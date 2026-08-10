@@ -8,6 +8,7 @@ import * from "WhitelangNodes.wl"
 import * from "WhitelangUtils.wl"
 import * from "WhitelangTokens.wl"
 import * from "WhitelangExceptions.wl"
+import * from "WhitelangTarget.wl"
 import Lexer, new_lexer, get_next_token from "WhitelangLexer.wl"
 import Parser, parse from "WhitelangParser.wl"
 
@@ -10825,6 +10826,7 @@ func compile_string_method_call(c -> Compiler, obj_node -> Struct, method_name -
 
 func compile_start(c -> Compiler) -> Void {
 
+    c.output_file.write("target triple = \"" + get_target_triple() + "\"\n\n");
     c.output_file.write("declare void @llvm.trap()\n\n");
 
     c.output_file.write("@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"\n");

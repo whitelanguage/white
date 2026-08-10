@@ -11,6 +11,7 @@ import "core/WhitelangParser.wl"
 import "core/WhitelangExceptions.wl"
 import "core/WhitelangCompiler.wl"
 import "core/WhitelangUtils.wl"
+import "core/WhitelangTarget.wl"
 
 struct CompilerConfig(
     source_file     -> String,
@@ -27,7 +28,8 @@ struct CompilerConfig(
     dump_ast        -> Bool,
     dump_ir         -> Bool,
     keep_temps      -> Bool,
-    is_shared       -> Bool
+    is_shared       -> Bool,
+    target_triple   -> String
 )
 
 func print_usage() -> Void {
@@ -53,7 +55,27 @@ func print_usage() -> Void {
     print("  --dump-ir              Dump LLVM IR to stdout");
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
+    print("  --target <triple>      Build for a supported target triple");
+    print("  --target-help          Display supported target triples");
     print("  -h, --help             Display this information");
+}
+
+func print_target_help() -> Void {
+    print("Supported White Language targets:");
+    print("");
+    print("Windows:");
+    print("  i686-pc-windows-msvc");
+    print("  x86_64-pc-windows-msvc");
+    print("");
+    print("Linux:");
+    print("  i686-unknown-linux-gnu");
+    print("  x86_64-unknown-linux-gnu");
+    print("  armv7-unknown-linux-gnueabihf");
+    print("  aarch64-unknown-linux-gnu");
+    print("");
+    print("macOS:");
+    print("  x86_64-apple-darwin");
+    print("  arm64-apple-darwin");
 }
 
 func log_stage(cfg -> CompilerConfig, name -> String) -> Void {
@@ -134,7 +156,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         dump_ast        = false,
         dump_ir         = false,
         keep_temps      = false,
-        is_shared       = false
+        is_shared       = false,
+        target_triple   = "native"
     );
 
     let i -> Int = 1;
@@ -145,6 +168,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
             print_usage();
             return 0;
         }
+        else if (arg == "--target-help") { print_target_help(); return 0; }
         else if (arg == "-v" || arg == "--verbose") { cfg.verbose = true; }
         else if (arg == "--dump-ast") { cfg.dump_ast = true; }
         else if (arg == "--dump-ir") { cfg.dump_ir = true; }
@@ -160,6 +184,15 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         else if (arg == "-O3") { cfg.opt_level = "-O3"; }
         else if (arg == "-Os") { cfg.opt_level = "-Os"; }
         else if (arg == "-Oz") { cfg.opt_level = "-Oz"; }
+        else if (arg == "--target") {
+            i++;
+            if (i >= argc) { print("Error: --target requires an argument"); return 1; }
+            cfg.target_triple = process.argument(argc, argv, i);
+        }
+        else if (arg.starts_with("--target=")) {
+            if (arg.length() == 9) { print("Error: --target requires an argument"); return 1; }
+            cfg.target_triple = arg.slice(9, arg.length());
+        }
         else if (arg == "-o") {
             i++;
             if (i >= argc) { print("Error: -o requires an argument"); return 1; }
@@ -197,6 +230,11 @@ func main(argc -> Int, ptr argv -> String) -> Int {
 
     if (cfg.source_file.length() == 0) {
         print("Error: No input file.");
+        return 1;
+    }
+    if (!WhitelangTarget.select_target(cfg.target_triple)) {
+        print("Error: Unsupported target '" + cfg.target_triple + "'.");
+        print("Run 'wlc --target-help' to list supported targets.");
         return 1;
     }
 
@@ -247,21 +285,21 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         else if (cfg.is_compile_only) {
             if (cfg.is_emit_llvm) { cfg.output_file = base_name + ".bc"; }
             else { 
-                if (sys.OS == sys.Os.Windows) { cfg.output_file = base_name + ".obj"; }
+                if (WhitelangTarget.get_target_binary_format() == sys.BinaryFormat.Coff) { cfg.output_file = base_name + ".obj"; }
                 else { cfg.output_file = base_name + ".o"; }
             }
         }
         else if (cfg.is_shared) {
-            if (sys.OS == sys.Os.Windows) { 
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { 
                 cfg.output_file = base_name + ".dll"; 
-            } else if (sys.OS == sys.Os.MacOS) { 
+            } else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) { 
                 cfg.output_file = "lib" + base_name + ".dylib";
             } else { 
                 cfg.output_file = "lib" + base_name + ".so"; 
             }
         }
         else { // EXE
-            if (sys.OS == sys.Os.Windows) { cfg.output_file = base_name + ".exe"; }
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { cfg.output_file = base_name + ".exe"; }
             else { cfg.output_file = base_name; }
         }
     }
@@ -355,7 +393,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     if (!has_clang) { has_clang = true; }
 
     let import_lib -> String = "";
-    if (cfg.is_shared && sys.OS == sys.Os.Windows) {
+    if (cfg.is_shared && WhitelangTarget.get_target_os() == sys.Os.Windows) {
         import_lib = windows_implib_path(cfg.output_file);
         if (WhitelangUtils.file_exists(import_lib)) {
             file.remove(import_lib)?;
@@ -368,6 +406,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     
     let clang_args -> Vector(String) = [];
     if (cfg.debug_info) { clang_args.append("-g"); }
+    if (cfg.target_triple != "native") { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     clang_args.append("-Wno-override-module");
     clang_args.append(cfg.opt_level);
     clang_args.append(ll_file);
@@ -392,19 +431,19 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
     else {
         if (cfg.is_shared) {
-            if (sys.OS == sys.Os.MacOS) {
+            if (WhitelangTarget.get_target_os() == sys.Os.MacOS) {
                 clang_args.append("-dynamiclib");
             } else {
                 clang_args.append("-shared");
             }
-            if (sys.OS == sys.Os.Windows && using_portable_clang) {
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows && using_portable_clang) {
                 clang_args.append("-Xlinker");
                 clang_args.append("--out-implib=" + import_lib);
             }
-            if (sys.OS != sys.Os.Windows) { clang_args.append("-fPIC"); }
+            if (WhitelangTarget.get_target_os() != sys.Os.Windows) { clang_args.append("-fPIC"); }
         }
 
-        if (sys.OS == sys.Os.Windows) {
+        if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
             clang_args.append("-nostdlib");
             clang_args.append("-Xlinker");
             if (cfg.is_shared) {
@@ -440,7 +479,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         clang_args.append("-o");
         clang_args.append(cfg.output_file);
 
-        if (sys.OS != sys.Os.Windows) {
+        if (WhitelangTarget.get_target_os() != sys.Os.Windows) {
             clang_args.append("-lm");
             clang_args.append("-lc");
         }

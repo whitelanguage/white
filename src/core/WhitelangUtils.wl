@@ -6,6 +6,7 @@ import Dict from "dict"
 import "WhitelangTokens.wl"
 import * from "WhitelangNodes.wl"
 import * from "WhitelangExceptions.wl"
+import * from "WhitelangTarget.wl"
 
 // Type constants
 const TYPE_INT   -> Int = 1;
@@ -2903,23 +2904,3 @@ func is_subclass(c -> Compiler, child_id -> Int, parent_id -> Int) -> Bool {
     return false;
 }
 
-// system utils
-func get_target_os() -> sys.Os {
-    return sys.OS;
-}
-
-func get_target_arch() -> sys.Arch {
-    return sys.ARCH;
-}
-
-func get_target_abi() -> sys.Abi {
-    return sys.ABI;
-}
-
-func get_target_binary_format() -> sys.BinaryFormat {
-    return sys.BINARY_FORMAT;
-}
-
-func get_target_pointer_bits() -> Int {
-    return sys.POINTER_BITS;
-}
