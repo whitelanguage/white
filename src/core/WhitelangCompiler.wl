@@ -11038,9 +11038,147 @@ func emit_freestanding_memops(c -> Compiler) -> Void {
     c.output_file.write("}\n\n");
 }
 
-func emit_windows_stack_probe(c -> Compiler) -> Void {
-    // keep target assembly private to the Windows backend until structured asm is available
-    if (get_target_arch() != sys.Arch.X86_64) { return; }
+func emit_windows_x86_division_builtins(c -> Compiler) -> Void {
+    // llvm lowers 64-bit division to these msvc helper symbols on x86
+    c.output_file.write("define internal void @__wl_udivrem64(i64 %dividend, i64 %divisor, i64* %quotient.out, i64* %remainder.out) noinline {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %zero = icmp eq i64 %divisor, 0\n");
+    c.output_file.write("  br i1 %zero, label %divide.zero, label %check.range\n\n");
+    c.output_file.write("divide.zero:\n");
+    c.output_file.write("  call void @llvm.trap()\n");
+    c.output_file.write("  unreachable\n\n");
+    c.output_file.write("check.range:\n");
+    c.output_file.write("  %less = icmp ult i64 %dividend, %divisor\n");
+    c.output_file.write("  br i1 %less, label %less.than.divisor, label %check.narrow\n\n");
+    c.output_file.write("less.than.divisor:\n");
+    c.output_file.write("  store i64 0, i64* %quotient.out\n");
+    c.output_file.write("  store i64 %dividend, i64* %remainder.out\n");
+    c.output_file.write("  ret void\n\n");
+    c.output_file.write("check.narrow:\n");
+    c.output_file.write("  %dividend.high = lshr i64 %dividend, 32\n");
+    c.output_file.write("  %divisor.high = lshr i64 %divisor, 32\n");
+    c.output_file.write("  %high.bits = or i64 %dividend.high, %divisor.high\n");
+    c.output_file.write("  %narrow = icmp eq i64 %high.bits, 0\n");
+    c.output_file.write("  br i1 %narrow, label %divide.narrow, label %loop\n\n");
+    c.output_file.write("divide.narrow:\n");
+    c.output_file.write("  %dividend.low = trunc i64 %dividend to i32\n");
+    c.output_file.write("  %divisor.low = trunc i64 %divisor to i32\n");
+    c.output_file.write("  %quotient.low = udiv i32 %dividend.low, %divisor.low\n");
+    c.output_file.write("  %remainder.low = urem i32 %dividend.low, %divisor.low\n");
+    c.output_file.write("  %quotient.wide = zext i32 %quotient.low to i64\n");
+    c.output_file.write("  %remainder.wide = zext i32 %remainder.low to i64\n");
+    c.output_file.write("  store i64 %quotient.wide, i64* %quotient.out\n");
+    c.output_file.write("  store i64 %remainder.wide, i64* %remainder.out\n");
+    c.output_file.write("  ret void\n\n");
+    c.output_file.write("loop:\n");
+    c.output_file.write("  %index = phi i32 [ 64, %check.narrow ], [ %next.index, %body ]\n");
+    c.output_file.write("  %quotient = phi i64 [ 0, %check.narrow ], [ %next.quotient, %body ]\n");
+    c.output_file.write("  %remainder = phi i64 [ 0, %check.narrow ], [ %next.remainder, %body ]\n");
+    c.output_file.write("  %done = icmp eq i32 %index, 0\n");
+    c.output_file.write("  br i1 %done, label %finish, label %body\n\n");
+    c.output_file.write("body:\n");
+    c.output_file.write("  %next.index = sub i32 %index, 1\n");
+    c.output_file.write("  %shift = zext i32 %next.index to i64\n");
+    c.output_file.write("  %shifted.dividend = lshr i64 %dividend, %shift\n");
+    c.output_file.write("  %bit = and i64 %shifted.dividend, 1\n");
+    c.output_file.write("  %shifted.remainder = shl i64 %remainder, 1\n");
+    c.output_file.write("  %candidate = or i64 %shifted.remainder, %bit\n");
+    c.output_file.write("  %fits = icmp uge i64 %candidate, %divisor\n");
+    c.output_file.write("  %reduced = sub i64 %candidate, %divisor\n");
+    c.output_file.write("  %next.remainder = select i1 %fits, i64 %reduced, i64 %candidate\n");
+    c.output_file.write("  %quotient.bit = shl i64 1, %shift\n");
+    c.output_file.write("  %with.bit = or i64 %quotient, %quotient.bit\n");
+    c.output_file.write("  %next.quotient = select i1 %fits, i64 %with.bit, i64 %quotient\n");
+    c.output_file.write("  br label %loop\n\n");
+    c.output_file.write("finish:\n");
+    c.output_file.write("  store i64 %quotient, i64* %quotient.out\n");
+    c.output_file.write("  store i64 %remainder, i64* %remainder.out\n");
+    c.output_file.write("  ret void\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define x86_stdcallcc i64 @\"\\01__aulldiv\"(i64 %dividend, i64 %divisor) noinline {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %quotient = alloca i64\n");
+    c.output_file.write("  %remainder = alloca i64\n");
+    c.output_file.write("  call void @__wl_udivrem64(i64 %dividend, i64 %divisor, i64* %quotient, i64* %remainder)\n");
+    c.output_file.write("  %result = load i64, i64* %quotient\n");
+    c.output_file.write("  ret i64 %result\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define x86_stdcallcc i64 @\"\\01__aullrem\"(i64 %dividend, i64 %divisor) noinline {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %quotient = alloca i64\n");
+    c.output_file.write("  %remainder = alloca i64\n");
+    c.output_file.write("  call void @__wl_udivrem64(i64 %dividend, i64 %divisor, i64* %quotient, i64* %remainder)\n");
+    c.output_file.write("  %result = load i64, i64* %remainder\n");
+    c.output_file.write("  ret i64 %result\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define x86_stdcallcc i64 @\"\\01__alldiv\"(i64 %dividend, i64 %divisor) noinline {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %dividend.negative = icmp slt i64 %dividend, 0\n");
+    c.output_file.write("  %divisor.negative = icmp slt i64 %divisor, 0\n");
+    c.output_file.write("  %negative.dividend = sub i64 0, %dividend\n");
+    c.output_file.write("  %negative.divisor = sub i64 0, %divisor\n");
+    c.output_file.write("  %magnitude.dividend = select i1 %dividend.negative, i64 %negative.dividend, i64 %dividend\n");
+    c.output_file.write("  %magnitude.divisor = select i1 %divisor.negative, i64 %negative.divisor, i64 %divisor\n");
+    c.output_file.write("  %quotient = alloca i64\n");
+    c.output_file.write("  %remainder = alloca i64\n");
+    c.output_file.write("  call void @__wl_udivrem64(i64 %magnitude.dividend, i64 %magnitude.divisor, i64* %quotient, i64* %remainder)\n");
+    c.output_file.write("  %magnitude = load i64, i64* %quotient\n");
+    c.output_file.write("  %negative = xor i1 %dividend.negative, %divisor.negative\n");
+    c.output_file.write("  %negative.result = sub i64 0, %magnitude\n");
+    c.output_file.write("  %result = select i1 %negative, i64 %negative.result, i64 %magnitude\n");
+    c.output_file.write("  ret i64 %result\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define x86_stdcallcc i64 @\"\\01__allrem\"(i64 %dividend, i64 %divisor) noinline {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %dividend.negative = icmp slt i64 %dividend, 0\n");
+    c.output_file.write("  %divisor.negative = icmp slt i64 %divisor, 0\n");
+    c.output_file.write("  %negative.dividend = sub i64 0, %dividend\n");
+    c.output_file.write("  %negative.divisor = sub i64 0, %divisor\n");
+    c.output_file.write("  %magnitude.dividend = select i1 %dividend.negative, i64 %negative.dividend, i64 %dividend\n");
+    c.output_file.write("  %magnitude.divisor = select i1 %divisor.negative, i64 %negative.divisor, i64 %divisor\n");
+    c.output_file.write("  %quotient = alloca i64\n");
+    c.output_file.write("  %remainder = alloca i64\n");
+    c.output_file.write("  call void @__wl_udivrem64(i64 %magnitude.dividend, i64 %magnitude.divisor, i64* %quotient, i64* %remainder)\n");
+    c.output_file.write("  %magnitude = load i64, i64* %remainder\n");
+    c.output_file.write("  %negative.result = sub i64 0, %magnitude\n");
+    c.output_file.write("  %result = select i1 %dividend.negative, i64 %negative.result, i64 %magnitude\n");
+    c.output_file.write("  ret i64 %result\n");
+    c.output_file.write("}\n\n");
+}
+
+func emit_windows_x86_stack_probe(c -> Compiler) -> Void {
+    // x86 __chkstk probes the guard pages and returns on the allocated stack
+    c.output_file.write("module asm \".text\"\n");
+    c.output_file.write("module asm \".p2align 4, 0x90\"\n");
+    c.output_file.write("module asm \".globl __chkstk\"\n");
+    c.output_file.write("module asm \"__chkstk:\"\n");
+    c.output_file.write("module asm \"pushl %ecx\"\n");
+    c.output_file.write("module asm \"leal 8(%esp), %ecx\"\n");
+    c.output_file.write("module asm \"cmpl $0x1000, %eax\"\n");
+    c.output_file.write("module asm \"jb 2f\"\n");
+    c.output_file.write("module asm \"1:\"\n");
+    c.output_file.write("module asm \"subl $0x1000, %ecx\"\n");
+    c.output_file.write("module asm \"testb $0, (%ecx)\"\n");
+    c.output_file.write("module asm \"subl $0x1000, %eax\"\n");
+    c.output_file.write("module asm \"cmpl $0x1000, %eax\"\n");
+    c.output_file.write("module asm \"ja 1b\"\n");
+    c.output_file.write("module asm \"2:\"\n");
+    c.output_file.write("module asm \"subl %eax, %ecx\"\n");
+    c.output_file.write("module asm \"testb $0, (%ecx)\"\n");
+    c.output_file.write("module asm \"movl %esp, %eax\"\n");
+    c.output_file.write("module asm \"movl %ecx, %esp\"\n");
+    c.output_file.write("module asm \"movl (%eax), %ecx\"\n");
+    c.output_file.write("module asm \"movl 4(%eax), %eax\"\n");
+    c.output_file.write("module asm \"pushl %eax\"\n");
+    c.output_file.write("module asm \"retl\"\n\n");
+}
+
+func emit_windows_x64_stack_probe(c -> Compiler) -> Void {
+    // x64 callers adjust rsp after the probe returns
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
     c.output_file.write("module asm \".globl __chkstk\"\n");
@@ -11066,18 +11204,27 @@ func emit_windows_stack_probe(c -> Compiler) -> Void {
     c.output_file.write("module asm \"retq\"\n\n");
 }
 
+func emit_windows_stack_probe(c -> Compiler) -> Void {
+    // keep target assembly private to the Windows backend until structured asm is available
+    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_stack_probe(c); }
+    else if (get_target_arch() == sys.Arch.X86_64) { emit_windows_x64_stack_probe(c); }
+}
+
 func emit_windows_abi(c -> Compiler) -> Void {
     if (get_target_os() != sys.Os.Windows) { return; }
     c.output_file.write("@_fltused = global i32 39029\n\n");
     c.output_file.write("define void @__main() {\nentry:\n  ret void\n}\n\n");
     emit_freestanding_memops(c);
+    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_division_builtins(c); }
     emit_windows_stack_probe(c);
 }
 
 func emit_windows_entrypoint(c -> Compiler) -> Void {
     if (get_target_os() != sys.Os.Windows) { return; }
     if (c.is_shared) {
-        c.output_file.write("define i32 @DllMainCRTStartup(i8* %instance, i32 %reason, i8* %reserved) {\n");
+        let callconv -> String = "";
+        if (get_target_arch() == sys.Arch.X86) { callconv = "x86_stdcallcc "; }
+        c.output_file.write("define " + callconv + "i32 @DllMainCRTStartup(i8* %instance, i32 %reason, i8* %reserved) {\n");
         c.output_file.write("entry:\n");
         c.output_file.write("  ret i32 1\n");
         c.output_file.write("}\n\n");

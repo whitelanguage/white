@@ -406,7 +406,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     
     let clang_args -> Vector(String) = [];
     if (cfg.debug_info) { clang_args.append("-g"); }
-    if (cfg.target_triple != "native") { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
+    if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     clang_args.append("-Wno-override-module");
     clang_args.append(cfg.opt_level);
     clang_args.append(ll_file);
