@@ -299,11 +299,44 @@ The options used most often are:
 -S              emit assembly
 --emit-llvm     emit LLVM IR
 --shared        build a DLL, shared object, or dynamic library
+--target <name> build for a target triple
+--target-help   list supported target triples
+--sysroot <dir> use a target system root when compiling and linking
 -L <dir>        add a native library search path
 --keep-temps    keep the temporary LLVM IR
 ```
 
 Run `wlc --help` for the complete driver help.
+
+The driver currently accepts these target triples:
+
+```bash
+wlc --target-help
+```
+
+```text
+i686-pc-windows-msvc
+x86_64-pc-windows-msvc
+i686-unknown-linux-gnu
+x86_64-unknown-linux-gnu
+armv7-unknown-linux-gnueabihf
+aarch64-unknown-linux-gnu
+x86_64-apple-darwin
+arm64-apple-darwin
+```
+
+`--target` is enough when emitting LLVM IR, assembly, or an object file. Linking
+for another operating system also requires that system's libraries and SDK.
+Pass a prepared system root with `--sysroot`; `wlc` does not bundle one.
+
+On Windows, an x86 executable or DLL needs the x86 `kernel32` and `shell32`
+import libraries. If Clang does not find the Windows SDK automatically, pass its
+`um/x86` directory with `-L`.
+
+The Linux target harness is in `ci/test-linux-targets.ps1`. It creates a native
+compiler for x86-64, x86, ARMv7, or AArch64, bootstraps it twice in Docker, and
+compares the two generated IR files before running the language tests. See
+`ci/docker/README.md` for the short and full commands.
 
 ## Rebuilding the compiler
 
@@ -342,9 +375,10 @@ allocation, files, processes and environment access. Replacing those stable
 interfaces with handwritten system calls would add architecture-specific code
 without improving ordinary White programs.
 
-Windows x86-64 is the most heavily tested native ABI. Linux and macOS have also
-been used for bootstrapping, including macOS on ARM64, but the target model is
-not yet broad enough to advertise general 32-bit support.
+Windows x86-64 is the most heavily tested native ABI. The x86 compiler also
+bootstraps, and its language and DLL tests run under WOW64. Linux and macOS have
+been used for bootstrapping, including macOS on ARM64, but real 32-bit systems
+still need separate ABI testing before general 32-bit support is advertised.
 
 ## Repository layout
 
@@ -363,8 +397,7 @@ Code extension uses it for diagnostics, symbols, definitions and semantic
 highlighting. Both are still under active development.
 
 An official website and binary download portal also exist. Work there has been
-slower while the compiler and standard library settle down, but the
-site has not been abandoned.
+slower while the compiler and standard library settle down, but the site has not been abandoned.
 
 A package manager named `wlp` is planned(Maybe?). Today, dependencies are resolved from
 the standard library, source-relative paths and `WL_PATH`.

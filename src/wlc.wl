@@ -29,11 +29,12 @@ struct CompilerConfig(
     dump_ir         -> Bool,
     keep_temps      -> Bool,
     is_shared       -> Bool,
-    target_triple   -> String
+    target_triple   -> String,
+    sysroot         -> String
 )
 
 func print_usage() -> Void {
-    print("White Language Compiler (v0.3.1)");
+    print("White Language Compiler (v0.3.2)");
     print("Usage: wlc <source.wl> [extra_files...] [options]");
     print("");
     print("Arguments:");
@@ -57,6 +58,7 @@ func print_usage() -> Void {
     print("  --shared               Build a shared library (dll, so, dylib)");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
+    print("  --sysroot <dir>        Use <dir> as the target system root");
     print("  -h, --help             Display this information");
 }
 
@@ -157,7 +159,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         dump_ir         = false,
         keep_temps      = false,
         is_shared       = false,
-        target_triple   = "native"
+        target_triple   = "native",
+        sysroot         = ""
     );
 
     let i -> Int = 1;
@@ -192,6 +195,16 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         else if (arg.starts_with("--target=")) {
             if (arg.length() == 9) { print("Error: --target requires an argument"); return 1; }
             cfg.target_triple = arg.slice(9, arg.length());
+        }
+        else if (arg == "--sysroot") {
+            i++;
+            if (i >= argc) { print("Error: --sysroot requires an argument"); return 1; }
+            cfg.sysroot = process.argument(argc, argv, i);
+            if (cfg.sysroot.length() == 0) { print("Error: --sysroot requires an argument"); return 1; }
+        }
+        else if (arg.starts_with("--sysroot=")) {
+            if (arg.length() == 10) { print("Error: --sysroot requires an argument"); return 1; }
+            cfg.sysroot = arg.slice(10, arg.length());
         }
         else if (arg == "-o") {
             i++;
@@ -407,6 +420,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     let clang_args -> Vector(String) = [];
     if (cfg.debug_info) { clang_args.append("-g"); }
     if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
+    if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
     clang_args.append("-Wno-override-module");
     clang_args.append(cfg.opt_level);
     clang_args.append(ll_file);

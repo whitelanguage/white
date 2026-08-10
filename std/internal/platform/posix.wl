@@ -25,8 +25,8 @@ extern func fopen(filename -> AnyPtr, mode -> AnyPtr) -> AnyPtr from "C";
 extern func fclose(stream -> AnyPtr) -> Int from "C";
 extern func fread(p -> AnyPtr, size -> UIntSize, count -> UIntSize, stream -> AnyPtr) -> UIntSize from "C";
 extern func fwrite(p -> AnyPtr, size -> UIntSize, count -> UIntSize, stream -> AnyPtr) -> UIntSize from "C";
-extern func fseek(stream -> AnyPtr, offset -> Long, origin -> Int) -> Int from "C";
-extern func ftell(stream -> AnyPtr) -> Long from "C";
+extern func fseek(stream -> AnyPtr, offset -> IntSize, origin -> Int) -> Int from "C";
+extern func ftell(stream -> AnyPtr) -> IntSize from "C";
 extern func rewind(stream -> AnyPtr) -> Void from "C";
 extern func remove(filename -> AnyPtr) -> Int from "C";
 

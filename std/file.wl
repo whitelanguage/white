@@ -192,19 +192,19 @@ class File {
             return buffer;
         }
 
-        if (posix.fseek(self.handle, 0L, SEEK_END) != 0) {
+        if (posix.fseek(self.handle, IntSize(0), SEEK_END) != 0) {
             self.last_error = __last_error();
             throw self.last_error;
         }
-        let size -> Long = posix.ftell(self.handle);
-        if (size < 0L || size > 2147483647L) {
-            if (size > 2147483647L) { throw Error.FileTooLarge; }
+        let size -> IntSize = posix.ftell(self.handle);
+        if (size < IntSize(0) || size > IntSize(2147483647)) {
+            if (size > IntSize(2147483647)) { throw Error.FileTooLarge; }
             self.last_error = __last_error();
             throw self.last_error;
         }
         posix.rewind(self.handle);
 
-        let buffer -> String = runtime_string.alloc(size);
+        let buffer -> String = runtime_string.alloc(Long(size));
         if (buffer is null) {
             self.last_error = Error.OutOfMemory;
             throw self.last_error;

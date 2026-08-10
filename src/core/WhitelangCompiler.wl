@@ -8586,7 +8586,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
         }
         
         // convert to i8* for address comparison
-        if (lhs_res.type != TYPE_STRING && lhs_res.type != TYPE_NULL && lhs_res.type != TYPE_NULLPTR) {
+        if (lhs_res.type != TYPE_NULL && lhs_res.type != TYPE_NULLPTR) {
             let lhs_info -> StructInfo = c.struct_id_map.get("" + lhs_res.type);
             if (lhs_info is !null && lhs_info.is_interface) {
                 let object_l -> String = next_reg(c);
@@ -8599,7 +8599,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 l_reg = cast_l;
             }
         }
-        if (rhs_res.type != TYPE_STRING && rhs_res.type != TYPE_NULL && rhs_res.type != TYPE_NULLPTR) {
+        if (rhs_res.type != TYPE_NULL && rhs_res.type != TYPE_NULLPTR) {
             let rhs_info -> StructInfo = c.struct_id_map.get("" + rhs_res.type);
             if (rhs_info is !null && rhs_info.is_interface) {
                 let object_r -> String = next_reg(c);
