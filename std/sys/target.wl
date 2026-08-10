@@ -13,19 +13,12 @@ enum Arch {
     X86_64 = 1,
     Arm = 2,
     AArch64 = 3,
-    RiscV32 = 4,
-    RiscV64 = 5,
-    Wasm32 = 6,
-    Wasm64 = 7,
-    PowerPC64 = 8,
-    S390x = 9,
     Unknown = 10,
 }
 
 enum Abi {
     Msvc = 0,
     Gnu = 1,
-    Musl = 2,
     None = 3,
     Unknown = 4,
 }
@@ -34,7 +27,6 @@ enum BinaryFormat {
     Coff = 0,
     Elf = 1,
     MachO = 2,
-    Wasm = 3,
     Unknown = 4,
 }
 

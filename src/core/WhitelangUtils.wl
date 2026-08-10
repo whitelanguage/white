@@ -7,12 +7,6 @@ import "WhitelangTokens.wl"
 import * from "WhitelangNodes.wl"
 import * from "WhitelangExceptions.wl"
 
-extern "system" {
-    func GetSystemInfo(info -> AnyPtr) -> Void;
-}
-
-extern func uname(info -> AnyPtr) -> Int from "C";
-
 // Type constants
 const TYPE_INT   -> Int = 1;
 const TYPE_FLOAT -> Int = 2;
@@ -837,6 +831,38 @@ func get_size_llvm_type() -> String {
 
 func get_pointer_size_bytes() -> Int {
     return get_target_pointer_bits() / 8;
+}
+
+func align_to(value -> Int, alignment -> Int) -> Int {
+    if (alignment <= 1) { return value; }
+    let remainder -> Int = value % alignment;
+    if (remainder == 0) { return value; }
+    return value + alignment - remainder;
+}
+
+func target_i64_align() -> Int {
+    if (get_target_arch() == sys.Arch.X86 && get_target_os() != sys.Os.Windows) { return 4; }
+    return 8;
+}
+
+func any_error_align() -> Int {
+    return target_i64_align();
+}
+
+func any_error_size() -> Int {
+    return align_to(12, any_error_align());
+}
+
+func closure_payload_size() -> Int {
+    return get_pointer_size_bytes() * 2;
+}
+
+func closure_env_offset() -> Int {
+    return get_pointer_size_bytes();
+}
+
+func variant_payload_size() -> Int {
+    return 24;
 }
 
 func get_vector_llvm_type(c -> Compiler, element_type -> Int) -> String {
@@ -1773,11 +1799,11 @@ func get_type_size_bytes(c -> Compiler, type_id -> Int) -> Int {
     if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) { return 16; }
     if (type_id == TYPE_INTSIZE || type_id == TYPE_UINTSIZE) { return get_pointer_size_bytes(); }
     if (type_id == TYPE_LONG || type_id == TYPE_UINT64 || type_id == TYPE_FLOAT) { return 8; }
-    if (type_id == TYPE_ANY_ERROR) { return 16; } // { i64 domain, i32 code } with tail padding
+    if (type_id == TYPE_ANY_ERROR) { return any_error_size(); }
 
     let arr_info -> ArrayInfo = c.array_info_map.get("" + type_id);
     if (arr_info is !null) {
-        if (arr_info.size < 0) { return get_pointer_size_bytes() * 5; }
+        if (arr_info.size < 0) { return get_pointer_size_bytes(); }
         return arr_info.size * get_type_size_bytes(c, arr_info.base_type);
     }
 
@@ -1786,17 +1812,16 @@ func get_type_size_bytes(c -> Compiler, type_id -> Int) -> Int {
 
     let fallible_info -> SymbolInfo = c.fallible_base_map.get("" + type_id);
     if (fallible_info is !null) {
-        let offset -> Int = 8 + get_type_size_bytes(c, TYPE_ANY_ERROR);
-        let layout_align -> Int = get_type_align_bytes(c, type_id);
+        let error_align -> Int = any_error_align();
+        let offset -> Int = align_to(1, error_align) + any_error_size();
+        let layout_align -> Int = error_align;
         if (fallible_info.type != TYPE_VOID) {
             let value_align -> Int = get_type_align_bytes(c, fallible_info.type);
-            let remainder -> Int = offset % value_align;
-            if (remainder != 0) { offset += value_align - remainder; }
+            offset = align_to(offset, value_align);
             offset += get_type_size_bytes(c, fallible_info.type);
+            if (value_align > layout_align) { layout_align = value_align; }
         }
-        let tail -> Int = offset % layout_align;
-        if (tail != 0) { offset += layout_align - tail; }
-        return offset;
+        return align_to(offset, layout_align);
     }
 
     return get_pointer_size_bytes();
@@ -1808,6 +1833,7 @@ func get_type_align_bytes(c -> Compiler, type_id -> Int) -> Int {
     if (type_id == TYPE_INT || type_id == TYPE_UINT32 || type_id == TYPE_CHAR || type_id == TYPE_FLOAT32 || type_id == TYPE_GENERIC_ENUM) { return 4; }
     if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) { return 16; }
     if (type_id == TYPE_INTSIZE || type_id == TYPE_UINTSIZE) { return get_pointer_size_bytes(); }
+    if (type_id == TYPE_LONG || type_id == TYPE_UINT64 || type_id == TYPE_FLOAT || type_id == TYPE_ANY_ERROR) { return target_i64_align(); }
 
     let arr_info -> ArrayInfo = c.array_info_map.get("" + type_id);
     if (arr_info is !null) {
@@ -1816,9 +1842,13 @@ func get_type_align_bytes(c -> Compiler, type_id -> Int) -> Int {
     }
 
     let fallible_info -> SymbolInfo = c.fallible_base_map.get("" + type_id);
-    if (fallible_info is !null && fallible_info.type != TYPE_VOID) {
-        let value_align -> Int = get_type_align_bytes(c, fallible_info.type);
-        if (value_align > 8) { return value_align; }
+    if (fallible_info is !null) {
+        let result -> Int = any_error_align();
+        if (fallible_info.type != TYPE_VOID) {
+            let value_align -> Int = get_type_align_bytes(c, fallible_info.type);
+            if (value_align > result) { result = value_align; }
+        }
+        return result;
     }
     return get_pointer_size_bytes();
 }
@@ -2874,65 +2904,22 @@ func is_subclass(c -> Compiler, child_id -> Int, parent_id -> Int) -> Bool {
 }
 
 // system utils
-func get_target_os() -> String {
-    if (sys.OS == sys.Os.Windows) { return "WINDOWS"; }
-    if (sys.OS == sys.Os.Linux) { return "LINUX"; }
-    if (sys.OS == sys.Os.MacOS) { return "MACOS"; }
-    return "UNKNOWN";
+func get_target_os() -> sys.Os {
+    return sys.OS;
 }
 
-func target_name_equals(buffer -> AnyPtr, offset -> Int, name -> String) -> Bool {
-    let ptr bytes -> Byte = buffer;
-    let i -> Int = 0;
-    while (i < name.length()) {
-        if (bytes[offset + i] != name[i]) { return false; }
-        i += 1;
-    }
-    return bytes[offset + name.length()] == Byte(0);
+func get_target_arch() -> sys.Arch {
+    return sys.ARCH;
 }
 
-func get_target_arch() -> String {
-    if (sys.OS == sys.Os.Windows) {
-        let info -> Byte[48] = [0];
-        GetSystemInfo(ref info[0]);
-        let arch -> Int = Int(info[0]) | (Int(info[1]) << 8);
-        if (arch == 0) { return "X86"; }
-        if (arch == 5) { return "ARM"; }
-        if (arch == 9) { return "X86_64"; }
-        if (arch == 12) { return "AARCH64"; }
-        return "UNKNOWN";
-    }
-
-    let info -> Byte[1536] = [0];
-    if (uname(ref info[0]) != 0) { return "UNKNOWN"; }
-    let machine_offset -> Int = 260;
-    if (sys.OS == sys.Os.MacOS) { machine_offset = 1024; }
-    let raw -> AnyPtr = ref info[0];
-    if (target_name_equals(raw, machine_offset, "i386") || target_name_equals(raw, machine_offset, "i686")) { return "X86"; }
-    if (target_name_equals(raw, machine_offset, "x86_64") || target_name_equals(raw, machine_offset, "amd64")) { return "X86_64"; }
-    if (target_name_equals(raw, machine_offset, "arm") || target_name_equals(raw, machine_offset, "armv7l")) { return "ARM"; }
-    if (target_name_equals(raw, machine_offset, "aarch64") || target_name_equals(raw, machine_offset, "arm64")) { return "AARCH64"; }
-    if (target_name_equals(raw, machine_offset, "riscv32")) { return "RISCV32"; }
-    if (target_name_equals(raw, machine_offset, "riscv64")) { return "RISCV64"; }
-    if (target_name_equals(raw, machine_offset, "ppc64") || target_name_equals(raw, machine_offset, "ppc64le")) { return "POWERPC64"; }
-    if (target_name_equals(raw, machine_offset, "s390x")) { return "S390X"; }
-    return "UNKNOWN";
+func get_target_abi() -> sys.Abi {
+    return sys.ABI;
 }
 
-func get_target_abi() -> String {
-    if (sys.OS == sys.Os.Windows) { return "MSVC"; }
-    if (sys.OS == sys.Os.Linux) { return "GNU"; }
-    if (sys.OS == sys.Os.MacOS) { return "NONE"; }
-    return "UNKNOWN";
-}
-
-func get_target_binary_format() -> String {
-    if (sys.OS == sys.Os.Windows) { return "COFF"; }
-    if (sys.OS == sys.Os.Linux) { return "ELF"; }
-    if (sys.OS == sys.Os.MacOS) { return "MACHO"; }
-    return "UNKNOWN";
+func get_target_binary_format() -> sys.BinaryFormat {
+    return sys.BINARY_FORMAT;
 }
 
 func get_target_pointer_bits() -> Int {
-    return Int(size_of(AnyPtr)) * 8;
+    return sys.POINTER_BITS;
 }

@@ -69,7 +69,7 @@ const FILE_CURRENT -> Int = 1;
 const FILE_END -> Int = 2;
 
 func is_invalid_handle(handle -> AnyPtr) -> Bool {
-    return handle is nullptr || Long(handle) == -1L;
+    return handle is nullptr || IntSize(handle) == IntSize(-1);
 }
 
 func utf8_to_utf16(value -> String) -> AnyPtr {

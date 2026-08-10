@@ -63,77 +63,36 @@ func target_intrinsic(c -> Compiler, node -> Struct) -> String {
 }
 
 func target_value(name -> String) -> Int {
-    if (name == "target_os") {
-        let os -> String = get_target_os();
-        if (os == "WINDOWS") { return 0; }
-        if (os == "LINUX") { return 1; }
-        if (os == "MACOS") { return 2; }
-        return 3;
-    }
-    if (name == "target_arch") {
-        let arch -> String = get_target_arch();
-        if (arch == "X86") { return 0; }
-        if (arch == "X86_64") { return 1; }
-        if (arch == "ARM") { return 2; }
-        if (arch == "AARCH64") { return 3; }
-        if (arch == "RISCV32") { return 4; }
-        if (arch == "RISCV64") { return 5; }
-        if (arch == "WASM32") { return 6; }
-        if (arch == "WASM64") { return 7; }
-        if (arch == "POWERPC64") { return 8; }
-        if (arch == "S390X") { return 9; }
-        return 10;
-    }
-    if (name == "target_abi") {
-        let abi -> String = get_target_abi();
-        if (abi == "MSVC") { return 0; }
-        if (abi == "GNU") { return 1; }
-        if (abi == "MUSL") { return 2; }
-        if (abi == "NONE") { return 3; }
-        return 4;
-    }
-    if (name == "target_binary_format") {
-        let format -> String = get_target_binary_format();
-        if (format == "COFF") { return 0; }
-        if (format == "ELF") { return 1; }
-        if (format == "MACHO") { return 2; }
-        if (format == "WASM") { return 3; }
-        return 4;
-    }
+    if (name == "target_os") { return Int(get_target_os()); }
+    if (name == "target_arch") { return Int(get_target_arch()); }
+    if (name == "target_abi") { return Int(get_target_abi()); }
+    if (name == "target_binary_format") { return Int(get_target_binary_format()); }
     if (name == "target_pointer_bits") { return get_target_pointer_bits(); }
     return -1;
 }
 
 func target_member(name -> String, member -> String) -> Int {
     if (name == "target_os") {
-        if (member == "Windows") { return 0; }
-        if (member == "Linux") { return 1; }
-        if (member == "MacOS") { return 2; }
-        if (member == "Unknown") { return 3; }
+        if (member == "Windows") { return Int(sys.Os.Windows); }
+        if (member == "Linux") { return Int(sys.Os.Linux); }
+        if (member == "MacOS") { return Int(sys.Os.MacOS); }
+        if (member == "Unknown") { return Int(sys.Os.Unknown); }
     } else if (name == "target_arch") {
-        if (member == "X86") { return 0; }
-        if (member == "X86_64") { return 1; }
-        if (member == "Arm") { return 2; }
-        if (member == "AArch64") { return 3; }
-        if (member == "RiscV32") { return 4; }
-        if (member == "RiscV64") { return 5; }
-        if (member == "Wasm32") { return 6; }
-        if (member == "Wasm64") { return 7; }
-        if (member == "PowerPC64") { return 8; }
-        if (member == "S390x") { return 9; }
-        if (member == "Unknown") { return 10; }
+        if (member == "X86") { return Int(sys.Arch.X86); }
+        if (member == "X86_64") { return Int(sys.Arch.X86_64); }
+        if (member == "Arm") { return Int(sys.Arch.Arm); }
+        if (member == "AArch64") { return Int(sys.Arch.AArch64); }
+        if (member == "Unknown") { return Int(sys.Arch.Unknown); }
     } else if (name == "target_abi") {
-        if (member == "Msvc") { return 0; }
-        if (member == "Gnu") { return 1; }
-        if (member == "Musl") { return 2; }
-        if (member == "None") { return 3; }
-        if (member == "Unknown") { return 4; }
+        if (member == "Msvc") { return Int(sys.Abi.Msvc); }
+        if (member == "Gnu") { return Int(sys.Abi.Gnu); }
+        if (member == "None") { return Int(sys.Abi.None); }
+        if (member == "Unknown") { return Int(sys.Abi.Unknown); }
     } else if (name == "target_binary_format") {
-        if (member == "Coff") { return 0; }
-        if (member == "Elf") { return 1; }
-        if (member == "MachO") { return 2; }
-        if (member == "Wasm") { return 3; }
-        if (member == "Unknown") { return 4; }
+        if (member == "Coff") { return Int(sys.BinaryFormat.Coff); }
+        if (member == "Elf") { return Int(sys.BinaryFormat.Elf); }
+        if (member == "MachO") { return Int(sys.BinaryFormat.MachO); }
+        if (member == "Unknown") { return Int(sys.BinaryFormat.Unknown); }
     }
     return -1;
 }
@@ -191,10 +150,7 @@ func fold_target_cond(c -> Compiler, node -> Struct) -> Int {
 
     let literal_base -> BaseNode = literal_node;
     let equal -> Bool = false;
-    if (intrinsic == "target_os" && literal_base is !null && literal_base.type == NODE_STRING) {
-        let literal -> StringNode = literal_node;
-        equal = get_target_os() == literal.tok.value;
-    } else if (intrinsic == "target_pointer_bits" && literal_base is !null && literal_base.type == NODE_INT) {
+    if (intrinsic == "target_pointer_bits" && literal_base is !null && literal_base.type == NODE_INT) {
         let literal -> IntNode = literal_node;
         equal = get_target_pointer_bits() == string_to_int(literal.tok.value, literal.pos);
     } else if (literal_base is !null && literal_base.type == NODE_FIELD_ACCESS) {
@@ -721,7 +677,7 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
         }
 
         let variant_llvm -> String = variant_info.llvm_name;
-        let box_ptr -> String = emit_alloc_obj(c, "24", "" + expected_type, variant_llvm + "*");
+        let box_ptr -> String = emit_alloc_obj(c, "" + variant_payload_size(), "" + expected_type, variant_llvm + "*");
 
         let type_ptr -> String = next_reg(c);
         c.output_file.write(c.indent + type_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 0\n");
@@ -1197,13 +1153,7 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
 
 func emit_target_intrinsic(c -> Compiler, info -> SymbolInfo) -> CompileResult {
     let name -> String = info.reg.slice(11, info.reg.length());
-    if (name != "target_os" || info.type != TYPE_STRING) { return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type); }
-    let value -> String = get_target_os();
-    let id -> Int = register_string_constant(c, value);
-    let len -> Int = value.length() + 1;
-    let result -> String = next_reg(c);
-    c.output_file.write(c.indent + result + " = getelementptr inbounds { i32, i32, [" + len + " x i8] }, { i32, i32, [" + len + " x i8] }* @.str." + id + ", i32 0, i32 2, i32 0\n");
-    return CompileResult(reg=result, type=TYPE_STRING, origin_type=0);
+    return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type);
 }
 
 func register_string_constant(c -> Compiler, val -> String) -> Int {
@@ -2032,7 +1982,7 @@ func emit_alloc_obj(c -> Compiler, payload_size_reg -> String, type_id_str -> St
 }
 
 func emit_alloc_closure(c -> Compiler, type_id -> Int) -> String {
-    let closure -> String = emit_alloc_obj(c, "16", "" + TYPE_GENERIC_FUNCTION, "i8*");
+    let closure -> String = emit_alloc_obj(c, "" + closure_payload_size(), "" + TYPE_GENERIC_FUNCTION, "i8*");
     let tag_bytes -> String = next_reg(c);
     let tag_slot -> String = next_reg(c);
     c.output_file.write(c.indent + tag_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 -4\n");
@@ -2588,7 +2538,7 @@ func emit_type_drop(c -> Compiler, type_id -> Int) -> Void {
     c.output_file.write("entry:\n");
 
     if (type_id == TYPE_GENERIC_FUNCTION) {
-        c.output_file.write("  %env.addr = getelementptr inbounds i8, i8* %ptr, i32 8\n");
+        c.output_file.write("  %env.addr = getelementptr inbounds i8, i8* %ptr, i32 " + closure_env_offset() + "\n");
         c.output_file.write("  %env.slot = bitcast i8* %env.addr to i8**\n");
         c.output_file.write("  %env = load i8*, i8** %env.slot\n");
         c.output_file.write("  call void @__wl_release(i8* %env)\n");
@@ -3271,8 +3221,6 @@ func compile_var_decl(c -> Compiler, node -> VarDeclareNode) -> CompileResult {
                     throw_type_error(node.pos, "Intrinsic 'sys.POINTER_BITS' must be declared as const Int.");
                     return void_result();
                 }
-            } else if (intrinsic == "target_os" && target_type_id == TYPE_STRING) {
-                // keep the old declaration valid for one bootstrap generation
             } else {
                 let target_info -> StructInfo = c.struct_id_map.get("" + target_type_id);
                 let enum_name -> String = target_enum_name(intrinsic);
@@ -3410,7 +3358,7 @@ func compile_var_decl(c -> Compiler, node -> VarDeclareNode) -> CompileResult {
         }
 
         let linkage -> String = "";
-        if (c.is_shared && sys.OS == sys.Os.Windows) {
+    if (c.is_shared && get_target_os() == sys.Os.Windows) {
             if ((sys_anns.ann_flags & FLAG_ANN_EXPORT) != 0) {
                 linkage = "dllexport ";
             } else {
@@ -3830,7 +3778,7 @@ func compile_func_def(c -> Compiler, node -> FunctionDefNode) -> CompileResult {
     let linkage -> String = "internal ";
     if (raw_name == "main" || (f_info.ann_flags & FLAG_ANN_EXPORT) != 0) {
         linkage = "";
-        if (c.is_shared && (f_info.ann_flags & FLAG_ANN_EXPORT) != 0 && sys.OS == sys.Os.Windows) {
+        if (c.is_shared && (f_info.ann_flags & FLAG_ANN_EXPORT) != 0 && get_target_os() == sys.Os.Windows) {
             linkage = "dllexport ";
         }
     }
@@ -4302,7 +4250,7 @@ func compile_local_closure(c -> Compiler, func_def -> FunctionDefNode) -> Compil
     let old_file -> file.File = c.output_file;
 
     let temp_dir -> String = "";
-    if (sys.OS == sys.Os.Windows) {
+    if (get_target_os() == sys.Os.Windows) {
         temp_dir = sys.env.get_env("TMP");
         if (temp_dir is null) { temp_dir = sys.env.get_env("TEMP"); }
         if (temp_dir is null) { temp_dir = "."; }
@@ -4464,7 +4412,7 @@ func compile_local_closure(c -> Compiler, func_def -> FunctionDefNode) -> Compil
     c.output_file.write(c.indent + "store i8* " + lambda_casted + ", i8** " + clo_func_ptr + "\n");
 
     let clo_env_ptr_i8 -> String = next_reg(c);
-    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 8\n");
+    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
     let clo_env_ptr -> String = next_reg(c);
     c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
     c.output_file.write(c.indent + "store i8* " + env_payload_i8 + ", i8** " + clo_env_ptr + "\n");
@@ -6276,7 +6224,7 @@ func compile_field_access(c -> Compiler, node -> FieldAccessNode) -> CompileResu
 
             let environment_bytes -> String = next_reg(c);
             let environment_slot -> String = next_reg(c);
-            c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 8\n");
+            c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
             c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
             c.output_file.write(c.indent + "store i8* " + object_ptr + ", i8** " + environment_slot + "\n");
 
@@ -6333,7 +6281,7 @@ func compile_field_access(c -> Compiler, node -> FieldAccessNode) -> CompileResu
             c.output_file.write(c.indent + "store i8* " + method_i8ptr + ", i8** " + clo_func_ptr + "\n");
             
             let clo_env_ptr_i8 -> String = next_reg(c);
-            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 8\n");
+            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
             let clo_env_ptr -> String = next_reg(c);
             c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
             let obj_i8_ptr -> String = next_reg(c);
@@ -6497,7 +6445,10 @@ func normalize_extern_abi(name -> String, pos -> Position) -> String {
     return "C";
 }
 func extern_callconv(abi_name -> String) -> String {
-    if (abi_name == "system" && get_target_os() == "WINDOWS") { return "win64cc "; }
+    if (abi_name == "system" && get_target_os() == sys.Os.Windows) {
+        if (get_target_arch() == sys.Arch.X86) { return "x86_stdcallcc "; }
+        if (get_target_arch() == sys.Arch.X86_64) { return "win64cc "; }
+    }
     return "ccc ";
 }
 func func_callconv(info -> FuncInfo) -> String {
@@ -6537,7 +6488,7 @@ func vector_capacity_limit(elem_size -> Int) -> Long {
     return limit;
 }
 func backend_symbol_signature(name -> String) -> String {
-    if (get_target_os() != "WINDOWS") { return ""; }
+    if (get_target_os() != sys.Os.Windows) { return ""; }
     let size_ty -> String = get_size_llvm_type();
     if (name == "memcpy" || name == "memmove") { return "ccc i8* (i8*, i8*, " + size_ty + ")"; }
     if (name == "memset") { return "ccc i8* (i8*, i32, " + size_ty + ")"; }
@@ -7737,7 +7688,7 @@ func compile_lvalue_ptr(c -> Compiler, node -> Struct, pos -> Position) -> Compi
             c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
             c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
             let clo_env_ptr_i8 -> String = next_reg(c);
-            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 8\n");
+            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
             let clo_env_ptr -> String = next_reg(c);
             c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
             c.output_file.write(c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
@@ -7918,7 +7869,7 @@ func compile_lvalue_ptr(c -> Compiler, node -> Struct, pos -> Position) -> Compi
                     c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
                     
                     let clo_env_ptr_i8 -> String = next_reg(c);
-                    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 8\n");
+                    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
                     let clo_env_ptr -> String = next_reg(c);
                     c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
                     
@@ -8841,7 +8792,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_func_ptr_i8 + " to i8**\n");
                 c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
                 let clo_env_ptr_i8 -> String = next_reg(c);
-                c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 8\n");
+                c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
                 let clo_env_ptr -> String = next_reg(c);
                 c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
                 c.output_file.write(c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
@@ -9402,7 +9353,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 if (is_func || is_meth) {
                     is_closure = true;
                     let env_ptr_i8_addr -> String = next_reg(c);
-                    c.output_file.write(c.indent + env_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 8\n");
+                    c.output_file.write(c.indent + env_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 " + closure_env_offset() + "\n");
                     let env_ptr_addr -> String = next_reg(c);
                     c.output_file.write(c.indent + env_ptr_addr + " = bitcast i8* " + env_ptr_i8_addr + " to i8**\n");
                     actual_env_reg = next_reg(c);
@@ -11087,6 +11038,7 @@ func emit_freestanding_memops(c -> Compiler) -> Void {
 
 func emit_windows_stack_probe(c -> Compiler) -> Void {
     // keep target assembly private to the Windows backend until structured asm is available
+    if (get_target_arch() != sys.Arch.X86_64) { return; }
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
     c.output_file.write("module asm \".globl __chkstk\"\n");
@@ -11113,7 +11065,7 @@ func emit_windows_stack_probe(c -> Compiler) -> Void {
 }
 
 func emit_windows_abi(c -> Compiler) -> Void {
-    if (sys.OS != sys.Os.Windows) { return; }
+    if (get_target_os() != sys.Os.Windows) { return; }
     c.output_file.write("@_fltused = global i32 39029\n\n");
     c.output_file.write("define void @__main() {\nentry:\n  ret void\n}\n\n");
     emit_freestanding_memops(c);
@@ -11121,7 +11073,7 @@ func emit_windows_abi(c -> Compiler) -> Void {
 }
 
 func emit_windows_entrypoint(c -> Compiler) -> Void {
-    if (sys.OS != sys.Os.Windows) { return; }
+    if (get_target_os() != sys.Os.Windows) { return; }
     if (c.is_shared) {
         c.output_file.write("define i32 @DllMainCRTStartup(i8* %instance, i32 %reason, i8* %reserved) {\n");
         c.output_file.write("entry:\n");
