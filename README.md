@@ -1,7 +1,7 @@
 # White Language
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-red.svg)
-![Version](https://img.shields.io/github/v/tag/pangbai520/White-Language?label=version&color=green&sort=semver)
+![Version](https://img.shields.io/github/v/tag/whitelanguage/white?label=version&color=green&sort=semver)
 ![Status](https://img.shields.io/badge/status-bootstrapped-success.svg)
 
 White is a statically typed language and a self-hosting compiler project.
