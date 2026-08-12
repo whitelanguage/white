@@ -13,6 +13,11 @@ import "core/WhitelangCompiler.wl"
 import "core/WhitelangUtils.wl"
 import "core/WhitelangTarget.wl"
 
+
+const VERSION -> String = "devel";
+const REVISION -> String = "unknown";
+const COMMIT_DATE -> String = "unknown";
+
 struct CompilerConfig(
     source_file     -> String,
     output_file     -> String,
@@ -34,7 +39,7 @@ struct CompilerConfig(
 )
 
 func print_usage() -> Void {
-    print("White Language Compiler (v0.3.2)");
+    print("White Language Compiler");
     print("Usage: wlc <source.wl> [extra_files...] [options]");
     print("");
     print("Arguments:");
@@ -59,7 +64,51 @@ func print_usage() -> Void {
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
+    print("  -V, --version          Display compiler version information");
     print("  -h, --help             Display this information");
+}
+
+func clang_program() -> String {
+    let command -> String = "clang";
+    if (sys.OS == sys.Os.Windows) { command = "clang.exe"; }
+
+    let wl_path -> String = sys.env.get_env("WL_PATH");
+    if (wl_path is null) { return command; }
+
+    let portable -> String = wl_path + "/tools/llvm/bin/clang";
+    if (sys.OS == sys.Os.Windows) { portable += ".exe"; }
+    if (WhitelangUtils.file_exists(portable)) { return portable; }
+    return command;
+}
+
+func print_version(verbose -> Bool) -> Void {
+    if (!verbose) { print("White Language Compiler " + VERSION); return; }
+
+    print("wlc " + VERSION);
+    print("release: " + VERSION);
+    print("commit-hash: " + REVISION);
+    print("commit-date: " + COMMIT_DATE);
+    print("host: " + WhitelangTarget.native_target_triple());
+    print("pointer-width: " + sys.POINTER_BITS);
+    print("backend: LLVM IR");
+
+    let clang -> String = clang_program();
+    print("clang-command: " + clang);
+    let status -> Int = process.run(clang, ["--version"])?;
+    catch(err) {
+        print("clang-version: unavailable");
+        return;
+    }
+    if (status != 0) { print("clang-version: unavailable"); }
+}
+
+func has_argument(argc -> Int, ptr argv -> String, expected -> String) -> Bool {
+    let i -> Int = 1;
+    while (i < argc) {
+        if (process.argument(argc, argv, i) == expected) { return true; }
+        i += 1;
+    }
+    return false;
 }
 
 func print_target_help() -> Void {
@@ -139,8 +188,16 @@ func split_link_flags(value -> String) -> Vector(String) {
 
 func main(argc -> Int, ptr argv -> String) -> Int {
     if (argc < 2) {
-        print_usage();
+        print("Error: No input file.");
         return 1;
+    }
+
+    if (has_argument(argc, argv, "-h") || has_argument(argc, argv, "--help")) { print_usage(); return 0; }
+    let wants_version -> Bool = has_argument(argc, argv, "-V") || has_argument(argc, argv, "--version") || has_argument(argc, argv, "-vV");
+    if (wants_version) {
+        let verbose_version -> Bool = has_argument(argc, argv, "-vV") || has_argument(argc, argv, "-v") || has_argument(argc, argv, "--verbose");
+        print_version(verbose_version);
+        return 0;
     }
 
     let cfg -> CompilerConfig = CompilerConfig(
@@ -167,11 +224,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     while (i < argc) {
         let arg -> String = process.argument(argc, argv, i);
 
-        if (arg == "-h" || arg == "--help") {
-            print_usage();
-            return 0;
-        }
-        else if (arg == "--target-help") { print_target_help(); return 0; }
+        if (arg == "--target-help") { print_target_help(); return 0; }
         else if (arg == "-v" || arg == "--verbose") { cfg.verbose = true; }
         else if (arg == "--dump-ast") { cfg.dump_ast = true; }
         else if (arg == "--dump-ir") { cfg.dump_ir = true; }
@@ -376,34 +429,12 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
 
     log_stage(cfg, "Backend/Linker");
-    let clang_cmd -> String = "clang";
-    if (sys.OS == sys.Os.Windows) {
-        clang_cmd = "clang.exe";
-    }
-
-    let has_clang -> Bool = false;
-    let using_portable_clang -> Bool = false;
-
-    let wl_path -> String = sys.env.get_env("WL_PATH");
-    if (wl_path is !null) {
-        let portable_clang -> String = "";
-        if (sys.OS == sys.Os.Windows) {
-            portable_clang = wl_path + "/tools/llvm/bin/clang.exe";
-        } else {
-            portable_clang = wl_path + "/tools/llvm/bin/clang";
-        }
-
-        if (WhitelangUtils.file_exists(portable_clang)) {
-            clang_cmd = portable_clang;
-            has_clang = true;
-            using_portable_clang = true;
-            if (cfg.verbose) { print("Using portable LLVM: " + portable_clang); }
-        } else {
-            if (cfg.verbose) { print("Portable LLVM not found, falling back to system " + clang_cmd + "."); }
-        }
-    }
-
-    if (!has_clang) { has_clang = true; }
+    let clang_cmd -> String = clang_program();
+    let system_clang -> String = "clang";
+    if (sys.OS == sys.Os.Windows) { system_clang = "clang.exe"; }
+    let using_portable_clang -> Bool = clang_cmd != system_clang;
+    if (cfg.verbose && using_portable_clang) { print("Using portable LLVM: " + clang_cmd); }
+    else if (cfg.verbose) { print("Portable LLVM not found, falling back to system " + clang_cmd + "."); }
 
     let import_lib -> String = "";
     if (cfg.is_shared && WhitelangTarget.get_target_os() == sys.Os.Windows) {
@@ -452,7 +483,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
             }
             if (WhitelangTarget.get_target_os() == sys.Os.Windows && using_portable_clang) {
                 clang_args.append("-Xlinker");
-                clang_args.append("--out-implib=" + import_lib);
+                if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
+                else { clang_args.append("--out-implib=" + import_lib); }
             }
             if (WhitelangTarget.get_target_os() != sys.Os.Windows) { clang_args.append("-fPIC"); }
         }
@@ -515,7 +547,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
 
     if (ret == 0 && import_lib.length() > 0 && !using_portable_clang && !WhitelangUtils.file_exists(import_lib)) {
         clang_args.append("-Xlinker");
-        clang_args.append("--out-implib=" + import_lib);
+        if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
+        else { clang_args.append("--out-implib=" + import_lib); }
         ret = process.run(clang_cmd, clang_args)?;
         catch(err) {
             print("Build Failed: Could not restart Clang to create import library (error " + Int(err) + ")");
