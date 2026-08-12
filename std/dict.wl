@@ -1,6 +1,5 @@
 // std/dict.wl
-// Basic open-addressed hash map using linear probing and tombstones
-// capacities stay at powers of two so probing can use a bitmask
+// dynamic hash table with type-aware keys and values
 
 import "internal/runtime"
 
@@ -9,36 +8,37 @@ struct Variant(
     // compiler internal implementation
 )
 
-func hash_string(key -> String) -> Int {
+@CompilerLink("dict_key_hash")
+func __key_hash(key -> Variant) -> Int {
+    // the previous compiler uses this body while bootstrapping the intrinsic
+    let text -> String = key;
     let hash -> Int = 5381;
     let i -> Int = 0;
-    let len -> Int = key.length();
-
-    while (i < len) {
-        let c -> Char = key[i];
-        if (c == '\0') { break; }
-        hash = ((hash << 5) + hash) ^ Int(c);
+    while (i < text.length()) {
+        hash = ((hash << 5) + hash) ^ Int(text[i]);
         i++;
     }
-
     if (hash < 0) { hash = ~hash; }
     if (hash < 2) { hash += 2; }
-
     return hash;
 }
 
-class Dict {
-    let ptr keys      -> String = nullptr; 
-    let ptr values    -> Variant = nullptr; 
-    // this array stores the hashes but also tracks state (0 = empty, 1 = deleted)
-    let ptr hashes    -> Int    = nullptr; 
+@CompilerLink("dict_keys_equal")
+func __keys_equal(left -> Variant, right -> Variant) -> Bool {
+    let left_text -> String = left;
+    let right_text -> String = right;
+    return left_text == right_text;
+}
 
+class Dict {
+    let ptr keys      -> Variant = nullptr; 
+    let ptr values    -> Variant = nullptr;
+    let ptr hashes    -> Int    = nullptr;
     let capacity      -> Int = 0;
     let size          -> Int = 0;
     let tombstones    -> Int = 0;
 
     init(cap -> Int) {
-        // minimum size of 8, then find the next power of 2
         let actual_cap -> Int = 8;
         while (actual_cap < cap) {
             if (actual_cap >= 1073741824) {
@@ -48,9 +48,8 @@ class Dict {
             actual_cap <<= 1;
         }
 
-        // keys and variants are stored as pointers, hashes are 32-bit values
         let slot_size -> UIntSize = runtime.pointer_size();
-        let ptr new_keys -> String = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
+        let ptr new_keys -> Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
         let ptr new_values -> Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
         let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * UIntSize(4));
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
@@ -65,40 +64,40 @@ class Dict {
         self.values = new_values;
         self.hashes = new_hashes;
         self.capacity = actual_cap;
-        self.size = 0;
-        self.tombstones = 0;
     }
 
-    method __release_slots(ptr keys -> String, ptr values -> Variant, ptr hashes -> Int, cap -> Int) -> Void {
+    method __hash(key -> Variant) -> Int {
+        let hash -> Int = __key_hash(key);
+        if (hash < 2) {
+            runtime.panic("Dict key is not hashable");
+            return 2;
+        }
+        return hash;
+    }
+
+    method __release_slots(ptr slot_keys -> Variant, ptr slot_values -> Variant, ptr slot_hashes -> Int, cap -> Int) -> Void {
         let i -> Int = 0;
         while (i < cap) {
-            if (hashes[i] >= 2) {
-                keys[i] = null;
-                values[i] = null;
+            if (slot_hashes[i] >= 2) {
+                slot_keys[i] = null;
+                slot_values[i] = null;
             }
             i += 1;
         }
     }
 
-    method __resize() -> Void {
+    method __rehash(new_cap -> Int) -> Void {
         let old_cap -> Int = self.capacity;
-        let ptr old_keys -> String   = self.keys;
-        let ptr old_vals -> Variant = self.values;
-        let ptr old_hashes -> Int    = self.hashes;
-
-        // standard x2 growth strategy
-        if (old_cap >= 1073741824) {
-            runtime.panic_capacity_overflow("Dict");
-            return;
-        }
-        let new_cap -> Int = old_cap << 1;
+        let ptr old_keys -> Variant = self.keys;
+        let ptr old_values -> Variant = self.values;
+        let ptr old_hashes -> Int = self.hashes;
         let slot_size -> UIntSize = runtime.pointer_size();
-        let ptr new_keys -> String = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
-        let ptr new_vals -> Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
+        let ptr new_keys -> Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
+        let ptr new_values -> Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
         let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * UIntSize(4));
-        if (new_keys is nullptr || new_vals is nullptr || new_hashes is nullptr) {
+        if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
-            runtime.mem_dealloc(new_vals);
+            runtime.mem_dealloc(new_values);
             runtime.mem_dealloc(new_hashes);
             runtime.panic_out_of_memory("Dict");
             return;
@@ -106,170 +105,144 @@ class Dict {
 
         self.capacity = new_cap;
         self.keys = new_keys;
-        self.values = new_vals;
+        self.values = new_values;
         self.hashes = new_hashes;
+        self.tombstones = 0;
 
-        self.size = 0;
-        self.tombstones = 0; 
-
+        let mask -> Int = new_cap - 1;
         let i -> Int = 0;
         while (i < old_cap) {
-            // only migrate slots that actually have data (hash >= 2)
-            if (old_hashes[i] >= 2) {
-                self.put(old_keys[i], old_vals[i]);
+            let hash -> Int = old_hashes[i];
+            if (hash >= 2) {
+                let idx -> Int = hash & mask;
+                while (new_hashes[idx] != 0) { idx = (idx + 1) & mask; }
+                new_hashes[idx] = hash;
+                new_keys[idx] = old_keys[i];
+                new_values[idx] = old_values[i];
             }
             i++;
         }
 
-        self.__release_slots(old_keys, old_vals, old_hashes, old_cap);
+        self.__release_slots(old_keys, old_values, old_hashes, old_cap);
         runtime.mem_dealloc(old_keys);
-        runtime.mem_dealloc(old_vals);
+        runtime.mem_dealloc(old_values);
         runtime.mem_dealloc(old_hashes);
     }
 
-    method put(key -> String, val -> Variant) -> Void {
-        // if we're 75% full (counting dead slots), we need to grow
-        if ((self.size + self.tombstones) * 3 >= self.capacity << 1) {
-            self.__resize();
+    method __prepare_insert() -> Bool {
+        if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) { return false; }
+        if ((self.size + 1) * 3 < self.capacity * 2) {
+            self.__rehash(self.capacity);
+            return true;
         }
+        if (self.capacity >= 1073741824) {
+            runtime.panic_capacity_overflow("Dict");
+            return false;
+        }
+        self.__rehash(self.capacity << 1);
+        return true;
+    }
 
-        let hash -> Int = hash_string(key);
-        // fast bitwise AND for index, only works because capacity is a power of 2.
+    method put(key -> Variant, value -> Variant) -> Void {
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx  -> Int = hash & mask;
         let first_tombstone -> Int = -1;
 
         while true {
-            let curr_h -> Int = self.hashes[idx];
-
-            // found a fresh spot
-            if (curr_h == 0) { 
-                // if we passed a tombstone earlier, reuse that slot instead of wasting space
+            let current -> Int = self.hashes[idx];
+            if (current == 0) {
+                if (self.__prepare_insert()) {
+                    self.put(key, value);
+                    return;
+                }
                 if (first_tombstone != -1) {
                     idx = first_tombstone;
                     self.tombstones--;
                 }
                 self.hashes[idx] = hash;
                 self.keys[idx] = key;
-                self.values[idx] = val;
+                self.values[idx] = value;
                 self.size++;
                 return;
             }
-
-            // keep track of the first dead slot we see in case we need to insert
-            if (curr_h == 1) { 
-                if (first_tombstone == -1) {
-                    first_tombstone = idx; 
-                }
-            } 
-            // check the hash first before doing a heavy string comparison
-            else if (curr_h == hash) {
-                if (self.keys[idx] == key) { 
-                    self.values[idx] = val; // key already exists, just update the value
-                    return;
-                }
+            if (current == 1) {
+                if (first_tombstone == -1) { first_tombstone = idx; }
+            } else if (current == hash && __keys_equal(self.keys[idx], key)) {
+                self.values[idx] = value;
+                return;
             }
-
-            // collision or tombstone: keep walking
             idx = (idx + 1) & mask;
         }
     }
 
-    method get(key -> String) -> Variant {
-        if (self.size == 0) { return null; } // 0 means empty
-
-        let hash -> Int = hash_string(key);
+    method get(key -> Variant) -> Variant {
+        if (self.size == 0) { return null; }
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx  -> Int = hash & mask;
-
         while true {
-            let curr_h -> Int = self.hashes[idx];
-
-            // if we hit an empty slot, the key definitely isn't here
-            if (curr_h == 0) { 
-                return null; 
-            }
-
-            // quick hash check, then confirm with a proper string compare
-            if (curr_h == hash) {
-                if (self.keys[idx] == key) {
-                    return self.values[idx];
-                }
-            }
-
-            // don't stop on tombstones (1), the item might be further down the line
+            let current -> Int = self.hashes[idx];
+            if (current == 0) { return null; }
+            if (current == hash && __keys_equal(self.keys[idx], key)) { return self.values[idx]; }
             idx = (idx + 1) & mask;
         }
         return null;
     }
 
-    method remove(key -> String) -> Void {
+    method remove(key -> Variant) -> Void {
         if (self.size == 0) { return; }
-
-        let hash -> Int = hash_string(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx  -> Int = hash & mask;
-
         while true {
-            let curr_h -> Int = self.hashes[idx];
-
-            if (curr_h == 0) { return; } // nothing to delete
-
-            if (curr_h == hash) {
-                if (self.keys[idx] == key) {
-                    // turn this into a "tombstone" so we don't break the probe chain
-                    self.hashes[idx] = 1; 
-                    self.keys[idx] = null;
-                    self.values[idx] = null;
-                    self.size--;
-                    self.tombstones++;
-                    return;
-                }
+            let current -> Int = self.hashes[idx];
+            if (current == 0) { return; }
+            if (current == hash && __keys_equal(self.keys[idx], key)) {
+                self.hashes[idx] = 1;
+                self.keys[idx] = null;
+                self.values[idx] = null;
+                self.size--;
+                self.tombstones++;
+                return;
             }
             idx = (idx + 1) & mask;
         }
     }
 
-    method contains_key(key -> String) -> Bool {
+    method contains_key(key -> Variant) -> Bool {
         if (self.size == 0) { return false; }
-
-        let hash -> Int = hash_string(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx  -> Int = hash & mask;
-
         while true {
-            let curr_h -> Int = self.hashes[idx];
-            if (curr_h == 0) { 
-                return false; 
-            }
-
-            if (curr_h == hash) {
-                if (self.keys[idx] == key) {
-                    return true;
-                }
-            }
-
+            let current -> Int = self.hashes[idx];
+            if (current == 0) { return false; }
+            if (current == hash && __keys_equal(self.keys[idx], key)) { return true; }
             idx = (idx + 1) & mask;
         }
         return false;
     }
 
+    method length() -> Int {
+        return self.size;
+    }
+
+    method is_empty() -> Bool {
+        return self.size == 0;
+    }
+
+    method clear() -> Void {
+        self.__release_slots(self.keys, self.values, self.hashes, self.capacity);
+        runtime.mem_set(self.hashes, 0, UIntSize(self.capacity) * UIntSize(4));
+        self.size = 0;
+        self.tombstones = 0;
+    }
+
     deinit() {
-        // standard cleanup to avoid leaking memory
-        if (self.keys is !nullptr && self.values is !nullptr && self.hashes is !nullptr) {
-            self.__release_slots(self.keys, self.values, self.hashes, self.capacity);
-        }
-        if (self.keys is !nullptr) {
-            runtime.mem_dealloc(self.keys);
-            self.keys = nullptr;
-        }
-        if (self.values is !nullptr) {
-            runtime.mem_dealloc(self.values);
-            self.values = nullptr;
-        }
-        if (self.hashes is !nullptr) {
-            runtime.mem_dealloc(self.hashes);
-            self.hashes = nullptr;
-        }
+        if (self.keys is !nullptr && self.values is !nullptr && self.hashes is !nullptr) { self.__release_slots(self.keys, self.values, self.hashes, self.capacity); }
+        if (self.keys is !nullptr) { runtime.mem_dealloc(self.keys); self.keys = nullptr; }
+        if (self.values is !nullptr) { runtime.mem_dealloc(self.values); self.values = nullptr; }
+        if (self.hashes is !nullptr) { runtime.mem_dealloc(self.hashes); self.hashes = nullptr; }
     }
 }

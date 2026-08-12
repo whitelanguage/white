@@ -194,7 +194,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
 
     if (has_argument(argc, argv, "-h") || has_argument(argc, argv, "--help")) { print_usage(); return 0; }
     let wants_version -> Bool = has_argument(argc, argv, "-V") || has_argument(argc, argv, "--version") || has_argument(argc, argv, "-vV");
-    if (wants_version) {
+    if wants_version {
         let verbose_version -> Bool = has_argument(argc, argv, "-vV") || has_argument(argc, argv, "-v") || has_argument(argc, argv, "--verbose");
         print_version(verbose_version);
         return 0;

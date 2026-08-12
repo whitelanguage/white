@@ -26,6 +26,57 @@ func type_fingerprint(c -> Compiler, type_id -> Int) -> UInt64 {
     return hash;
 }
 
+func is_dict_key_type(c -> Compiler, type_id -> Int) -> Bool {
+    if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) { return true; }
+    if (is_primitive_type(type_id)) { return type_id != TYPE_ANY_ERROR; }
+    if (is_pointer_type(c, type_id)) { return true; }
+
+    let info -> StructInfo = c.struct_id_map.get("" + type_id);
+    if (info is !null) {
+        if (info.is_enum || info.is_interface) { return true; }
+        if (info.is_class) { return info.name != "dict.Dict" && info.name != "Dict"; }
+        return false;
+    }
+    if (c.func_ret_map.get("" + type_id) is !null || c.method_ret_map.get("" + type_id) is !null) { return true; }
+    return false;
+}
+
+func is_dynamic_dict(info -> StructInfo) -> Bool {
+    return info is !null && (info.name == "dict.Dict" || info.name == "Dict");
+}
+
+func is_dict_key_method(name -> String) -> Bool {
+    return name == "put" || name == "get" || name == "remove" || name == "contains_key";
+}
+
+func append_dict_key_case(c -> Compiler, cases -> String, seen -> Dict, type_id -> Int, label -> String) -> String {
+    let fingerprint -> UInt64 = type_fingerprint(c, type_id);
+    let key -> String = "" + fingerprint;
+    let previous -> StringConstant = seen.get(key);
+    let type_name -> String = get_type_name(c, type_id);
+    if (previous is !null && previous.value != type_name) {
+        throw_internal_compiler_error(null, "Dict key fingerprint collision between " + previous.value + " and " + type_name);
+        return cases;
+    }
+    if (previous is !null) { return cases; }
+    seen.put(key, StringConstant(id=0, value=type_name));
+    return cases + "    i64 " + fingerprint + ", label " + label + "\n";
+}
+
+func append_variant_ref_case(c -> Compiler, cases -> String, seen -> Dict, type_id -> Int) -> String {
+    let fingerprint -> UInt64 = type_fingerprint(c, type_id);
+    let key -> String = "" + fingerprint;
+    let previous -> StringConstant = seen.get(key);
+    let type_name -> String = get_type_name(c, type_id);
+    if (previous is !null && previous.value != type_name) {
+        throw_internal_compiler_error(null, "Variant fingerprint collision between " + previous.value + " and " + type_name);
+        return cases;
+    }
+    if (previous is !null) { return cases; }
+    seen.put(key, StringConstant(id=0, value=type_name));
+    return cases + "    i64 " + fingerprint + ", label %release\n";
+}
+
 func emit_error_value(c -> Compiler, value -> CompileResult, pos -> Position) -> CompileResult {
     // attach a stable error-domain id to a concrete error enum value
     if (value.type == TYPE_ANY_ERROR) { return value; }
@@ -665,10 +716,11 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
     let origin -> Int = val_res.origin_type;
 
     let variant_info -> StructInfo = c.struct_table.get("$Variant");
-    if (variant_info is !null && expected_type == variant_info.type_id && val_res.type != TYPE_NULL) {
+    if (variant_info is !null && expected_type == variant_info.type_id) {
         let boxed_info -> StructInfo = c.struct_id_map.get("" + val_res.type);
         let boxed_enum -> Bool = boxed_info is !null && boxed_info.is_enum;
-        let boxed_type_supported -> Bool = is_primitive_type(val_res.type) ||
+        let boxed_type_supported -> Bool = val_res.type == TYPE_NULL ||
+                                           is_primitive_type(val_res.type) ||
                                            is_ref_type(c, val_res.type) ||
                                            is_pointer_type(c, val_res.type) ||
                                            boxed_enum;
@@ -683,7 +735,7 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
         let type_ptr -> String = next_reg(c);
         c.output_file.write(c.indent + type_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 0\n");
         let boxed_tag -> UInt64 = type_fingerprint(c, val_res.type);
-        if (val_res.type == TYPE_NULLPTR) { boxed_tag = UInt64(0); }
+        if (val_res.type == TYPE_NULL || val_res.type == TYPE_NULLPTR) { boxed_tag = UInt64(0); }
         c.output_file.write(c.indent + "store i64 " + boxed_tag + ", i64* " + type_ptr + "\n");
 
         let payload_low_ptr -> String = next_reg(c);
@@ -694,7 +746,7 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
         let payload_low -> String = "0";
         let payload_high -> String = "0";
 
-        if (val_res.type == TYPE_NULLPTR) {
+        if (val_res.type == TYPE_NULL || val_res.type == TYPE_NULLPTR) {
             payload_low = "0";
         } else if (boxed_info is !null && boxed_info.is_interface) {
             let interface_ty -> String = get_llvm_type_str(c, val_res.type);
@@ -2567,13 +2619,16 @@ func emit_type_drop(c -> Compiler, type_id -> Int) -> Void {
         c.output_file.write("  %tag = load i64, i64* %tag.slot\n");
         c.output_file.write("  switch i64 %tag, label %done [\n");
 
+        let ref_cases -> String = "";
+        let seen_refs -> Dict = Dict(64);
         let ref_id -> Int = 1;
         while (ref_id < c.type_counter) {
             if (is_ref_type(c, ref_id) && ref_id != type_id) {
-                c.output_file.write("    i64 " + type_fingerprint(c, ref_id) + ", label %release\n");
+                ref_cases = append_variant_ref_case(c, ref_cases, seen_refs, ref_id);
             }
             ref_id += 1;
         }
+        c.output_file.write(ref_cases);
         c.output_file.write("  ]\n");
         c.output_file.write("release:\n");
         c.output_file.write("  %payload.slot = getelementptr inbounds %struct.$Variant, %struct.$Variant* %box, i32 0, i32 1\n");
@@ -2663,6 +2718,195 @@ func emit_type_drop(c -> Compiler, type_id -> Int) -> Void {
     }
 
     c.output_file.write("  ret void\n");
+    c.output_file.write("}\n\n");
+}
+
+func emit_dict_key_helpers(c -> Compiler) -> Void {
+    c.output_file.write("define internal i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high) {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %mixed.0 = xor i64 %tag, %low\n");
+    c.output_file.write("  %mixed.1 = xor i64 %mixed.0, %high\n");
+    c.output_file.write("  %shifted = lshr i64 %mixed.1, 32\n");
+    c.output_file.write("  %mixed.2 = xor i64 %mixed.1, %shifted\n");
+    c.output_file.write("  %raw = trunc i64 %mixed.2 to i32\n");
+    c.output_file.write("  %positive = and i32 %raw, 2147483647\n");
+    c.output_file.write("  %small = icmp ult i32 %positive, 2\n");
+    c.output_file.write("  %adjusted = add i32 %positive, 2\n");
+    c.output_file.write("  %result = select i1 %small, i32 %adjusted, i32 %positive\n");
+    c.output_file.write("  ret i32 %result\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define internal i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right) {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %same = icmp eq %struct.$String* %left, %right\n");
+    c.output_file.write("  br i1 %same, label %equal, label %check.null\n");
+    c.output_file.write("check.null:\n");
+    c.output_file.write("  %left.null = icmp eq %struct.$String* %left, null\n");
+    c.output_file.write("  %right.null = icmp eq %struct.$String* %right, null\n");
+    c.output_file.write("  %has.null = or i1 %left.null, %right.null\n");
+    c.output_file.write("  br i1 %has.null, label %different, label %check.length\n");
+    c.output_file.write("check.length:\n");
+    c.output_file.write("  %left.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 1\n");
+    c.output_file.write("  %right.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 1\n");
+    c.output_file.write("  %left.len = load i32, i32* %left.len.addr\n");
+    c.output_file.write("  %right.len = load i32, i32* %right.len.addr\n");
+    c.output_file.write("  %same.len = icmp eq i32 %left.len, %right.len\n");
+    c.output_file.write("  br i1 %same.len, label %prepare, label %different\n");
+    c.output_file.write("prepare:\n");
+    c.output_file.write("  %left.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 0\n");
+    c.output_file.write("  %right.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 0\n");
+    c.output_file.write("  %left.buf = load i8*, i8** %left.buf.addr\n");
+    c.output_file.write("  %right.buf = load i8*, i8** %right.buf.addr\n");
+    c.output_file.write("  br label %compare\n");
+    c.output_file.write("compare:\n");
+    c.output_file.write("  %index = phi i32 [ 0, %prepare ], [ %next, %matched ]\n");
+    c.output_file.write("  %done = icmp uge i32 %index, %left.len\n");
+    c.output_file.write("  br i1 %done, label %equal, label %read\n");
+    c.output_file.write("read:\n");
+    c.output_file.write("  %left.byte.addr = getelementptr inbounds i8, i8* %left.buf, i32 %index\n");
+    c.output_file.write("  %right.byte.addr = getelementptr inbounds i8, i8* %right.buf, i32 %index\n");
+    c.output_file.write("  %left.byte = load i8, i8* %left.byte.addr\n");
+    c.output_file.write("  %right.byte = load i8, i8* %right.byte.addr\n");
+    c.output_file.write("  %byte.equal = icmp eq i8 %left.byte, %right.byte\n");
+    c.output_file.write("  br i1 %byte.equal, label %matched, label %different\n");
+    c.output_file.write("matched:\n");
+    c.output_file.write("  %next = add i32 %index, 1\n");
+    c.output_file.write("  br label %compare\n");
+    c.output_file.write("equal:\n");
+    c.output_file.write("  ret i1 true\n");
+    c.output_file.write("different:\n");
+    c.output_file.write("  ret i1 false\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define internal i32 @__wl_dict_key_hash(%struct.$Variant* %key) {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %is.null = icmp eq %struct.$Variant* %key, null\n");
+    c.output_file.write("  br i1 %is.null, label %invalid, label %read\n");
+    c.output_file.write("read:\n");
+    c.output_file.write("  %tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 0\n");
+    c.output_file.write("  %low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 1\n");
+    c.output_file.write("  %high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 2\n");
+    c.output_file.write("  %tag = load i64, i64* %tag.addr\n");
+    c.output_file.write("  %low = load i64, i64* %low.addr\n");
+    c.output_file.write("  %high = load i64, i64* %high.addr\n");
+    c.output_file.write("  switch i64 %tag, label %invalid [\n");
+    c.output_file.write("    i64 0, label %bits\n");
+    let key_cases -> String = "";
+    let seen_keys -> Dict = Dict(64);
+    seen_keys.put("0", StringConstant(id=0, value="null"));
+    let type_id -> Int = 1;
+    while (type_id < c.type_counter) {
+        if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(c, type_id)) {
+            let label -> String = "%bits";
+            if (type_id == TYPE_STRING) { label = "%string"; }
+            if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
+            key_cases = append_dict_key_case(c, key_cases, seen_keys, type_id, label);
+        }
+        type_id++;
+    }
+    c.output_file.write(key_cases);
+    c.output_file.write("  ]\n");
+    c.output_file.write("bits:\n");
+    c.output_file.write("  %bits.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high)\n");
+    c.output_file.write("  ret i32 %bits.hash\n");
+    c.output_file.write("float:\n");
+    c.output_file.write("  %float.value = bitcast i64 %low to double\n");
+    c.output_file.write("  %float.nan = fcmp uno double %float.value, %float.value\n");
+    c.output_file.write("  br i1 %float.nan, label %invalid, label %float.valid\n");
+    c.output_file.write("float.valid:\n");
+    c.output_file.write("  %float.zero = fcmp oeq double %float.value, 0.0\n");
+    c.output_file.write("  %float.bits = select i1 %float.zero, i64 0, i64 %low\n");
+    c.output_file.write("  %float.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %float.bits, i64 0)\n");
+    c.output_file.write("  ret i32 %float.hash\n");
+    c.output_file.write("string:\n");
+    c.output_file.write("  %string.ptr = inttoptr i64 %low to %struct.$String*\n");
+    c.output_file.write("  %string.null = icmp eq %struct.$String* %string.ptr, null\n");
+    c.output_file.write("  br i1 %string.null, label %invalid, label %string.read\n");
+    c.output_file.write("string.read:\n");
+    c.output_file.write("  %string.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 0\n");
+    c.output_file.write("  %string.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 1\n");
+    c.output_file.write("  %string.buf = load i8*, i8** %string.buf.addr\n");
+    c.output_file.write("  %string.len = load i32, i32* %string.len.addr\n");
+    c.output_file.write("  %string.bad.len = icmp slt i32 %string.len, 0\n");
+    c.output_file.write("  br i1 %string.bad.len, label %invalid, label %string.loop\n");
+    c.output_file.write("string.loop:\n");
+    c.output_file.write("  %string.index = phi i32 [ 0, %string.read ], [ %string.next, %string.body ]\n");
+    c.output_file.write("  %string.state = phi i64 [ 14695981039346656037, %string.read ], [ %string.next.state, %string.body ]\n");
+    c.output_file.write("  %string.done = icmp uge i32 %string.index, %string.len\n");
+    c.output_file.write("  br i1 %string.done, label %string.end, label %string.body\n");
+    c.output_file.write("string.body:\n");
+    c.output_file.write("  %string.byte.addr = getelementptr inbounds i8, i8* %string.buf, i32 %string.index\n");
+    c.output_file.write("  %string.byte = load i8, i8* %string.byte.addr\n");
+    c.output_file.write("  %string.byte.wide = zext i8 %string.byte to i64\n");
+    c.output_file.write("  %string.xor = xor i64 %string.state, %string.byte.wide\n");
+    c.output_file.write("  %string.next.state = mul i64 %string.xor, 1099511628211\n");
+    c.output_file.write("  %string.next = add i32 %string.index, 1\n");
+    c.output_file.write("  br label %string.loop\n");
+    c.output_file.write("string.end:\n");
+    c.output_file.write("  %string.len.wide = zext i32 %string.len to i64\n");
+    c.output_file.write("  %string.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %string.state, i64 %string.len.wide)\n");
+    c.output_file.write("  ret i32 %string.hash\n");
+    c.output_file.write("invalid:\n");
+    c.output_file.write("  ret i32 0\n");
+    c.output_file.write("}\n\n");
+
+    c.output_file.write("define internal i1 @__wl_dict_keys_equal(%struct.$Variant* %left, %struct.$Variant* %right) {\n");
+    c.output_file.write("entry:\n");
+    c.output_file.write("  %same = icmp eq %struct.$Variant* %left, %right\n");
+    c.output_file.write("  br i1 %same, label %equal, label %check.null\n");
+    c.output_file.write("check.null:\n");
+    c.output_file.write("  %left.null = icmp eq %struct.$Variant* %left, null\n");
+    c.output_file.write("  %right.null = icmp eq %struct.$Variant* %right, null\n");
+    c.output_file.write("  %has.null = or i1 %left.null, %right.null\n");
+    c.output_file.write("  br i1 %has.null, label %different, label %read\n");
+    c.output_file.write("read:\n");
+    c.output_file.write("  %left.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 0\n");
+    c.output_file.write("  %right.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 0\n");
+    c.output_file.write("  %left.tag = load i64, i64* %left.tag.addr\n");
+    c.output_file.write("  %right.tag = load i64, i64* %right.tag.addr\n");
+    c.output_file.write("  %same.tag = icmp eq i64 %left.tag, %right.tag\n");
+    c.output_file.write("  br i1 %same.tag, label %dispatch, label %different\n");
+    c.output_file.write("dispatch:\n");
+    c.output_file.write("  switch i64 %left.tag, label %bits [\n");
+    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_STRING) + ", label %string\n");
+    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT) + ", label %float\n");
+    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT32) + ", label %float\n");
+    c.output_file.write("  ]\n");
+    c.output_file.write("bits:\n");
+    c.output_file.write("  %left.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    c.output_file.write("  %right.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    c.output_file.write("  %left.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 2\n");
+    c.output_file.write("  %right.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 2\n");
+    c.output_file.write("  %left.low = load i64, i64* %left.low.addr\n");
+    c.output_file.write("  %right.low = load i64, i64* %right.low.addr\n");
+    c.output_file.write("  %left.high = load i64, i64* %left.high.addr\n");
+    c.output_file.write("  %right.high = load i64, i64* %right.high.addr\n");
+    c.output_file.write("  %same.low = icmp eq i64 %left.low, %right.low\n");
+    c.output_file.write("  %same.high = icmp eq i64 %left.high, %right.high\n");
+    c.output_file.write("  %same.bits = and i1 %same.low, %same.high\n");
+    c.output_file.write("  ret i1 %same.bits\n");
+    c.output_file.write("float:\n");
+    c.output_file.write("  %float.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    c.output_file.write("  %float.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    c.output_file.write("  %float.left.bits = load i64, i64* %float.left.addr\n");
+    c.output_file.write("  %float.right.bits = load i64, i64* %float.right.addr\n");
+    c.output_file.write("  %float.left = bitcast i64 %float.left.bits to double\n");
+    c.output_file.write("  %float.right = bitcast i64 %float.right.bits to double\n");
+    c.output_file.write("  %float.equal = fcmp oeq double %float.left, %float.right\n");
+    c.output_file.write("  ret i1 %float.equal\n");
+    c.output_file.write("string:\n");
+    c.output_file.write("  %string.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    c.output_file.write("  %string.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    c.output_file.write("  %string.left.raw = load i64, i64* %string.left.addr\n");
+    c.output_file.write("  %string.right.raw = load i64, i64* %string.right.addr\n");
+    c.output_file.write("  %string.left = inttoptr i64 %string.left.raw to %struct.$String*\n");
+    c.output_file.write("  %string.right = inttoptr i64 %string.right.raw to %struct.$String*\n");
+    c.output_file.write("  %string.equal = call i1 @__wl_dict_string_equal(%struct.$String* %string.left, %struct.$String* %string.right)\n");
+    c.output_file.write("  ret i1 %string.equal\n");
+    c.output_file.write("equal:\n");
+    c.output_file.write("  ret i1 true\n");
+    c.output_file.write("different:\n");
+    c.output_file.write("  ret i1 false\n");
     c.output_file.write("}\n\n");
 }
 
@@ -3755,6 +3999,7 @@ func compile_func_def(c -> Compiler, node -> FunctionDefNode) -> CompileResult {
     if (f_info is null) {
         return void_result();
     }
+    if (f_info.compiler_link_name == "dict_key_hash" || f_info.compiler_link_name == "dict_keys_equal") { return void_result(); }
     if ((f_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) { return void_result(); }
     let ret_type_id -> Int = f_info.ret_type;
     let llvm_ret_type -> String = get_llvm_type_str(c, ret_type_id);
@@ -4128,6 +4373,13 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
         c.expected_type = expected_type;
         let arg_val -> CompileResult = compile_node(c, arg_node_curr.val);
         c.expected_type = 0;
+        if (arg_val is !null && arg_val.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        let dynamic_key_arg -> Bool = arg_idx == 0 && is_dynamic_dict(s_info) && is_dict_key_method(method_name);
+        if (dynamic_key_arg && arg_val is !null && arg_val.type != expected_type && !is_dict_key_type(c, arg_val.type)) {
+            throw_type_error(n_call.pos, "Type " + get_type_name(c, arg_val.type) + " cannot be used as a Dict key");
+            emit_release_owned(c, arg_val);
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
         arg_val = emit_implicit_cast(c, arg_val, expected_type, n_call.pos);
         
         let ty_str -> String = get_llvm_type_str(c, arg_val.type);
@@ -4150,6 +4402,54 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
         emit_release_owned(c, obj_res);
         return CompileResult(reg=call_res, type=ret_type, origin_type=0, owns_ref=result_owns_value(c, ret_type), is_const_access=obj_res.is_const_access);
     }
+}
+
+func compile_dict_intrinsic(c -> Compiler, info -> FuncInfo, node -> CallNode) -> CompileResult {
+    let args -> Vector(Struct) = node.args;
+    let count -> Int = 0;
+    if (args is !null) { count = args.length(); }
+    let expected -> Int = 1;
+    if (info.compiler_link_name == "dict_keys_equal") { expected = 2; }
+    if (count != expected) {
+        throw_type_error(node.pos, "Argument count mismatch. Expected " + expected + ", got " + count);
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+    if (reject_named_args(args, node.pos, "a compiler intrinsic")) { return CompileResult(reg="poison", type=TYPE_POISON); }
+
+    let variant_info -> StructInfo = c.struct_table.get("$Variant");
+    if (variant_info is null) {
+        throw_internal_compiler_error(node.pos, "Variant is not registered.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let values -> Vector(Struct) = [];
+    let i -> Int = 0;
+    while (i < count) {
+        let arg -> ArgNode = args[i];
+        let old_expected -> Int = c.expected_type;
+        c.expected_type = variant_info.type_id;
+        let value -> CompileResult = compile_node(c, arg.val);
+        c.expected_type = old_expected;
+        if (value is null || value.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        value = emit_implicit_cast(c, value, variant_info.type_id, node.pos);
+        values.append(value);
+        i++;
+    }
+
+    let result -> String = next_reg(c);
+    if (info.compiler_link_name == "dict_key_hash") {
+        let value -> CompileResult = values[0];
+        c.output_file.write(c.indent + result + " = call i32 @__wl_dict_key_hash(%struct.$Variant* " + value.reg + ")\n");
+        emit_release_owned(c, value);
+        return CompileResult(reg=result, type=TYPE_INT);
+    }
+
+    let left -> CompileResult = values[0];
+    let right -> CompileResult = values[1];
+    c.output_file.write(c.indent + result + " = call i1 @__wl_dict_keys_equal(%struct.$Variant* " + left.reg + ", %struct.$Variant* " + right.reg + ")\n");
+    emit_release_owned(c, left);
+    emit_release_owned(c, right);
+    return CompileResult(reg=result, type=TYPE_BOOL);
 }
 
 func compile_local_closure(c -> Compiler, func_def -> FunctionDefNode) -> CompileResult {
@@ -9159,6 +9459,9 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 throw_name_error(n_call.pos, "Function '" + func_name + "' is not defined.");
                 return void_result();
             }
+            if (func_info.compiler_link_name == "dict_key_hash" || func_info.compiler_link_name == "dict_keys_equal") {
+                return compile_dict_intrinsic(c, func_info, n_call);
+            }
             if ((func_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 throw_invalid_syntax(n_call.pos, "Compiler intrinsic '" + func_info.base_name + "' must be called as " + func_info.base_name + "(Type).");
                 return CompileResult(reg="poison", type=TYPE_POISON);
@@ -11283,6 +11586,7 @@ func compile_end(c -> Compiler) -> Void {
         return;
     }
     compile_arc_hooks(c);
+    emit_dict_key_helpers(c);
     emit_windows_abi(c);
     emit_windows_entrypoint(c);
 

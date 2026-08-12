@@ -372,7 +372,10 @@ func erase_alias_prefix(table -> Dict, prefix -> String) -> Void {
     let removed -> Vector(String) = [];
     let i -> Int = 0;
     while (i < table.capacity) {
-        if (table.hashes[i] >= 2 && table.keys[i].starts_with(prefix)) { removed.append(table.keys[i]); }
+        if (table.hashes[i] >= 2) {
+            let key -> String = table.keys[i];
+            if (key.starts_with(prefix)) { removed.append(key); }
+        }
         i += 1;
     }
     i = 0;
