@@ -59,6 +59,7 @@ const NODE_CATCH          -> Int = 55;
 const NODE_THROW          -> Int = 56;
 const NODE_FALLIBLE_TYPE  -> Int = 57;
 const NODE_TYPE_LAYOUT    -> Int = 58;
+const NODE_GENERIC_TYPE   -> Int = 59;
 
 struct BaseNode(type -> Int) // Used to read node type
 
@@ -180,6 +181,7 @@ struct CallNode(
     type   -> Int,    // NODE_CALL
     callee -> Struct,
     args   -> Vector(Struct),
+    type_args -> Vector(Struct),
     pos    -> Position,
     preserve_fallible -> Bool
 )
@@ -201,11 +203,18 @@ struct ParamListNode(
     param -> Struct // ParamNode
 )
 
+struct GenericParamNode(
+    name_tok -> Token,
+    constraints -> Vector(Struct),
+    pos -> Position
+)
+
 
 // func name(params...) -> RetType { body }
 struct FunctionDefNode(
     type     -> Int,    // NODE_FUNC_DEF
     name_tok -> Token,
+    type_params -> Vector(Struct),
     params   -> Vector(Struct), // ParamListNode
     ret_type_tok -> Struct,
     body     -> Struct,
@@ -230,10 +239,18 @@ struct FunctionTypeNode(
 struct StructDefNode(
     type     -> Int,    // NODE_STRUCT_DEF
     name_tok -> Token,
+    type_params -> Vector(Struct),
     fields   -> Vector(Struct),
     body     -> Struct,
     annotations -> Vector(Struct),
     pos      -> Position
+)
+
+struct GenericTypeNode(
+    type -> Int,
+    base_type -> Struct,
+    type_args -> Vector(Struct),
+    pos -> Position
 )
 
 struct FieldAccessNode(
@@ -354,7 +371,8 @@ struct ClassDefNode(
     type -> Int, // NODE_CLASS_DEF
     pos -> Position,
     name_tok -> Token,
-    parent_tok -> Token,
+    type_params -> Vector(Struct),
+    parent_tok -> Struct,
     interfaces -> Vector(Struct),
     fields -> Vector(Struct),
     methods -> Vector(Struct),
@@ -365,6 +383,7 @@ struct MethodDefNode(
     type -> Int, // NODE_METHOD_DEF
     pos -> Position,
     name_tok -> Token,
+    type_params -> Vector(Struct),
     params -> Vector(Struct),
     return_type -> Struct,
     body -> Struct,
@@ -475,6 +494,7 @@ struct TypeLayoutNode(
 struct InterfaceDefNode(
     type     -> Int, // NODE_INTERFACE_DEF
     name_tok -> Token,
+    type_params -> Vector(Struct),
     methods  -> Vector(Struct),
     pos      -> Position
 )

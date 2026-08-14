@@ -169,6 +169,181 @@ func parser_advance(p -> Parser) -> Void {
     p.current_tok = WhitelangLexer.get_next_token(p.lexer);
 }
 
+func is_generic_close(p -> Parser, open_type -> Int) -> Bool {
+    if (open_type == TOK_LT) {
+        return p.current_tok.type == TOK_GT || p.current_tok.type == TOK_RSHIFT;
+    }
+    return p.current_tok.type == TOK_RPAREN;
+}
+
+func consume_generic_close(p -> Parser, open_type -> Int, pos -> Position) -> Void {
+    if (open_type == TOK_LT) {
+        if (p.current_tok.type == TOK_GT) {
+            parser_advance(p);
+            return;
+        }
+        if (p.current_tok.type == TOK_RSHIFT) {
+            p.current_tok = Token(type=TOK_GT, value=">", line=p.current_tok.line, col=p.current_tok.col + 1);
+            return;
+        }
+
+        throw_invalid_syntax(pos, "Expected '>' after type arguments.");
+        return;
+    }
+    let close_type -> Int = TOK_RPAREN;
+    let close_text -> String = ")";
+    if (p.current_tok.type == close_type) {
+        parser_advance(p);
+        return;
+    }
+
+    throw_invalid_syntax(pos, "Expected '" + close_text + "' after type arguments.");
+}
+
+func parse_type_args(p -> Parser) -> Vector(Struct) {
+    let pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+    let open_type -> Int = p.current_tok.type;
+    let args -> Vector(Struct) = [];
+    parser_advance(p);
+
+    if (is_generic_close(p, open_type)) {
+        throw_invalid_syntax(pos, "Generic argument lists cannot be empty.");
+        consume_generic_close(p, open_type, pos);
+        return args;
+    }
+    while true {
+        args.append(parse_return_type(p));
+        if (p.current_tok.type != TOK_COMMA) {
+            break;
+        }
+        parser_advance(p);
+    }
+    consume_generic_close(p, open_type, pos);
+    return args;
+}
+
+func parse_type_params(p -> Parser) -> Vector(Struct) {
+    let pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+    let open_type -> Int = p.current_tok.type;
+    let params -> Vector(Struct) = [];
+    let names -> Dict = Dict(8);
+    parser_advance(p);
+
+    if (is_generic_close(p, open_type)) {
+        throw_invalid_syntax(pos, "Generic parameter lists cannot be empty.");
+        consume_generic_close(p, open_type, pos);
+        return params;
+    }
+
+    while true {
+        if (!is_name_token(p.current_tok.type)) {
+            let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Expected a type parameter name.");
+            break;
+        }
+        let name_tok -> Token = p.current_tok;
+        let param_pos -> Position = Position(idx=0, ln=name_tok.line, col=name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+        if (names.contains_key(name_tok.value)) {
+            let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_name_error(err_pos, "Type parameter '" + p.current_tok.value + "' is already declared.");
+        } else {
+            names.put(name_tok.value, name_tok.value);
+        }
+        parser_advance(p);
+
+        let constraints -> Vector(Struct) = [];
+        if (p.current_tok.type == TOK_COLON) {
+            parser_advance(p);
+            constraints.append(parse_return_type(p));
+            while (p.current_tok.type == TOK_PLUS) {
+                parser_advance(p);
+                constraints.append(parse_return_type(p));
+            }
+        }
+        params.append(GenericParamNode(name_tok=name_tok, constraints=constraints, pos=param_pos));
+        if (p.current_tok.type != TOK_COMMA) {
+            break;
+        }
+        parser_advance(p);
+    }
+
+    consume_generic_close(p, open_type, pos);
+    return params;
+}
+
+func may_generic_call(p -> Parser) -> Bool {
+    if (p.current_tok.type != TOK_LT) { return false; }
+    let lexer -> WhitelangLexer.Lexer = p.lexer;
+    let save_idx -> Int = lexer.pos.idx;
+    let save_ln -> Int = lexer.pos.ln;
+    let save_col -> Int = lexer.pos.col;
+    let save_char -> Char = lexer.current_char;
+    let save_width -> Int = lexer.current_width;
+    let save_valid -> Bool = lexer.current_valid;
+    let save_trivia -> Bool = lexer.collect_trivia;
+    lexer.collect_trivia = false;
+
+    let depth -> Int = 1;
+    let next -> Token = WhitelangLexer.get_next_token(lexer);
+    while (next.type != TOK_EOF && depth > 0) {
+        if (next.type == TOK_LT) { depth++; }
+        else if (next.type == TOK_GT) { depth--; }
+        else if (next.type == TOK_RSHIFT) { depth -= 2; }
+        if (depth > 0) {
+            next = WhitelangLexer.get_next_token(lexer);
+        }
+    }
+
+    let follows_call -> Bool = false;
+    if (depth == 0) { follows_call = WhitelangLexer.get_next_token(lexer).type == TOK_LPAREN; }
+
+    lexer.pos.idx = save_idx;
+    lexer.pos.ln = save_ln;
+    lexer.pos.col = save_col;
+    lexer.current_char = save_char;
+    lexer.current_width = save_width;
+    lexer.current_valid = save_valid;
+    lexer.collect_trivia = save_trivia;
+    return follows_call;
+}
+
+func may_generic_value(p -> Parser) -> Bool {
+    if (p.current_tok.type != TOK_LT) { return false; }
+    let lexer -> WhitelangLexer.Lexer = p.lexer;
+    let save_idx -> Int = lexer.pos.idx;
+    let save_ln -> Int = lexer.pos.ln;
+    let save_col -> Int = lexer.pos.col;
+    let save_char -> Char = lexer.current_char;
+    let save_width -> Int = lexer.current_width;
+    let save_valid -> Bool = lexer.current_valid;
+    let save_trivia -> Bool = lexer.collect_trivia;
+    lexer.collect_trivia = false;
+
+    let depth -> Int = 1;
+    let next -> Token = WhitelangLexer.get_next_token(lexer);
+    while (next.type != TOK_EOF && depth > 0) {
+        if (next.type == TOK_LT) { depth++; }
+        else if (next.type == TOK_GT) { depth--; }
+        else if (next.type == TOK_RSHIFT) { depth -= 2; }
+        if (depth > 0) { next = WhitelangLexer.get_next_token(lexer); }
+    }
+
+    let follows_value -> Bool = false;
+    if (depth == 0) {
+        let after -> Int = WhitelangLexer.get_next_token(lexer).type;
+        follows_value = after == TOK_SEMICOLON || after == TOK_COMMA || after == TOK_RPAREN || after == TOK_RBRACKET;
+    }
+
+    lexer.pos.idx = save_idx;
+    lexer.pos.ln = save_ln;
+    lexer.pos.col = save_col;
+    lexer.current_char = save_char;
+    lexer.current_width = save_width;
+    lexer.current_valid = save_valid;
+    lexer.collect_trivia = save_trivia;
+    return follows_value;
+}
+
 func peek_type(p -> Parser) -> Int {
     let l -> WhitelangLexer.Lexer = p.lexer;
     
@@ -381,6 +556,9 @@ func parse_type_base_inner(p -> Parser) -> Struct {
                 parser_advance(p); // skip type_name
                 type_node = FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos);
             }
+        }
+        if (p.current_tok.type == TOK_LPAREN) {
+            type_node = GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(p), pos=start_pos);
         }
         return type_node;
     }
@@ -693,7 +871,7 @@ func atom(p -> Parser) -> Struct {
     }
 
     let err_pos -> Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    throw_invalid_syntax(err_pos, "Unexpected token: " + WhitelangTokens.get_token_name(tok.type));
+    throw_invalid_syntax(err_pos, "Unexpected token '" + WhitelangTokens.get_token_name(tok.type) + "'");
     if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
     let zero_tok -> Token = Token(type=TOK_INT, value="0", line=tok.line, col=tok.col);
     return IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos);
@@ -725,13 +903,19 @@ func postfix_expr(p -> Parser) -> Struct {
     let node -> Struct = atom(p);
 
     while (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC || p.current_tok.type == TOK_LPAREN ||
-           p.current_tok.type == TOK_DOT || p.current_tok.type == TOK_LBRACKET || p.current_tok.type == TOK_QUESTION) {
+           p.current_tok.type == TOK_DOT || p.current_tok.type == TOK_LBRACKET || p.current_tok.type == TOK_QUESTION ||
+           (p.current_tok.type == TOK_LT && (may_generic_call(p) || may_generic_value(p)))) {
         // ++ / --
         if (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC) {
             let op_tok -> Token = p.current_tok;
             parser_advance(p);
             let pos -> Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             node = PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos);
+        }
+
+        else if (p.current_tok.type == TOK_LT && (may_generic_call(p) || may_generic_value(p))) {
+            let pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            node = GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(p), pos=pos);
         }
 
         else if (p.current_tok.type == TOK_QUESTION) {
@@ -759,7 +943,15 @@ func postfix_expr(p -> Parser) -> Struct {
             parser_advance(p); // skip ')'
 
             let pos -> Position = Position(idx=0, ln=paren_tok.line, col=paren_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = CallNode(type=NODE_CALL, callee=node, args=args, pos=pos, preserve_fallible=false);
+
+            let type_args -> Vector(Struct) = null;
+            let call_base -> BaseNode = node;
+            if (call_base.type == NODE_GENERIC_TYPE) {
+                let generic -> GenericTypeNode = node;
+                type_args = generic.type_args;
+            }
+
+            node = CallNode(type=NODE_CALL, callee=node, args=args, type_args=type_args, pos=pos, preserve_fallible=false);
         }
 
         else if (p.current_tok.type == TOK_DOT) {
@@ -1403,6 +1595,11 @@ func func_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let name_tok -> Token = p.current_tok;
     parser_advance(p);
 
+    let type_params -> Vector(Struct) = null;
+    if (p.current_tok.type == TOK_LT) {
+        type_params = parse_type_params(p);
+    }
+
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after function name.");
@@ -1429,7 +1626,7 @@ func func_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let body -> Struct = parse_block(p);
     
     let pos -> Position = Position(idx=0, ln=func_tok.line, col=func_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
+    return FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, type_params=type_params, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
 }
 
 func return_stmt(p -> Parser) -> Struct {
@@ -1467,6 +1664,11 @@ func parse_struct_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let name_tok -> Token = p.current_tok;
     parser_advance(p);
 
+    let type_params -> Vector(Struct) = null;
+    if (p.current_tok.type == TOK_LT) {
+        type_params = parse_type_params(p);
+    }
+
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after struct name.");
@@ -1485,7 +1687,7 @@ func parse_struct_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     if (p.current_tok.type == TOK_LBRACE) {
         body = parse_block(p); // initialization
     }
-    return StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, fields=fields, body=body, annotations=anns, pos=start_pos);
+    return StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos);
 }
 
 func parse_extern_func(p -> Parser) -> Struct {
@@ -1756,6 +1958,11 @@ func parse_interface_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let name_tok -> Token = p.current_tok;
     parser_advance(p);
 
+    let type_params -> Vector(Struct) = null;
+    if (p.current_tok.type == TOK_LT) {
+        type_params = parse_type_params(p);
+    }
+
     if (p.current_tok.type != TOK_LBRACE) {
         let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '{' before interface body.");
@@ -1775,6 +1982,11 @@ func parse_interface_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             parser_advance(p); // skip 'method'
             let m_name -> Token = p.current_tok;
             parser_advance(p);
+
+            let type_params -> Vector(Struct) = null;
+            if (p.current_tok.type == TOK_LT) {
+                type_params = parse_type_params(p);
+            }
 
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1803,7 +2015,7 @@ func parse_interface_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip ';'
 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, params=params, return_type=ret_type, body=null, is_override=false, annotations=member_anns));
+            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=null, is_override=false, annotations=member_anns));
 
         } else {
             let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1818,7 +2030,7 @@ func parse_interface_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '}'
 
-    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, methods=methods, pos=pos);
+    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, methods=methods, pos=pos);
 }
 
 func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
@@ -1832,15 +2044,15 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let name_tok -> Token = p.current_tok;
     parser_advance(p);
 
-    let parent_tok -> Token = null;
+    let type_params -> Vector(Struct) = null;
+    if (p.current_tok.type == TOK_LT) {
+        type_params = parse_type_params(p);
+    }
+
+    let parent_tok -> Struct = null;
     if (p.current_tok.type == TOK_LPAREN) {
         parser_advance(p); // skip '('
-        if (!is_name_token(p.current_tok.type)) {
-            let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            throw_invalid_syntax(err_pos, "Expected parent class name after '('.");
-        }
-        parent_tok = p.current_tok;
-        parser_advance(p); // skip identifier
+        parent_tok = parse_return_type(p);
         if (p.current_tok.type != TOK_RPAREN) {
             let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ')' after parent class name.");
@@ -1851,21 +2063,11 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
     let interfaces -> Vector(Struct) = [];
     if (p.current_tok.type == TOK_WITH) {
         parser_advance(p); // skip 'with'
-        if (!is_name_token(p.current_tok.type)) {
-            let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            throw_invalid_syntax(err_pos, "Expected interface name after 'with'.");
-        }
-        interfaces.append(p.current_tok);
-        parser_advance(p);
+        interfaces.append(parse_return_type(p));
         
         while (p.current_tok.type == TOK_COMMA) {
             parser_advance(p); // skip ','
-            if (!is_name_token(p.current_tok.type)) {
-                let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                throw_invalid_syntax(err_pos, "Expected interface name after ','.");
-            }
-            interfaces.append(p.current_tok);
-            parser_advance(p);
+            interfaces.append(parse_return_type(p));
         }
     }
 
@@ -1910,6 +2112,11 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             let m_name -> Token = p.current_tok;
             parser_advance(p);
 
+            let type_params -> Vector(Struct) = null;
+            if (p.current_tok.type == TOK_LT) {
+                type_params = parse_type_params(p);
+            }
+
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after method name.");
@@ -1934,7 +2141,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
 
             let body -> Struct = parse_block(p); 
             
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
 
         } else if (p.current_tok.type == TOK_TYPE) {
             let type_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1947,7 +2154,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             let type_name_tok -> Token = Token(type=TOK_IDENTIFIER, value="$type", line=type_pos.ln, col=type_pos.col);
             let body -> Struct = parse_block(p);
 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, params=[], return_type=target_type, body=body, is_override=false, annotations=null));
+            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, type_params=null, params=[], return_type=target_type, body=body, is_override=false, annotations=null));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "init") {
             let init_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1978,7 +2185,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
 
             let body -> Struct = parse_block(p); 
             
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "deinit") {
             let deinit_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2008,7 +2215,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             }
 
             let body -> Struct = parse_block(p); 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
 
         } else {
             let err_pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2071,6 +2278,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
             type=NODE_METHOD_DEF,
             pos=pos,
             name_tok=field_init_tok,
+            type_params=null,
             params=[],
             return_type=return_type,
             body=BlockNode(type=NODE_BLOCK, stmts=field_init_stmts),
@@ -2079,7 +2287,7 @@ func parse_class_def(p -> Parser, anns -> Vector(Struct)) -> Struct {
         ));
     }
 
-    return ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=name_tok, parent_tok=parent_tok, interfaces=interfaces, fields=fields, methods=methods, annotations=anns);
+    return ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=name_tok, type_params=type_params, parent_tok=parent_tok, interfaces=interfaces, fields=fields, methods=methods, annotations=anns);
 }
 
 func parse_enum_def(p -> Parser, anns -> Vector(Struct), is_error -> Bool) -> Struct {

@@ -34,7 +34,7 @@ func is_dict_key_type(c -> Compiler, type_id -> Int) -> Bool {
     let info -> StructInfo = c.struct_id_map.get("" + type_id);
     if (info is !null) {
         if (info.is_enum || info.is_interface) { return true; }
-        if (info.is_class) { return info.name != "dict.Dict" && info.name != "Dict"; }
+        if (info.is_class) { return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$"); }
         return false;
     }
     if (c.func_ret_map.get("" + type_id) is !null || c.method_ret_map.get("" + type_id) is !null) { return true; }
@@ -43,6 +43,23 @@ func is_dict_key_type(c -> Compiler, type_id -> Int) -> Bool {
 
 func is_dynamic_dict(info -> StructInfo) -> Bool {
     return info is !null && (info.name == "dict.Dict" || info.name == "Dict");
+}
+
+func is_typed_dict(c -> Compiler, info -> StructInfo) -> Bool {
+    if (info is null) { return false; }
+
+    let template -> GenericTemplate = c.generic_instance_templates.get("" + info.type_id);
+    return template is !null && (template.name == "Dict" || template.name.ends_with(".Dict"));
+}
+
+func is_generic_class(c -> Compiler, info -> StructInfo) -> Bool {
+    if (info is null) { return false; }
+
+    let template -> GenericTemplate = c.generic_instance_templates.get("" + info.type_id);
+    if (template is null || template.node is null) { return false; }
+
+    let base -> BaseNode = template.node;
+    return base.type == NODE_CLASS_DEF;
 }
 
 func is_dict_key_method(name -> String) -> Bool {
@@ -1048,7 +1065,7 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
             let itable_name -> String = "@itable." + val_info.name + "." + ex_info.name;
             let itable_len -> Int = 0; if (ex_info.vtable is !null) { itable_len = ex_info.vtable.length(); }
             let obj_cast -> String = next_reg(c);
-            c.output_file.write(c.indent + obj_cast + " = bitcast %class." + val_info.name + "* " + val_res.reg + " to i8*\n");
+            c.output_file.write(c.indent + obj_cast + " = bitcast " + val_info.llvm_name + "* " + val_res.reg + " to i8*\n");
             let s1 -> String = next_reg(c);
             let s2 -> String = next_reg(c);
             c.output_file.write(c.indent + s1 + " = insertvalue { i8*, i8* } undef, i8* " + obj_cast + ", 0\n");
@@ -1073,11 +1090,19 @@ func emit_implicit_cast(c -> Compiler, val_res -> CompileResult, expected_type -
     }
     if ((val_res.type == TYPE_GENERIC_STRUCT || val_res.type == TYPE_GENERIC_CLASS) && expected_type >= 100) {
         if (c.struct_id_map.get("" + expected_type) is !null || c.vector_base_map.get("" + expected_type) is !null) {
-            if (val_res.type == TYPE_GENERIC_CLASS && origin != 0 && origin != expected_type) {
-                throw_type_error(pos, "Cannot restore " + get_type_name(c, val_res.type) + " as " + get_type_name(c, expected_type));
-                return CompileResult(reg="poison", type=TYPE_POISON);
+            if (origin >= 100) {
+                let compatible -> Bool = origin == expected_type;
+                if (val_res.type == TYPE_GENERIC_STRUCT) {
+                    compatible = erased_struct_compatible(c, origin, expected_type);
+                }
+                if (val_res.type == TYPE_GENERIC_CLASS) {
+                    compatible = is_subclass(c, origin, expected_type);
+                }
+                if (!compatible) {
+                    throw_type_error(pos, "Cannot restore " + get_type_name(c, val_res.type) + " as " + get_type_name(c, expected_type));
+                    return CompileResult(reg="poison", type=TYPE_POISON);
+                }
             }
-            if (val_res.type == TYPE_GENERIC_CLASS) { emit_erased_type_check(c, val_res.reg, expected_type, pos); }
             let cast_reg -> String = next_reg(c);
             let dest_ty -> String = get_llvm_type_str(c, expected_type);
             c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + val_res.reg + " to " + dest_ty + "\n");
@@ -1310,22 +1335,24 @@ func same_method_signature(parent -> FuncInfo, child -> FuncInfo) -> Bool {
     return true;
 }
 
-func lookup_interface(c -> Compiler, token -> Token) -> StructInfo {
-    if (token is null) { return null; }
-    let info -> StructInfo = c.struct_table.get(token.value);
-    if (info is null && c.current_package_prefix.length() > 0) { info = c.struct_table.get(c.current_package_prefix + token.value); }
-    if (info is null) { let alias -> String = c.current_file_type_aliases.get(token.value); if (alias is !null) { info = c.struct_table.get(alias); } }
-    if (info is !null && info.is_interface) { return info; }
-    return null;
+func add_interface_type(c -> Compiler, list -> Vector(Struct), type_id -> Int, pos -> Position) -> Bool {
+    let info -> StructInfo = c.struct_id_map.get("" + type_id);
+    if (info is null || !info.is_interface) {
+        throw_type_error(pos, "Type " + get_type_name(c, type_id) + " is not an interface.");
+        return false;
+    }
+    let i -> Int = 0;
+    while (i < list.length()) {
+        let item -> TypeListNode = list[i];
+        if (item.type == type_id) { return true; }
+        i++;
+    }
+    list.append(TypeListNode(type=type_id));
+    return true;
 }
 
-func add_interface(c -> Compiler, list -> Vector(Struct), token -> Token, pos -> Position) -> Bool {
-    let info -> StructInfo = lookup_interface(c, token);
-    if (info is null) { throw_name_error(pos, "Interface '" + token.value + "' is not defined"); return false; }
-    let i -> Int = 0;
-    while (i < list.length()) { let item -> Token = list[i]; if (item.value == info.name) { return true; } i += 1; }
-    list.append(Token(type=TOK_IDENTIFIER, value=info.name, line=token.line, col=token.col));
-    return true;
+func add_interface(c -> Compiler, list -> Vector(Struct), node -> Struct, pos -> Position) -> Bool {
+    return add_interface_type(c, list, resolve_type(c, node), pos);
 }
 
 func class_has_interface(c -> Compiler, class_info -> StructInfo, target -> StructInfo) -> Bool {
@@ -1333,9 +1360,8 @@ func class_has_interface(c -> Compiler, class_info -> StructInfo, target -> Stru
     while (current is !null) {
         let i -> Int = 0;
         while (current.interfaces is !null && i < current.interfaces.length()) {
-            let token -> Token = current.interfaces[i];
-            let info -> StructInfo = lookup_interface(c, token);
-            if (info is !null && info.type_id == target.type_id) { return true; }
+            let item -> TypeListNode = current.interfaces[i];
+            if (item.type == target.type_id) { return true; }
             i += 1;
         }
         if (current.parent_id == 0) { break; }
@@ -1500,6 +1526,17 @@ func pre_register_structs(c -> Compiler, node -> Struct) -> Void {
             let raw_name -> String = n.name_tok.value;
             let s_name -> String = c.current_package_prefix + raw_name;
 
+            if (n.type_params is !null && n.type_params.length() > 0) {
+                if (c.generic_structs.get(s_name) is !null || c.struct_table.get(s_name) is !null) {
+                    throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
+                    i += 1;
+                    continue;
+                }
+                c.generic_structs.put(s_name, GenericTemplate(name=s_name, node=n, type_params=n.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                i += 1;
+                continue;
+            }
+
             // for dict.wl
             let sys_anns -> SystemAnnResult = consume_annotations(n.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
@@ -1518,11 +1555,12 @@ func pre_register_structs(c -> Compiler, node -> Struct) -> Void {
                     return;
                 }
             }
-            if (c.struct_table.get(s_name) is !null) { throw_name_error(n.pos, "Type '" + s_name + "' is already defined"); i += 1; continue; }
+            if (c.struct_table.get(s_name) is !null || c.generic_structs.get(s_name) is !null) {
+                throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
+                i += 1;
+                continue;
+            }
 
-            // TODO: Generics monomorphization is blowing up the binary size.
-            // We need to implement a recursion limit for instantiation depth, or 
-            // use pointer-tagging monomorphization to deduplicate underlying types.
             let new_id -> Int = c.type_counter;
             c.type_counter += 1;
             let info -> StructInfo = StructInfo(
@@ -1548,7 +1586,22 @@ func pre_register_structs(c -> Compiler, node -> Struct) -> Void {
             let c_node -> ClassDefNode = stmts[i];
             let raw_name -> String = c_node.name_tok.value;
             let c_name -> String = c.current_package_prefix + raw_name;
-            if (c.struct_table.get(c_name) is !null) { throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined"); i += 1; continue; }
+            if (c_node.type_params is !null && c_node.type_params.length() > 0) {
+                if (c.generic_structs.get(c_name) is !null || (c.struct_table.get(c_name) is !null && c_name != "dict.Dict")) {
+                    throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
+                    i += 1;
+                    continue;
+                }
+
+                c.generic_structs.put(c_name, GenericTemplate(name=c_name, node=c_node, type_params=c_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                i++;
+                continue;
+            }
+            if (c.struct_table.get(c_name) is !null || (c.generic_structs.get(c_name) is !null && c_name != "dict.Dict")) {
+                throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
+                i += 1;
+                continue;
+            }
             let sys_anns -> SystemAnnResult = consume_annotations(c_node.annotations, raw_name);
             let new_id -> Int = c.type_counter;
             c.type_counter += 1;
@@ -1575,12 +1628,25 @@ func pre_register_structs(c -> Compiler, node -> Struct) -> Void {
             let i_node -> InterfaceDefNode = stmts[i];
             let raw_name -> String = i_node.name_tok.value;
             let i_name -> String = c.current_package_prefix + raw_name;
-            if (c.struct_table.get(i_name) is !null) { throw_name_error(i_node.pos, "Type '" + i_name + "' is already defined"); i += 1; continue; }
+            if (c.struct_table.get(i_name) is !null || c.generic_structs.get(i_name) is !null) {
+                throw_name_error(i_node.pos, "Type '" + i_name + "' is already defined");
+                i += 1;
+                continue;
+            }
+            if (i_node.type_params is !null && i_node.type_params.length() > 0) {
+                c.generic_structs.put(i_name, GenericTemplate(name=i_name, node=i_node, type_params=i_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                i++;
+                continue;
+            }
             let method_names -> Dict = Dict(8);
             let method_index -> Int = 0;
             while (i_node.methods is !null && method_index < i_node.methods.length()) {
                 let iface_method -> MethodDefNode = i_node.methods[method_index];
                 let method_name -> String = iface_method.name_tok.value;
+                if (iface_method.type_params is !null && iface_method.type_params.length() > 0) {
+                    throw_type_error(iface_method.pos, "Interface methods cannot declare type parameters.");
+                    break;
+                }
                 if (method_names.contains_key(method_name)) { throw_name_error(iface_method.pos, "method '" + method_name + "' is already declared in interface '" + i_name + "'"); break; }
                 method_names.put(method_name, StringConstant(id=0, value=method_name));
                 check_duplicate_params(iface_method.params, "interface method '" + method_name + "'", iface_method.pos);
@@ -1683,6 +1749,17 @@ func pre_register_funcs(c -> Compiler, node -> Struct) -> Void {
         if (base.type == NODE_FUNC_DEF) {
             let f_node -> FunctionDefNode = stmts[i];
             let raw_name -> String = f_node.name_tok.value;
+
+            if (f_node.type_params is !null && f_node.type_params.length() > 0) {
+                let template_name -> String = c.current_package_prefix + raw_name;
+                if (c.generic_funcs.get(template_name) is !null || c.func_table.get(template_name) is !null) {
+                    throw_name_error(f_node.pos, "Function '" + template_name + "' is already defined.");
+                    return;
+                }
+                c.generic_funcs.put(template_name, GenericTemplate(name=template_name, node=f_node, type_params=f_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                i += 1;
+                continue;
+            }
             
             let ret_type_id -> Int = resolve_type(c, f_node.ret_type_tok);
             if (ret_type_id == TYPE_AUTO) {
@@ -1743,7 +1820,7 @@ func pre_register_funcs(c -> Compiler, node -> Struct) -> Void {
                 llvm_func_name = mangle_wl_name(c, c.current_package_prefix, raw_name, arg_types);
             }
 
-            if (c.func_table.get(func_key) is !null) {
+            if (c.func_table.get(func_key) is !null || c.generic_funcs.get(func_key) is !null) {
                 throw_name_error(f_node.pos, "Function '" + func_key + "' is already defined.");
                 return;
             }
@@ -1757,6 +1834,11 @@ func pre_register_funcs(c -> Compiler, node -> Struct) -> Void {
 
         } else if (base.type == NODE_CLASS_DEF) {
             let c_node -> ClassDefNode = stmts[i];
+            if (c_node.type_params is !null && c_node.type_params.length() > 0) {
+                i += 1;
+                continue;
+            }
+
             let raw_name -> String = c_node.name_tok.value;
             let c_name -> String = c.current_package_prefix + raw_name;
             let m_vec -> Vector(Struct) = c_node.methods;
@@ -1769,6 +1851,17 @@ func pre_register_funcs(c -> Compiler, node -> Struct) -> Void {
             while (m_idx < m_len) {
                 let m_node -> MethodDefNode = m_vec[m_idx];
                 let m_raw_name -> String = method_base_name(c, m_node);
+
+                if (m_node.type_params is !null && m_node.type_params.length() > 0) {
+                    let method_key -> String = c_name + "_" + m_raw_name;
+                    if (c.generic_methods.get(method_key) is !null || c.func_table.get(method_key) is !null) {
+                        throw_name_error(m_node.pos, "Method '" + method_key + "' is already defined.");
+                        return;
+                    }
+                    c.generic_methods.put(method_key, GenericTemplate(name=method_key, node=m_node, type_params=m_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                    m_idx++;
+                    continue;
+                }
 
                 let ret_id -> Int = resolve_type(c, m_node.return_type);
                 if (ret_id == TYPE_AUTO) { 
@@ -1808,7 +1901,7 @@ func pre_register_funcs(c -> Compiler, node -> Struct) -> Void {
                 let m_key -> String = c_name + "_" + m_raw_name;
                 let m_llvm_name -> String = mangle_wl_name(c, c_name + ".", m_raw_name, arg_types);
                 
-                if (c.func_table.get(m_key) is !null) {
+                if (c.func_table.get(m_key) is !null || c.generic_methods.get(m_key) is !null) {
                     if (m_node.name_tok.value == "$type") {
                         let target_id -> Int = ret_id;
                         if (is_fallible_type(c, target_id)) {
@@ -2044,6 +2137,40 @@ func emit_alloc_closure(c -> Compiler, type_id -> Int) -> String {
     return closure;
 }
 
+func erased_struct_compatible(c -> Compiler, actual -> Int, expected -> Int) -> Bool {
+    if (actual == expected) { return true; }
+
+    let actual_info -> StructInfo = c.struct_id_map.get("" + actual);
+    let expected_info -> StructInfo = c.struct_id_map.get("" + expected);
+    if (actual_info is null || expected_info is null || 
+        actual_info.is_class || expected_info.is_class || 
+        actual_info.is_enum || expected_info.is_enum || 
+        actual_info.is_interface || expected_info.is_interface) {
+        return false;
+    }
+
+    let actual_count -> Int = 0;
+    let expected_count -> Int = 0;
+    if (actual_info.fields is !null) {
+        actual_count = actual_info.fields.length();
+    }
+
+    if (expected_info.fields is !null) {
+        expected_count = expected_info.fields.length();
+    }
+
+    if (expected_count != 1 || expected_count > actual_count) { return false; }
+
+    let index -> Int = 0;
+    while (index < expected_count) {
+        let actual_field -> FieldInfo = actual_info.fields[index];
+        let expected_field -> FieldInfo = expected_info.fields[index];
+        if (actual_field.type != expected_field.type) { return false; }
+        index += 1;
+    }
+    return true;
+}
+
 func emit_erased_type_check(c -> Compiler, value -> String, expected -> Int, pos -> Position) -> Void {
     let tag_bytes -> String = next_reg(c);
     let tag_slot -> String = next_reg(c);
@@ -2054,23 +2181,10 @@ func emit_erased_type_check(c -> Compiler, value -> String, expected -> Int, pos
     c.output_file.write(c.indent + tag_bytes + " = getelementptr inbounds i8, i8* " + value + ", i32 -4\n");
     c.output_file.write(c.indent + tag_slot + " = bitcast i8* " + tag_bytes + " to i32*\n");
     c.output_file.write(c.indent + tag + " = load i32, i32* " + tag_slot + "\n");
-    c.output_file.write(c.indent + matches + " = icmp eq i32 " + tag + ", " + expected + "\n");
-    let accepted -> String = matches;
-    let expected_info -> StructInfo = c.struct_id_map.get("" + expected);
-    if (expected_info is !null && expected_info.is_class) {
-        let candidate -> Int = 100;
-        while (candidate < c.type_counter) {
-            if (candidate != expected && is_subclass(c, candidate, expected)) {
-                let candidate_match -> String = next_reg(c);
-                let combined -> String = next_reg(c);
-                c.output_file.write(c.indent + candidate_match + " = icmp eq i32 " + tag + ", " + candidate + "\n");
-                c.output_file.write(c.indent + combined + " = or i1 " + accepted + ", " + candidate_match + "\n");
-                accepted = combined;
-            }
-            candidate += 1;
-        }
-    }
-    c.output_file.write(c.indent + "br i1 " + accepted + ", label %" + success + ", label %" + failure + "\n");
+    let helper -> String = "@__wl_erased_accept_" + expected;
+    c.erased_checks.put("" + expected, StringConstant(id=expected, value=helper));
+    c.output_file.write(c.indent + matches + " = call i1 " + helper + "(i32 " + tag + ")\n");
+    c.output_file.write(c.indent + "br i1 " + matches + ", label %" + success + ", label %" + failure + "\n");
     c.output_file.write("\n" + failure + ":\n");
     emit_runtime_error(c, pos, "Erased value has the wrong concrete type");
     c.output_file.write("\n" + success + ":\n");
@@ -2122,6 +2236,7 @@ func hoist_allocas(c -> Compiler, node -> Struct) -> Void {
 
             if (target_type_id == TYPE_AUTO) {
                 target_type_id = get_expr_type(c, v_node.value);
+                if (target_type_id == TYPE_POISON) { return; }
                 if (target_type_id == 0 || target_type_id == TYPE_AUTO) {
                     throw_type_error(v_node.pos, "Failed to statically infer type for 'Auto'. Please specify type explicitly.");
                     return;
@@ -2726,9 +2841,15 @@ func emit_dict_key_helpers(c -> Compiler) -> Void {
     c.output_file.write("entry:\n");
     c.output_file.write("  %mixed.0 = xor i64 %tag, %low\n");
     c.output_file.write("  %mixed.1 = xor i64 %mixed.0, %high\n");
-    c.output_file.write("  %shifted = lshr i64 %mixed.1, 32\n");
-    c.output_file.write("  %mixed.2 = xor i64 %mixed.1, %shifted\n");
-    c.output_file.write("  %raw = trunc i64 %mixed.2 to i32\n");
+    c.output_file.write("  %shifted.0 = lshr i64 %mixed.1, 30\n");
+    c.output_file.write("  %mixed.2 = xor i64 %mixed.1, %shifted.0\n");
+    c.output_file.write("  %mixed.3 = mul i64 %mixed.2, -4658895280553007687\n");
+    c.output_file.write("  %shifted.1 = lshr i64 %mixed.3, 27\n");
+    c.output_file.write("  %mixed.4 = xor i64 %mixed.3, %shifted.1\n");
+    c.output_file.write("  %mixed.5 = mul i64 %mixed.4, -7723592293110705685\n");
+    c.output_file.write("  %shifted.2 = lshr i64 %mixed.5, 31\n");
+    c.output_file.write("  %mixed.6 = xor i64 %mixed.5, %shifted.2\n");
+    c.output_file.write("  %raw = trunc i64 %mixed.6 to i32\n");
     c.output_file.write("  %positive = and i32 %raw, 2147483647\n");
     c.output_file.write("  %small = icmp ult i32 %positive, 2\n");
     c.output_file.write("  %adjusted = add i32 %positive, 2\n");
@@ -3413,6 +3534,11 @@ func compile_var_decl(c -> Compiler, node -> VarDeclareNode) -> CompileResult {
 
     if (target_type_id == TYPE_AUTO) {
         target_type_id = get_expr_type(c, node.value);
+        if (target_type_id == TYPE_POISON) {
+            let curr_scope -> Scope = c.symbol_table;
+            curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            return void_result();
+        }
         if (target_type_id == 0 || target_type_id == TYPE_AUTO) {
             throw_type_error(node.pos, "Failed to statically infer type for 'Auto'.");
             let curr_scope -> Scope = c.symbol_table;
@@ -3642,7 +3768,7 @@ func compile_var_decl(c -> Compiler, node -> VarDeclareNode) -> CompileResult {
 
         if is_valid_struct {
             let fake_args -> Vector(Struct) = [];
-            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, pos=node.pos, preserve_fallible=false);
+            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
             let val_res -> CompileResult = null;
             
             if (s_info.is_class) {
@@ -3984,10 +4110,16 @@ func has_loop_break(node -> Struct) -> Bool {
 }
 
 func compile_func_def(c -> Compiler, node -> FunctionDefNode) -> CompileResult {
+    if (node.type_params is !null && node.type_params.length() > 0 && 
+        c.generic_func_key.length() == 0) {
+        return void_result();
+    }
     let raw_name -> String = node.name_tok.value;
 
     let func_name -> String = raw_name;
-    if (raw_name != "main") {
+    if (c.generic_func_key.length() > 0) {
+        func_name = c.generic_func_key;
+    } else if (raw_name != "main") {
         func_name = c.current_package_prefix + raw_name;
     }
 
@@ -4100,9 +4232,17 @@ func compile_func_def(c -> Compiler, node -> FunctionDefNode) -> CompileResult {
 func compile_method_def(c -> Compiler, class_name -> String, node -> MethodDefNode) -> CompileResult {
     let raw_name -> String = method_base_name(c, node);
     let m_name -> String = class_name + "_" + raw_name;
+    if (c.generic_method_key.length() > 0) {
+        m_name = c.generic_method_key;
+    }
     
     let f_info -> FuncInfo = c.func_table.get(m_name);
     if (f_info is null) {
+        return void_result();
+    }
+    f_info.mutates_self = method_mutates_self(node.body);
+    if (f_info.compiler_link_name == "typed_dict_hash" || f_info.compiler_link_name == "typed_dict_equal" || 
+        f_info.compiler_link_name == "typed_dict_zero") {
         return void_result();
     }
     let ret_type_id -> Int = f_info.ret_type;
@@ -4230,8 +4370,23 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
     let found -> Bool = false;
     let f_info -> FuncInfo = null;
     let m_node -> MethodDefNode = null;
+    let generic_method -> Bool = false;
+    let method_template -> GenericTemplate = c.generic_methods.get(s_info.name + "_" + method_name);
+
+    if (method_template is !null) {
+        if (s_info.is_interface) {
+            throw_type_error(n_call.pos, "Generic methods cannot be called through an interface value.");
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+        let types -> Vector(Struct) = resolve_generic_method_args(c, method_template, n_call.type_args, n_call.args, n_call.pos);
+        if (types is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        f_info = register_generic_method(c, method_template, s_info, types, n_call.pos);
+        if (f_info is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        found = true;
+        generic_method = true;
+    }
     
-    while (m_idx < v_len) {
+    while (!found && m_idx < v_len) {
         if (s_info.is_interface) {
             let m -> MethodDefNode = vtable_vec[m_idx];
             if (m.name_tok.value == method_name) {
@@ -4249,10 +4404,69 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
         }
         m_idx += 1;
     }
+
+    if (!found && !s_info.is_interface) {
+        let direct -> FuncInfo = c.func_table.get(s_info.name + "_" + method_name);
+        if (direct is !null && direct.compiler_link_name is !null && 
+            direct.compiler_link_name.length() > 0) {
+            f_info = direct; found = true;
+        }
+    }
     
     if (!found) { 
         throw_name_error(n_call.pos, "Method '" + method_name + "' not found in '" + s_info.name + "'.");
         return void_result();
+    }
+    if (!generic_method && n_call.type_args is !null) {
+        throw_type_error(n_call.pos, "Method '" + method_name + "' is not generic.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+    if (f_info is !null && (f_info.compiler_link_name == "typed_dict_hash" || f_info.compiler_link_name == "typed_dict_equal")) {
+        let args -> Vector(Struct) = n_call.args;
+        let expected_count -> Int = 1;
+        if (f_info.compiler_link_name == "typed_dict_equal") {
+            expected_count = 2;
+        }
+
+        let actual_count -> Int = 0;
+        if (args is !null) {
+            actual_count = args.length();
+        }
+        if (actual_count != expected_count) { throw_type_error(n_call.pos, "Argument count mismatch. Expected " + expected_count + ", got " + actual_count); return CompileResult(reg="poison", type=TYPE_POISON); }
+
+        let key_type_node -> TypeListNode = f_info.arg_types[1];
+        let key_type -> Int = key_type_node.type;
+        let llvm_type -> String = get_llvm_type_str(c, key_type);
+        let values -> Vector(Struct) = [];
+
+        let index -> Int = 0;
+        while (index < actual_count) {
+            let arg -> ArgNode = args[index];
+            let value -> CompileResult = emit_implicit_cast(c, compile_node(c, arg.val), key_type, n_call.pos);
+            values.append(value);
+            index++;
+        }
+
+        let result -> String = next_reg(c);
+        if (f_info.compiler_link_name == "typed_dict_hash") {
+            let value -> CompileResult = values[0];
+            c.output_file.write(c.indent + result + " = call i32 @__wl_typed_dict_hash_" + key_type + "(" + llvm_type + " " + value.reg + ")\n");
+            emit_release_owned(c, value);
+        } else {
+            let left -> CompileResult = values[0];
+            let right -> CompileResult = values[1];
+            c.output_file.write(c.indent + result + " = call i1 @__wl_typed_dict_equal_" + key_type + "(" + llvm_type + " " + left.reg + ", " + llvm_type + " " + right.reg + ")\n");
+            emit_release_owned(c, left); emit_release_owned(c, right);
+        }
+
+        emit_release_owned(c, obj_res);
+        return CompileResult(reg=result, type=f_info.ret_type);
+    }
+
+    if (f_info is !null && f_info.compiler_link_name == "typed_dict_zero") {
+        let result -> CompileResult = typed_dict_zero(c, f_info, n_call);
+        emit_release_owned(c, obj_res);
+        return result;
     }
     if (obj_res.is_const_access && (s_info.is_interface || (f_info is !null && f_info.mutates_self))) {
         throw_type_error(n_call.pos, "Cannot call mutating method '" + method_name + "' through const value");
@@ -4266,8 +4480,8 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
     let ret_type -> Int = 0;
     
     if (s_info.is_interface) {
-        sig = get_method_def_sig_str(c, m_node);
-        ret_type = resolve_type(c, m_node.return_type);
+        sig = interface_method_sig(c, s_info, m_node);
+        ret_type = interface_method_type(c, s_info, m_node.return_type);
         expected_types = m_node.params;
         
         let obj_box -> String = obj_res.reg;
@@ -4301,24 +4515,27 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
         let obj_ptr -> String = obj_res.reg;
         
         emit_method_nullcheck(c, obj_ptr, class_llvm_ty, method_name, n_call.pos);
+        if (is_generic_class(c, s_info) || generic_method) {
+            func_ptr = "@" + f_info.name;
+        } else {
+            let vptr_addr -> String = next_reg(c);
+            c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_ptr + ", i32 0, i32 0\n");
         
-        let vptr_addr -> String = next_reg(c);
-        c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_ptr + ", i32 0, i32 0\n");
-        
-        let vtable_i8ptr -> String = next_reg(c);
-        c.output_file.write(c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
-        
-        let vtable_ptr -> String = next_reg(c);
-        c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to %vtable_type." + s_info.name + "*\n");
-        
-        let method_i8ptr_addr -> String = next_reg(c);
-        c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds %vtable_type." + s_info.name + ", %vtable_type." + s_info.name + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
-        
-        let method_i8ptr -> String = next_reg(c);
-        c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
-        
-        func_ptr = next_reg(c);
-        c.output_file.write(c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
+            let vtable_i8ptr -> String = next_reg(c);
+            c.output_file.write(c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
+
+            let vtable_ptr -> String = next_reg(c);
+            c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(c, s_info) + "*\n");
+
+            let method_i8ptr_addr -> String = next_reg(c);
+            c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(c, s_info) + ", " + class_vtable_type(c, s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+
+            let method_i8ptr -> String = next_reg(c);
+            c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
+
+            func_ptr = next_reg(c);
+            c.output_file.write(c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
+        }
         
         let self_type_node -> TypeListNode = expected_types[0];
         let self_expected_type -> Int = self_type_node.type;
@@ -4364,7 +4581,7 @@ func compile_class_method_call(c -> Compiler, s_info -> StructInfo, obj_res -> C
         
         if (s_info.is_interface) {
             let p_node -> ParamNode = expected_types[arg_idx];
-            expected_type = resolve_type(c, p_node.type_tok);
+            expected_type = interface_method_type(c, s_info, p_node.type_tok);
         } else {
             let expected_type_node -> TypeListNode = expected_types[arg_idx + 1];
             expected_type = expected_type_node.type;
@@ -4817,6 +5034,8 @@ func compile_return(c -> Compiler, node -> ReturnNode) -> CompileResult {
 }
 
 func compile_struct_def(c -> Compiler, node -> StructDefNode) -> CompileResult {
+    if (node.type_params is !null && node.type_params.length() > 0) { return void_result(); }
+
     let raw_name -> String = node.name_tok.value;
     let struct_name -> String = c.current_package_prefix + raw_name;
 
@@ -4909,6 +5128,13 @@ func compile_struct_init(c -> Compiler, s_info -> StructInfo, n_call -> CallNode
     }
 
     if (s_info.init_body is !null) {
+        let template -> GenericTemplate = c.generic_instance_templates.get("" + s_info.type_id);
+        let previous_bindings -> Dict = c.generic_bindings;
+        let previous -> GenericTemplate = null;
+        if (template is !null) {
+            let bindings -> Dict = c.generic_instance_bindings.get("" + s_info.type_id);
+            previous = use_generic_context(c, template, bindings);
+        }
         enter_scope(c);
         let this_ptr_addr -> String = next_reg(c);
         let struct_ptr_ty -> String = s_info.llvm_name + "*";
@@ -4918,6 +5144,9 @@ func compile_struct_init(c -> Compiler, s_info -> StructInfo, n_call -> CallNode
         c.symbol_table.table.put("this", SymbolInfo(reg=this_ptr_addr, type=s_info.type_id, origin_type=s_info.type_id));
         compile_node(c, s_info.init_body);
         exit_scope(c);
+        if (template is !null) {
+            restore_generic_context(c, previous, previous_bindings);
+        }
     }
 
     let args -> Vector(Struct) = n_call.args;
@@ -5890,6 +6119,166 @@ func emit_class_field_initializers(c -> Compiler, class_info -> StructInfo, obje
     );
 }
 
+func typed_dict_zero(c -> Compiler, info -> FuncInfo, node -> CallNode) -> CompileResult {
+    if (node.args is !null && node.args.length() != 0) { throw_type_error(node.pos, "Argument count mismatch. Expected 0, got " + node.args.length()); return CompileResult(reg="poison", type=TYPE_POISON); }
+
+    let type_id -> Int = info.ret_type;
+    let value -> String = "0";
+    if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
+        value = "0.0";
+    } else if (is_nullable_reference_type(c, type_id) || is_pointer_type(c, type_id)) {
+        value = "null";
+    } else {
+        let type_info -> StructInfo = c.struct_id_map.get("" + type_id);
+        let array_info -> ArrayInfo = c.array_info_map.get("" + type_id);
+        if ((type_info is !null && type_info.is_interface) || 
+            (array_info is !null && array_info.size >= 0) || 
+            is_fallible_type(c, type_id)) {
+            value = "zeroinitializer";
+        }
+    }
+    return CompileResult(reg=value, type=type_id);
+}
+
+func emit_typed_dict_helpers(c -> Compiler) -> Void {
+    let slot -> Int = 0;
+    while (slot < c.typed_dict_keys.capacity) {
+        if (c.typed_dict_keys.hashes[slot] >= 2) {
+            let entry -> StringConstant = c.typed_dict_keys.values[slot];
+            let type_id -> Int = entry.id;
+            let llvm_type -> String = get_llvm_type_str(c, type_id);
+            let hash_name -> String = "@__wl_typed_dict_hash_" + type_id;
+            let equal_name -> String = "@__wl_typed_dict_equal_" + type_id;
+            if (type_id == TYPE_STRING) {
+                c.output_file.write("define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
+                c.output_file.write("entry:\n");
+                c.output_file.write("  %is.null = icmp eq %struct.$String* %key, null\n");
+                c.output_file.write("  br i1 %is.null, label %invalid, label %read\n");
+                c.output_file.write("read:\n");
+                c.output_file.write("  %buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 0\n");
+                c.output_file.write("  %len.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 1\n");
+                c.output_file.write("  %buf = load i8*, i8** %buf.addr\n");
+                c.output_file.write("  %len = load i32, i32* %len.addr\n");
+                c.output_file.write("  br label %loop\n");
+                c.output_file.write("loop:\n");
+                c.output_file.write("  %index = phi i32 [ 0, %read ], [ %next, %body ]\n");
+                c.output_file.write("  %state = phi i64 [ 14695981039346656037, %read ], [ %next.state, %body ]\n");
+                c.output_file.write("  %done = icmp uge i32 %index, %len\n");
+                c.output_file.write("  br i1 %done, label %finish, label %body\n");
+                c.output_file.write("body:\n");
+                c.output_file.write("  %byte.addr = getelementptr inbounds i8, i8* %buf, i32 %index\n");
+                c.output_file.write("  %byte = load i8, i8* %byte.addr\n");
+                c.output_file.write("  %wide = zext i8 %byte to i64\n");
+                c.output_file.write("  %mixed = xor i64 %state, %wide\n");
+                c.output_file.write("  %next.state = mul i64 %mixed, 1099511628211\n");
+                c.output_file.write("  %next = add i32 %index, 1\n");
+                c.output_file.write("  br label %loop\n");
+                c.output_file.write("finish:\n");
+                c.output_file.write("  %len.wide = zext i32 %len to i64\n");
+                c.output_file.write("  %hash = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %state, i64 %len.wide)\n");
+                c.output_file.write("  ret i32 %hash\n");
+                c.output_file.write("invalid:\n");
+                c.output_file.write("  ret i32 0\n");
+                c.output_file.write("}\n\n");
+                c.output_file.write("define internal i1 " + equal_name + "(%struct.$String* %left, %struct.$String* %right) {\nentry:\n  %result = call i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right)\n  ret i1 %result\n}\n\n");
+            } else {
+                c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
+                let bits -> String = "%bits";
+                let key_info -> StructInfo = c.struct_id_map.get("" + type_id);
+                if (is_pointer_type(c, type_id) || type_id == TYPE_ANYPTR || 
+                    c.func_ret_map.get("" + type_id) is !null || 
+                    c.method_ret_map.get("" + type_id) is !null || 
+                    (key_info is !null && key_info.is_class)) {
+
+                    c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
+                }
+                else if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) {
+                    c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
+                    bits = "";
+                }
+                else if (type_id == TYPE_FLOAT) {
+                    c.output_file.write("  %is.nan = fcmp uno double %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq double %key, 0.0\n  %raw = bitcast double %key to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %raw\n");
+                }
+                else if (type_id == TYPE_FLOAT32) {
+                    c.output_file.write("  %is.nan = fcmp uno float %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq float %key, 0.0\n  %raw = bitcast float %key to i32\n  %wide = zext i32 %raw to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %wide\n");
+                }
+                else if (key_info is !null && key_info.is_enum) {
+                    c.output_file.write("  " + bits + " = zext i32 %key to i64\n");
+                }
+                else {
+                    let width -> Int = get_type_bitwidth(type_id);
+                    if (width < 64) {
+                        c.output_file.write("  " + bits + " = zext " + llvm_type + " %key to i64\n");
+                    } else {
+                        c.output_file.write("  " + bits + " = add i64 %key, 0\n");
+                    }
+                }
+
+                if (bits.length() > 0) {
+                    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
+                }
+                if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
+                    c.output_file.write("invalid:\n  ret i32 0\n");
+                }
+                if (bits.length() > 0) {
+                    c.output_file.write("}\n\n");
+                }
+                c.output_file.write("define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\nentry:\n");
+                if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
+                    c.output_file.write("  %result = fcmp oeq " + llvm_type + " %left, %right\n");
+                } else {
+                    c.output_file.write("  %result = icmp eq " + llvm_type + " %left, %right\n");
+                }
+                c.output_file.write("  ret i1 %result\n}\n\n");
+            }
+        }
+        slot += 1;
+    }
+}
+
+func emit_erased_check_helpers(c -> Compiler) -> Void {
+    let slot -> Int = 0;
+    while (slot < c.erased_checks.capacity) {
+        if (c.erased_checks.hashes[slot] >= 2) {
+            let entry -> StringConstant = c.erased_checks.values[slot];
+            let expected -> Int = entry.id;
+            c.output_file.write("define internal i1 " + entry.value + "(i32 %tag) {\n");
+            c.output_file.write("entry:\n");
+            c.output_file.write("  switch i32 %tag, label %reject [\n");
+
+            let candidate -> Int = 100;
+            while (candidate < c.type_counter) {
+                let accepted -> Bool = candidate == expected;
+                let expected_info -> StructInfo = c.struct_id_map.get("" + expected);
+                if (!accepted && expected_info is !null && expected_info.is_class) {
+                    accepted = is_subclass(c, candidate, expected);
+                }
+                if (!accepted && expected_info is !null && !expected_info.is_class) {
+                    accepted = erased_struct_compatible(c, candidate, expected);
+                }
+                if accepted {
+                    c.output_file.write("    i32 " + candidate + ", label %accept\n");
+                }
+                candidate += 1;
+            }
+            c.output_file.write("  ]\n");
+            c.output_file.write("accept:\n");
+            c.output_file.write("  ret i1 true\n");
+            c.output_file.write("reject:\n");
+            c.output_file.write("  ret i1 false\n");
+            c.output_file.write("}\n\n");
+        }
+        slot += 1;
+    }
+}
+
+func class_vtable_type(c -> Compiler, info -> StructInfo) -> String {
+    if (c.generic_instance_templates.get("" + info.type_id) is !null) {
+        return generic_llvm_name("%vtable_type.__generic.", info.type_id);
+    }
+    return "%vtable_type." + info.name;
+}
+
 func compile_class_init(c -> Compiler, s_info -> StructInfo, n_call -> CallNode) -> CompileResult {
     let size_ty -> String = get_size_llvm_type();
     let size_ptr -> String = next_reg(c);
@@ -5910,7 +6299,7 @@ func compile_class_init(c -> Compiler, s_info -> StructInfo, n_call -> CallNode)
         
         if (f_curr.name == "_vptr") {
             let vtable_cast -> String = next_reg(c);
-            c.output_file.write(c.indent + vtable_cast + " = bitcast %vtable_type." + s_info.name + "* " + s_info.vtable_name + " to i8*\n");
+            c.output_file.write(c.indent + vtable_cast + " = bitcast " + class_vtable_type(c, s_info) + "* " + s_info.vtable_name + " to i8*\n");
             c.output_file.write(c.indent + "store i8* " + vtable_cast + ", i8** " + f_ptr + "\n");
         } else {
             let zero_val -> String = "0";
@@ -5995,29 +6384,84 @@ func compile_class_init(c -> Compiler, s_info -> StructInfo, n_call -> CallNode)
     return CompileResult(reg=obj_ptr, type=s_info.type_id);
 }
 
+func register_class_methods(c -> Compiler, class_name -> String, class_type_id -> Int, methods -> Vector(Struct)) -> Bool {
+    let index -> Int = 0;
+    while (methods is !null && index < methods.length()) {
+        let method_node -> MethodDefNode = methods[index];
+        let method_name -> String = method_base_name(c, method_node);
+
+        let ret_type -> Int = resolve_type(c, method_node.return_type);
+        if (ret_type == TYPE_AUTO) {
+            throw_type_error(method_node.pos, "Auto return type deduction is not supported in methods.");
+            return false;
+        }
+        if (method_node.name_tok.value == "$type") {
+            let target -> Int = ret_type;
+            if (is_fallible_type(c, target)) {
+                target = get_inner_fallible_type(c, target);
+            }
+            if (!is_conversion_target(target)) {
+                throw_type_error(method_node.pos, "Conversion target " + get_type_name(c, target) + " is not a built-in value type");
+                return false;
+            }
+        }
+
+        let arg_types -> Vector(Struct) = [TypeListNode(type=class_type_id)];
+        let arg_names -> Vector(String) = ["self"];
+        if (!check_duplicate_params(method_node.params, "method '" + method_name + "'", method_node.pos)) {
+            return false;
+        }
+
+        let param_index -> Int = 0;
+        while (method_node.params is !null && param_index < method_node.params.length()) {
+            let param -> ParamNode = method_node.params[param_index];
+            let param_type -> Int = resolve_type(c, param.type_tok);
+            if (param_type == TYPE_AUTO) {
+                throw_type_error(param.pos, "Auto cannot be used in method parameters.");
+                return false;
+            }
+
+            arg_types.append(TypeListNode(type=param_type));
+            arg_names.append(param.name_tok.value);
+            param_index += 1;
+        }
+
+        let key -> String = class_name + "_" + method_name;
+        if (c.func_table.get(key) is !null) { throw_name_error(method_node.pos, "Method '" + key + "' is already defined."); return false; }
+        let symbol -> String = mangle_wl_name(c, class_name + ".", method_name, arg_types);
+        c.func_table.put(key, FuncInfo(name=symbol, base_name=method_name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(method_node.body)));
+        index += 1;
+    }
+    return true;
+}
+
 func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
+    if (node.type_params is !null && 
+        node.type_params.length() > 0 && 
+        c.generic_class_type == 0) {
+        return void_result();
+    }
+
     let raw_name -> String = node.name_tok.value;
     let class_name -> String = c.current_package_prefix + raw_name;
-    let full_name -> String = "class." + class_name;
+    if (c.generic_class_type != 0) {
+        let generic_info -> StructInfo = c.struct_id_map.get("" + c.generic_class_type);
+        class_name = generic_info.name;
+    }
 
+    let full_name -> String = "class." + class_name;
     if (c.struct_table.get(full_name) is !null) {
         throw_import_error(node.pos, "Class '" + class_name + "' is already defined.");
         return void_result();
     }
 
     let info -> StructInfo = c.struct_table.get(class_name);
-
     let parent_info -> StructInfo = null;
     if (node.parent_tok is !null) {
-        let p_name -> String = node.parent_tok.value;
-        parent_info = c.struct_table.get(p_name);
-
-        if (parent_info is null && c.current_package_prefix != "") {
-            parent_info = c.struct_table.get(c.current_package_prefix + p_name);
-        }
-
+        let parent_type -> Int = resolve_type(c, node.parent_tok);
+        parent_info = c.struct_id_map.get("" + parent_type);
         if (parent_info is null || !parent_info.is_class) {
-            throw_name_error(node.pos, "Parent class '" + p_name + "' is not defined or is not a class.");
+            throw_type_error(node.pos, "Type " + get_type_name(c, parent_type) + " is not a class.");
             return void_result();
         }
         info.parent_id = parent_info.type_id;
@@ -6027,14 +6471,14 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
     if (parent_info is !null) {
         let inherited_idx -> Int = 0;
         while (parent_info.interfaces is !null && inherited_idx < parent_info.interfaces.length()) {
-            let inherited -> Token = parent_info.interfaces[inherited_idx];
-            if (!add_interface(c, effective_interfaces, inherited, node.pos)) { return void_result(); }
+            let inherited -> TypeListNode = parent_info.interfaces[inherited_idx];
+            if (!add_interface_type(c, effective_interfaces, inherited.type, node.pos)) { return void_result(); }
             inherited_idx += 1;
         }
     }
     let declared_idx -> Int = 0;
     while (node.interfaces is !null && declared_idx < node.interfaces.length()) {
-        let declared -> Token = node.interfaces[declared_idx];
+        let declared -> Struct = node.interfaces[declared_idx];
         if (!add_interface(c, effective_interfaces, declared, node.pos)) { return void_result(); }
         declared_idx += 1;
     }
@@ -6109,7 +6553,8 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
     info.fields = fields_vec;
 
     let def_str -> String = info.llvm_name + " = type { " + llvm_body + " }\n";
-    c.output_file.write(def_str);
+    if (c.generic_class_type != 0) { c.generic_type_defs += def_str; }
+    else { c.output_file.write(def_str); }
 
     let my_methods -> Vector(Struct) = node.methods;
     let mm_len -> Int = 0; if (my_methods is !null) { mm_len = my_methods.length(); }
@@ -6117,6 +6562,11 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
     while (mm_idx < mm_len) {
         let m_node -> MethodDefNode = my_methods[mm_idx];
         let raw_m_name -> String = method_base_name(c, m_node);
+
+        if (m_node.type_params is !null && m_node.type_params.length() > 0) {
+            mm_idx++;
+            continue;
+        }
         
         if (raw_m_name != "$init" && raw_m_name != "$field_init") {
             let m_name -> String = class_name + "_" + raw_m_name;
@@ -6126,7 +6576,13 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
                 throw_name_error(m_node.pos, "Compiler internal error: Method '" + m_name + "' was not properly registered.");
                 return void_result();
             }
+            f_info.mutates_self = method_mutates_self(m_node.body);
             
+            if (f_info.compiler_link_name is !null && 
+                f_info.compiler_link_name.length() > 0) {
+                mm_idx += 1;
+                continue;
+            }
             let vt_len -> Int = vtable_vec.length();
             let vt_i -> Int = 0;
             let is_override -> Bool = false;
@@ -6152,8 +6608,15 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
     info.vtable = vtable_vec;
 
     let vt_final_len -> Int = vtable_vec.length();
-    c.output_file.write("%vtable_type." + class_name + " = type [ " + vt_final_len + " x i8* ]\n");
-    let vt_str -> String = info.vtable_name + " = global %vtable_type." + class_name;
+    let vtable_type -> String = "%vtable_type." + class_name;
+    if (c.generic_class_type != 0) {
+        vtable_type = generic_llvm_name("%vtable_type.__generic.", info.type_id);
+        c.generic_type_defs += vtable_type + " = type [ " + vt_final_len + " x i8* ]\n";
+    } else {
+        c.output_file.write(vtable_type + " = type [ " + vt_final_len + " x i8* ]\n");
+    }
+
+    let vt_str -> String = info.vtable_name + " = global " + vtable_type;
     if (vt_final_len == 0) {
         vt_str += " zeroinitializer\n\n";
     } else {
@@ -6174,9 +6637,9 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
         let i_len -> Int = info.interfaces.length();
         let i_idx -> Int = 0;
         while (i_idx < i_len) {
-            let i_tok -> Token = info.interfaces[i_idx];
-            let raw_i_name -> String = i_tok.value;
-            let i_info -> StructInfo = lookup_interface(c, i_tok);
+            let interface_type -> TypeListNode = info.interfaces[i_idx];
+            let i_info -> StructInfo = c.struct_id_map.get("" + interface_type.type);
+            let raw_i_name -> String = get_type_name(c, interface_type.type);
             if (i_info is null || !i_info.is_interface) {
                 throw_name_error(node.pos, "Interface '" + raw_i_name + "' is not defined or is not an interface.");
                 return void_result();
@@ -6205,7 +6668,7 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
                         let f -> FuncInfo = vtable_vec[vt_idx];
                         if (f.base_name == req_name) {
                             let match -> Bool = true;
-                            let req_ret_type -> Int = resolve_type(c, req_m.return_type);
+                            let req_ret_type -> Int = interface_method_type(c, i_info, req_m.return_type);
                             if (f.ret_type != req_ret_type) {
                                 match = false;
                             } else {
@@ -6222,7 +6685,7 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
                                     let p_idx -> Int = 0;
                                     while (p_idx < req_p_len) {
                                         let req_p -> ParamNode = req_params[p_idx];
-                                        let req_p_type -> Int = resolve_type(c, req_p.type_tok);
+                                        let req_p_type -> Int = interface_method_type(c, i_info, req_p.type_tok);
                                         let f_p -> TypeListNode = f.arg_types[p_idx + 1];
                                         
                                         if (f_p.type != req_p_type) {
@@ -6262,7 +6725,9 @@ func compile_class_def(c -> Compiler, node -> ClassDefNode) -> CompileResult {
     mm_idx = 0;
     while (mm_idx < mm_len) {
         let m_node -> MethodDefNode = my_methods[mm_idx];
-        compile_method_def(c, class_name, m_node);
+        if (m_node.type_params is null || m_node.type_params.length() == 0) {
+            compile_method_def(c, class_name, m_node);
+        }
         mm_idx += 1;
     }
     
@@ -6562,9 +7027,9 @@ func compile_field_access(c -> Compiler, node -> FieldAccessNode) -> CompileResu
             let vtable_i8ptr -> String = next_reg(c);
             c.output_file.write(c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
             let vtable_ptr -> String = next_reg(c);
-            c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to %vtable_type." + s_info.name + "*\n");
+            c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(c, s_info) + "*\n");
             let method_i8ptr_addr -> String = next_reg(c);
-            c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds %vtable_type." + s_info.name + ", %vtable_type." + s_info.name + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+            c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(c, s_info) + ", " + class_vtable_type(c, s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
             let method_i8ptr -> String = next_reg(c);
             c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
 
@@ -7268,7 +7733,7 @@ func compile_length_method(c -> Compiler, obj_node -> Struct, call_node -> CallN
     return void_result();
 }
 
-func compile_index_access(c -> Compiler, node -> IndexAccessNode) -> CompileResult {
+func compile_index_access(c -> Compiler, node -> IndexAccessNode, handled -> Bool) -> CompileResult {
     check_out_index(c, node.target, node.index_node, node.pos);
     let target_res -> CompileResult = compile_node(c, node.target);
     if (target_res is !null && target_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
@@ -7287,7 +7752,7 @@ func compile_index_access(c -> Compiler, node -> IndexAccessNode) -> CompileResu
         if has_get {
             let fake_args -> Vector(Struct) = [];
             fake_args.append(ArgNode(val=node.index_node, name=null));
-            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, pos=node.pos, preserve_fallible=false);
+            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=handled);
             return compile_class_method_call(c, s_info, target_res, "get", fake_call);
         }
     }
@@ -7442,7 +7907,7 @@ func compile_index_assign(c -> Compiler, node -> IndexAssignNode) -> CompileResu
             let fake_args -> Vector(Struct) = [];
             fake_args.append(ArgNode(val=node.index_node, name=null));
             fake_args.append(ArgNode(val=node.value, name=null));
-            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, pos=node.pos, preserve_fallible=false);
+            let fake_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
             compile_class_method_call(c, s_info, target_res, "put", fake_call);
             return void_result();
         }
@@ -7740,16 +8205,20 @@ func compile_map_lit(c -> Compiler, lit_node -> Struct) -> CompileResult {
     let cap -> Int = pair_count * 2;
     if (cap < 8) { cap = 8; }
 
-    let dict_info -> StructInfo = c.struct_table.get("Dict");
-    if (dict_info is null) { dict_info = c.struct_table.get("dict.Dict"); }
+    let dict_info -> StructInfo = c.struct_id_map.get("" + c.expected_type);
+    if (!is_typed_dict(c, dict_info)) {
+        dict_info = c.struct_table.get("Dict");
+        if (dict_info is null) { dict_info = c.struct_table.get("dict.Dict"); }
+    }
     if (dict_info is null) { throw_type_error(node.pos, "Compiler error: 'Dict' class not found in prelude."); }
 
-    let cap_tok -> Token = Token(type=TOK_INT, value="" + cap, line=node.pos.ln, col=node.pos.col);
-    let cap_node -> IntNode = IntNode(type=NODE_INT, tok=cap_tok, pos=node.pos);
-
     let init_args -> Vector(Struct) = [];
-    init_args.append(ArgNode(val=cap_node, name=null));
-    let fake_init_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=init_args, pos=node.pos, preserve_fallible=false);
+    if (!is_typed_dict(c, dict_info)) {
+        let cap_tok -> Token = Token(type=TOK_INT, value="" + cap, line=node.pos.ln, col=node.pos.col);
+        let cap_node -> IntNode = IntNode(type=NODE_INT, tok=cap_tok, pos=node.pos);
+        init_args.append(ArgNode(val=cap_node, name=null));
+    }
+    let fake_init_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=init_args, type_args=null, pos=node.pos, preserve_fallible=false);
 
     let dict_res -> CompileResult = compile_class_init(c, dict_info, fake_init_call);
 
@@ -7760,7 +8229,7 @@ func compile_map_lit(c -> Compiler, lit_node -> Struct) -> CompileResult {
         let put_args -> Vector(Struct) = [];
         put_args.append(ArgNode(val=pair.key, name=null));
         put_args.append(ArgNode(val=pair.value, name=null));
-        let fake_put_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=put_args, pos=node.pos, preserve_fallible=false);
+        let fake_put_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=put_args, type_args=null, pos=node.pos, preserve_fallible=false);
         
         compile_class_method_call(c, dict_info, dict_res, "put", fake_put_call);
         i += 1;
@@ -7817,11 +8286,17 @@ func compile_enum_def(c -> Compiler, node -> EnumDefNode) -> CompileResult {
 }
 
 func compile_try_unwrap(c -> Compiler, node -> TryUnwrapNode) -> CompileResult {
-    let expr_res -> CompileResult = compile_node(c, node.expr);
+    let expr_base -> BaseNode = node.expr;
+    let expr_res -> CompileResult = null;
+    if (expr_base.type == NODE_INDEX_ACCESS) {
+        let access -> IndexAccessNode = node.expr;
+        expr_res = compile_index_access(c, access, true);
+    } else {
+        expr_res = compile_node(c, node.expr);
+    }
+
     let fallible_type -> Int = expr_res.type;
-    
     if (!is_fallible_type(c, fallible_type)) {
-        let expr_base -> BaseNode = node.expr;
         if (expr_base.type == NODE_CALL) {
             let call -> CallNode = node.expr;
             let callee_base -> BaseNode = call.callee;
@@ -8154,10 +8629,10 @@ func compile_lvalue_ptr(c -> Compiler, node -> Struct, pos -> Position) -> Compi
                     let vtable_ptr_addr -> String = next_reg(c);
                     c.output_file.write(c.indent + vtable_ptr_addr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 0\n");
                     let vtable_ptr -> String = next_reg(c);
-                    c.output_file.write(c.indent + vtable_ptr + " = load %vtable_type." + s_info.name + "*, %vtable_type." + s_info.name + "** " + vtable_ptr_addr + "\n");
+                    c.output_file.write(c.indent + vtable_ptr + " = load " + class_vtable_type(c, s_info) + "*, " + class_vtable_type(c, s_info) + "** " + vtable_ptr_addr + "\n");
                     
                     let method_i8ptr_addr -> String = next_reg(c);
-                    c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds %vtable_type." + s_info.name + ", %vtable_type." + s_info.name + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+                    c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(c, s_info) + ", " + class_vtable_type(c, s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
                     let method_i8ptr -> String = next_reg(c);
                     c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
                     
@@ -8710,12 +9185,131 @@ func compile_binop(c -> Compiler, node -> BinOpNode) -> CompileResult {
     return CompileResult(reg=res_reg, type=target_type);
 }
 
+func emit_function_value(c -> Compiler, info -> FuncInfo) -> CompileResult {
+    if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let specific_type -> Int = get_func_type_id(c, info.arg_types, info.ret_type);
+    let cast -> String = next_reg(c);
+    c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(c, info) + " @" + info.name + " to i8*\n");
+
+    let closure -> String = emit_alloc_closure(c, specific_type);
+    let function_slot -> String = next_reg(c);
+    c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
+    c.output_file.write(c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
+
+    let environment_bytes -> String = next_reg(c);
+    let environment_slot -> String = next_reg(c);
+    c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
+    c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
+    c.output_file.write(c.indent + "store i8* null, i8** " + environment_slot + "\n");
+
+    return CompileResult(reg=closure, type=specific_type, origin_type=info.ret_type);
+}
+
+func emit_generic_method_value(c -> Compiler, generic -> GenericTypeNode) -> CompileResult {
+    let field_base -> BaseNode = generic.base_type;
+    if (field_base.type != NODE_FIELD_ACCESS) {
+        throw_type_error(generic.pos, "A generic method instance must name a class method.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+    let field -> FieldAccessNode = generic.base_type;
+    let object -> CompileResult = compile_node(c, field.obj);
+    if (object is null || object.type == TYPE_POISON) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let info -> StructInfo = c.struct_id_map.get("" + object.type);
+    if (info is null || !info.is_class) {
+        throw_type_error(generic.pos, "Generic methods can only be bound from class values.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let template -> GenericTemplate = c.generic_methods.get(info.name + "_" + field.field_name);
+    if (template is null) {
+        throw_name_error(generic.pos, "Generic method '" + field.field_name + "' is not defined in '" + info.name + "'.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let types -> Vector(Struct) = resolve_generic_method_args(c, template, generic.type_args, null, generic.pos);
+    if (types is null) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let method_info -> FuncInfo = register_generic_method(c, template, info, types, generic.pos);
+    if (method_info is null) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+    if (object.is_const_access && method_info.mutates_self) {
+        throw_type_error(generic.pos, "Cannot bind mutating method '" + field.field_name + "' through const value");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    emit_method_nullcheck(c, object.reg, info.llvm_name, field.field_name, generic.pos);
+    let args -> Vector(Struct) = [];
+    let i -> Int = 1;
+    while (i < method_info.arg_types.length()) {
+        args.append(method_info.arg_types[i]);
+        i++;
+    }
+
+    let method_type -> Int = get_method_type_id(c, args, method_info.ret_type);
+    let closure -> String = emit_alloc_closure(c, method_type);
+    let cast -> String = next_reg(c);
+    c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(c, method_info) + " @" + method_info.name + " to i8*\n");
+
+    let function_slot -> String = next_reg(c);
+    c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
+    c.output_file.write(c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
+
+    let environment_bytes -> String = next_reg(c);
+    let environment_slot -> String = next_reg(c);
+    c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
+    c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
+
+    let object_bytes -> String = next_reg(c);
+    c.output_file.write(c.indent + object_bytes + " = bitcast " + info.llvm_name + "* " + object.reg + " to i8*\n");
+    c.output_file.write(c.indent + "store i8* " + object_bytes + ", i8** " + environment_slot + "\n");
+
+    emit_retain(c, object.reg, object.type);
+
+    return CompileResult(reg=closure, type=method_type, origin_type=method_info.ret_type);
+}
+
+func compile_generic_value(c -> Compiler, node -> GenericTypeNode) -> CompileResult {
+    let base -> BaseNode = node.base_type;
+    if (base.type == NODE_FIELD_ACCESS) {
+        return emit_generic_method_value(c, node);
+    }
+
+    let name -> String = generic_symbol_name(c, node.base_type, true);
+    let template -> GenericTemplate = c.generic_funcs.get(name);
+    if (template is null) {
+        throw_name_error(node.pos, "Generic function '" + name + "' is not defined.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let types -> Vector(Struct) = resolve_generic_args(c, template, node.type_args, null, node.pos);
+    if (types is null) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let instance -> FuncInfo = register_generic_func(c, template, types, node.pos);
+    if (instance is null) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    return emit_function_value(c, instance);
+}
+
 func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
     if (node is null) {
         return void_result();
     }
 
     let base -> BaseNode = node;
+    if (base.type == NODE_GENERIC_TYPE) { return compile_generic_value(c, node); }
     if (base.type == NODE_TYPE_LAYOUT) { return compile_type_layout(c, node); }
 
     if (base.type == NODE_BLOCK) {
@@ -8746,7 +9340,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
     if (base.type == NODE_FIELD_ASSIGN) { return compile_field_assign(c, node); }
     if (base.type == NODE_EXTERN_BLOCK) { return compile_extern_block(c, node); }
     if (base.type == NODE_VECTOR_LIT) { return compile_vector_lit(c, node); }
-    if (base.type == NODE_INDEX_ACCESS) { return compile_index_access(c, node); }
+    if (base.type == NODE_INDEX_ACCESS) { return compile_index_access(c, node, false); }
     if (base.type == NODE_INDEX_ASSIGN) { return compile_index_assign(c, node); }
     if (base.type == NODE_SLICE_ACCESS) { return compile_slice_access(c, node, false); }
     if (base.type == NODE_MAP_LIT) { return compile_map_lit(c, node); }
@@ -9135,14 +9729,20 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
 
     if (base.type == NODE_CALL) {
         let n_call -> CallNode = node;
-        let callee -> BaseNode = n_call.callee;
+        let callee_node -> Struct = n_call.callee;
+        let callee -> BaseNode = callee_node;
+        if (callee.type == NODE_GENERIC_TYPE) {
+            let generic_callee -> GenericTypeNode = callee_node;
+            callee_node = generic_callee.base_type;
+            callee = callee_node;
+        }
 
         let func_name -> String = "";
         let is_direct -> Bool = false;
         let is_package_call -> Bool = false;
 
         if (callee.type == NODE_FIELD_ACCESS) {
-            let f_acc -> FieldAccessNode = n_call.callee;
+            let f_acc -> FieldAccessNode = callee_node;
 
             let obj_base_pre -> BaseNode = f_acc.obj;
             if (obj_base_pre.type == NODE_SUPER) {
@@ -9296,8 +9896,44 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
         }
 
         if (callee.type == NODE_VAR_ACCESS) {
-            let v_node -> VarAccessNode = n_call.callee;
+            let v_node -> VarAccessNode = callee_node;
             func_name = v_node.name_tok.value;
+        }
+
+        let generic_type_name -> String = generic_symbol_name(c, callee_node, false);
+        let generic_type_template -> GenericTemplate = c.generic_structs.get(generic_type_name);
+        if (use_generic_constructor(c, generic_type_name, generic_type_template, n_call.type_args, n_call.args, c.expected_type)) {
+            let types -> Vector(Struct) = resolve_generic_constructor_args(c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
+            if (types is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+
+            let template_base -> BaseNode = generic_type_template.node;
+            let instance_type -> Int = 0;
+            if (template_base.type == NODE_CLASS_DEF) {
+                instance_type = register_generic_class(c, generic_type_template, types, n_call.pos);
+            } else {
+                instance_type = register_generic_struct(c, generic_type_template, types, n_call.pos);
+            }
+
+            let instance -> StructInfo = c.struct_id_map.get("" + instance_type);
+            if (template_base.type == NODE_CLASS_DEF) {
+                return compile_class_init(c, instance, n_call);
+            }
+
+            return compile_struct_init(c, instance, n_call);
+        }
+
+        if (callee.type == NODE_VAR_ACCESS || callee.type == NODE_FIELD_ACCESS) {
+            let generic_name -> String = generic_symbol_name(c, callee_node, true);
+            let template -> GenericTemplate = c.generic_funcs.get(generic_name);
+            if (template is !null) {
+                let types -> Vector(Struct) = resolve_generic_args(c, template, n_call.type_args, n_call.args, n_call.pos);
+                if (types is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+
+                let instance -> FuncInfo = register_generic_func(c, template, types, n_call.pos);
+                if (instance is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+
+                func_name = generic_instance_name(template.name, types, c);
+            }
         }
 
         if (func_name != "") {
@@ -9330,7 +9966,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 let conversion -> FuncInfo = find_class_conversion(source_info, cast_target);
                 if (conversion is !null) {
                     let no_args -> Vector(Struct) = [];
-                    let conversion_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=no_args, pos=n_call.pos, preserve_fallible=true);
+                    let conversion_call -> CallNode = CallNode(type=NODE_CALL, callee=null, args=no_args, type_args=null, pos=n_call.pos, preserve_fallible=true);
                     let converted -> CompileResult = compile_class_method_call(
                         c,
                         source_info,
@@ -9586,7 +10222,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
 
         else {
             if (callee.type == NODE_VAR_ACCESS) {
-                let v_node -> VarAccessNode = n_call.callee;
+                let v_node -> VarAccessNode = callee_node;
                 let s_info -> StructInfo = c.struct_table.get(v_node.name_tok.value);
                 if (s_info is !null) {
                     if (s_info.is_class) {
@@ -9597,7 +10233,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
                 }
             }
 
-            let callee_res -> CompileResult = compile_node(c, n_call.callee);
+            let callee_res -> CompileResult = compile_node(c, callee_node);
             if (callee_res is !null && callee_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
             let ptr_type -> Int = callee_res.type;
 
@@ -9606,7 +10242,7 @@ func compile_node(c -> Compiler, node -> Struct) -> CompileResult {
 
             if (ptr_type == TYPE_GENERIC_FUNCTION || ptr_type == TYPE_GENERIC_METHOD) {
                 if (callee.type == NODE_VAR_ACCESS) {
-                    let v_node -> VarAccessNode = n_call.callee;
+                    let v_node -> VarAccessNode = callee_node;
                     let info -> SymbolInfo = find_symbol(c, v_node.name_tok.value);
                     if (info is !null && info.origin_type >= 100) {
                         let f_ret_info -> SymbolInfo = c.func_ret_map.get("" + info.origin_type);
@@ -11260,6 +11896,7 @@ func compile(c -> Compiler, node -> Struct) -> Void {
         compile_ast_pass(c, p_mod);
         mod_i += 1;
     }
+    emit_pending_generics(c);
     compile_end(c);
 }
 
@@ -11587,6 +12224,8 @@ func compile_end(c -> Compiler) -> Void {
     }
     compile_arc_hooks(c);
     emit_dict_key_helpers(c);
+    emit_typed_dict_helpers(c);
+    emit_erased_check_helpers(c);
     emit_windows_abi(c);
     emit_windows_entrypoint(c);
 
@@ -11614,4 +12253,115 @@ func compile_end(c -> Compiler) -> Void {
     c.output_file.write(c.global_buffer);
     c.output_file.write("\n");
     c.output_file.close();
+
+    if (c.generic_type_defs.length() > 0) {
+        let original -> file.File = file.open(c.output_file.path)?;
+        catch(err) {
+            throw_internal_compiler_error(null, "Cannot reopen generated LLVM IR while finalizing generic types.");
+            return;
+        }
+
+        let body -> String = original.read_all()?;
+        catch(err) {
+            original.close();
+            throw_internal_compiler_error(null, "Cannot read generated LLVM IR while finalizing generic types.");
+            return;
+        }
+        original.close();
+
+        let rewrite -> file.File = file.create(c.output_file.path)?;
+        catch(err) {
+            throw_internal_compiler_error(null, "Cannot rewrite generated LLVM IR while finalizing generic types.");
+            return;
+        }
+
+        let line_end -> Int = 0;
+        while (line_end < body.length() && body[line_end] != '\n') { line_end++; }
+        if (line_end < body.length()) { line_end++; }
+        rewrite.write(body.slice(0, line_end));
+        rewrite.write(c.generic_type_defs);
+        rewrite.write(body.slice(line_end, body.length()));
+        rewrite.close();
+    }
+}
+
+func emit_pending_generic_funcs(c -> Compiler) -> Void {
+    let index -> Int = c.generic_func_emitted;
+    while (index < c.generic_worklist.length()) {
+        let instance -> GenericFuncInstance = c.generic_worklist[index];
+        index++;
+        c.generic_func_emitted = index;
+        let template -> GenericTemplate = instance.template;
+        let node -> FunctionDefNode = template.node;
+        let previous_bindings -> Dict = c.generic_bindings;
+        let previous -> GenericTemplate = use_generic_context(c, template, instance.bindings);
+        let previous_key -> String = c.generic_func_key;
+        let previous_depth -> Int = c.generic_depth;
+        c.generic_func_key = instance.func_key;
+        c.generic_depth = instance.depth;
+
+        compile_func_def(c, node);
+
+        c.generic_depth = previous_depth;
+        c.generic_func_key = previous_key;
+        restore_generic_context(c, previous, previous_bindings);
+    }
+}
+
+func emit_pending_generic_classes(c -> Compiler) -> Void {
+    let index -> Int = c.generic_class_emitted;
+    while (index < c.generic_class_worklist.length()) {
+        let instance -> GenericClassInstance = c.generic_class_worklist[index];
+        index++;
+        c.generic_class_emitted = index;
+        let template -> GenericTemplate = instance.template;
+        let node -> ClassDefNode = template.node;
+        let previous_bindings -> Dict = c.generic_bindings;
+        let previous -> GenericTemplate = use_generic_context(c, template, instance.bindings);
+        let previous_type -> Int = c.generic_class_type;
+        let previous_depth -> Int = c.generic_depth;
+        c.generic_class_type = instance.type_id;
+        c.generic_depth = instance.depth;
+
+        compile_class_def(c, node);
+
+        c.generic_depth = previous_depth;
+        c.generic_class_type = previous_type;
+        restore_generic_context(c, previous, previous_bindings);
+    }
+}
+
+func emit_pending_generic_methods(c -> Compiler) -> Void {
+    let index -> Int = c.generic_method_emitted;
+    while (index < c.generic_method_worklist.length()) {
+        let instance -> GenericMethodInstance = c.generic_method_worklist[index];
+        index++;
+        c.generic_method_emitted = index;
+        let template -> GenericTemplate = instance.template;
+        let node -> MethodDefNode = template.node;
+        let previous_bindings -> Dict = c.generic_bindings;
+        let previous -> GenericTemplate = use_generic_context(c, template, instance.bindings);
+        let previous_key -> String = c.generic_method_key;
+        let previous_depth -> Int = c.generic_depth;
+        c.generic_method_key = instance.func_key;
+        c.generic_depth = instance.depth;
+
+        compile_method_def(c, instance.owner_name, node);
+
+        c.generic_depth = previous_depth;
+        c.generic_method_key = previous_key;
+        restore_generic_context(c, previous, previous_bindings);
+    }
+}
+
+func has_pending_generics(c -> Compiler) -> Bool {
+    return c.generic_class_emitted < c.generic_class_worklist.length() || c.generic_func_emitted < c.generic_worklist.length() || c.generic_method_emitted < c.generic_method_worklist.length();
+}
+
+func emit_pending_generics(c -> Compiler) -> Void {
+    while (has_pending_generics(c)) {
+        emit_pending_generic_classes(c);
+        emit_pending_generic_funcs(c);
+        emit_pending_generic_methods(c);
+    }
 }

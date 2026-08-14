@@ -136,6 +136,41 @@ struct StructInfo(
     compiler_link_name -> String
 )
 
+struct GenericTemplate(
+    name -> String,
+    node -> Struct,
+    type_params -> Vector(Struct),
+    prefix -> String,
+    dir -> String,
+    visible -> Dict,
+    namespaces -> Dict,
+    types -> Dict,
+    funcs -> Dict,
+    globals -> Dict
+)
+
+struct GenericFuncInstance(
+    template -> GenericTemplate,
+    bindings -> Dict,
+    func_key -> String,
+    depth -> Int
+)
+
+struct GenericClassInstance(
+    template -> GenericTemplate,
+    bindings -> Dict,
+    type_id -> Int,
+    depth -> Int
+)
+
+struct GenericMethodInstance(
+    template -> GenericTemplate,
+    bindings -> Dict,
+    func_key -> String,
+    owner_name -> String,
+    depth -> Int
+)
+
 struct ArrayInfo(
     base_type -> Int,
     size      -> Int,
@@ -217,7 +252,29 @@ struct Compiler(
     current_catch_err_ptr -> String,
     current_catch_scope -> Struct,
     extra_libs -> Vector(String),
-    error_types -> Vector(Struct)
+    error_types -> Vector(Struct),
+    generic_structs -> Dict,
+    generic_funcs -> Dict,
+    generic_methods -> Dict,
+    generic_instances -> Dict,
+    generic_type_names -> Dict,
+    generic_instance_bindings -> Dict,
+    generic_instance_templates -> Dict,
+    generic_type_defs -> String,
+    generic_worklist -> Vector(Struct),
+    generic_func_emitted -> Int,
+    generic_class_worklist -> Vector(Struct),
+    generic_class_emitted -> Int,
+    generic_method_worklist -> Vector(Struct),
+    generic_method_emitted -> Int,
+    generic_bindings -> Dict,
+    generic_depth -> Int,
+    generic_instance_count -> Int,
+    generic_func_key -> String,
+    generic_method_key -> String,
+    generic_class_type -> Int,
+    erased_checks -> Dict,
+    typed_dict_keys -> Dict
 )
 
 struct ParsedModule(
@@ -309,7 +366,29 @@ func new_compiler(out_path -> String, is_shared -> Bool, emit_source_context -> 
         current_catch_err_ptr = "",
         current_catch_scope = null,
         extra_libs = [],
-        error_types = []
+        error_types = [],
+        generic_structs = Dict(32),
+        generic_funcs = Dict(32),
+        generic_methods = Dict(32),
+        generic_instances = Dict(32),
+        generic_type_names = Dict(32),
+        generic_instance_bindings = Dict(32),
+        generic_instance_templates = Dict(32),
+        generic_type_defs = "",
+        generic_worklist = [],
+        generic_func_emitted = 0,
+        generic_class_worklist = [],
+        generic_class_emitted = 0,
+        generic_method_worklist = [],
+        generic_method_emitted = 0,
+        generic_bindings = Dict(8),
+        generic_depth = 0,
+        generic_instance_count = 0,
+        generic_func_key = "",
+        generic_method_key = "",
+        generic_class_type = 0,
+        erased_checks = Dict(16),
+        typed_dict_keys = Dict(16)
     );
 
     comp.type_drop_list.append(TypeListNode(type=TYPE_GENERIC_FUNCTION));
@@ -488,6 +567,21 @@ func export_module_symbols(c -> Compiler, prefix -> String, as_submodule -> Bool
         k += 1;
     }
 
+    let gs_cap -> Int = c.generic_structs.capacity;
+    k = 0;
+    while (k < gs_cap) {
+        if (c.generic_structs.hashes[k] >= 2) {
+            let s_key -> String = c.generic_structs.keys[k];
+            if (s_key.starts_with(prefix)) {
+                let bare_name -> String = s_key.slice(p_len, s_key.length());
+                if (!bare_name.starts_with("__")) {
+                    c.global_type_aliases.put(export_prefix + bare_name, s_key);
+                }
+            }
+        }
+        k += 1;
+    }
+
     let g_cap -> Int = c.global_symbol_table.capacity;
     k = 0;
     while (k < g_cap) {
@@ -605,6 +699,28 @@ func bind_import_symbols(c -> Compiler, node -> ImportNode, prefix -> String, in
                 k += 1;
             }
 
+            let gf_cap -> Int = c.generic_funcs.capacity;
+            k = 0;
+            while (k < gf_cap) {
+                if (c.generic_funcs.hashes[k] >= 2) {
+                    let f_key -> String = c.generic_funcs.keys[k];
+                    if (f_key.starts_with(prefix)) {
+                        let bare_name -> String = f_key.slice(p_len, f_key.length());
+                        if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
+                            let existing_f -> String = c.current_file_func_aliases.get(bare_name);
+                            if (existing_f is !null && keep_existing) {
+                                /* pass */
+                            } else if (existing_f is !null && existing_f != f_key) {
+                                report_import_collision(c, node.pos, "function", bare_name);
+                            } else {
+                                c.current_file_func_aliases.put(bare_name, f_key);
+                            }
+                        }
+                    }
+                }
+                k += 1;
+            }
+
             let s_cap -> Int = c.struct_table.capacity;
             k = 0;
             while (k < s_cap) {
@@ -615,6 +731,28 @@ func bind_import_symbols(c -> Compiler, node -> ImportNode, prefix -> String, in
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
                             let existing_s -> String = c.current_file_type_aliases.get(bare_name);
                             if (existing_s is !null && keep_existing) {
+                            } else if (existing_s is !null && existing_s != s_key) {
+                                report_import_collision(c, node.pos, "type", bare_name);
+                            } else {
+                                c.current_file_type_aliases.put(bare_name, s_key);
+                            }
+                        }
+                    }
+                }
+                k += 1;
+            }
+
+            let gs_cap -> Int = c.generic_structs.capacity;
+            k = 0;
+            while (k < gs_cap) {
+                if (c.generic_structs.hashes[k] >= 2) {
+                    let s_key -> String = c.generic_structs.keys[k];
+                    if (s_key.starts_with(prefix)) {
+                        let bare_name -> String = s_key.slice(p_len, s_key.length());
+                        if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
+                            let existing_s -> String = c.current_file_type_aliases.get(bare_name);
+                            if (existing_s is !null && keep_existing) {
+                                /* pass */
                             } else if (existing_s is !null && existing_s != s_key) {
                                 report_import_collision(c, node.pos, "type", bare_name);
                             } else {
@@ -739,7 +877,7 @@ func bind_import_symbols(c -> Compiler, node -> ImportNode, prefix -> String, in
         let lookup_name -> String = prefix + orig_name;
         let found -> Bool = false;
 
-        if (c.func_table.get(lookup_name) is !null) {
+        if (c.func_table.get(lookup_name) is !null || c.generic_funcs.get(lookup_name) is !null) {
             let existing_f -> String = c.current_file_func_aliases.get(target_name);
             if (existing_f is !null && keep_existing) { }
             else if (existing_f is !null && existing_f != lookup_name) { report_import_collision(c, node.pos, "function", target_name); }
@@ -753,7 +891,7 @@ func bind_import_symbols(c -> Compiler, node -> ImportNode, prefix -> String, in
             else { c.current_file_func_aliases.put(target_name, real_name); }
             found = true;
         }
-        if (c.struct_table.get(lookup_name) is !null) {
+        if (c.struct_table.get(lookup_name) is !null || c.generic_structs.get(lookup_name) is !null) {
             let existing_s -> String = c.current_file_type_aliases.get(target_name);
             if (existing_s is !null && keep_existing) { }
             else if (existing_s is !null && existing_s != lookup_name) { report_import_collision(c, node.pos, "type", target_name); }
@@ -986,6 +1124,9 @@ func get_type_name(c -> Compiler, type_id -> Int) -> String {
     if (type_id == TYPE_UINTSIZE){ return "UIntSize"; }
 
     if (type_id >= 100) {
+        let generic_name -> StringConstant = c.generic_type_names.get("" + type_id);
+        if (generic_name is !null) { return generic_name.value; }
+
         let f_info -> SymbolInfo = c.func_ret_map.get("" + type_id);
         if (f_info is !null) {
             let sig -> String = "Function(";
@@ -1415,6 +1556,59 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
     }
     if (base.type == NODE_BOOL) { return TYPE_BOOL; }
     if (base.type == NODE_TYPE_LAYOUT) { return TYPE_UINTSIZE; }
+    if (base.type == NODE_GENERIC_TYPE) {
+        let generic -> GenericTypeNode = node;
+        let generic_base -> BaseNode = generic.base_type;
+        if (generic_base.type == NODE_FIELD_ACCESS) {
+            let field -> FieldAccessNode = generic.base_type;
+
+            let owner_type -> Int = get_expr_type(c, field.obj);
+            let owner -> StructInfo = c.struct_id_map.get("" + owner_type);
+            if (owner is null || !owner.is_class) {
+                return TYPE_POISON;
+            }
+
+            let method_template -> GenericTemplate = c.generic_methods.get(owner.name + "_" + field.field_name);
+            if (method_template is null) {
+                return TYPE_POISON;
+            }
+
+            let method_types -> Vector(Struct) = resolve_generic_method_args(c, method_template, generic.type_args, null, generic.pos);
+            if (method_types is null) {
+                return TYPE_POISON;
+            }
+
+            let method_info -> FuncInfo = register_generic_method(c, method_template, owner, method_types, generic.pos);
+            if (method_info is null) {
+                return TYPE_POISON;
+            }
+
+            let args -> Vector(Struct) = [];
+            let i -> Int = 1;
+            while (i < method_info.arg_types.length()) {
+                args.append(method_info.arg_types[i]);
+                i++;
+            }
+            return get_method_type_id(c, args, method_info.ret_type);
+        }
+
+        let name -> String = generic_symbol_name(c, generic.base_type, true);
+        let template -> GenericTemplate = c.generic_funcs.get(name);
+        if (template is null) {
+            return TYPE_POISON;
+        }
+
+        let types -> Vector(Struct) = resolve_generic_args(c, template, generic.type_args, null, generic.pos);
+        if (types is null) {
+            return TYPE_POISON;
+        }
+        let instance -> FuncInfo = register_generic_func(c, template, types, generic.pos);
+        if (instance is null) {
+            return TYPE_POISON;
+        }
+
+        return get_func_type_id(c, instance.arg_types, instance.ret_type);
+    }
     
     if (base.type == NODE_VAR_ACCESS) {
         let v -> VarAccessNode = node;
@@ -1498,7 +1692,14 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
             let arr_info -> ArrayInfo = c.array_info_map.get("" + target_type);
             if (arr_info is !null) { return arr_info.base_type; }
             let s_info -> StructInfo = c.struct_id_map.get("" + target_type);
-            if (s_info is !null && s_info.name == "Dict") { return TYPE_GENERIC_STRUCT; }
+            if (s_info is !null && s_info.is_class) {
+                let method_index -> Int = 0;
+                while (s_info.vtable is !null && method_index < s_info.vtable.length()) {
+                    let method_info -> FuncInfo = s_info.vtable[method_index];
+                    if (method_info.base_name == "get") { return method_info.ret_type; }
+                    method_index++;
+                }
+            }
         }
         if (target_type == TYPE_STRING) { return TYPE_BYTE; }
         return 0;
@@ -1585,9 +1786,48 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
 
     if (base.type == NODE_CALL) {
         let call_node -> CallNode = node;
-        let callee -> BaseNode = call_node.callee;
+        let callee_node -> Struct = call_node.callee;
+        let callee -> BaseNode = callee_node;
+        if (callee.type == NODE_GENERIC_TYPE) {
+            let generic -> GenericTypeNode = callee_node;
+            callee_node = generic.base_type;
+            callee = callee_node;
+        }
+
+        let generic_type_name -> String = generic_symbol_name(c, callee_node, false);
+        let generic_type_template -> GenericTemplate = c.generic_structs.get(generic_type_name);
+        if (use_generic_constructor(c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
+            let types -> Vector(Struct) = resolve_generic_constructor_args(c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
+            if (types is null) { return TYPE_POISON; }
+    
+            let template_base -> BaseNode = generic_type_template.node;
+            if (template_base.type == NODE_CLASS_DEF) {
+                return register_generic_class(c, generic_type_template, types, call_node.pos);
+            }
+            return register_generic_struct(c, generic_type_template, types, call_node.pos);
+        }
+
+        let generic_name -> String = generic_symbol_name(c, callee_node, true);
+        let generic_template -> GenericTemplate = c.generic_funcs.get(generic_name);
+        if (generic_template is !null) {
+            let types -> Vector(Struct) = resolve_generic_args(c, generic_template, call_node.type_args, call_node.args, call_node.pos);
+            if (types is null) { return TYPE_POISON; }
+
+            let instance -> FuncInfo = register_generic_func(c, generic_template, types, call_node.pos);
+            if (instance is null) { return TYPE_POISON; }
+
+            if (call_node.preserve_fallible) {
+                return instance.ret_type;
+            }
+            if (is_fallible_type(c, instance.ret_type)) {
+                return get_inner_fallible_type(c, instance.ret_type);
+            }
+    
+            return instance.ret_type;
+        }
+
         if (callee.type == NODE_VAR_ACCESS) {
-            let v -> VarAccessNode = call_node.callee;
+            let v -> VarAccessNode = callee_node;
             let callee_name -> String = v.name_tok.value;
 
             let cast_target -> Int = get_builtin_cast_target(callee_name);
@@ -1630,7 +1870,7 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
             }
         }
         else if (callee.type == NODE_FIELD_ACCESS) {
-            let f -> FieldAccessNode = call_node.callee;
+            let f -> FieldAccessNode = callee_node;
             let obj_type -> Int = get_expr_type(c, f.obj);
             if (obj_type == 0) {
                 let path_parts -> Vector(String) = [];
@@ -1690,6 +1930,21 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
             if (obj_type >= 100) {
                 let s_info -> StructInfo = c.struct_id_map.get("" + obj_type);
                 if (s_info is !null && s_info.is_class) {
+                    let method_template -> GenericTemplate = c.generic_methods.get(s_info.name + "_" + f.field_name);
+                    if (method_template is !null) {
+                        let types -> Vector(Struct) = resolve_generic_method_args(c, method_template, call_node.type_args, call_node.args, call_node.pos);
+                        if (types is null) {
+                            return TYPE_POISON;
+                        }
+                        let instance -> FuncInfo = register_generic_method(c, method_template, s_info, types, call_node.pos);
+                        if (instance is null) {
+                            return TYPE_POISON;
+                        }
+                        if (!call_node.preserve_fallible && is_fallible_type(c, instance.ret_type)) {
+                            return get_inner_fallible_type(c, instance.ret_type);
+                        }
+                        return instance.ret_type;
+                    }
                     let vtable -> Vector(Struct) = s_info.vtable;
                     let v_len -> Int = 0; if (vtable is !null) { v_len = vtable.length(); }
                     let m_idx -> Int = 0;
@@ -1707,7 +1962,7 @@ func get_expr_type(c -> Compiler, node -> Struct) -> Int {
                     while (m_idx < v_len) {
                         let m_node -> MethodDefNode = vtable[m_idx];
                         if (m_node.name_tok.value == f.field_name) {
-                            return resolve_type(c, m_node.return_type);
+                            return interface_method_type(c, s_info, m_node.return_type);
                         }
                         m_idx += 1;
                     }
@@ -1867,9 +2122,1195 @@ func get_signed_min_literal(type_id -> Int) -> String {
     return "";
 }
 
+func generic_instance_name(template_name -> String, types -> Vector(Struct), c -> Compiler) -> String {
+    let name -> String = template_name;
+    let i -> Int = 0;
+    while (types is !null && i < types.length()) {
+        let item -> TypeListNode = types[i];
+        name += "$" + mangle_type(c, item.type);
+        i += 1;
+    }
+    return name;
+}
+
+func generic_type_name(template_name -> String, types -> Vector(Struct), c -> Compiler) -> String {
+    let name -> String = template_name + "<";
+    let i -> Int = 0;
+    while (types is !null && i < types.length()) {
+        let item -> TypeListNode = types[i];
+        if (i > 0) { name += ", "; }
+        name += get_type_name(c, item.type);
+        i += 1;
+    }
+    return name + ">";
+}
+
+func generic_llvm_name(prefix -> String, type_id -> Int) -> String {
+    return prefix + type_id;
+}
+
+func generic_param_name(node -> Struct) -> String {
+    let param -> GenericParamNode = node;
+    return param.name_tok.value;
+}
+
+func generic_bindings(params -> Vector(Struct), types -> Vector(Struct)) -> Dict {
+    let bindings -> Dict = Dict(8);
+    let i -> Int = 0;
+    while (params is !null && types is !null && i < params.length() && i < types.length()) {
+        let param -> GenericParamNode = params[i];
+        let value -> TypeListNode = types[i];
+        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type));
+        i += 1;
+    }
+    return bindings;
+}
+
+func extend_generic_bindings(base -> Dict, params -> Vector(Struct), types -> Vector(Struct)) -> Dict {
+    let bindings -> Dict = Dict(8);
+    let i -> Int = 0;
+    if (base is !null) {
+        while (i < base.capacity) {
+            if (base.hashes[i] >= 2) {
+                bindings.put(base.keys[i], base.values[i]);
+            }
+            i++;
+        }
+    }
+
+    i = 0;
+    while (params is !null && types is !null && i < params.length() && i < types.length()) {
+        let param -> GenericParamNode = params[i];
+        let value -> TypeListNode = types[i];
+        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type));
+        i++;
+    }
+    return bindings;
+}
+
+func use_generic_context(c -> Compiler, template -> GenericTemplate, bindings -> Dict) -> GenericTemplate {
+    let previous -> GenericTemplate = GenericTemplate(name=c.current_package_prefix, node=null, type_params=null, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases);
+    c.current_package_prefix = template.prefix;
+    c.current_dir = template.dir;
+    c.current_file_visible_prefixes = template.visible;
+    c.current_file_namespaces = template.namespaces;
+    c.current_file_type_aliases = template.types;
+    c.current_file_func_aliases = template.funcs;
+    c.current_file_global_aliases = template.globals;
+    c.generic_bindings = bindings;
+    return previous;
+}
+
+func restore_generic_context(c -> Compiler, previous -> GenericTemplate, bindings -> Dict) -> Void {
+    c.current_package_prefix = previous.prefix;
+    c.current_dir = previous.dir;
+    c.current_file_visible_prefixes = previous.visible;
+    c.current_file_namespaces = previous.namespaces;
+    c.current_file_type_aliases = previous.types;
+    c.current_file_func_aliases = previous.funcs;
+    c.current_file_global_aliases = previous.globals;
+    c.generic_bindings = bindings;
+}
+
+func generic_symbol_name(c -> Compiler, node -> Struct, is_function -> Bool) -> String {
+    if (node is null) { return ""; }
+
+    let base -> BaseNode = node;
+    if (base.type == NODE_VAR_ACCESS) {
+        let named -> VarAccessNode = node;
+        let name -> String = named.name_tok.value;
+        let alias -> String = null;
+        if is_function {
+            alias = c.current_file_func_aliases.get(name);
+        } else {
+            alias = c.current_file_type_aliases.get(name);
+        }
+
+        if (alias is !null && 
+            (
+                (is_function && c.generic_funcs.get(alias) is !null) || 
+                (!is_function && c.generic_structs.get(alias) is !null)
+            )
+        ) {
+            return alias;
+        }
+        if (c.current_package_prefix != "") {
+            let local -> String = c.current_package_prefix + name;
+            if ((is_function && c.generic_funcs.get(local) is !null) || (!is_function && c.generic_structs.get(local) is !null)) {
+                return local;
+            }
+        }
+
+        if (alias is !null) {
+            return alias;
+        }
+
+        return name;
+    }
+
+    if (base.type == NODE_FIELD_ACCESS) {
+        let field -> FieldAccessNode = node;
+        let path_parts -> Vector(String) = [];
+        let current -> Struct = field.obj;
+        let current_base -> BaseNode = current;
+        while (current_base.type == NODE_FIELD_ACCESS) {
+            let inner -> FieldAccessNode = current;
+            path_parts.append(inner.field_name);
+            current = inner.obj;
+            current_base = current;
+        }
+
+        if (current_base.type != NODE_VAR_ACCESS) {
+            return "";
+        }
+
+        let root -> VarAccessNode = current;
+        let prefix -> String = c.current_file_visible_prefixes.get(root.name_tok.value);
+        if (prefix is !null) {
+            return module_member_name(prefix, path_parts, field.field_name);
+        }
+
+        let source -> String = module_member_name(root.name_tok.value + ".", path_parts, field.field_name);
+        let alias -> String = null;
+        if is_function {
+            alias = c.current_file_func_aliases.get(source);
+        } else {
+            alias = c.current_file_type_aliases.get(source);
+        }
+
+        if (alias is !null) {
+            return alias;
+        }
+    }
+    return "";
+}
+
+func register_generic_struct(c -> Compiler, template -> GenericTemplate, types -> Vector(Struct), pos -> Position) -> Int {
+    let key -> String = generic_instance_name(template.name, types, c);
+    let cached -> SymbolInfo = c.generic_instances.get(key);
+    if (cached is !null) { return cached.type; }
+
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return TYPE_POISON;
+    }
+    if (c.generic_instance_count >= 4096) {
+        throw_type_error(pos, "Generic instantiation limit exceeded.");
+        return TYPE_POISON;
+    }
+
+    c.generic_instance_count += 1;
+
+    let node -> StructDefNode = template.node;
+    let bindings -> Dict = generic_bindings(template.type_params, types);
+    if (!check_generic_constraints(c, template, bindings, types, pos)) { return TYPE_POISON; }
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    c.generic_depth += 1;
+
+    let new_id -> Int = c.type_counter;
+    c.type_counter += 1;
+    let llvm_name -> String = "%struct.__generic." + new_id;
+    let info -> StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name=llvm_name, init_body=node.body, is_class=false, vtable_name="", parent_id=0, vtable=null, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=false, interfaces=null);
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, c)));
+    c.generic_instance_bindings.put("" + new_id, bindings);
+    c.generic_instance_templates.put("" + new_id, template);
+    c.struct_table.put(key, info);
+    c.struct_id_map.put("" + new_id, info);
+    c.type_drop_list.append(TypeListNode(type=new_id));
+
+    let body -> String = "";
+    let fields -> Vector(Struct) = [];
+    let i -> Int = 0;
+    while (node.fields is !null && i < node.fields.length()) {
+        let field -> ParamNode = node.fields[i];
+        let field_type -> Int = resolve_type(c, field.type_tok);
+        let field_llvm -> String = get_llvm_type_str(c, field_type);
+        if (i > 0) {
+            body += ", ";
+        }
+        body += field_llvm;
+        fields.append(FieldInfo(name=field.name_tok.value, type=field_type, llvm_type=field_llvm, offset=i, is_const=false));
+        i += 1;
+    }
+    info.fields = fields;
+    c.generic_type_defs += llvm_name + " = type { " + body + " }\n\n";
+
+    c.generic_depth -= 1;
+    restore_generic_context(c, previous, previous_bindings);
+    return new_id;
+}
+
+func register_generic_interface(c -> Compiler, template -> GenericTemplate, types -> Vector(Struct), pos -> Position) -> Int {
+    let key -> String = generic_instance_name(template.name, types, c);
+    let cached -> SymbolInfo = c.generic_instances.get(key);
+    if (cached is !null) {
+        return cached.type;
+    }
+
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return TYPE_POISON;
+    }
+    if (c.generic_instance_count >= 4096) {
+        throw_type_error(pos, "Generic instantiation limit exceeded.");
+        return TYPE_POISON;
+    }
+    c.generic_instance_count++;
+
+    let node -> InterfaceDefNode = template.node;
+    let bindings -> Dict = generic_bindings(template.type_params, types);
+    c.generic_depth++;
+    if (!check_generic_constraints(c, template, bindings, types, pos)) {
+        c.generic_depth--;
+        return TYPE_POISON;
+    }
+
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    let new_id -> Int = c.type_counter;
+    c.type_counter++;
+
+    let method_names -> Dict = Dict(8);
+    let i -> Int = 0;
+    while (node.methods is !null && i < node.methods.length()) {
+        let method_node -> MethodDefNode = node.methods[i];
+        if (method_node.type_params is !null && method_node.type_params.length() > 0) {
+            throw_type_error(method_node.pos, "Interface methods cannot declare type parameters.");
+            restore_generic_context(c, previous, previous_bindings);
+            c.generic_depth--;
+            return TYPE_POISON;
+        }
+        if (method_names.contains_key(method_node.name_tok.value)) {
+            throw_name_error(method_node.pos, "Method '" + method_node.name_tok.value + "' is already declared in interface '" + key + "'.");
+            restore_generic_context(c, previous, previous_bindings);
+            c.generic_depth--;
+            return TYPE_POISON;
+        }
+        method_names.put(method_node.name_tok.value, StringConstant(id=0, value=method_node.name_tok.value));
+        i++;
+    }
+
+    let info -> StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name="{ i8*, i8* }", init_body=null, is_class=false, vtable_name="", parent_id=0, vtable=node.methods, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=true, interfaces=null);
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, c)));
+    c.generic_instance_bindings.put("" + new_id, bindings);
+    c.generic_instance_templates.put("" + new_id, template);
+    c.struct_table.put(key, info);
+    c.struct_id_map.put("" + new_id, info);
+    c.type_drop_list.append(TypeListNode(type=new_id));
+    restore_generic_context(c, previous, previous_bindings);
+    c.generic_depth--;
+    return new_id;
+}
+
+func interface_method_type(c -> Compiler, info -> StructInfo, node -> Struct) -> Int {
+    let template -> GenericTemplate = c.generic_instance_templates.get("" + info.type_id);
+    if (template is null) {
+        return resolve_type(c, node);
+    }
+
+    let bindings -> Dict = c.generic_instance_bindings.get("" + info.type_id);
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    let result -> Int = resolve_type(c, node);
+    restore_generic_context(c, previous, previous_bindings);
+    return result;
+}
+
+func interface_method_sig(c -> Compiler, info -> StructInfo, node -> MethodDefNode) -> String {
+    let template -> GenericTemplate = c.generic_instance_templates.get("" + info.type_id);
+    if (template is null) {
+        return get_method_def_sig_str(c, node);
+    }
+
+    let bindings -> Dict = c.generic_instance_bindings.get("" + info.type_id);
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    let result -> String = get_method_def_sig_str(c, node);
+    restore_generic_context(c, previous, previous_bindings);
+    return result;
+}
+
+func implements_interface(c -> Compiler, type_id -> Int, interface_id -> Int) -> Bool {
+    if (type_id == interface_id) { return true; }
+    let info -> StructInfo = c.struct_id_map.get("" + type_id);
+    while (info is !null) {
+        let i -> Int = 0;
+        while (info.interfaces is !null && i < info.interfaces.length()) {
+            let item -> TypeListNode = info.interfaces[i];
+            if (item.type == interface_id) {
+                return true;
+            }
+            i++;
+        }
+        if (info.parent_id == 0) { break; }
+        info = c.struct_id_map.get("" + info.parent_id);
+    }
+    return false;
+}
+
+func check_generic_constraints(c -> Compiler, template -> GenericTemplate, bindings -> Dict, types -> Vector(Struct), pos -> Position) -> Bool {
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    let i -> Int = 0;
+    while (i < template.type_params.length()) {
+        let param -> GenericParamNode = template.type_params[i];
+        let actual -> TypeListNode = types[i];
+        let constraint_index -> Int = 0;
+        while (param.constraints is !null && constraint_index < param.constraints.length()) {
+            let constraint_type -> Int = resolve_type(c, param.constraints[constraint_index]);
+            let constraint_info -> StructInfo = c.struct_id_map.get("" + constraint_type);
+            if (constraint_info is null || !constraint_info.is_interface) {
+                throw_type_error(param.pos, "Generic constraint " + get_type_name(c, constraint_type) + " is not an interface.");
+                restore_generic_context(c, previous, previous_bindings);
+                return false;
+            }
+            if (!implements_interface(c, actual.type, constraint_type)) {
+                throw_type_error(pos, "Type " + get_type_name(c, actual.type) + " does not satisfy " + get_type_name(c, constraint_type) + " for '" + param.name_tok.value + "'.");
+                restore_generic_context(c, previous, previous_bindings);
+                return false;
+            }
+            constraint_index++;
+        }
+        i++;
+    }
+    restore_generic_context(c, previous, previous_bindings);
+    return true;
+}
+
+func register_generic_class(c -> Compiler, template -> GenericTemplate, types -> Vector(Struct), pos -> Position) -> Int {
+    let key -> String = generic_instance_name(template.name, types, c);
+    let cached -> SymbolInfo = c.generic_instances.get(key);
+    if (cached is !null) { return cached.type; }
+
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return TYPE_POISON;
+    }
+    if (c.generic_instance_count >= 4096) {
+        throw_type_error(pos, "Generic instantiation limit exceeded.");
+        return TYPE_POISON;
+    }
+    c.generic_instance_count += 1;
+
+    let node -> ClassDefNode = template.node;
+    if (template.name == "Dict" || template.name.ends_with(".Dict")) {
+        if (types.length() != 2) {
+            throw_type_error(pos, "Dict expects 2 type arguments, got " + types.length() + ".");
+            return TYPE_POISON;
+        }
+        let key_type -> TypeListNode = types[0];
+        if (!generic_dict_key_type(c, key_type.type)) {
+            throw_type_error(pos, "Type " + get_type_name(c, key_type.type) + " cannot be used as a Dict key");
+            return TYPE_POISON;
+        }
+        c.typed_dict_keys.put("" + key_type.type, StringConstant(id=key_type.type, value=""));
+    }
+    let bindings -> Dict = generic_bindings(template.type_params, types);
+    if (!check_generic_constraints(c, template, bindings, types, pos)) {return TYPE_POISON; }
+    let new_id -> Int = c.type_counter;
+    c.type_counter += 1;
+
+    let info -> StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name="%class.__generic." + new_id, init_body=node, is_class=true, vtable_name="@vtable.__generic." + new_id, parent_id=0, vtable=null, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=false, interfaces=null);
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, c)));
+    c.generic_instance_bindings.put("" + new_id, bindings);
+    c.generic_instance_templates.put("" + new_id, template);
+    c.struct_table.put(key, info);
+    c.struct_id_map.put("" + new_id, info);
+    c.type_drop_list.append(TypeListNode(type=new_id));
+
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+
+    let parent_info -> StructInfo = null;
+    if (node.parent_tok is !null) {
+        let parent_type -> Int = resolve_type(c, node.parent_tok);
+
+        parent_info = c.struct_id_map.get("" + parent_type);
+        if (parent_info is null || !parent_info.is_class) {
+            throw_type_error(pos, "Type " + get_type_name(c, parent_type) + " is not a class.");
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+        info.parent_id = parent_type;
+    }
+
+    let interfaces -> Vector(Struct) = [];
+    let inherited_interface_index -> Int = 0;
+    while (parent_info is !null && parent_info.interfaces is !null && inherited_interface_index < parent_info.interfaces.length()) {
+        interfaces.append(parent_info.interfaces[inherited_interface_index]);
+        inherited_interface_index++;
+    }
+
+    let interface_index -> Int = 0;
+    while (node.interfaces is !null && interface_index < node.interfaces.length()) {
+        let interface_type -> Int = resolve_type(c, node.interfaces[interface_index]);
+        let interface_info -> StructInfo = c.struct_id_map.get("" + interface_type);
+        if (interface_info is null || !interface_info.is_interface) {
+            throw_type_error(pos, "Type " + get_type_name(c, interface_type) + " is not an interface.");
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+        interfaces.append(TypeListNode(type=interface_type));
+        interface_index++;
+    }
+    info.interfaces = interfaces;
+
+    let fields -> Vector(Struct) = [];
+    let field_names -> Dict = Dict(8);
+    if (parent_info is !null) {
+        let inherited_field_index -> Int = 0;
+        while (parent_info.fields is !null && inherited_field_index < parent_info.fields.length()) {
+            let inherited_field -> FieldInfo = parent_info.fields[inherited_field_index];
+            fields.append(inherited_field);
+            field_names.put(inherited_field.name, StringConstant(id=0, value=inherited_field.name));
+            inherited_field_index++;
+        }
+    } else {
+        fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="i8*", offset=0, is_const=true));
+        field_names.put("_vptr", StringConstant(id=0, value="_vptr"));
+    }
+
+    let field_index -> Int = 0;
+    while (node.fields is !null && field_index < node.fields.length()) {
+        let field -> VarDeclareNode = node.fields[field_index];
+        let field_name -> String = field.name_tok.value;
+        if (field_names.contains_key(field_name)) {
+            throw_name_error(field.pos, "Field '" + field_name + "' is already defined in class '" + generic_type_name(template.name, types, c) + "'.");
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+
+        let field_type -> Int = resolve_type(c, field.type_node);
+        if (field_type == TYPE_AUTO) {
+            if (field.value is null) {
+                throw_type_error(field.pos, "Field '" + field_name + "' needs an explicit type when it has no initializer.");
+                restore_generic_context(c, previous, previous_bindings);
+                return TYPE_POISON;
+            }
+            field_type = get_expr_type(c, field.value);
+        }
+
+        if (field_type == TYPE_AUTO || field_type == TYPE_POISON) {
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+
+        field_names.put(field_name, StringConstant(id=0, value=field_name));
+        fields.append(FieldInfo(name=field_name, type=field_type, llvm_type=get_llvm_type_str(c, field_type), offset=fields.length(), is_const=field.is_const));
+        field_index += 1;
+    }
+    info.fields = fields;
+
+    let methods -> Vector(Struct) = [];
+    let inherited_method_index -> Int = 0;
+    while (parent_info is !null && parent_info.vtable is !null && inherited_method_index < parent_info.vtable.length()) {
+        methods.append(parent_info.vtable[inherited_method_index]);
+        inherited_method_index++;
+    }
+
+    let method_index -> Int = 0;
+    while (node.methods is !null && method_index < node.methods.length()) {
+        let method_node -> MethodDefNode = node.methods[method_index];
+        let method_name -> String = method_base_name(c, method_node);
+
+        if (method_node.type_params is !null && method_node.type_params.length() > 0) {
+            let method_key -> String = key + "_" + method_name;
+            if (c.generic_methods.get(method_key) is !null || c.func_table.get(method_key) is !null) {
+                throw_name_error(method_node.pos, "Method '" + method_key + "' is already defined.");
+                restore_generic_context(c, previous, previous_bindings);
+                return TYPE_POISON;
+            }
+
+            c.generic_methods.put(method_key, GenericTemplate(name=method_key, node=method_node, type_params=method_node.type_params, prefix=template.prefix, dir=template.dir, visible=template.visible, namespaces=template.namespaces, types=template.types, funcs=template.funcs, globals=template.globals));
+            method_index++;
+            continue;
+        }
+
+        let return_type -> Int = resolve_type(c, method_node.return_type);
+        if (return_type == TYPE_AUTO || return_type == TYPE_POISON) {
+            throw_type_error(method_node.pos, "Auto return type deduction is not supported in methods.");
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+
+        let arg_types -> Vector(Struct) = [TypeListNode(type=new_id)];
+        let arg_names -> Vector(String) = ["self"];
+        let param_names -> Dict = Dict(8);
+        let param_index -> Int = 0;
+        while (method_node.params is !null && param_index < method_node.params.length()) {
+            let param -> ParamNode = method_node.params[param_index];
+            if (param_names.contains_key(param.name_tok.value)) {
+                throw_name_error(param.pos, "Parameter '" + param.name_tok.value + "' is already defined in method '" + method_name + "'.");
+                restore_generic_context(c, previous, previous_bindings);
+                return TYPE_POISON;
+            }
+
+            let param_type -> Int = resolve_type(c, param.type_tok);
+            if (param_type == TYPE_AUTO || param_type == TYPE_POISON) {
+                throw_type_error(param.pos, "Auto cannot be used in method parameters.");
+                restore_generic_context(c, previous, previous_bindings);
+                return TYPE_POISON;
+            }
+
+            param_names.put(param.name_tok.value, StringConstant(id=0, value=param.name_tok.value));
+            arg_types.append(TypeListNode(type=param_type));
+            arg_names.append(param.name_tok.value);
+            param_index += 1;
+        }
+
+        let method_key -> String = key + "_" + method_name;
+        if (c.func_table.get(method_key) is !null || c.generic_methods.get(method_key) is !null) {
+            throw_name_error(method_node.pos, "Method '" + method_key + "' is already defined.");
+            restore_generic_context(c, previous, previous_bindings);
+            return TYPE_POISON;
+        }
+
+        let symbol -> String = mangle_wl_name(c, key + ".", method_name, arg_types);
+        let link_name -> String = "";
+        if (method_node.annotations is !null) {
+            let method_anns -> SystemAnnResult = consume_annotations(method_node.annotations, method_name);
+            link_name = method_anns.compiler_link_name;
+        }
+
+        let func_info -> FuncInfo = FuncInfo(name=symbol, base_name=method_name, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, compiler_link_name=link_name, mutates_self=true);
+        c.func_table.put(method_key, func_info);
+        if (method_name != "$init" && method_name != "$field_init" && link_name.length() == 0) {
+            let replaced -> Bool = false;
+            let inherited_index -> Int = 0;
+            while (inherited_index < methods.length()) {
+                let inherited_method -> FuncInfo = methods[inherited_index];
+                if (inherited_method.base_name == method_name) {
+                    if (inherited_method.ret_type != func_info.ret_type || inherited_method.arg_types.length() != func_info.arg_types.length()) {
+                        throw_type_error(method_node.pos, "Override of '" + method_name + "' does not match the parent method signature.");
+                        restore_generic_context(c, previous, previous_bindings);
+                        return TYPE_POISON;
+                    }
+    
+                    methods[inherited_index] = func_info;
+                    replaced = true;
+                    break;
+                }
+                inherited_index++;
+            }
+
+            if (!replaced) { methods.append(func_info); }
+        }
+        method_index += 1;
+    }
+    info.vtable = methods;
+    restore_generic_context(c, previous, previous_bindings);
+    c.generic_class_worklist.append(GenericClassInstance(template=template, bindings=bindings, type_id=new_id, depth=c.generic_depth));
+    return new_id;
+}
+
+func is_type_parameter(template -> GenericTemplate, name -> String) -> Bool {
+    let i -> Int = 0;
+    while (template.type_params is !null && i < template.type_params.length()) {
+        let param -> GenericParamNode = template.type_params[i];
+        if (param.name_tok.value == name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+func generic_dict_key_type(c -> Compiler, type_id -> Int) -> Bool {
+    if (type_id == TYPE_STRING   || type_id == TYPE_BOOL    || 
+        type_id == TYPE_CHAR     || type_id == TYPE_BYTE    || 
+        type_id == TYPE_INT8     || type_id == TYPE_INT16   || 
+        type_id == TYPE_INT      || type_id == TYPE_LONG    || 
+        type_id == TYPE_INT128   || type_id == TYPE_UINT16  || 
+        type_id == TYPE_UINT32   || type_id == TYPE_UINT64  || 
+        type_id == TYPE_UINT128  || type_id == TYPE_INTSIZE || 
+        type_id == TYPE_UINTSIZE || type_id == TYPE_FLOAT   || 
+        type_id == TYPE_FLOAT32  || type_id == TYPE_ANYPTR  || 
+        type_id == TYPE_NULLPTR) {
+        return true;
+    }
+    if (is_pointer_type(c, type_id) || c.func_ret_map.get("" + type_id) is !null || 
+        c.method_ret_map.get("" + type_id) is !null) {
+        return true;
+    }
+    let info -> StructInfo = c.struct_id_map.get("" + type_id);
+    if (info is null) {return false; }
+    if (info.is_enum) { return true; }
+    if (!info.is_class || info.name == "dict.Dict" || info.name == "Dict") { return false; }
+
+    let template -> GenericTemplate = c.generic_instance_templates.get("" + type_id);
+    return template is null || (template.name != "Dict" && !template.name.ends_with(".Dict"));
+}
+
+func bind_inferred_type(inferred -> Dict, name -> String, actual -> Int, pos -> Position) -> Bool {
+    if (actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
+
+    let previous -> SymbolInfo = inferred.get(name);
+    if (previous is !null && previous.type != actual) {
+        throw_type_error(pos, "Conflicting types inferred for '" + name + "'.");
+        return false;
+    }
+    inferred.put(name, SymbolInfo(reg="", type=actual, origin_type=actual));
+    return true;
+}
+
+func infer_type_args(c -> Compiler, template -> GenericTemplate, pattern -> Struct, actual -> Int, inferred -> Dict, pos -> Position) -> Bool {
+    if (pattern is null || actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
+    let base -> BaseNode = pattern;
+
+    if (base.type == NODE_VAR_ACCESS) {
+        let named -> VarAccessNode = pattern;
+        if (is_type_parameter(template, named.name_tok.value)) {
+            return bind_inferred_type(inferred, named.name_tok.value, actual, pos);
+        }
+        return true;
+    }
+
+    if (base.type == NODE_VECTOR_TYPE) {
+        let vector -> SymbolInfo = c.vector_base_map.get("" + actual);
+        if (vector is null) {
+            return true;
+        }
+        let pattern_vector -> VectorTypeNode = pattern;
+        return infer_type_args(c, template, pattern_vector.element_type, vector.type, inferred, pos);
+    }
+
+    if (base.type == NODE_SLICE_TYPE) {
+        let slice -> ArrayInfo = c.array_info_map.get("" + actual);
+        if (slice is null || slice.size != -1) {
+            return true;
+        }
+        let pattern_slice -> SliceTypeNode = pattern;
+        return infer_type_args(c, template, pattern_slice.element_type, slice.base_type, inferred, pos);
+    }
+
+    if (base.type == NODE_ARRAY_TYPE) {
+        let array -> ArrayInfo = c.array_info_map.get("" + actual);
+        if (array is null || array.size < 0) {
+            return true;
+        }
+        let pattern_array -> ArrayTypeNode = pattern;
+        return infer_type_args(c, template, pattern_array.base_type, array.base_type, inferred, pos);
+    }
+
+    if (base.type == NODE_PTR_TYPE) {
+        let pointer -> PointerTypeNode = pattern;
+        let current -> Int = actual;
+        let level -> Int = 0;
+        while (level < pointer.level) {
+            let ptr_info -> SymbolInfo = c.ptr_base_map.get("" + current);
+            if (ptr_info is null) {
+                return true;
+            }
+
+            current = ptr_info.type;
+            level += 1;
+        }
+        return infer_type_args(c, template, pointer.base_type, current, inferred, pos);
+    }
+
+    if (base.type == NODE_FALLIBLE_TYPE) {
+        let fallible -> SymbolInfo = c.fallible_base_map.get("" + actual);
+        if (fallible is null) {
+            return true;
+        }
+        let pattern_fallible -> FallibleTypeNode = pattern;
+        return infer_type_args(c, template, pattern_fallible.base_type, fallible.type, inferred, pos);
+    }
+
+    if (base.type == NODE_GENERIC_TYPE) {
+        let generic -> GenericTypeNode = pattern;
+        let generic_base -> BaseNode = generic.base_type;
+        if (generic_base.type == NODE_VAR_ACCESS) {
+            let named -> VarAccessNode = generic.base_type;
+            if (named.name_tok.value == "Vector") {
+                let vector -> SymbolInfo = c.vector_base_map.get("" + actual);
+                if (vector is !null && generic.type_args.length() == 1) {
+                    return infer_type_args(c, template, generic.type_args[0], vector.type, inferred, pos);
+                }
+                return true;
+            }
+            if (named.name_tok.value == "Array") {
+                let slice -> ArrayInfo = c.array_info_map.get("" + actual);
+                if (slice is !null && slice.size == -1 && generic.type_args.length() == 1) {
+                    return infer_type_args(c, template, generic.type_args[0], slice.base_type, inferred, pos);
+                }
+                return true;
+            }
+
+            let actual_bindings -> Dict = c.generic_instance_bindings.get("" + actual);
+            let actual_info -> StructInfo = c.struct_id_map.get("" + actual);
+            if (actual_bindings is null || actual_info is null) {
+                return true;
+            }
+
+            let generic_name -> String = named.name_tok.value;
+            if (c.current_package_prefix != "" && c.generic_structs.get(c.current_package_prefix + generic_name) is !null) {
+                generic_name = c.current_package_prefix + generic_name;
+            }
+    
+            let alias -> String = c.current_file_type_aliases.get(generic_name);
+            if (alias is !null) {
+                generic_name = alias;
+            }
+
+            let nested_template -> GenericTemplate = c.generic_structs.get(generic_name);
+            if (nested_template is null || !actual_info.name.starts_with(generic_name + "$")) {
+                return true;
+            }
+
+            let i -> Int = 0;
+            while (i < generic.type_args.length() && i < nested_template.type_params.length()) {
+                let nested_param -> GenericParamNode = nested_template.type_params[i];
+                let nested_actual -> SymbolInfo = actual_bindings.get(nested_param.name_tok.value);
+                if (nested_actual is !null && 
+                    !infer_type_args(c, template, generic.type_args[i], nested_actual.type, inferred, pos)) {
+                    return false;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    return true;
+}
+
+func infer_generic_instance(c -> Compiler, template -> GenericTemplate, actual -> Int, inferred -> Dict, pos -> Position) -> Bool {
+    if (actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
+
+    let actual_template -> GenericTemplate = c.generic_instance_templates.get("" + actual);
+    if (actual_template is null || actual_template.name != template.name) { return true; }
+
+    let actual_bindings -> Dict = c.generic_instance_bindings.get("" + actual);
+    if (actual_bindings is null) { return true; }
+
+    let i -> Int = 0;
+    while (i < template.type_params.length()) {
+        let param -> GenericParamNode = template.type_params[i];
+        let binding -> SymbolInfo = actual_bindings.get(param.name_tok.value);
+        if (binding is !null && !bind_inferred_type(inferred, param.name_tok.value, binding.type, pos)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+func concrete_constructor_accepts(c -> Compiler, name -> String, args -> Vector(Struct)) -> Bool {
+    let info -> StructInfo = c.struct_table.get(name);
+    if (info is null) { return false; }
+
+    let count -> Int = 0;
+    if (args is !null) {
+        count = args.length();
+    }
+    if (!info.is_class) {
+        let fields -> Int = 0;
+        if (info.fields is !null) {
+            fields = info.fields.length();
+        }
+        return count == fields;
+    }
+    let init -> FuncInfo = c.func_table.get(info.name + "_$init");
+    if (init is null) {
+        return count == 0;
+    }
+    let params -> Int = 0;
+    if (init.arg_types is !null) {
+        params = init.arg_types.length() - 1;
+    }
+    return count == params;
+}
+
+func use_generic_constructor(c -> Compiler, name -> String, template -> GenericTemplate, explicit -> Vector(Struct), args -> Vector(Struct), expected -> Int) -> Bool {
+    if (template is null) { return false; }
+    if (explicit is !null) { return true; }
+
+    let expected_template -> GenericTemplate = c.generic_instance_templates.get("" + expected);
+    if (expected_template is !null && expected_template.name == template.name) {return true; }
+    return !concrete_constructor_accepts(c, name, args);
+}
+
+func generic_constructor_params(template -> GenericTemplate) -> Vector(Struct) {
+    let base -> BaseNode = template.node;
+    if (base.type == NODE_STRUCT_DEF) {
+        let node -> StructDefNode = template.node;
+        return node.fields;
+    }
+    if (base.type == NODE_CLASS_DEF) {
+        let node -> ClassDefNode = template.node;
+        let i -> Int = 0;
+        while (node.methods is !null && i < node.methods.length()) {
+            let member -> MethodDefNode = node.methods[i];
+            if (member.name_tok.value == "$init") {
+                return member.params;
+            }
+            i += 1;
+        }
+    }
+    return null;
+}
+
+func generic_call_param(params -> Vector(Struct), arg -> ArgNode, index -> Int) -> ParamNode {
+    if (params is null) {return null; }
+    if (arg.name is null) {
+        if (index < params.length()) {
+            return params[index];
+        }
+        return null;
+    }
+
+    let i -> Int = 0;
+    while (i < params.length()) {
+        let param -> ParamNode = params[i];
+        if (param.name_tok.value == arg.name) {
+            return param;
+        }
+        i += 1;
+    }
+    return null;
+}
+
+func resolve_generic_constructor_args(c -> Compiler, template -> GenericTemplate, explicit -> Vector(Struct), args -> Vector(Struct), expected -> Int, pos -> Position) -> Vector(Struct) {
+    let result -> Vector(Struct) = [];
+    let count -> Int = template.type_params.length();
+    let i -> Int = 0;
+    if (explicit is !null) {
+        if (explicit.length() != count) {
+            throw_type_error(pos, "Type '" + template.name + "' expects " + count + " type arguments, got " + explicit.length() + ".");
+            return null;
+        }
+        while (i < explicit.length()) {
+            let type_id -> Int = resolve_type(c, explicit[i]);
+            if (type_id == TYPE_POISON) { return null; }
+            result.append(TypeListNode(type=type_id));
+            i += 1;
+        }
+        return result;
+    }
+
+    let inferred -> Dict = Dict(8);
+    if (!infer_generic_instance(c, template, expected, inferred, pos)) { return null; }
+
+    let params -> Vector(Struct) = generic_constructor_params(template);
+    i = 0;
+    while (args is !null && params is !null && i < args.length()) {
+        let arg -> ArgNode = args[i];
+        let param -> ParamNode = generic_call_param(params, arg, i);
+        if (param is null) {
+            i += 1;
+            continue;
+        }
+        let previous_expected -> Int = c.expected_type;
+        c.expected_type = 0;
+        let actual_type -> Int = get_expr_type(c, arg.val);
+        c.expected_type = previous_expected;
+        if (actual_type == TYPE_POISON) { return null; }
+        if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
+        i += 1;
+    }
+    i = 0;
+    while (i < count) {
+        let type_param -> GenericParamNode = template.type_params[i];
+        let inferred_type -> SymbolInfo = inferred.get(type_param.name_tok.value);
+        if (inferred_type is null) {
+            throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for type '" + template.name + "'.");
+            return null;
+        }
+        result.append(TypeListNode(type=inferred_type.type));
+        i += 1;
+    }
+    return result;
+}
+
+func resolve_generic_args(c -> Compiler, template -> GenericTemplate, explicit -> Vector(Struct), args -> Vector(Struct), pos -> Position) -> Vector(Struct) {
+    let result -> Vector(Struct) = [];
+    let count -> Int = template.type_params.length();
+    let i -> Int = 0;
+    if (explicit is !null) {
+        if (explicit.length() != count) {
+            throw_type_error(pos, "Function '" + template.name + "' expects " + count + " type arguments, got " + explicit.length() + ".");
+            return null;
+        }
+        while (i < explicit.length()) {
+            let type_id -> Int = resolve_type(c, explicit[i]);
+            if (type_id == TYPE_POISON) { return null; }
+            result.append(TypeListNode(type=type_id));
+            i += 1;
+        }
+        return result;
+    }
+
+    let node -> FunctionDefNode = template.node;
+    let inferred -> Dict = Dict(8);
+    if (!infer_type_args(c, template, node.ret_type_tok, c.expected_type, inferred, pos)) { return null; }
+
+    i = 0;
+    while (args is !null && node.params is !null && i < args.length()) {
+        let arg -> ArgNode = args[i];
+        let param -> ParamNode = generic_call_param(node.params, arg, i);
+        if (param is null) {
+            i += 1;
+            continue;
+        }
+
+        let previous_expected -> Int = c.expected_type;
+        c.expected_type = 0;
+
+        let actual_type -> Int = get_expr_type(c, arg.val);
+        c.expected_type = previous_expected;
+
+        if (actual_type == TYPE_POISON) { return null; }
+        if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
+        i += 1;
+    }
+
+    i = 0;
+    while (i < count) {
+        let type_param -> GenericParamNode = template.type_params[i];
+        let inferred_type -> SymbolInfo = inferred.get(type_param.name_tok.value);
+        if (inferred_type is null) {
+            throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for function '" + template.name + "'.");
+            return null;
+        }
+
+        result.append(TypeListNode(type=inferred_type.type));
+        i += 1;
+    }
+    return result;
+}
+
+func resolve_generic_method_args(c -> Compiler, template -> GenericTemplate, explicit -> Vector(Struct), args -> Vector(Struct), pos -> Position) -> Vector(Struct) {
+    let result -> Vector(Struct) = [];
+    let count -> Int = template.type_params.length();
+    let i -> Int = 0;
+    if (explicit is !null) {
+        if (explicit.length() != count) {
+            let method_node -> MethodDefNode = template.node;
+            throw_type_error(pos, "Method '" + method_node.name_tok.value + "' expects " + count + " type arguments, got " + explicit.length() + ".");
+            return null;
+        }
+        while (i < explicit.length()) {
+            let type_id -> Int = resolve_type(c, explicit[i]);
+            if (type_id == TYPE_POISON) { return null; }
+            result.append(TypeListNode(type=type_id));
+            i++;
+        }
+        return result;
+    }
+
+    let node -> MethodDefNode = template.node;
+    let inferred -> Dict = Dict(8);
+    if (!infer_type_args(c, template, node.return_type, c.expected_type, inferred, pos)) { return null; }
+
+    i = 0;
+    while (args is !null && node.params is !null && i < args.length()) {
+        let arg -> ArgNode = args[i];
+        let param -> ParamNode = generic_call_param(node.params, arg, i);
+        if (param is !null) {
+            let previous_expected -> Int = c.expected_type;
+            c.expected_type = 0;
+            let actual_type -> Int = get_expr_type(c, arg.val);
+            c.expected_type = previous_expected;
+            if (actual_type == TYPE_POISON) { return null; }
+            if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < count) {
+        let type_param -> GenericParamNode = template.type_params[i];
+        let inferred_type -> SymbolInfo = inferred.get(type_param.name_tok.value);
+        if (inferred_type is null) {
+            throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for method '" + node.name_tok.value + "'.");
+            return null;
+        }
+        result.append(TypeListNode(type=inferred_type.type));
+        i++;
+    }
+    return result;
+}
+
+func register_generic_method(c -> Compiler, template -> GenericTemplate, owner -> StructInfo, types -> Vector(Struct), pos -> Position) -> FuncInfo {
+    let key -> String = generic_instance_name(template.name, types, c);
+    let cached -> FuncInfo = c.func_table.get(key);
+    if (cached is !null) { return cached; }
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return null;
+    }
+    if (c.generic_instance_count >= 4096) {
+        throw_type_error(pos, "Generic instantiation limit exceeded.");
+        return null;
+    }
+    c.generic_instance_count++;
+
+    let node -> MethodDefNode = template.node;
+    let owner_bindings -> Dict = c.generic_instance_bindings.get("" + owner.type_id);
+    let bindings -> Dict = extend_generic_bindings(owner_bindings, template.type_params, types);
+    if (!check_generic_constraints(c, template, bindings, types, pos)) { return null; }
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    c.generic_depth++;
+
+    let return_type -> Int = resolve_type(c, node.return_type);
+    let arg_types -> Vector(Struct) = [TypeListNode(type=owner.type_id)];
+    let arg_names -> Vector(String) = ["self"];
+    let i -> Int = 0;
+    while (node.params is !null && i < node.params.length()) {
+        let param -> ParamNode = node.params[i];
+        arg_types.append(TypeListNode(type=resolve_type(c, param.type_tok)));
+        arg_names.append(param.name_tok.value);
+        i++;
+    }
+
+    let symbol -> String = mangle_wl_name(c, owner.name + ".", key, arg_types);
+    let info -> FuncInfo = FuncInfo(name=symbol, base_name=node.name_tok.value, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false);
+    c.func_table.put(key, info);
+    c.generic_method_worklist.append(GenericMethodInstance(template=template, bindings=bindings, func_key=key, owner_name=owner.name, depth=c.generic_depth));
+
+    c.generic_depth--;
+    restore_generic_context(c, previous, previous_bindings);
+    return info;
+}
+
+func register_generic_func(c -> Compiler, template -> GenericTemplate, types -> Vector(Struct), pos -> Position) -> FuncInfo {
+    let key -> String = generic_instance_name(template.name, types, c);
+    let cached -> FuncInfo = c.func_table.get(key);
+    if (cached is !null) { return cached; }
+
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return null;
+    }
+
+    if (c.generic_instance_count >= 4096) {
+        throw_type_error(pos, "Generic instantiation limit exceeded.");
+        return null;
+    }
+
+    c.generic_instance_count += 1;
+
+    let node -> FunctionDefNode = template.node;
+    let bindings -> Dict = generic_bindings(template.type_params, types);
+    if (!check_generic_constraints(c, template, bindings, types, pos)) { return null; }
+    let previous_bindings -> Dict = c.generic_bindings;
+    let previous -> GenericTemplate = use_generic_context(c, template, bindings);
+    c.generic_depth += 1;
+
+    let ret_type -> Int = resolve_type(c, node.ret_type_tok);
+    let arg_types -> Vector(Struct) = [];
+    let arg_names -> Vector(String) = [];
+
+    let i -> Int = 0;
+    while (node.params is !null && i < node.params.length()) {
+        let param -> ParamNode = node.params[i];
+        arg_types.append(TypeListNode(type=resolve_type(c, param.type_tok)));
+        arg_names.append(param.name_tok.value);
+        i += 1;
+    }
+
+    let symbol -> String = mangle_wl_name(c, template.prefix, key, arg_types);
+    let info -> FuncInfo = FuncInfo(name=symbol, base_name=template.name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false);
+    c.func_table.put(key, info);
+    c.generic_worklist.append(GenericFuncInstance(template=template, bindings=bindings, func_key=key, depth=c.generic_depth));
+
+    c.generic_depth -= 1;
+    restore_generic_context(c, previous, previous_bindings);
+    return info;
+}
+
 func resolve_type(c -> Compiler, node -> Struct) -> Int {
     if (node is null) { return TYPE_VOID; }
     let base -> BaseNode = node;
+
+    if (base.type == NODE_GENERIC_TYPE) {
+        let generic -> GenericTypeNode = node;
+        let base_node -> BaseNode = generic.base_type;
+        if (base_node.type != NODE_VAR_ACCESS && base_node.type != NODE_FIELD_ACCESS) {
+            throw_type_error(generic.pos, "Generic types must name a declared type.");
+            return TYPE_POISON;
+        }
+        let args -> Vector(Struct) = generic.type_args;
+        let simple_name -> String = "";
+        if (base_node.type == NODE_VAR_ACCESS) {
+            let named -> VarAccessNode = generic.base_type; simple_name = named.name_tok.value;
+        }
+        if (simple_name == "Vector") {
+            if (args is null || args.length() != 1) {
+                throw_type_error(generic.pos, "Vector expects 1 type argument.");
+                return TYPE_POISON;
+            }
+            return get_vector_type_id(c, resolve_type(c, args[0]));
+        }
+        if (simple_name == "Array") {
+            if (args is null || args.length() != 1) {
+                throw_type_error(generic.pos, "Array expects 1 type argument.");
+                return TYPE_POISON;
+            }
+            return get_slice_type_id(c, resolve_type(c, args[0]));
+        }
+        let key -> String = generic_symbol_name(c, generic.base_type, false);
+        let template -> GenericTemplate = c.generic_structs.get(key);
+        if (template is null) {
+            let exported_key -> String = c.global_type_aliases.get(key);
+            if (exported_key is !null) {
+                template = c.generic_structs.get(exported_key);
+                key = exported_key;
+            }
+        }
+        if (template is null && base_node.type == NODE_VAR_ACCESS) {
+            let named -> VarAccessNode = generic.base_type;
+            let import_key -> String = c.current_file_type_aliases.get(named.name_tok.value);
+            if (import_key is !null) {
+                template = c.generic_structs.get(import_key);
+                key = import_key;
+            }
+        }
+        if (template is null) {
+            throw_type_error(generic.pos, "Type '" + key + "' is not generic.");
+            return TYPE_POISON;
+        }
+        if (args is null || args.length() != template.type_params.length()) {
+            let got -> Int = 0;
+            if (args is !null) {
+                got = args.length();
+            }
+            throw_type_error(generic.pos, "Type '" + key + "' expects " + template.type_params.length() + " type arguments, got " + got + ".");
+            return TYPE_POISON;
+        }
+        let instance_key -> String = key;
+
+        let i -> Int = 0;
+        while (i < args.length()) {
+            let arg_type -> Int = resolve_type(c, args[i]);
+            instance_key += "$" + mangle_type(c, arg_type);
+            i += 1;
+        }
+
+        let cached -> SymbolInfo = c.generic_instances.get(instance_key);
+        if (cached is !null) { return cached.type; }
+
+        let concrete -> Vector(Struct) = [];
+
+        i = 0;
+        while (i < args.length()) {
+            concrete.append(TypeListNode(type=resolve_type(c, args[i])));
+            i += 1;
+        }
+
+        let template_base -> BaseNode = template.node;
+        if (template_base.type == NODE_CLASS_DEF) {
+            return register_generic_class(c, template, concrete, generic.pos);
+        }
+        if (template_base.type == NODE_INTERFACE_DEF) {
+            return register_generic_interface(c, template, concrete, generic.pos);
+        }
+
+        return register_generic_struct(c, template, concrete, generic.pos);
+    }
 
     if (base.type == NODE_FUNCTION_TYPE) {
         let f_node -> FunctionTypeNode = node;
@@ -1992,6 +3433,9 @@ func resolve_type(c -> Compiler, node -> Struct) -> Int {
     if (base.type == NODE_VAR_ACCESS) {
         let v -> VarAccessNode = node;
         let name -> String = v.name_tok.value;
+
+        let generic_type -> SymbolInfo = c.generic_bindings.get(name);
+        if (generic_type is !null) { return generic_type.type; }
 
         if (name == "Int" || name == "Int32") { return TYPE_INT; }
         if (name == "Long" || name == "Int64") { return TYPE_LONG; }
