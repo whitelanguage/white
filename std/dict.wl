@@ -2,6 +2,7 @@
 // dynamic hash table with type-aware keys and values
 
 import "internal/runtime"
+import Hash, Eq from "hash"
 
 error Error {
     KeyNotFound
@@ -251,7 +252,7 @@ class Dict {
     }
 }
 
-class Dict<K, V> {
+class Dict<K: Hash + Eq(K), V> {
     let ptr keys -> K = nullptr;
     let ptr values -> V = nullptr;
     let ptr hashes -> Int = nullptr;
@@ -279,38 +280,38 @@ class Dict<K, V> {
         self.capacity = actual_cap;
     }
 
-    @CompilerLink("typed_dict_hash")
-    method _hash(key -> K) -> Int {
+    @CompilerLink("hash_value")
+    method __hash(key -> K) -> Int {
         return 0;
     }
 
-    @CompilerLink("typed_dict_equal")
-    method _equal(left -> K, right -> K) -> Bool {
+    @CompilerLink("values_equal")
+    method __equal(left -> K, right -> K) -> Bool {
         return false;
     }
 
-    @CompilerLink("typed_dict_zero")
-    method _zero_key() -> K {
+    @CompilerLink("zero_value")
+    method __zero_key() -> K {
         return null;
     }
 
-    @CompilerLink("typed_dict_zero")
-    method _zero_value() -> V {
+    @CompilerLink("zero_value")
+    method __zero_value() -> V {
         return null;
     }
 
-    method _clear_slots(ptr slot_keys -> K, ptr slot_values -> V, ptr slot_hashes -> Int, cap -> Int) -> Void {
+    method __clear_slots(ptr slot_keys -> K, ptr slot_values -> V, ptr slot_hashes -> Int, cap -> Int) -> Void {
         let i -> Int = 0;
         while (i < cap) {
             if (slot_hashes[i] >= 2) {
-                slot_keys[i] = self._zero_key();
-                slot_values[i] = self._zero_value();
+                slot_keys[i] = self.__zero_key();
+                slot_values[i] = self.__zero_value();
             }
             i++;
         }
     }
 
-    method _rehash(new_cap -> Int) -> Void {
+    method __rehash(new_cap -> Int) -> Void {
         let old_cap -> Int = self.capacity;
         let ptr old_keys -> K = self.keys;
         let ptr old_values -> V = self.values;
@@ -347,18 +348,18 @@ class Dict<K, V> {
             i++;
         }
 
-        self._clear_slots(old_keys, old_values, old_hashes, old_cap);
+        self.__clear_slots(old_keys, old_values, old_hashes, old_cap);
         runtime.mem_dealloc(old_keys);
         runtime.mem_dealloc(old_values);
         runtime.mem_dealloc(old_hashes);
     }
 
-    method _prepare_insert() -> Bool {
+    method __prepare_insert() -> Bool {
         if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) {
             return false;
         }
         if ((self.size + 1) * 3 < self.capacity * 2) {
-            self._rehash(self.capacity);
+            self.__rehash(self.capacity);
             return true;
         }
         if (self.capacity >= 1073741824) {
@@ -366,12 +367,12 @@ class Dict<K, V> {
             return false;
         }
 
-        self._rehash(self.capacity << 1);
+        self.__rehash(self.capacity << 1);
         return true;
     }
 
     method put(key -> K, value -> V) -> Void {
-        let hash -> Int = self._hash(key);
+        let hash -> Int = self.__hash(key);
         if (hash < 2) {
             runtime.panic("Dict key is not hashable");
             return;
@@ -383,7 +384,7 @@ class Dict<K, V> {
         while true {
             let current -> Int = self.hashes[idx];
             if (current == 0) {
-                if (self._prepare_insert()) {
+                if (self.__prepare_insert()) {
                     self.put(key, value);
                     return;
                 }
@@ -403,7 +404,7 @@ class Dict<K, V> {
                     first_tombstone = idx;
                 }
             }
-            else if (current == hash && self._equal(self.keys[idx], key)) {
+            else if (current == hash && self.__equal(self.keys[idx], key)) {
                 self.values[idx] = value;
                 return;
             }
@@ -417,7 +418,7 @@ class Dict<K, V> {
             throw Error.KeyNotFound;
         }
 
-        let hash -> Int = self._hash(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx -> Int = hash & mask;
         while true {
@@ -425,7 +426,7 @@ class Dict<K, V> {
             if (current == 0) {
                 throw Error.KeyNotFound;
             }
-            if (current == hash && self._equal(self.keys[idx], key)) {
+            if (current == hash && self.__equal(self.keys[idx], key)) {
                 return self.values[idx];
             }
             idx = (idx + 1) & mask;
@@ -435,23 +436,23 @@ class Dict<K, V> {
 
     method lookup(key -> K) -> V {
         if (self.size == 0) {
-            return self._zero_value();
+            return self.__zero_value();
         }
 
-        let hash -> Int = self._hash(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx -> Int = hash & mask;
         while true {
             let current -> Int = self.hashes[idx];
             if (current == 0) {
-                return self._zero_value();
+                return self.__zero_value();
             }
-            if (current == hash && self._equal(self.keys[idx], key)) {
+            if (current == hash && self.__equal(self.keys[idx], key)) {
                 return self.values[idx];
             }
             idx = (idx + 1) & mask;
         }
-        return self._zero_value();
+        return self.__zero_value();
     }
 
     method remove(key -> K) -> Bool {
@@ -459,7 +460,7 @@ class Dict<K, V> {
             return false;
         }
 
-        let hash -> Int = self._hash(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx -> Int = hash & mask;
         while true {
@@ -468,10 +469,10 @@ class Dict<K, V> {
                 return false;
             }
 
-            if (current == hash && self._equal(self.keys[idx], key)) {
+            if (current == hash && self.__equal(self.keys[idx], key)) {
                 self.hashes[idx] = 1;
-                self.keys[idx] = self._zero_key();
-                self.values[idx] = self._zero_value();
+                self.keys[idx] = self.__zero_key();
+                self.values[idx] = self.__zero_value();
                 self.size--;
                 self.tombstones++;
                 return true;
@@ -487,7 +488,7 @@ class Dict<K, V> {
             return false;
         }
 
-        let hash -> Int = self._hash(key);
+        let hash -> Int = self.__hash(key);
         let mask -> Int = self.capacity - 1;
         let idx -> Int = hash & mask;
         while true {
@@ -495,7 +496,7 @@ class Dict<K, V> {
             if (current == 0) {
                 return false;
             }
-            if (current == hash && self._equal(self.keys[idx], key)) {
+            if (current == hash && self.__equal(self.keys[idx], key)) {
                 return true;
             }
             idx = (idx + 1) & mask;
@@ -512,7 +513,7 @@ class Dict<K, V> {
     }
 
     method clear() -> Void {
-        self._clear_slots(self.keys, self.values, self.hashes, self.capacity);
+        self.__clear_slots(self.keys, self.values, self.hashes, self.capacity);
         runtime.mem_set(self.hashes, 0, UIntSize(self.capacity) * size_of(Int));
 
         self.size = 0;
@@ -523,7 +524,7 @@ class Dict<K, V> {
         if (self.keys is !nullptr && 
             self.values is !nullptr && 
             self.hashes is !nullptr) {
-            self._clear_slots(self.keys, self.values, self.hashes, self.capacity);
+            self.__clear_slots(self.keys, self.values, self.hashes, self.capacity);
         }
         if (self.keys is !nullptr) {
             runtime.mem_dealloc(self.keys);

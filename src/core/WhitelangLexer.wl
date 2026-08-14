@@ -5,6 +5,7 @@ import * from "WhitelangExceptions.wl"
 
 struct Lexer(
     text -> String,
+    length -> Int,
     pos  -> Position, 
     current_char -> Char,
     current_width -> Int,
@@ -206,7 +207,14 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
 }
 
 func lexer_load_current(l -> Lexer) -> Void {
-    while (l.pos.idx < l.text.length()) {
+    while (l.pos.idx < l.length) {
+        let first -> Int = Int(l.text[l.pos.idx]);
+        if (first > 0 && first <= 127) {
+            l.current_char = Char(first);
+            l.current_width = 1;
+            l.current_valid = true;
+            return;
+        }
         let unit -> Utf8Unit = decode_utf8_unit(l.text, l.pos.idx);
         if (!unit.valid || unit.value == '\0') {
             let err_pos -> Position = Position(idx=l.pos.idx, ln=l.pos.ln, col=l.pos.col, text=l.text, fn=l.pos.fn);
@@ -230,7 +238,7 @@ func lexer_load_current(l -> Lexer) -> Void {
 
 func __new_lexer(fn -> String, text -> String, collect_trivia -> Bool) -> Lexer {
     let pos -> Position = Position(idx=0, ln=0, col=0, text=text, fn=fn);
-    let l -> Lexer = Lexer(text=text, pos=pos, current_char='\0', current_width=0, current_valid=true, collect_trivia=collect_trivia, trivia=[]);
+    let l -> Lexer = Lexer(text=text, length=text.length(), pos=pos, current_char='\0', current_width=0, current_valid=true, collect_trivia=collect_trivia, trivia=[]);
     lexer_load_current(l);
     return l;
 }
@@ -253,48 +261,64 @@ func lexer_advance(l -> Lexer) -> Void {
         l.pos.col += previous_width;
     }
     l.pos.idx += previous_width;
+
+    if (l.pos.idx < l.length) {
+        let next -> Int = Int(l.text[l.pos.idx]);
+        if (next > 0 && next <= 127) {
+            l.current_char = Char(next);
+            l.current_width = 1;
+            l.current_valid = true;
+            return;
+        }
+    }
     lexer_load_current(l);
 }
 
 func get_string(l -> Lexer) -> Token {
     let start_ln -> Int = l.pos.ln;
     let start_col -> Int = l.pos.col;
-    
-    lexer_advance(l); // skip opening "
-    
+    lexer_advance(l);
+
     let result -> String = "";
-    
-    // " and \
+    let chunk_start -> Int = l.pos.idx;
     while (l.current_char != '"' && l.current_char != '\0') {
-        if (l.current_char == '\\') { // \
-            lexer_advance(l); 
-            if (l.current_char == 'n') { // 'n' -> newline
-                result = result + "\n";
-            } else if (l.current_char == 't') { // 't' -> tab
-                result = result + "\t";
-            } else if (l.current_char == 'r') { // 'r' -> return
-                result = result + "\r";
-            } else if (l.current_char == '"') { // '"' -> "
-                result = result + "\"";
-            } else if (l.current_char == '\\') { // '\' -> \
-                result = result + "\\";
+        if (l.current_char == '\\') {
+            if (l.pos.idx > chunk_start) {
+                result += l.text.slice(chunk_start, l.pos.idx);
+            }
+            lexer_advance(l);
+            if (l.current_char == 'n') {
+                result += "\n";
+            } else if (l.current_char == 't') {
+                result += "\t";
+            } else if (l.current_char == 'r') {
+                result += "\r";
+            } else if (l.current_char == '"') {
+                result += "\"";
+            } else if (l.current_char == '\\') {
+                result += "\\";
             } else {
                 let idx -> Int = l.pos.idx;
-                result += l.text.slice(idx, idx + 1); 
+                result += l.text.slice(idx, idx + l.current_width);
             }
-            lexer_advance(l); // consume the escaped char
+            lexer_advance(l);
+            chunk_start = l.pos.idx;
         } else {
-            let idx -> Int = l.pos.idx;
-            result += l.text.slice(idx, idx + l.current_width);
             lexer_advance(l);
         }
     }
-    
+
     if (l.current_char == '"') {
-        lexer_advance(l); // skip closing "
+        if (l.pos.idx > chunk_start) {
+            result += l.text.slice(chunk_start, l.pos.idx);
+        }
+        lexer_advance(l);
         return WhitelangTokens.Token(type=TOK_STR_LIT, value=result, line=start_ln, col=start_col);
     }
-    
+
+    if (l.pos.idx > chunk_start) {
+        result += l.text.slice(chunk_start, l.pos.idx);
+    }
     throw_illegal_char(l.pos, "Unterminated string literal. ");
     return WhitelangTokens.Token(type=TOK_STR_LIT, value=result, line=start_ln, col=start_col);
 }
@@ -367,62 +391,122 @@ func get_number(l -> Lexer) -> Token {
     return WhitelangTokens.Token(type=TOK_INT, value=value, line=start_line, col=start_col);
 }
 
+func keyword_matches(text -> String, start -> Int, length -> Int, keyword -> String) -> Bool {
+    if (length != keyword.length()) { return false; }
+    let i -> Int = 0;
+    while (i < length) {
+        if (text[start + i] != keyword[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+func keyword_type(text -> String, start -> Int, length -> Int) -> Int {
+    let first -> Char = text[start];
+    if (length == 2) {
+        if (first == 'a') {
+            if (keyword_matches(text, start, length, "as")) { return TOK_AS; }
+        } else if (first == 'i') {
+            if (keyword_matches(text, start, length, "if")) { return TOK_IF; }
+            if (keyword_matches(text, start, length, "is")) { return TOK_IS; }
+            if (keyword_matches(text, start, length, "in")) { return TOK_IN; }
+        }
+    } else if (length == 3) {
+        if (first == 'I') {
+            if (keyword_matches(text, start, length, "Int")) { return TOK_T_INT; }
+        } else if (first == 'f') {
+            if (keyword_matches(text, start, length, "for")) { return TOK_FOR; }
+        } else if (first == 'l') {
+            if (keyword_matches(text, start, length, "let")) { return TOK_LET; }
+        } else if (first == 'p') {
+            if (keyword_matches(text, start, length, "ptr")) { return TOK_PTR; }
+        } else if (first == 'r') {
+            if (keyword_matches(text, start, length, "ref")) { return TOK_REF; }
+        }
+    } else if (length == 4) {
+        if (first == 'B') {
+            if (keyword_matches(text, start, length, "Bool")) { return TOK_T_BOOL; }
+        } else if (first == 'C') {
+            if (keyword_matches(text, start, length, "Char")) { return TOK_T_CHAR; }
+        } else if (first == 'V') {
+            if (keyword_matches(text, start, length, "Void")) { return TOK_T_VOID; }
+        } else if (first == 'e') {
+            if (keyword_matches(text, start, length, "else")) { return TOK_ELSE; }
+            if (keyword_matches(text, start, length, "enum")) { return TOK_ENUM; }
+        } else if (first == 'f') {
+            if (keyword_matches(text, start, length, "func")) { return TOK_FUNC; }
+            if (keyword_matches(text, start, length, "from")) { return TOK_FROM; }
+        } else if (first == 'n') {
+            if (keyword_matches(text, start, length, "null")) { return TOK_NULL; }
+        } else if (first == 's') {
+            if (keyword_matches(text, start, length, "self")) { return TOK_SELF; }
+        } else if (first == 't') {
+            if (keyword_matches(text, start, length, "true")) { return TOK_TRUE; }
+            if (keyword_matches(text, start, length, "this")) { return TOK_THIS; }
+            if (keyword_matches(text, start, length, "type")) { return TOK_TYPE; }
+        } else if (first == 'w') {
+            if (keyword_matches(text, start, length, "with")) { return TOK_WITH; }
+        }
+    } else if (length == 5) {
+        if (first == 'F') {
+            if (keyword_matches(text, start, length, "Float")) { return TOK_T_FLOAT; }
+        } else if (first == 'b') {
+            if (keyword_matches(text, start, length, "break")) { return TOK_BREAK; }
+        } else if (first == 'c') {
+            if (keyword_matches(text, start, length, "const")) { return TOK_CONST; }
+            if (keyword_matches(text, start, length, "class")) { return TOK_CLASS; }
+            if (keyword_matches(text, start, length, "catch")) { return TOK_CATCH; }
+        } else if (first == 'd') {
+            if (keyword_matches(text, start, length, "deref")) { return TOK_DEREF; }
+        } else if (first == 'e') {
+            if (keyword_matches(text, start, length, "error")) { return TOK_ERROR; }
+        } else if (first == 'f') {
+            if (keyword_matches(text, start, length, "false")) { return TOK_FALSE; }
+        } else if (first == 's') {
+            if (keyword_matches(text, start, length, "super")) { return TOK_SUPER; }
+        } else if (first == 't') {
+            if (keyword_matches(text, start, length, "throw")) { return TOK_THROW; }
+        } else if (first == 'w') {
+            if (keyword_matches(text, start, length, "while")) { return TOK_WHILE; }
+        }
+    } else if (length == 6) {
+        if (first == 'S') {
+            if (keyword_matches(text, start, length, "String")) { return TOK_T_STRING; }
+        } else if (first == 'e') {
+            if (keyword_matches(text, start, length, "extern")) { return TOK_EXTERN; }
+        } else if (first == 'i') {
+            if (keyword_matches(text, start, length, "import")) { return TOK_IMPORT; }
+        } else if (first == 'm') {
+            if (keyword_matches(text, start, length, "method")) { return TOK_METHOD; }
+        } else if (first == 'r') {
+            if (keyword_matches(text, start, length, "return")) { return TOK_RETURN; }
+        } else if (first == 's') {
+            if (keyword_matches(text, start, length, "struct")) { return TOK_STRUCT; }
+        }
+    } else if (length == 7) {
+        if (first == 'n' && keyword_matches(text, start, length, "nullptr")) { return TOK_NULLPTR; }
+    } else if (length == 8) {
+        if (first == 'c' && keyword_matches(text, start, length, "continue")) { return TOK_CONTINUE; }
+    } else if (length == 9 && first == 'i' && keyword_matches(text, start, length, "interface")) {
+        return TOK_INTERFACE;
+    }
+    return TOK_IDENTIFIER;
+}
+
 func get_identifier(l -> Lexer) -> Token {
     let start_line -> Int = l.pos.ln;
     let start_col  -> Int = l.pos.col;
     let start_pos  -> Int = l.pos.idx;
-
     while (l.current_char != '\0' && (is_alpha(l.current_char) || is_digit(l.current_char))) {
         lexer_advance(l);
     }
-
+    let length -> Int = l.pos.idx - start_pos;
+    let type -> Int = keyword_type(l.text, start_pos, length);
+    if (type != TOK_IDENTIFIER) {
+        return WhitelangTokens.Token(type=type, value=get_token_name(type), line=start_line, col=start_col);
+    }
     let value -> String = l.text.slice(start_pos, l.pos.idx);
-
-    // Keywords mapping
-    if (value == "let") {return WhitelangTokens.Token(type=TOK_LET, value=value, line=start_line, col=start_col);}
-    if (value == "Int") {return WhitelangTokens.Token(type=TOK_T_INT, value=value, line=start_line, col=start_col);}
-    if (value == "Float") {return WhitelangTokens.Token(type=TOK_T_FLOAT, value=value, line=start_line, col=start_col);}
-    if (value == "String") {return WhitelangTokens.Token(type=TOK_T_STRING, value=value, line=start_line, col=start_col);}
-    if (value == "Char") {return WhitelangTokens.Token(type=TOK_T_CHAR, value=value, line=start_line, col=start_col);}
-    if (value == "Bool") {return WhitelangTokens.Token(type=TOK_T_BOOL, value=value, line=start_line, col=start_col);}
-    if (value == "Void") {return WhitelangTokens.Token(type=TOK_T_VOID, value=value, line=start_line, col=start_col);}
-    if (value == "true") {return WhitelangTokens.Token(type=TOK_TRUE, value=value, line=start_line, col=start_col);}
-    if (value == "false") {return WhitelangTokens.Token(type=TOK_FALSE, value=value, line=start_line, col=start_col);}
-    if (value == "if") {return WhitelangTokens.Token(type=TOK_IF, value=value, line=start_line, col=start_col);}
-    if (value == "else") {return WhitelangTokens.Token(type=TOK_ELSE, value=value, line=start_line, col=start_col);}
-    if (value == "while") {return WhitelangTokens.Token(type=TOK_WHILE, value=value, line=start_line, col=start_col);}
-    if (value == "break") { return WhitelangTokens.Token(type=TOK_BREAK, value=value, line=start_line, col=start_col); }
-    if (value == "continue") { return WhitelangTokens.Token(type=TOK_CONTINUE, value=value, line=start_line, col=start_col); }
-    if (value == "for")      { return WhitelangTokens.Token(type=TOK_FOR, value=value, line=start_line, col=start_col); }
-    if (value == "func")     { return WhitelangTokens.Token(type=TOK_FUNC, value=value, line=start_line, col=start_col); }
-    if (value == "return")   { return WhitelangTokens.Token(type=TOK_RETURN, value=value, line=start_line, col=start_col); }
-    if (value == "struct") { return WhitelangTokens.Token(type=TOK_STRUCT, value=value, line=start_line, col=start_col); }
-    if (value == "this")   { return WhitelangTokens.Token(type=TOK_THIS, value=value, line=start_line, col=start_col); }
-    if (value == "ptr") { return WhitelangTokens.Token(type=TOK_PTR, value=value, line=start_line, col=start_col); }
-    if (value == "ref") { return WhitelangTokens.Token(type=TOK_REF, value=value, line=start_line, col=start_col); }
-    if (value == "deref") { return WhitelangTokens.Token(type=TOK_DEREF, value=value, line=start_line, col=start_col); }
-    if (value == "nullptr") { return WhitelangTokens.Token(type=TOK_NULLPTR, value=value, line=start_line, col=start_col); }
-    if (value == "null") { return WhitelangTokens.Token(type=TOK_NULL, value=value, line=start_line, col=start_col); }
-    if (value == "is") { return WhitelangTokens.Token(type=TOK_IS, value=value, line=start_line, col=start_col); }
-    if (value == "extern") { return WhitelangTokens.Token(type=TOK_EXTERN, value=value, line=start_line, col=start_col); }
-    if (value == "from") { return WhitelangTokens.Token(type=TOK_FROM, value=value, line=start_line, col=start_col); }
-    if (value == "import") { return WhitelangTokens.Token(type=TOK_IMPORT, value=value, line=start_line, col=start_col); }
-    if (value == "const") { return WhitelangTokens.Token(type=TOK_CONST, value=value, line=start_line, col=start_col); }
-    if (value == "as") { return WhitelangTokens.Token(type=TOK_AS, value=value, line=start_line, col=start_col); }
-    if (value == "class") { return WhitelangTokens.Token(type=TOK_CLASS, value=value, line=start_line, col=start_col); }
-    if (value == "method") { return WhitelangTokens.Token(type=TOK_METHOD, value=value, line=start_line, col=start_col); }
-    if (value == "self") { return WhitelangTokens.Token(type=TOK_SELF, value=value, line=start_line, col=start_col); }
-    if (value == "super") { return WhitelangTokens.Token(type=TOK_SUPER, value=value, line=start_line, col=start_col); }
-    if (value == "enum") { return WhitelangTokens.Token(type=TOK_ENUM, value=value, line=start_line, col=start_col); }
-    if (value == "error") { return WhitelangTokens.Token(type=TOK_ERROR, value=value, line=start_line, col=start_col); }
-    if (value == "type") { return WhitelangTokens.Token(type=TOK_TYPE, value=value, line=start_line, col=start_col); }
-    if (value == "interface") { return WhitelangTokens.Token(type=TOK_INTERFACE, value=value, line=start_line, col=start_col); }
-    if (value == "with") { return WhitelangTokens.Token(type=TOK_WITH, value=value, line=start_line, col=start_col); }
-    if (value == "catch") { return WhitelangTokens.Token(type=TOK_CATCH, value=value, line=start_line, col=start_col); }
-    if (value == "throw") { return WhitelangTokens.Token(type=TOK_THROW, value=value, line=start_line, col=start_col); }
-    if (value == "in") { return WhitelangTokens.Token(type=TOK_IN, value=value, line=start_line, col=start_col); }
-
-    return WhitelangTokens.Token(type=TOK_IDENTIFIER, value=value, line=start_line, col=start_col);
+    return WhitelangTokens.Token(type=type, value=value, line=start_line, col=start_col);
 }
 
 
@@ -516,7 +600,7 @@ func get_next_token(l -> Lexer) -> Token {
         // . and ...
         if (char == '.') {
             let is_ellipsis -> Bool = false;
-            if (l.pos.idx + 2 < l.text.length()) {
+            if (l.pos.idx + 2 < l.length) {
                 let n1 -> Char = l.text[l.pos.idx + 1];
                 let n2 -> Char = l.text[l.pos.idx + 2];
                 if (n1 == '.' && n2 == '.') { // . .

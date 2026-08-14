@@ -454,6 +454,10 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
     clang_args.append("-Wno-override-module");
     clang_args.append(cfg.opt_level);
+    if (cfg.opt_level == "-Oz") {
+        clang_args.append("-mllvm");
+        clang_args.append("-inline-threshold=0");
+    }
     clang_args.append(ll_file);
 
     let extra_idx -> Int = 0;

@@ -6,6 +6,7 @@ import "internal/platform/windows"
 import "internal/platform/posix"
 import "internal/platform/errors" as platform_errors
 import "internal/runtime/string" as runtime_string
+import "internal/runtime/memory" as runtime_memory
 
 error Error {
     None,
@@ -272,11 +273,9 @@ class File {
                 let count -> Int = content_len - source_idx;
                 if (count > available) { count = available; }
 
-                let i -> Int = 0;
-                while (i < count) {
-                    target[self.write_buffer_len + i] = source[source_idx + i];
-                    i += 1;
-                }
+                let target_start -> AnyPtr = ref target[self.write_buffer_len];
+                let source_start -> AnyPtr = ref source[source_idx];
+                runtime_memory.mem_copy(target_start, source_start, UIntSize(count));
                 self.write_buffer_len += count;
                 source_idx += count;
             }

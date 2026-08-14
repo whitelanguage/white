@@ -8,7 +8,7 @@ let LAST_ERROR_FILE -> String = "";
 let CLEAN_TMP_LL -> String = "";
 let ACTIVE_FILE -> file.File = null;
 let ERROR_BUFFER -> Vector(String) = null;
-let REPORTED_ERRORS -> Dict = null;
+let REPORTED_ERRORS -> Dict(String, Bool) = null;
 let STRUCTURED_ERRORS -> Vector(Struct) = null;
 let COLLECT_ERRORS_ONLY -> Bool = false;
 
@@ -277,7 +277,7 @@ func abort_and_clean(status -> Int) -> Void {
 func report_error(pos -> Position, name -> String, details -> String) -> Void {
     if (COLLECT_ERRORS_ONLY && GLOBAL_ERROR_COUNT >= 50) { return; }
     let error_key -> String = pos.fn + ":" + pos.ln + ":" + pos.col + ":" + name + ":" + details;
-    if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(32); }
+    if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(); }
     if (REPORTED_ERRORS.contains_key(error_key)) { return; }
     REPORTED_ERRORS.put(error_key, true);
 

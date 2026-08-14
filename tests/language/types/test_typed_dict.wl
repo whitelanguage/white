@@ -5,6 +5,7 @@
 import "builtin"
 import Dict from "dict"
 import Error as DictError from "dict"
+import Hash, Eq from "hash"
 
 let DROPPED -> Int = 0;
 
@@ -20,11 +21,19 @@ class DictProbe {
     }
 }
 
-class DictKey {
+class DictKey with Hash, Eq(DictKey) {
     let value -> Int;
 
     init(value -> Int) {
         self.value = value;
+    }
+
+    method hash() -> Int {
+        return self.value;
+    }
+
+    method equals(other -> DictKey) -> Bool {
+        return self.value == other.value;
     }
 }
 
@@ -46,20 +55,13 @@ func main() -> Int {
         if (err != DictError.KeyNotFound) { print("FAIL: Typed Dict error"); return 1; }
     }
 
-    let floating -> Auto = Dict<Float, Int>();
-    floating.put(-0.0, 7);
-    let zero -> Int = floating.get(0.0)?;
-    catch(err) { print("FAIL: Typed Dict float key"); return 1; }
-    if (zero != 7) { print("FAIL: Typed Dict float key"); return 1; }
-
     let first_key -> DictKey = DictKey(1);
-    let same_key -> DictKey = first_key;
     let other_key -> DictKey = DictKey(1);
     let identities -> Dict(DictKey, String) = Dict();
     identities.put(first_key, "first");
-    let identity -> String = identities.get(same_key)?;
+    let identity -> String = identities.get(other_key)?;
     catch(err) { print("FAIL: Typed Dict class key"); return 1; }
-    if (identity != "first" || identities.contains_key(other_key)) { print("FAIL: Typed Dict class key"); return 1; }
+    if (identity != "first" || !identities.contains_key(other_key)) { print("FAIL: Typed Dict class key"); return 1; }
 
     let probes -> Dict(String, DictProbe) = Dict();
     probes.put("value", DictProbe(1));

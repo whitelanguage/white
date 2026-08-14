@@ -226,7 +226,7 @@ func parse_type_params(p -> Parser) -> Vector(Struct) {
     let pos -> Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let open_type -> Int = p.current_tok.type;
     let params -> Vector(Struct) = [];
-    let names -> Dict = Dict(8);
+    let names -> Dict(String, String) = Dict();
     parser_advance(p);
 
     if (is_generic_close(p, open_type)) {
