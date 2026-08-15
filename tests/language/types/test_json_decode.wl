@@ -4,28 +4,28 @@
 
 import "json"
 
-func rejects(source -> String, expected -> json.JsonError) -> Bool {
-    let value -> json.Value = json.decode(source)?;
+func rejects(source: String, expected: json.JsonError) -> Bool {
+    let value: json.Value = json.decode(source)?;
     catch(err) {
         return err == expected;
     }
     return value is null;
 }
 
-func rejects_long(source -> String, expected -> json.JsonError) -> Bool {
-    let value -> json.Value = json.decode(source)?;
+func rejects_long(source: String, expected: json.JsonError) -> Bool {
+    let value: json.Value = json.decode(source)?;
     catch(err) { return false; }
-    let number -> Long = value.as_long()?;
+    let number: Long = value.as_long()?;
     catch(err) {
         return err == expected;
     }
     return number == 0L;
 }
 
-func rejects_limit(source -> String, limit -> Int, expected -> json.JsonError) -> Bool {
-    let decoder -> json.Decoder = json.Decoder(source);
+func rejects_limit(source: String, limit: Int, expected: json.JsonError) -> Bool {
+    let decoder: json.Decoder = json.Decoder(source);
     decoder.set_max_depth(limit);
-    let value -> json.Value = decoder.decode()?;
+    let value: json.Value = decoder.decode()?;
     catch(err) {
         return err == expected;
     }
@@ -33,26 +33,26 @@ func rejects_limit(source -> String, limit -> Int, expected -> json.JsonError) -
 }
 
 func main() -> Int {
-    let source -> String =
+    let source: String =
         " {\"name\":\"White \\u4E2D\\uD83D\\uDE00\"," +
         "\"enabled\":true,\"count\":-9223372036854775808," +
         "\"ratio\":1.25e2,\"items\":[null,false,\"line\\nfeed\"]," +
         "\"duplicate\":1,\"duplicate\":2} ";
 
-    let root -> json.Value = json.decode(source)?;
+    let root: json.Value = json.decode(source)?;
     catch(err) {
         print("FAIL: valid JSON rejected, error " + Int(err));
         return 1;
     }
-    let name -> String = root.get("name")?.as_string()?;
+    let name: String = root.get("name")?.as_string()?;
     catch(err) { return 2; }
-    let count -> Long = root.get("count")?.as_long()?;
+    let count: Long = root.get("count")?.as_long()?;
     catch(err) { return 3; }
-    let ratio_source -> String = root.get("ratio")?.as_number_text()?;
+    let ratio_source: String = root.get("ratio")?.as_number_text()?;
     catch(err) { return 4; }
-    let newline_text -> String = root.get("items")?.at(2)?.as_string()?;
+    let newline_text: String = root.get("items")?.at(2)?.as_string()?;
     catch(err) { return 5; }
-    let duplicate -> Long = root.get("duplicate")?.as_long()?;
+    let duplicate: Long = root.get("duplicate")?.as_long()?;
     catch(err) { return 6; }
 
     if (name != "White 中😀" ||
@@ -93,15 +93,15 @@ func main() -> Int {
         return 8;
     }
 
-    let invalid_utf8 -> String = "中"[0:1];
+    let invalid_utf8: String = "中"[0:1];
     if (!rejects(invalid_utf8, json.JsonError.InvalidUtf8)) {
         print("FAIL: invalid UTF-8 accepted");
         return 9;
     }
 
-    let decoder -> json.Decoder = json.Decoder("[[0]]");
+    let decoder: json.Decoder = json.Decoder("[[0]]");
     decoder.set_max_depth(1);
-    let too_deep -> json.Value = decoder.decode()?;
+    let too_deep: json.Value = decoder.decode()?;
     catch(err) {
         if (err == json.JsonError.NestingTooDeep &&
             decoder.offset() >= 0 &&

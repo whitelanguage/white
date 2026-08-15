@@ -16,7 +16,7 @@ func main() -> Int {
         return 1;
     }
 
-    let empty -> String = io.stdin.read_bytes(0)?;
+    let empty: String = io.stdin.read_bytes(0)?;
     catch(err) {
         print("FAIL: zero-length stdin read");
         return 1;

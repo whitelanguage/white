@@ -4,7 +4,7 @@
 // Expected Error: "Type Vector(Int) cannot be used as a Dict key"
 
 func main() -> Int {
-    let key -> Vector(Int) = [1, 2, 3];
-    let values -> Dict = { key: "value" };
+    let key: Vector(Int) = [1, 2, 3];
+    let values: Dict = { key: "value" };
     return 0;
 }

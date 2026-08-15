@@ -3,21 +3,21 @@
 // Focus: Folding numeric global constants without losing floating-point precision.
 
 
-const PI -> Float = 3.14159265358979323846;
-const HALF_PI -> Float = PI / 2;
-const SCALE -> Int = 2;
-const OFFSET -> Int = SCALE + 3;
-const WIDE_BASE -> Int128 = 170141183460469231731687303715884105720LL;
-const WIDE_NEXT -> Int128 = WIDE_BASE + 1;
-const ENABLED -> Bool = true;
-const ENABLED_COPY -> Bool = ENABLED;
-const RESTORED_PI -> Float = HALF_PI * SCALE;
-const POWER -> Float = 2.0 ** 10.0;
-const REMAINDER -> Float = 5.5 % 2.0;
-const THIRD -> Float32 = 1.0 / 3.0;
+const PI: Float = 3.14159265358979323846;
+const HALF_PI: Float = PI / 2;
+const SCALE: Int = 2;
+const OFFSET: Int = SCALE + 3;
+const WIDE_BASE: Int128 = 170141183460469231731687303715884105720LL;
+const WIDE_NEXT: Int128 = WIDE_BASE + 1;
+const ENABLED: Bool = true;
+const ENABLED_COPY: Bool = ENABLED;
+const RESTORED_PI: Float = HALF_PI * SCALE;
+const POWER: Float = 2.0 ** 10.0;
+const REMAINDER: Float = 5.5 % 2.0;
+const THIRD: Float32 = 1.0 / 3.0;
 
-func close(left -> Float, right -> Float, tolerance -> Float) -> Bool {
-    let difference -> Float = left - right;
+func close(left: Float, right: Float, tolerance: Float) -> Bool {
+    let difference: Float = left - right;
     if (difference < 0.0) { difference = 0.0 - difference; }
     return difference <= tolerance;
 }

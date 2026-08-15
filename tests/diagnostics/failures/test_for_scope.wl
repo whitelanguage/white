@@ -3,4 +3,4 @@
 // Focus: Keeping the initializer variable inside the for statement.
 // Expected Error: "NameError: Undefined variable or function 'index'."
 
-func main() -> Int { for (let index -> Int = 0; index < 1; index += 1) { } return index; }
+func main() -> Int { for (let index: Int = 0; index < 1; index += 1) { } return index; }

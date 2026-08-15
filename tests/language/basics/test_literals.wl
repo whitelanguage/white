@@ -5,10 +5,10 @@
 
 func main() -> Int {
     // multiple unary minus on floats
-    let complex_float -> Float = 0.1 + -(-0.2); // Equivalent to 0.1 + 0.2
+    let complex_float: Float = 0.1 + -(-0.2); // Equivalent to 0.1 + 0.2
     
     // comparison operators
-    let bool_test -> Bool = (5 >= 3) && true;
+    let bool_test: Bool = (5 >= 3) && true;
 
     if (complex_float > 0.299999 && complex_float < 0.300001 && bool_test) {
         print("PASS: Literals and unary operators");

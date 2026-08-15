@@ -6,8 +6,8 @@ import "../../fixtures/modules/left/provider.wl" as left
 import "../../fixtures/modules/right/provider.wl" as right
 
 func main() -> Int {
-    let left_item -> left.Item = left.Item(1);
-    let right_item -> right.Item = right.Item(2);
+    let left_item: left.Item = left.Item(1);
+    let right_item: right.Item = right.Item(2);
 
     left.marker = 31;
     right.marker = 42;

@@ -6,33 +6,33 @@ import Dict from "dict"
 import Hash, Eq from "hash"
 
 class Key with Hash, Eq(Key) {
-    let value -> Int;
+    let value: Int;
 
-    init(value -> Int) {
+    init(value: Int) {
         self.value = value;
     }
 
-    method hash() -> Int {
+    func hash() -> Int {
         return self.value;
     }
 
-    method equals(other -> Key) -> Bool {
+    func equals(other: Key) -> Bool {
         return self.value == other.value;
     }
 }
 
 func main() -> Int {
-    let names -> Dict(String, Int) = Dict();
+    let names: Dict(String, Int) = Dict();
     names.put("white", 7);
-    let number -> Int = names.get("white")?;
+    let number: Int = names.get("white")?;
     catch(err) {
         print("FAIL: Built-in Hash and Eq");
         return 1;
     }
 
-    let values -> Dict(Key, String) = Dict();
+    let values: Dict(Key, String) = Dict();
     values.put(Key(42), "answer");
-    let answer -> String = values.get(Key(42))?;
+    let answer: String = values.get(Key(42))?;
     catch(err) {
         print("FAIL: User-defined Hash and Eq");
         return 1;

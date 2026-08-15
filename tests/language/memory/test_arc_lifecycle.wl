@@ -3,11 +3,11 @@
 // Focus: Automatic Reference Counting (ARC) during scope transitions and reassignments.
 
 
-struct Point(x -> Int, y -> Int)
+struct Point(x: Int, y: Int)
 
 func test_assignment() -> Bool {
-    let s1 -> String = "Hello";
-    let s2 -> String = "World"; 
+    let s1: String = "Hello";
+    let s2: String = "World"; 
     
     // assignment should decrease RC of s1's old value and increase RC of s2's value
     s1 = s2; 
@@ -16,7 +16,7 @@ func test_assignment() -> Bool {
 }
 
 func main() -> Int {
-    let assign_ok -> Bool = test_assignment();
+    let assign_ok: Bool = test_assignment();
     
     // if the compiler reaches here without memory leaks or crashes, scope logic is valid
     if (assign_ok) {

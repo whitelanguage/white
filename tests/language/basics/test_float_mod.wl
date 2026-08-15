@@ -3,11 +3,11 @@
 // Focus: Floating-point remainder without a platform math library.
 
 
-func remainder(left -> Float, right -> Float) -> Float {
+func remainder(left: Float, right: Float) -> Float {
     return left % right;
 }
 
-func remainder32(left -> Float32, right -> Float32) -> Float32 {
+func remainder32(left: Float32, right: Float32) -> Float32 {
     return left % right;
 }
 

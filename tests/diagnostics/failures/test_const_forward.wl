@@ -3,8 +3,8 @@
 // Focus: Reporting a forward reference in a global constant expression without entering LLVM lowering.
 // Expected Error: "InvalidSyntax: Constant 'FULL' is used before its declaration."
 
-const HALF -> Float = FULL / 2;
-const FULL -> Float = 3.0;
+const HALF: Float = FULL / 2;
+const FULL: Float = 3.0;
 
 func main() -> Int {
     return 0;

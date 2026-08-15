@@ -3,7 +3,7 @@
 // Focus: Dropping unused class and container return values at the end of an expression statement.
 
 
-let DROPPED -> Int = 0;
+let DROPPED: Int = 0;
 
 class Probe {
     deinit() {

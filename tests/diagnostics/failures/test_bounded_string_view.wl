@@ -4,7 +4,7 @@
 // Expected Error: "TypeError: String views currently require a full slice expression."
 
 func main() -> Int {
-    let value -> String = "WhiteLang";
-    let invalid -> String = ref value[0:5];
+    let value: String = "WhiteLang";
+    let invalid: String = ref value[0:5];
     return 0;
 }

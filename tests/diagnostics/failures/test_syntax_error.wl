@@ -5,6 +5,6 @@
 
 func main() -> Int {
     // Intentional syntax error: missing closing parenthesis
-    let x -> Int = (1 + 2; 
+    let x: Int = (1 + 2; 
     return 0;
 }

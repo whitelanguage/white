@@ -14,28 +14,28 @@ import "core/WhitelangUtils.wl"
 import "core/WhitelangTarget.wl"
 
 
-const VERSION -> String = "devel";
-const REVISION -> String = "unknown";
-const COMMIT_DATE -> String = "unknown";
+const VERSION      : String = "devel";
+const REVISION     : String = "unknown";
+const COMMIT_DATE  : String = "unknown";
 
 struct CompilerConfig(
-    source_file     -> String,
-    output_file     -> String,
-    extra_ldflags   -> Vector(String),
-    library_paths   -> Vector(String),
-    extra_files     -> Vector(String),
-    is_compile_only -> Bool,  // -c
-    is_asm_only     -> Bool,  // -S
-    is_emit_llvm    -> Bool,  // --emit-llvm
-    debug_info      -> Bool,  // -g
-    opt_level       -> String,
-    verbose         -> Bool,
-    dump_ast        -> Bool,
-    dump_ir         -> Bool,
-    keep_temps      -> Bool,
-    is_shared       -> Bool,
-    target_triple   -> String,
-    sysroot         -> String
+    source_file     : String,
+    output_file     : String,
+    extra_ldflags   : Vector(String),
+    library_paths   : Vector(String),
+    extra_files     : Vector(String),
+    is_compile_only : Bool,  // -c
+    is_asm_only     : Bool,  // -S
+    is_emit_llvm    : Bool,  // --emit-llvm
+    debug_info      : Bool,  // -g
+    opt_level       : String,
+    verbose         : Bool,
+    dump_ast        : Bool,
+    dump_ir         : Bool,
+    keep_temps      : Bool,
+    is_shared       : Bool,
+    target_triple   : String,
+    sysroot         : String
 )
 
 func print_usage() -> Void {
@@ -69,19 +69,19 @@ func print_usage() -> Void {
 }
 
 func clang_program() -> String {
-    let command -> String = "clang";
+    let command: String = "clang";
     if (sys.OS == sys.Os.Windows) { command = "clang.exe"; }
 
-    let wl_path -> String = sys.env.get_env("WL_PATH");
+    let wl_path: String = sys.env.get_env("WL_PATH");
     if (wl_path is null) { return command; }
 
-    let portable -> String = wl_path + "/tools/llvm/bin/clang";
+    let portable: String = wl_path + "/tools/llvm/bin/clang";
     if (sys.OS == sys.Os.Windows) { portable += ".exe"; }
     if (WhitelangUtils.file_exists(portable)) { return portable; }
     return command;
 }
 
-func print_version(verbose -> Bool) -> Void {
+func print_version(verbose: Bool) -> Void {
     if (!verbose) { print("White Language Compiler " + VERSION); return; }
 
     print("wlc " + VERSION);
@@ -92,9 +92,9 @@ func print_version(verbose -> Bool) -> Void {
     print("pointer-width: " + sys.POINTER_BITS);
     print("backend: LLVM IR");
 
-    let clang -> String = clang_program();
+    let clang: String = clang_program();
     print("clang-command: " + clang);
-    let status -> Int = process.run(clang, ["--version"])?;
+    let status: Int = process.run(clang, ["--version"])?;
     catch(err) {
         print("clang-version: unavailable");
         return;
@@ -102,8 +102,8 @@ func print_version(verbose -> Bool) -> Void {
     if (status != 0) { print("clang-version: unavailable"); }
 }
 
-func has_argument(argc -> Int, ptr argv -> String, expected -> String) -> Bool {
-    let i -> Int = 1;
+func has_argument(argc: Int, ptr argv: String, expected: String) -> Bool {
+    let i: Int = 1;
     while (i < argc) {
         if (process.argument(argc, argv, i) == expected) { return true; }
         i += 1;
@@ -129,37 +129,37 @@ func print_target_help() -> Void {
     print("  arm64-apple-darwin");
 }
 
-func log_stage(cfg -> CompilerConfig, name -> String) -> Void {
+func log_stage(cfg: CompilerConfig, name: String) -> Void {
     if (cfg.verbose) {
         print("");
         print("[Stage: " + name + "] ------------------------------");
     }
 }
 
-func get_base_name(path -> String) -> String {
-    let len -> Int = path.length();
+func get_base_name(path: String) -> String {
+    let len: Int = path.length();
     if (path.ends_with(".wl")) {
         return path.slice(0, len - 3);
     }
     return path;
 }
 
-func windows_implib_path(output -> String) -> String {
-    let len -> Int = output.length();
+func windows_implib_path(output: String) -> String {
+    let len: Int = output.length();
     if (len >= 4 && output[len - 4] == '.' && (output[len - 3] == 'd' || output[len - 3] == 'D') && (output[len - 2] == 'l' || output[len - 2] == 'L') && (output[len - 1] == 'l' || output[len - 1] == 'L')) {
         return output.slice(0, len - 4) + ".lib";
     }
     return output + ".lib";
 }
 
-func split_link_flags(value -> String) -> Vector(String) {
-    let result -> Vector(String) = [];
-    let current -> String = "";
-    let quote -> Char = '\0';
-    let i -> Int = 0;
+func split_link_flags(value: String) -> Vector(String) {
+    let result: Vector(String) = [];
+    let current: String = "";
+    let quote: Char = '\0';
+    let i: Int = 0;
 
     while (i < value.length()) {
-        let ch -> Char = value[i];
+        let ch: Char = value[i];
         if (quote != '\0') {
             if (ch == quote) {
                 quote = '\0';
@@ -186,21 +186,21 @@ func split_link_flags(value -> String) -> Vector(String) {
     return result;
 }
 
-func main(argc -> Int, ptr argv -> String) -> Int {
+func main(argc: Int, ptr argv: String) -> Int {
     if (argc < 2) {
         print("Error: No input file.");
         return 1;
     }
 
     if (has_argument(argc, argv, "-h") || has_argument(argc, argv, "--help")) { print_usage(); return 0; }
-    let wants_version -> Bool = has_argument(argc, argv, "-V") || has_argument(argc, argv, "--version") || has_argument(argc, argv, "-vV");
+    let wants_version: Bool = has_argument(argc, argv, "-V") || has_argument(argc, argv, "--version") || has_argument(argc, argv, "-vV");
     if wants_version {
-        let verbose_version -> Bool = has_argument(argc, argv, "-vV") || has_argument(argc, argv, "-v") || has_argument(argc, argv, "--verbose");
+        let verbose_version: Bool = has_argument(argc, argv, "-vV") || has_argument(argc, argv, "-v") || has_argument(argc, argv, "--verbose");
         print_version(verbose_version);
         return 0;
     }
 
-    let cfg -> CompilerConfig = CompilerConfig(
+    let cfg: CompilerConfig = CompilerConfig(
         source_file     = "",
         output_file     = "",
         extra_ldflags   = [],
@@ -220,9 +220,9 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         sysroot         = ""
     );
 
-    let i -> Int = 1;
+    let i: Int = 1;
     while (i < argc) {
-        let arg -> String = process.argument(argc, argv, i);
+        let arg: String = process.argument(argc, argv, i);
 
         if (arg == "--target-help") { print_target_help(); return 0; }
         else if (arg == "-v" || arg == "--verbose") { cfg.verbose = true; }
@@ -267,7 +267,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         else if (arg == "-L" || arg == "--library-path") {
             i++;
             if (i >= argc) { print("Error: " + arg + " requires an argument"); return 1; }
-            let library_path -> String = process.argument(argc, argv, i);
+            let library_path: String = process.argument(argc, argv, i);
             if (library_path.length() == 0) { print("Error: Library search path cannot be empty"); return 1; }
             cfg.library_paths.append(library_path);
         }
@@ -277,8 +277,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         else if (arg == "--ldflags") {
             i++;
             if (i >= argc) { print("Error: --ldflags requires an argument"); return 1; }
-            let flags -> Vector(String) = split_link_flags(process.argument(argc, argv, i));
-            let flag_idx -> Int = 0;
+            let flags: Vector(String) = split_link_flags(process.argument(argc, argv, i));
+            let flag_idx: Int = 0;
             while (flag_idx < flags.length()) {
                 cfg.extra_ldflags.append(flags[flag_idx]);
                 flag_idx += 1;
@@ -304,13 +304,13 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         return 1;
     }
 
-    let base_name -> String = get_base_name(cfg.source_file);
-    let ll_file -> String = "";
+    let base_name: String = get_base_name(cfg.source_file);
+    let ll_file: String = "";
     
     if (cfg.keep_temps || cfg.is_emit_llvm) {
         ll_file = base_name + ".ll";
     } else {
-        let temp_dir -> String = "";
+        let temp_dir: String = "";
         
         if (sys.OS == sys.Os.Windows) {
             temp_dir = sys.env.get_env("TMP");
@@ -324,11 +324,11 @@ func main(argc -> Int, ptr argv -> String) -> Int {
             temp_dir = "/tmp/";
         }
 
-        let file_only -> String = base_name;
-        let len -> Int = base_name.length();
-        let idx -> Int = len - 1;
+        let file_only: String = base_name;
+        let len: Int = base_name.length();
+        let idx: Int = len - 1;
         while (idx >= 0) {
-            let ch -> Char = base_name[idx];
+            let ch: Char = base_name[idx];
             if (ch == '/' || ch == '\\') {
                 file_only = base_name.slice(idx + 1, len);
                 break;
@@ -371,28 +371,28 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
 
     log_stage(cfg, "Frontend & Middle-end");
-    let f_in -> file.File = file.open(cfg.source_file)?;
+    let f_in: file.File = file.open(cfg.source_file)?;
     catch(err) {
         print("Error: Could not open " + cfg.source_file + " (error " + Int(err) + ")");
         return 1;
     }
-    let source -> String = f_in.read_all()?;
+    let source: String = f_in.read_all()?;
     catch(err) {
         print("Error: Could not read " + cfg.source_file + " (error " + Int(err) + ")");
         return 1;
     }
     f_in.close();
 
-    let lexer -> WhitelangLexer.Lexer = WhitelangLexer.new_lexer(cfg.source_file, source);
-    let parser -> WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=WhitelangLexer.get_next_token(lexer), nesting=0);
-    let ast -> Struct = WhitelangParser.parse(parser);
+    let lexer: WhitelangLexer.Lexer = WhitelangLexer.new_lexer(cfg.source_file, source);
+    let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=WhitelangLexer.get_next_token(lexer), nesting=0);
+    let ast: Struct = WhitelangParser.parse(parser);
 
     WhitelangExceptions.check_errors_and_abort();
     if (cfg.verbose) { print("Parsed source: " + cfg.source_file); }
 
     if (cfg.dump_ast) { print("[Debug] AST Dumped"); }
 
-    let compiler -> WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info)?;
+    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info)?;
     catch(err) {
         print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
         return 1;
@@ -409,12 +409,12 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
 
     if (cfg.dump_ir) {
-        let f_ir -> file.File = file.open(ll_file)?;
+        let f_ir: file.File = file.open(ll_file)?;
         catch(err) {
             print("Error: Could not reopen " + ll_file + " (error " + Int(err) + ")");
             return 1;
         }
-        let ir_content -> String = f_ir.read_all()?;
+        let ir_content: String = f_ir.read_all()?;
         catch(err) {
             print("Error: Could not read " + ll_file + " (error " + Int(err) + ")");
             return 1;
@@ -429,14 +429,14 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
 
     log_stage(cfg, "Backend/Linker");
-    let clang_cmd -> String = clang_program();
-    let system_clang -> String = "clang";
+    let clang_cmd: String = clang_program();
+    let system_clang: String = "clang";
     if (sys.OS == sys.Os.Windows) { system_clang = "clang.exe"; }
-    let using_portable_clang -> Bool = clang_cmd != system_clang;
+    let using_portable_clang: Bool = clang_cmd != system_clang;
     if (cfg.verbose && using_portable_clang) { print("Using portable LLVM: " + clang_cmd); }
     else if (cfg.verbose) { print("Portable LLVM not found, falling back to system " + clang_cmd + "."); }
 
-    let import_lib -> String = "";
+    let import_lib: String = "";
     if (cfg.is_shared && WhitelangTarget.get_target_os() == sys.Os.Windows) {
         import_lib = windows_implib_path(cfg.output_file);
         if (WhitelangUtils.file_exists(import_lib)) {
@@ -448,7 +448,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
         }
     }
     
-    let clang_args -> Vector(String) = [];
+    let clang_args: Vector(String) = [];
     if (cfg.debug_info) { clang_args.append("-g"); }
     if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
@@ -460,7 +460,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
     }
     clang_args.append(ll_file);
 
-    let extra_idx -> Int = 0;
+    let extra_idx: Int = 0;
     while (extra_idx < cfg.extra_files.length()) {
         clang_args.append(cfg.extra_files[extra_idx]);
         extra_idx += 1;
@@ -507,8 +507,8 @@ func main(argc -> Int, ptr argv -> String) -> Int {
             clang_args.append("-lshell32");
         }
 
-        let lib_idx -> Int = 0;
-        let path_idx -> Int = 0;
+        let lib_idx: Int = 0;
+        let path_idx: Int = 0;
         while (path_idx < cfg.library_paths.length()) {
             clang_args.append("-L");
             clang_args.append(cfg.library_paths[path_idx]);
@@ -520,7 +520,7 @@ func main(argc -> Int, ptr argv -> String) -> Int {
             lib_idx += 1;
         }
 
-        let flag_idx -> Int = 0;
+        let flag_idx: Int = 0;
         while (flag_idx < cfg.extra_ldflags.length()) {
             clang_args.append(cfg.extra_ldflags[flag_idx]);
             flag_idx += 1;
@@ -537,13 +537,13 @@ func main(argc -> Int, ptr argv -> String) -> Int {
 
     if (cfg.verbose) {
         print("Program: " + clang_cmd);
-        let arg_idx -> Int = 0;
+        let arg_idx: Int = 0;
         while (arg_idx < clang_args.length()) {
             print("  argv[" + arg_idx + "]: " + clang_args[arg_idx]);
             arg_idx += 1;
         }
     }
-    let ret -> Int = process.run(clang_cmd, clang_args)?;
+    let ret: Int = process.run(clang_cmd, clang_args)?;
     catch(err) {
         print("Build Failed: Could not start Clang (error " + Int(err) + ")");
         return 1;

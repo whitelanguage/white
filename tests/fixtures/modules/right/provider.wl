@@ -1,6 +1,6 @@
-let marker -> Int = 22;
+let marker: Int = 22;
 
-struct Item(value -> Int) {
+struct Item(value: Int) {
     this.value = 0;
 }
 

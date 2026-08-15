@@ -8,7 +8,7 @@ func fail_text() -> String? {
 }
 
 func main() -> Int {
-    let value -> String = fail_text()?;
+    let value: String = fail_text()?;
     catch(err) {
         print(err);
     }

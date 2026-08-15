@@ -4,14 +4,14 @@
 
 
 func main() -> Int {
-    let b1 -> Byte = 250;
-    let b2 -> Byte = 10;
+    let b1: Byte = 250;
+    let b2: Byte = 10;
     
     // 8-bit wrap-around: (250 + 10) = 260. 260 % 256 = 4
-    let b3 -> Byte = b1 + b2;
+    let b3: Byte = b1 + b2;
     
     // Int promotion: 250 + 100 = 350
-    let i -> Int = b1 + 100;
+    let i: Int = b1 + 100;
 
     if (b3 == 4 && i == 350) {
         print("PASS: Byte overflow and promotion");

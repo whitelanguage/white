@@ -4,8 +4,8 @@
 
 
 func main() -> Int {
-    let i -> Int = 0;
-    let sum -> Int = 0;
+    let i: Int = 0;
+    let sum: Int = 0;
 
     while (i < 10) {
         i = i + 1;

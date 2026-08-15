@@ -6,6 +6,6 @@
 import Dict from "dict"
 
 func main() -> Int {
-    let values -> Auto = Dict();
+    let values: Auto = Dict();
     return 0;
 }

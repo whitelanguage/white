@@ -4,7 +4,7 @@
 // Expected Error: "TypeError: Missing return."
 
 func missing_value() -> Int {
-    let value -> Int = 1;
+    let value: Int = 1;
 }
 
 func main() -> Int {

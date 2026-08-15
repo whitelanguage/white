@@ -3,4 +3,4 @@
 // Focus: Keeping Bool separate from integer types.
 // Expected Error: "TypeError: Type mismatch"
 
-func main() -> Int { let value -> Int = true; return value; }
+func main() -> Int { let value: Int = true; return value; }

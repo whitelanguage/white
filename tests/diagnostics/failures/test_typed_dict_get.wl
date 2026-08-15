@@ -6,7 +6,7 @@
 import Dict from "dict"
 
 func main() -> Int {
-    let values -> Dict(String, Int) = { "one": 1 };
-    let value -> Int = values["one"];
+    let values: Dict(String, Int) = { "one": 1 };
+    let value: Int = values["one"];
     return value;
 }

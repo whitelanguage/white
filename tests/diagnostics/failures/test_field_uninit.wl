@@ -4,7 +4,7 @@
 // Expected Error: "MissingInitializer: Field 'value' has no initializer, but class 'Missing' does not define init."
 
 class Missing {
-    let value -> Int;
+    let value: Int;
 }
 
 func main() -> Int {

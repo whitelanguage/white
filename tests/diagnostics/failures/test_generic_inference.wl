@@ -8,6 +8,6 @@ func make<T>() -> T {
 }
 
 func main() -> Int {
-    let value -> Auto = make();
+    let value: Auto = make();
     return 0;
 }

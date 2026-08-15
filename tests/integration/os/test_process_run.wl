@@ -6,7 +6,7 @@ import "process"
 import "sys"
 
 func main() -> Int {
-    let status -> Int = 0;
+    let status: Int = 0;
     if (sys.OS == sys.Os.Windows) {
         status = process.run("cmd.exe", ["/d", "/s", "/c", "if \"a b\"==\"a b\" (exit 7) else (exit 9)"])?;
     } else {

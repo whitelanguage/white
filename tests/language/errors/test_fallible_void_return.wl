@@ -7,7 +7,7 @@ func succeeds() -> Void? {
 }
 
 class Worker {
-    method succeeds() -> Void? {
+    func succeeds() -> Void? {
     }
 }
 
@@ -18,7 +18,7 @@ func main() -> Int {
         return 1;
     }
 
-    let worker -> Worker = Worker();
+    let worker: Worker = Worker();
     worker.succeeds()?;
     catch(err) {
         print("FAIL: Void? method returned an undefined error");

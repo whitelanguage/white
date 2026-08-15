@@ -14,11 +14,11 @@ struct Variant(
 )
 
 @CompilerLink("dict_key_hash")
-func __key_hash(key -> Variant) -> Int {
+func __key_hash(key: Variant) -> Int {
     // the previous compiler uses this body while bootstrapping the intrinsic
-    let text -> String = key;
-    let hash -> Int = 5381;
-    let i -> Int = 0;
+    let text: String = key;
+    let hash: Int = 5381;
+    let i: Int = 0;
     while (i < text.length()) {
         hash = ((hash << 5) + hash) ^ Int(text[i]);
         i++;
@@ -29,22 +29,22 @@ func __key_hash(key -> Variant) -> Int {
 }
 
 @CompilerLink("dict_keys_equal")
-func __keys_equal(left -> Variant, right -> Variant) -> Bool {
-    let left_text -> String = left;
-    let right_text -> String = right;
+func __keys_equal(left: Variant, right: Variant) -> Bool {
+    let left_text: String = left;
+    let right_text: String = right;
     return left_text == right_text;
 }
 
 class Dict {
-    let ptr keys      -> Variant = nullptr; 
-    let ptr values    -> Variant = nullptr;
-    let ptr hashes    -> Int    = nullptr;
-    let capacity      -> Int = 0;
-    let size          -> Int = 0;
-    let tombstones    -> Int = 0;
+    let ptr keys: Variant = nullptr; 
+    let ptr values: Variant = nullptr;
+    let ptr hashes: Int    = nullptr;
+    let capacity: Int = 0;
+    let size: Int = 0;
+    let tombstones: Int = 0;
 
-    init(cap -> Int) {
-        let actual_cap -> Int = 8;
+    init(cap: Int) {
+        let actual_cap: Int = 8;
         while (actual_cap < cap) {
             if (actual_cap >= 1073741824) {
                 runtime.panic_capacity_overflow("Dict");
@@ -53,10 +53,10 @@ class Dict {
             actual_cap <<= 1;
         }
 
-        let slot_size -> UIntSize = runtime.pointer_size();
-        let ptr new_keys -> Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
-        let ptr new_values -> Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
-        let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * UIntSize(4));
+        let slot_size: UIntSize = runtime.pointer_size();
+        let ptr new_keys: Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
+        let ptr new_values: Variant = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * slot_size);
+        let ptr new_hashes: Int = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * UIntSize(4));
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
             runtime.mem_dealloc(new_values);
@@ -71,8 +71,8 @@ class Dict {
         self.capacity = actual_cap;
     }
 
-    method __hash(key -> Variant) -> Int {
-        let hash -> Int = __key_hash(key);
+    func __hash(key: Variant) -> Int {
+        let hash: Int = __key_hash(key);
         if (hash < 2) {
             runtime.panic("Dict key is not hashable");
             return 2;
@@ -80,8 +80,8 @@ class Dict {
         return hash;
     }
 
-    method __release_slots(ptr slot_keys -> Variant, ptr slot_values -> Variant, ptr slot_hashes -> Int, cap -> Int) -> Void {
-        let i -> Int = 0;
+    func __release_slots(ptr slot_keys: Variant, ptr slot_values: Variant, ptr slot_hashes: Int, cap: Int) -> Void {
+        let i: Int = 0;
         while (i < cap) {
             if (slot_hashes[i] >= 2) {
                 slot_keys[i] = null;
@@ -91,15 +91,15 @@ class Dict {
         }
     }
 
-    method __rehash(new_cap -> Int) -> Void {
-        let old_cap -> Int = self.capacity;
-        let ptr old_keys -> Variant = self.keys;
-        let ptr old_values -> Variant = self.values;
-        let ptr old_hashes -> Int = self.hashes;
-        let slot_size -> UIntSize = runtime.pointer_size();
-        let ptr new_keys -> Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
-        let ptr new_values -> Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
-        let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * UIntSize(4));
+    func __rehash(new_cap: Int) -> Void {
+        let old_cap: Int = self.capacity;
+        let ptr old_keys: Variant = self.keys;
+        let ptr old_values: Variant = self.values;
+        let ptr old_hashes: Int = self.hashes;
+        let slot_size: UIntSize = runtime.pointer_size();
+        let ptr new_keys: Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
+        let ptr new_values: Variant = runtime.mem_alloc_zeroed(UIntSize(new_cap) * slot_size);
+        let ptr new_hashes: Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * UIntSize(4));
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
             runtime.mem_dealloc(new_values);
@@ -114,12 +114,12 @@ class Dict {
         self.hashes = new_hashes;
         self.tombstones = 0;
 
-        let mask -> Int = new_cap - 1;
-        let i -> Int = 0;
+        let mask: Int = new_cap - 1;
+        let i: Int = 0;
         while (i < old_cap) {
-            let hash -> Int = old_hashes[i];
+            let hash: Int = old_hashes[i];
             if (hash >= 2) {
-                let idx -> Int = hash & mask;
+                let idx: Int = hash & mask;
                 while (new_hashes[idx] != 0) { idx = (idx + 1) & mask; }
                 new_hashes[idx] = hash;
                 new_keys[idx] = old_keys[i];
@@ -134,7 +134,7 @@ class Dict {
         runtime.mem_dealloc(old_hashes);
     }
 
-    method __prepare_insert() -> Bool {
+    func __prepare_insert() -> Bool {
         if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) { return false; }
         if ((self.size + 1) * 3 < self.capacity * 2) {
             self.__rehash(self.capacity);
@@ -148,14 +148,14 @@ class Dict {
         return true;
     }
 
-    method put(key -> Variant, value -> Variant) -> Void {
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx  -> Int = hash & mask;
-        let first_tombstone -> Int = -1;
+    func put(key: Variant, value: Variant) -> Void {
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
+        let first_tombstone: Int = -1;
 
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 if (self.__prepare_insert()) {
                     self.put(key, value);
@@ -181,13 +181,13 @@ class Dict {
         }
     }
 
-    method get(key -> Variant) -> Variant {
+    func get(key: Variant) -> Variant {
         if (self.size == 0) { return null; }
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx  -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) { return null; }
             if (current == hash && __keys_equal(self.keys[idx], key)) { return self.values[idx]; }
             idx = (idx + 1) & mask;
@@ -195,13 +195,13 @@ class Dict {
         return null;
     }
 
-    method remove(key -> Variant) -> Void {
+    func remove(key: Variant) -> Void {
         if (self.size == 0) { return; }
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx  -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) { return; }
             if (current == hash && __keys_equal(self.keys[idx], key)) {
                 self.hashes[idx] = 1;
@@ -215,13 +215,13 @@ class Dict {
         }
     }
 
-    method contains_key(key -> Variant) -> Bool {
+    func contains_key(key: Variant) -> Bool {
         if (self.size == 0) { return false; }
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx  -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) { return false; }
             if (current == hash && __keys_equal(self.keys[idx], key)) { return true; }
             idx = (idx + 1) & mask;
@@ -229,15 +229,15 @@ class Dict {
         return false;
     }
 
-    method length() -> Int {
+    func length() -> Int {
         return self.size;
     }
 
-    method is_empty() -> Bool {
+    func is_empty() -> Bool {
         return self.size == 0;
     }
 
-    method clear() -> Void {
+    func clear() -> Void {
         self.__release_slots(self.keys, self.values, self.hashes, self.capacity);
         runtime.mem_set(self.hashes, 0, UIntSize(self.capacity) * UIntSize(4));
         self.size = 0;
@@ -253,18 +253,18 @@ class Dict {
 }
 
 class Dict<K: Hash + Eq(K), V> {
-    let ptr keys -> K = nullptr;
-    let ptr values -> V = nullptr;
-    let ptr hashes -> Int = nullptr;
-    let capacity -> Int = 0;
-    let size -> Int = 0;
-    let tombstones -> Int = 0;
+    let ptr keys: K = nullptr;
+    let ptr values: V = nullptr;
+    let ptr hashes: Int = nullptr;
+    let capacity: Int = 0;
+    let size: Int = 0;
+    let tombstones: Int = 0;
 
     init() {
-        let actual_cap -> Int = 8;
-        let ptr new_keys -> K = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(K));
-        let ptr new_values -> V = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(V));
-        let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(Int));
+        let actual_cap: Int = 8;
+        let ptr new_keys: K = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(K));
+        let ptr new_values: V = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(V));
+        let ptr new_hashes: Int = runtime.mem_alloc_zeroed(UIntSize(actual_cap) * size_of(Int));
 
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
@@ -281,27 +281,27 @@ class Dict<K: Hash + Eq(K), V> {
     }
 
     @CompilerLink("hash_value")
-    method __hash(key -> K) -> Int {
+    func __hash(key: K) -> Int {
         return 0;
     }
 
     @CompilerLink("values_equal")
-    method __equal(left -> K, right -> K) -> Bool {
+    func __equal(left: K, right: K) -> Bool {
         return false;
     }
 
     @CompilerLink("zero_value")
-    method __zero_key() -> K {
+    func __zero_key() -> K {
         return null;
     }
 
     @CompilerLink("zero_value")
-    method __zero_value() -> V {
+    func __zero_value() -> V {
         return null;
     }
 
-    method __clear_slots(ptr slot_keys -> K, ptr slot_values -> V, ptr slot_hashes -> Int, cap -> Int) -> Void {
-        let i -> Int = 0;
+    func __clear_slots(ptr slot_keys: K, ptr slot_values: V, ptr slot_hashes: Int, cap: Int) -> Void {
+        let i: Int = 0;
         while (i < cap) {
             if (slot_hashes[i] >= 2) {
                 slot_keys[i] = self.__zero_key();
@@ -311,14 +311,14 @@ class Dict<K: Hash + Eq(K), V> {
         }
     }
 
-    method __rehash(new_cap -> Int) -> Void {
-        let old_cap -> Int = self.capacity;
-        let ptr old_keys -> K = self.keys;
-        let ptr old_values -> V = self.values;
-        let ptr old_hashes -> Int = self.hashes;
-        let ptr new_keys -> K = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(K));
-        let ptr new_values -> V = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(V));
-        let ptr new_hashes -> Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(Int));
+    func __rehash(new_cap: Int) -> Void {
+        let old_cap: Int = self.capacity;
+        let ptr old_keys: K = self.keys;
+        let ptr old_values: V = self.values;
+        let ptr old_hashes: Int = self.hashes;
+        let ptr new_keys: K = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(K));
+        let ptr new_values: V = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(V));
+        let ptr new_hashes: Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(Int));
     
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
@@ -334,12 +334,12 @@ class Dict<K: Hash + Eq(K), V> {
         self.hashes = new_hashes;
         self.tombstones = 0;
 
-        let mask -> Int = new_cap - 1;
-        let i -> Int = 0;
+        let mask: Int = new_cap - 1;
+        let i: Int = 0;
         while (i < old_cap) {
-            let hash -> Int = old_hashes[i];
+            let hash: Int = old_hashes[i];
             if (hash >= 2) {
-                let idx -> Int = hash & mask;
+                let idx: Int = hash & mask;
                 while (new_hashes[idx] != 0) { idx = (idx + 1) & mask; }
                 new_hashes[idx] = hash;
                 new_keys[idx] = old_keys[i];
@@ -354,7 +354,7 @@ class Dict<K: Hash + Eq(K), V> {
         runtime.mem_dealloc(old_hashes);
     }
 
-    method __prepare_insert() -> Bool {
+    func __prepare_insert() -> Bool {
         if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) {
             return false;
         }
@@ -371,18 +371,18 @@ class Dict<K: Hash + Eq(K), V> {
         return true;
     }
 
-    method put(key -> K, value -> V) -> Void {
-        let hash -> Int = self.__hash(key);
+    func put(key: K, value: V) -> Void {
+        let hash: Int = self.__hash(key);
         if (hash < 2) {
             runtime.panic("Dict key is not hashable");
             return;
         }
 
-        let mask -> Int = self.capacity - 1;
-        let idx -> Int = hash & mask;
-        let first_tombstone -> Int = -1;
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
+        let first_tombstone: Int = -1;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 if (self.__prepare_insert()) {
                     self.put(key, value);
@@ -413,16 +413,16 @@ class Dict<K: Hash + Eq(K), V> {
         }
     }
 
-    method get(key -> K) -> V? {
+    func get(key: K) -> V? {
         if (self.size == 0) {
             throw Error.KeyNotFound;
         }
 
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 throw Error.KeyNotFound;
             }
@@ -434,16 +434,16 @@ class Dict<K: Hash + Eq(K), V> {
         throw Error.KeyNotFound;
     }
 
-    method lookup(key -> K) -> V {
+    func lookup(key: K) -> V {
         if (self.size == 0) {
             return self.__zero_value();
         }
 
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 return self.__zero_value();
             }
@@ -455,16 +455,16 @@ class Dict<K: Hash + Eq(K), V> {
         return self.__zero_value();
     }
 
-    method remove(key -> K) -> Bool {
+    func remove(key: K) -> Bool {
         if (self.size == 0) {
             return false;
         }
 
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 return false;
             }
@@ -483,16 +483,16 @@ class Dict<K: Hash + Eq(K), V> {
         return false;
     }
 
-    method contains_key(key -> K) -> Bool {
+    func contains_key(key: K) -> Bool {
         if (self.size == 0) {
             return false;
         }
 
-        let hash -> Int = self.__hash(key);
-        let mask -> Int = self.capacity - 1;
-        let idx -> Int = hash & mask;
+        let hash: Int = self.__hash(key);
+        let mask: Int = self.capacity - 1;
+        let idx: Int = hash & mask;
         while true {
-            let current -> Int = self.hashes[idx];
+            let current: Int = self.hashes[idx];
             if (current == 0) {
                 return false;
             }
@@ -504,15 +504,15 @@ class Dict<K: Hash + Eq(K), V> {
         return false;
     }
 
-    method length() -> Int {
+    func length() -> Int {
         return self.size;
     }
 
-    method is_empty() -> Bool {
+    func is_empty() -> Bool {
         return self.size == 0;
     }
 
-    method clear() -> Void {
+    func clear() -> Void {
         self.__clear_slots(self.keys, self.values, self.hashes, self.capacity);
         runtime.mem_set(self.hashes, 0, UIntSize(self.capacity) * size_of(Int));
 

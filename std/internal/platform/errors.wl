@@ -43,7 +43,7 @@ enum Kind {
     HostUnreachable,
 }
 
-func from_windows(code -> Int) -> Kind {
+func from_windows(code: Int) -> Kind {
     if (code == 0) { return Kind.None; }
     if (code == 2 || code == 3 || code == 15) { return Kind.NotFound; }
     if (code == 5 || code == 10013) { return Kind.PermissionDenied; }
@@ -75,7 +75,7 @@ func from_windows(code -> Int) -> Kind {
     return Kind.Unknown;
 }
 
-func from_posix(code -> Int) -> Kind {
+func from_posix(code: Int) -> Kind {
     if (code == 0) { return Kind.None; }
     if (code == 2) { return Kind.NotFound; }
     if (code == 1 || code == 13) { return Kind.PermissionDenied; }

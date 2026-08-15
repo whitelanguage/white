@@ -6,6 +6,6 @@
 import "../../fixtures/modules/left/provider.wl" as provider
 
 func main() -> Int {
-    let value -> provider.__PrivateItem;
+    let value: provider.__PrivateItem;
     return 0;
 }

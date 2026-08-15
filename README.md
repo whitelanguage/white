@@ -25,23 +25,23 @@ The limitations near the end of this file are part of the project, not fine prin
 
 ```rs
 interface Named {
-    method name() -> String;
+    func name() -> String;
 }
 
 class Project with Named {
-    let project_name -> String;
-    let targets -> Vector(String);
+    let project_name: String;
+    let targets: Vector(String);
 
-    init(name -> String) {
+    init(name: String) {
         self.project_name = name;
         self.targets = [];
     }
 
-    method name() -> String {
+    func name() -> String {
         return self.project_name;
     }
 
-    method add_target(target -> String) -> Void {
+    func add_target(target: String) -> Void {
         self.targets.append(target);
     }
 
@@ -51,12 +51,12 @@ class Project with Named {
 }
 
 func main() -> Int {
-    let project -> Project = Project("White Language");
+    let project = Project("White Language");
     project.add_target("windows");
     project.add_target("linux");
     project.add_target("macos");
 
-    let get_name -> Method(String) = project.name;
+    let get_name: Method() -> String = project.name;
     print(get_name(), " targets: ", project.targets);
     return 0;
 }
@@ -65,6 +65,13 @@ func main() -> Int {
 There is no special demonstration machinery in that example. Interfaces use
 dynamic dispatch, methods can be stored as values, class instances are managed
 by ARC, and `deinit` runs when the last owning reference is released.
+
+White 0.3.4 was the source transition release. White 0.3.5 uses `:` for
+parameter, field and variable types, and uses `func` for functions and class
+methods. The older `name -> Type`, `method`, and last-type-as-return callable
+forms are no longer accepted. A declaration with an initializer may omit its
+annotation, as in `let project = ...`; the compiler still resolves one concrete
+static type before generating IR.
 
 Class fields may omit a default when every initializer definitely assigns
 them. The compiler rejects reads before initialization and initializers which
@@ -87,8 +94,11 @@ The language currently has:
   standard I/O, dictionaries and JSON.
 
 This list says what the compiler accepts, not that every subsystem is finished.
-For example, the generic type system is still limited, `Dict` is not yet a
-general-purpose generic map, and the standard library is small.
+Generic functions, methods, structs, classes and interfaces are monomorphized,
+and interface constraints are checked before an instance is emitted. `Dict(K,
+V)` is fully typed and requires keys to implement `Hash` and `Eq(K)`. Built-in
+scalar keys already provide those contracts; user classes opt in explicitly.
+The standard library is still small.
 
 ## Errors
 
@@ -98,15 +108,15 @@ transfers control to the following `catch` block:
 ```rs
 import "file"
 
-func read_config(path -> String) -> String? {
-    let input -> file.File = file.open(path)?;
-    let text -> String = input.read_all()?;
+func read_config(path: String) -> String? {
+    let input: file.File = file.open(path)?;
+    let text = input.read_all()?;
     input.close_checked()?;
     return text;
 }
 
 func main() -> Int {
-    let config -> String = read_config("config.json")?;
+    let config = read_config("config.json")?;
     catch(err) {
         if (err == file.Error.NotFound) {
             print("config.json does not exist");
@@ -150,11 +160,11 @@ Standard-library packages use their own domains: `file.Error`, `io.Error`,
 byte-based and O(1):
 
 ```rs
-let text -> String = "A中😀";
+let text = "A中😀";
 print(text.length()); // 8
 
-let first -> Byte = text[0];
-let chinese -> Char = text.char_at(1)?;
+let first: Byte = text[0];
+let chinese: Char = text.char_at(1)?;
 catch(err) { return 1; }
 ```
 
@@ -166,8 +176,8 @@ Slices use a left-closed, right-open range. Without `ref`, slicing copies the
 element storage:
 
 ```rs
-let values -> Vector(Int) = [10, 20, 30];
-let copy -> Array(Int) = values[0:2];
+let values: Vector(Int) = [10, 20, 30];
+let copy: Array(Int) = values[0:2];
 copy[0] = 99;
 print(values[0]); // 10
 ```
@@ -175,7 +185,7 @@ print(values[0]); // 10
 `ref` creates a shared view and keeps its backing storage alive:
 
 ```rs
-let view -> Array(Int) = ref values[0:2];
+let view: Array(Int) = ref values[0:2];
 view[0] = 99;
 print(values[0]); // 99
 ```
@@ -197,7 +207,7 @@ func main() -> Int {
     io.stdout.write_all("name: ")?;
     catch(err) { return 1; }
 
-    let name -> String = io.stdin.read_line()?;
+    let name = io.stdin.read_line()?;
     catch(err) { return 1; }
 
     io.stdout.write_line("hello, " + name)?;
@@ -217,14 +227,14 @@ of JSON numbers so that large integers survive a parse/encode round trip.
 ```rs
 import "json"
 
-let document -> json.Value =
+let document: json.Value =
     json.decode("{\"name\":\"White Language\",\"version\":3}")?;
 catch(err) {
     print("bad JSON: ", err);
     return 1;
 }
 
-let name -> String = String(document.get("name")?)?;
+let name: String = String(document.get("name")?)?;
 catch(err) { return 1; }
 print(name);
 ```
@@ -238,7 +248,7 @@ Native declarations have block and single-function forms:
 
 ```rs
 extern "C" in "mylib" {
-    func native_add(left -> Int, right -> Int) -> Int;
+    func native_add(left: Int, right: Int) -> Int;
 }
 
 extern func native_version() -> Int from "C" in "mylib";
@@ -409,15 +419,16 @@ The important ones are:
 - ARC cannot collect cycles, and weak references are not implemented.
 - There is no borrow checker. Shared mutable objects require the same care they
   would in other ARC-based languages.
-- The generic system is limited and not yet suitable for building a broad
-  generic collection library.
-- `Dict` has `String` keys and stores values through an internal Variant.
+- A generic method is statically dispatched and does not occupy an interface
+  vtable slot. Interface method declarations therefore cannot introduce their
+  own type parameters.
+- `Dict` is heterogeneous and uses an internal Variant. Use `Dict(K, V)` when the key and value types are known.
 - Networking, threads, async I/O and a full filesystem package are missing.
 - Unicode scalar operations exist, but normalization, grapheme clusters and
   the larger Unicode database do not.
 - Raw pointers and incorrect extern declarations can cause undefined behaviour.
 - The internal White ABI may change between compiler releases.
-- The current data model assumes 64-bit targets in several places.
+- Native ARM hardware coverage is still smaller than the x86 test matrix.
 
 White is a good place to experiment with language design, work
 on a self-hosted compiler, and write small native tools. Production deployment

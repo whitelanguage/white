@@ -4,7 +4,7 @@
 // Expected Error: "TypeError: field 'value' needs an explicit type when it has no initializer."
 
 class Inferred {
-    let value -> Auto;
+    let value: Auto;
 
     init() -> Void {
         self.value = 1;

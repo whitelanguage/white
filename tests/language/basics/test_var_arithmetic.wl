@@ -4,15 +4,15 @@
 
 
 func main() -> Int {
-    let a -> Int = 5;
-    let b -> Float = 3.2;
+    let a: Int = 5;
+    let b: Float = 3.2;
 
-    // type promotion in binary ops (Int + Float -> Float)
-    let res -> Float = a + b;
+    // type promotion in binary ops (Int + Float: Float)
+    let res: Float = a + b;
     
     // operator precedence and unary fusion
     // ((a*a)/b) + (b/a) - b - (+b)
-    let complex_calc -> Float = a * a / b + b / a - b -+ b;
+    let complex_calc: Float = a * a / b + b / a - b -+ b;
 
     if (complex_calc != 0.0) {
         print("PASS: Arithmetic integrity");

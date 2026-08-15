@@ -1,12 +1,12 @@
 // core/WhitelangTarget.wl
 import "sys"
 
-let __target_triple -> String = "";
-let __target_os -> Int = -1;
-let __target_arch -> Int = -1;
-let __target_abi -> Int = -1;
-let __target_format -> Int = -1;
-let __target_pointer_bits -> Int = 0;
+let __target_triple: String = "";
+let __target_os: Int = -1;
+let __target_arch: Int = -1;
+let __target_abi: Int = -1;
+let __target_format: Int = -1;
+let __target_pointer_bits: Int = 0;
 
 func native_target_triple() -> String {
     if (sys.OS == sys.Os.Windows) {
@@ -24,7 +24,7 @@ func native_target_triple() -> String {
     return "";
 }
 
-func __set_target(triple -> String, os -> sys.Os, arch -> sys.Arch, abi -> sys.Abi, format -> sys.BinaryFormat, pointer_bits -> Int) -> Void {
+func __set_target(triple: String, os: sys.Os, arch: sys.Arch, abi: sys.Abi, format: sys.BinaryFormat, pointer_bits: Int) -> Void {
     __target_triple = triple;
     __target_os = Int(os);
     __target_arch = Int(arch);
@@ -33,9 +33,9 @@ func __set_target(triple -> String, os -> sys.Os, arch -> sys.Arch, abi -> sys.A
     __target_pointer_bits = pointer_bits;
 }
 
-func select_target(triple -> String) -> Bool {
+func select_target(triple: String) -> Bool {
     if (triple == "native") {
-        let native -> String = native_target_triple();
+        let native: String = native_target_triple();
         if (native.length() == 0) { return false; }
         __set_target(native, sys.OS, sys.ARCH, sys.ABI, sys.BINARY_FORMAT, sys.POINTER_BITS);
         return true;

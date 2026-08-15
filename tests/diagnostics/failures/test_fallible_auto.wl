@@ -4,6 +4,6 @@
 // Expected Error: "TypeError: Fallible values cannot be stored; handle the call with '?'"
 
 func main() -> Int {
-    let value -> Auto = input.read("name: ");
+    let value: Auto = input.read("name: ");
     return 0;
 }

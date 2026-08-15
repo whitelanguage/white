@@ -7,11 +7,11 @@ import "../../fixtures/pkgs/restricted_lib.wl" as mod
 
 func main() -> Int {
     // verify standard public access
-    let a -> Int = mod.public_func();
+    let a: Int = mod.public_func();
 
     // trigger access violation: attempting to invoke a triple-underscore private symbol
     // this must be intercepted by the compiler's symbol resolver
-    let b -> Int = mod.__private_func();
+    let b: Int = mod.__private_func();
 
     return 0;
 }

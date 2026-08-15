@@ -16,10 +16,10 @@ func platform_value() -> Int {
 }
 
 func main() -> Int {
-    let os -> sys.Os = sys.OS;
-    let arch -> sys.Arch = sys.ARCH;
-    let abi -> sys.Abi = sys.ABI;
-    let format -> sys.BinaryFormat = sys.BINARY_FORMAT;
+    let os: sys.Os = sys.OS;
+    let arch: sys.Arch = sys.ARCH;
+    let abi: sys.Abi = sys.ABI;
+    let format: sys.BinaryFormat = sys.BINARY_FORMAT;
 
     if (os == sys.Os.Unknown) {
         print("FAIL: sys.OS is unknown");

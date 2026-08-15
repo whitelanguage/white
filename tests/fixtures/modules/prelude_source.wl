@@ -7,7 +7,7 @@ import "process"
 import Dict from "dict"
 
 func check_module_prelude() -> Bool {
-    let values -> Dict = Dict(1);
+    let values: Dict = Dict(1);
     values.put("ready", true);
     print("PASS: imported module prelude");
     return values.contains_key("ready") && Error.InvalidArgument != Error.Overflow;

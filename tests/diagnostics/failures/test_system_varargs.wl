@@ -4,7 +4,7 @@
 // Expected Error: "ExternError: Variadic extern functions require the C ABI."
 
 extern "system" {
-    func invalid_system_varargs(tag -> Int, ...) -> Int;
+    func invalid_system_varargs(tag: Int, ...) -> Int;
 }
 
 func main() -> Int {

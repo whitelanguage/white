@@ -4,10 +4,10 @@
 // Expected Error: "MissingInitializer: Field 'value' is read before it is initialized."
 
 class EarlyRead {
-    let value -> Int;
+    let value: Int;
 
     init() -> Void {
-        let previous -> Int = self.value;
+        let previous: Int = self.value;
         self.value = previous;
     }
 }

@@ -4,6 +4,6 @@
 // Expected Error: "InvalidSyntax: Expected field name after '.'."
 
 func main() -> Int {
-    let value -> Float = 1.2.3;
+    let value: Float = 1.2.3;
     return Int(value);
 }

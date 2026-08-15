@@ -4,4 +4,4 @@
 // Expected Error: "TypeError: Cannot concatenate String and Value"
 
 class Value { }
-func main() -> Int { let text -> String = "value=" + Value(); return 0; }
+func main() -> Int { let text: String = "value=" + Value(); return 0; }

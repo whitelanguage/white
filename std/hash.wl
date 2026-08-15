@@ -2,9 +2,9 @@
 // contracts for values used by hash-based collections
 
 interface Hash {
-    method hash() -> Int;
+    func hash() -> Int;
 }
 
 interface Eq<T> {
-    method equals(other -> T) -> Bool;
+    func equals(other: T) -> Bool;
 }

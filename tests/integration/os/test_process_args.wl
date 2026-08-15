@@ -4,7 +4,7 @@
 
 import "process"
 
-func main(argc -> Int, ptr argv -> String) -> Int {
+func main(argc: Int, ptr argv: String) -> Int {
     if (argc < 1 || process.argument(argc, argv, 0) is null) {
         print("FAIL: Program name is missing");
         return 1;

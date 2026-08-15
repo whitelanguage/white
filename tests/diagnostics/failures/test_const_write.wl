@@ -3,5 +3,5 @@
 // Focus: Rejecting mutation through a const access path.
 // Expected Error: "TypeError: Cannot modify value through const access 'box'"
 
-class Box { let value -> Int = 0; }
-func main() -> Int { const box -> Box = Box(); box.value = 1; return 0; }
+class Box { let value: Int = 0; }
+func main() -> Int { const box: Box = Box(); box.value = 1; return 0; }

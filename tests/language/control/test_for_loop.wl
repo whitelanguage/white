@@ -4,10 +4,10 @@
 
 
 func main() -> Int {
-    let limit -> Int = 5;
-    let counter -> Int = 0;
+    let limit: Int = 5;
+    let counter: Int = 0;
 
-    for (i -> Int = 0; i < limit; i++) {
+    for (i: Int = 0; i < limit; i++) {
         counter = counter + 1;
     }
 

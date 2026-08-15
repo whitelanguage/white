@@ -13,20 +13,20 @@ error TransportError {
     UnexpectedToken
 }
 
-func parse(mode -> Int) -> Int? {
+func parse(mode: Int) -> Int? {
     if (mode == 1) { throw ParseError.UnexpectedToken; }
     if (mode == 2) { throw ParseError.InvalidEscape; }
     if (mode == 3) { throw Error.InvalidArgument; }
     return 42;
 }
 
-func forward(mode -> Int) -> Int? {
-    let value -> Int = parse(mode)?;
+func forward(mode: Int) -> Int? {
+    let value: Int = parse(mode)?;
     return value;
 }
 
-func rethrow(mode -> Int) -> Int? {
-    let value -> Int = parse(mode)?;
+func rethrow(mode: Int) -> Int? {
+    let value: Int = parse(mode)?;
     catch(err) {
         throw err;
     }
@@ -34,7 +34,7 @@ func rethrow(mode -> Int) -> Int? {
 }
 
 func catches_custom_domain() -> Bool {
-    let value -> Int = forward(1)?;
+    let value: Int = forward(1)?;
     catch(err) {
         return err == ParseError.UnexpectedToken &&
                err != TransportError.UnexpectedToken &&
@@ -44,7 +44,7 @@ func catches_custom_domain() -> Bool {
 }
 
 func catches_explicit_code() -> Bool {
-    let value -> Int = rethrow(2)?;
+    let value: Int = rethrow(2)?;
     catch(err) {
         return err == ParseError.InvalidEscape && Int(err) == 7;
     }
@@ -52,7 +52,7 @@ func catches_explicit_code() -> Bool {
 }
 
 func catches_standard_error() -> Bool {
-    let value -> Int = forward(3)?;
+    let value: Int = forward(3)?;
     catch(err) {
         return err == Error.InvalidArgument &&
                err != ParseError.UnexpectedToken;
@@ -61,7 +61,7 @@ func catches_standard_error() -> Bool {
 }
 
 func succeeds_without_error() -> Bool {
-    let value -> Int = forward(0)?;
+    let value: Int = forward(0)?;
     catch(err) {
         return false;
     }

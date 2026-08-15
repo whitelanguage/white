@@ -3,4 +3,4 @@
 // Focus: Requiring explicit conversion between signed and unsigned variables.
 // Expected Error: "TypeError: Cannot mix signed and unsigned integers without an explicit conversion"
 
-func main() -> Int { let signed -> Int = -1; let unsigned -> UInt32 = 1U; if (signed < unsigned) { return 1; } return 0; }
+func main() -> Int { let signed: Int = -1; let unsigned: UInt32 = 1U; if (signed < unsigned) { return 1; } return 0; }

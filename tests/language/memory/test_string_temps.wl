@@ -4,10 +4,10 @@
 
 
 func main() -> Int {
-    let i -> Int = 0;
+    let i: Int = 0;
     while (i < 100000) {
-        let text -> String = "value-" + i;
-        let copy -> String = text[:];
+        let text: String = "value-" + i;
+        let copy: String = text[:];
         if (copy != "value-" + i || text[0:5] != "value") {
             print("FAIL: String temporary ownership");
             return 1;

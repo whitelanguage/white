@@ -4,13 +4,13 @@
 
 
 func main() -> Int {
-    let maximum -> UInt64 = 18446744073709551615UL;
-    let quotient -> UInt64 = maximum;
+    let maximum: UInt64 = 18446744073709551615UL;
+    let quotient: UInt64 = maximum;
     quotient /= UInt64(10);
 
-    let remainder -> UInt64 = maximum % UInt64(10);
-    let sum -> UInt64 = UInt64(40) + UInt64(2);
-    let shifted -> UInt64 = maximum >> UInt64(63);
+    let remainder: UInt64 = maximum % UInt64(10);
+    let sum: UInt64 = UInt64(40) + UInt64(2);
+    let shifted: UInt64 = maximum >> UInt64(63);
 
     if (quotient != 1844674407370955161UL ||
         remainder != UInt64(5) ||

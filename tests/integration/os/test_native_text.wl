@@ -8,9 +8,9 @@ import "sys"
 import Error from "errors"
 
 func rejects_file_path() -> Bool {
-    let visible -> String = "tests-native-text.tmp";
-    let disguised -> String = visible + '\0' + ".ignored";
-    let handle -> file.File = file.create(disguised)?;
+    let visible: String = "tests-native-text.tmp";
+    let disguised: String = visible + '\0' + ".ignored";
+    let handle: file.File = file.create(disguised)?;
     catch(err) { return err == file.Error.InvalidPath; }
     handle.close();
     if (file.exists(visible)) {
@@ -21,34 +21,34 @@ func rejects_file_path() -> Bool {
 }
 
 func rejects_invalid_file_path() -> Bool {
-    let invalid -> String = "中"[0:1];
-    let handle -> file.File = file.File(invalid, "rb");
+    let invalid: String = "中"[0:1];
+    let handle: file.File = file.File(invalid, "rb");
     return !handle.is_open() && handle.last_error() == file.Error.InvalidPath;
 }
 
 func rejects_process_argument() -> Bool {
-    let argument -> String = "before" + '\0' + "after";
-    let status -> Int = process.run("does-not-run", [argument])?;
+    let argument: String = "before" + '\0' + "after";
+    let status: Int = process.run("does-not-run", [argument])?;
     catch(err) { return err == Error.InvalidArgument; }
     return false;
 }
 
 func rejects_invalid_process_argument() -> Bool {
-    let invalid -> String = "中"[0:1];
-    let status -> Int = process.run("does-not-run", [invalid])?;
+    let invalid: String = "中"[0:1];
+    let status: Int = process.run("does-not-run", [invalid])?;
     catch(err) { return err == Error.InvalidArgument; }
     return false;
 }
 
 func rejects_environment_name() -> Bool {
-    let value -> String = sys.env.get("PATH" + '\0' + "IGNORED")?;
+    let value: String = sys.env.get("PATH" + '\0' + "IGNORED")?;
     catch(err) { return err == sys.env.Error.InvalidName; }
     return false;
 }
 
 func rejects_invalid_environment_name() -> Bool {
-    let invalid -> String = "中"[0:1];
-    let value -> String = sys.env.get(invalid)?;
+    let invalid: String = "中"[0:1];
+    let value: String = sys.env.get(invalid)?;
     catch(err) { return err == sys.env.Error.InvalidName; }
     return false;
 }

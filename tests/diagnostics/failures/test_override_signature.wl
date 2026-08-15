@@ -3,6 +3,6 @@
 // Focus: Requiring an override to preserve the parent ABI.
 // Expected Error: "TypeError: Override of 'value' does not match the parent method signature"
 
-class Base { method value(input -> Int) -> Int { return input; } }
-class Child(Base) { method value(input -> String) -> String { return input; } }
+class Base { func value(input: Int) -> Int { return input; } }
+class Child(Base) { func value(input: String) -> String { return input; } }
 func main() -> Int { return 0; }

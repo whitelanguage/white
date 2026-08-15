@@ -7,13 +7,13 @@ import "process"
 
 
 func main() -> Int {
-    let wl_path -> String = sys.env.get_env("WL_PATH");
+    let wl_path: String = sys.env.get_env("WL_PATH");
     if (wl_path is null || wl_path.length() == 0) {
         print("FAIL: native environment lookup");
         return 1;
     }
 
-    let status -> Int = 0;
+    let status: Int = 0;
     if (sys.OS == sys.Os.Windows) {
         status = process.shell("exit /b 7");
         if (status != 7) {

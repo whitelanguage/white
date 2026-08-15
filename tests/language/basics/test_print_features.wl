@@ -4,14 +4,14 @@
 
 
 struct Point (
-    x -> Int,
-    y -> Int
+    x: Int,
+    y: Int
 )
 
 struct User (
-    id -> Int,
-    name -> String,
-    pos -> Point
+    id: Int,
+    name: String,
+    pos: Point
 )
 
 func main() -> Int {
@@ -32,15 +32,15 @@ func main() -> Int {
     print("");
 
     print("--- Vector Test ---");
-    let nums -> Vector(Int) = [1, 2, 3, 4, 5];
-    let words -> Vector(String) = ["Apple", "Banana", "Cherry"];
+    let nums: Vector(Int) = [1, 2, 3, 4, 5];
+    let words: Vector(String) = ["Apple", "Banana", "Cherry"];
     print("Numbers:", nums);
     print("Fruits:", words);
     print("");
 
     print("--- Struct Test ---");
-    let p -> Point = Point(x=10, y=20);
-    let u -> User = User(
+    let p: Point = Point(x=10, y=20);
+    let u: User = User(
         id=1, 
         name="WhiteLang", 
         pos=p
@@ -54,7 +54,7 @@ func main() -> Int {
     print("");
 
     print("--- Null & Pointer Test ---");
-    let n -> String = null;
+    let n: String = null;
     print("Null string:", n);
     
     print("PASS: Variadic print and complex type stringification");

@@ -11,12 +11,12 @@ enum Color {
 }
 
 func main() -> Int {
-    let c1 -> Color = Color.RED;
-    let c2 -> Color = Color.BLUE;
-    let c3 -> Enum = Color.BLUE;
-    let c4 -> Auto  = Color.YELLOW;
+    let c1: Color = Color.RED;
+    let c2: Color = Color.BLUE;
+    let c3: Enum = Color.BLUE;
+    let c4: Auto  = Color.YELLOW;
 
-    let res -> Bool = true;
+    let res: Bool = true;
 
     if (c1 == Color.GREEN) { res = false; }
     if (c1 == Color.RED) {} else { res = false; }

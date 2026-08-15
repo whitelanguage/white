@@ -1,6 +1,6 @@
-let state -> Int = 29;
+let state: Int = 29;
 
-struct Item(value -> Int) {
+struct Item(value: Int) {
     this.value = 0;
 }
 

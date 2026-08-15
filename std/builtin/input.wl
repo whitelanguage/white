@@ -10,7 +10,7 @@ import skip_bytes as stdin_skip_bytes from "../io/stdin.wl"
 import write_all as stdout_write_all from "../io/stdout.wl"
 import flush as stdout_flush from "../io/stdout.wl"
 
-func __prompt(text -> String) -> Void? {
+func __prompt(text: String) -> Void? {
 // write prompts without adding a line ending
     if (text is null || text.length() == 0) { return; }
     stdout_write_all(text)?;
@@ -18,38 +18,38 @@ func __prompt(text -> String) -> Void? {
     return;
 }
 
-func read(prompt -> String) -> String? {
+func read(prompt: String) -> String? {
     __prompt(prompt)?;
-    let value -> String = stdin_read_line()?;
+    let value: String = stdin_read_line()?;
     return value;
 }
 
-func read_bytes(prompt -> String, max_bytes -> Int) -> String? {
+func read_bytes(prompt: String, max_bytes: Int) -> String? {
     __prompt(prompt)?;
-    let value -> String = stdin_read_bytes(max_bytes)?;
+    let value: String = stdin_read_bytes(max_bytes)?;
     return value;
 }
 
-func read_full(prompt -> String, byte_count -> Int) -> String? {
+func read_full(prompt: String, byte_count: Int) -> String? {
     __prompt(prompt)?;
-    let value -> String = stdin_read_full(byte_count)?;
+    let value: String = stdin_read_full(byte_count)?;
     return value;
 }
 
-func read_until(prompt -> String, delimiter -> Char) -> String? {
+func read_until(prompt: String, delimiter: Char) -> String? {
     __prompt(prompt)?;
-    let value -> String = stdin_read_until(delimiter)?;
+    let value: String = stdin_read_until(delimiter)?;
     return value;
 }
 
-func read_all(prompt -> String) -> String? {
+func read_all(prompt: String) -> String? {
     __prompt(prompt)?;
-    let value -> String = stdin_read_all()?;
+    let value: String = stdin_read_all()?;
     return value;
 }
 
-func skip_bytes(prompt -> String, byte_count -> Int) -> Int? {
+func skip_bytes(prompt: String, byte_count: Int) -> Int? {
     __prompt(prompt)?;
-    let skipped -> Int = stdin_skip_bytes(byte_count)?;
+    let skipped: Int = stdin_skip_bytes(byte_count)?;
     return skipped;
 }

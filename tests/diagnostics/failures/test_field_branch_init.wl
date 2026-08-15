@@ -4,9 +4,9 @@
 // Expected Error: "MissingInitializer: Field 'value' is not initialized on every path through 'Branch.init'."
 
 class Branch {
-    let value -> Int;
+    let value: Int;
 
-    init(enabled -> Bool) -> Void {
+    init(enabled: Bool) -> Void {
         if enabled {
             self.value = 1;
         }

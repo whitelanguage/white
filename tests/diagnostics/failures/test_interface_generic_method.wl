@@ -4,7 +4,7 @@
 // Expected Error: "TypeError: Interface methods cannot declare type parameters."
 
 interface Factory {
-    method make<T>() -> T;
+    func make<T>() -> T;
 }
 
 func main() -> Int {

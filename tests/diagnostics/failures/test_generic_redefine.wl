@@ -3,11 +3,11 @@
 // Focus: Rejecting generic and non-generic functions that share a source name.
 // Expected Error: "NameError: Function 'identity' is already defined."
 
-func identity(value -> Int) -> Int {
+func identity(value: Int) -> Int {
     return value;
 }
 
-func identity<T>(value -> T) -> T {
+func identity<T>(value: T) -> T {
     return value;
 }
 

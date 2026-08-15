@@ -5,10 +5,10 @@
 import Error from "errors"
 
 class NumberText {
-    let text -> String = "";
-    let value -> Int = 0;
+    let text: String = "";
+    let value: Int = 0;
 
-    init(text -> String, value -> Int) -> Void {
+    init(text: String, value: Int) -> Void {
         self.text = text;
         self.value = value;
     }
@@ -31,8 +31,8 @@ class TaggedNumber(NumberText) {
     }
 }
 
-func read_fallible(value -> NumberText) -> Int {
-    let result -> Int = Int(value)?;
+func read_fallible(value: NumberText) -> Int {
+    let result: Int = Int(value)?;
     catch(err) {
         if (err == Error.InvalidArgument) { return -1; }
         return -2;
@@ -41,9 +41,9 @@ func read_fallible(value -> NumberText) -> Int {
 }
 
 func main() -> Int {
-    let number -> NumberText = NumberText("seven", 7);
-    let invalid -> NumberText = NumberText("invalid", -1);
-    let tagged -> TaggedNumber = TaggedNumber();
+    let number: NumberText = NumberText("seven", 7);
+    let invalid: NumberText = NumberText("invalid", -1);
+    let tagged: TaggedNumber = TaggedNumber();
     tagged.text = "nine";
     tagged.value = 9;
 

@@ -7,7 +7,7 @@ import "builtin" as bt
 
 func main() -> Int {
     // using aliased function and aliased module
-    let result -> Int = asd(1, 2);
+    let result: Int = asd(1, 2);
     
     if (result == 3) {
         bt.print("PASS: Import aliasing and cross-file calls");

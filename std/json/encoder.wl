@@ -6,29 +6,29 @@ import Kind from "value.wl"
 import Value from "value.wl"
 import validate_number from "value.wl"
 
-const __MAX_DEPTH -> Int = 1024;
+const __MAX_DEPTH: Int = 1024;
 
 class Encoder {
-    let __indent -> Int = 0;
-    let __max_depth -> Int = 512;
+    let __indent: Int = 0;
+    let __max_depth: Int = 512;
 
     init() {
         self.__indent = 0;
         self.__max_depth = 512;
     }
 
-    method set_indent(indent -> Int) -> Void {
+    func set_indent(indent: Int) -> Void {
         self.__indent = indent;
     }
 
-    method set_max_depth(max_depth -> Int) -> Void {
+    func set_max_depth(max_depth: Int) -> Void {
         self.__max_depth = max_depth;
     }
 
-    method __write_indent(output -> Builder, depth -> Int) -> Void? {
+    func __write_indent(output: Builder, depth: Int) -> Void? {
         output.write_byte(Byte(10))?;
-        let count -> Int = depth * self.__indent;
-        let i -> Int = 0;
+        let count: Int = depth * self.__indent;
+        let i: Int = 0;
         while (i < count) {
             output.write_byte(Byte(32))?;
             i += 1;
@@ -36,19 +36,19 @@ class Encoder {
         return;
     }
 
-    method __hex(value -> Int) -> Byte {
+    func __hex(value: Int) -> Byte {
         if (value < 10) { return Byte(value + 48); }
         return Byte(value - 10 + 97);
     }
 
-    method __write_string(output -> Builder, value -> String) -> Void? {
+    func __write_string(output: Builder, value: String) -> Void? {
         if (value is null || !value.is_valid_utf8()) {
             throw JsonError.InvalidUtf8;
         }
         output.write_byte(Byte(34))?;
-        let i -> Int = 0;
+        let i: Int = 0;
         while (i < value.length()) {
-            let byte -> Int = Int(value[i]);
+            let byte: Int = Int(value[i]);
             if (byte == 34) {
                 output.write("\\\"")?;
             } else if (byte == 92) {
@@ -76,10 +76,10 @@ class Encoder {
         return;
     }
 
-    method __write_array(output -> Builder, value -> Value, depth -> Int) -> Void? {
-        let length -> Int = value.length()?;
+    func __write_array(output: Builder, value: Value, depth: Int) -> Void? {
+        let length: Int = value.length()?;
         output.write_byte(Byte(91))?;
-        let i -> Int = 0;
+        let i: Int = 0;
         while (i < length) {
             if (i > 0) { output.write_byte(Byte(44))?; }
             if (self.__indent > 0) { self.__write_indent(output, depth + 1)?; }
@@ -93,15 +93,15 @@ class Encoder {
         return;
     }
 
-    method __write_object(output -> Builder, value -> Value, depth -> Int) -> Void? {
+    func __write_object(output: Builder, value: Value, depth: Int) -> Void? {
     // object keys keep insertion order, so output is stable across runs
-        let length -> Int = value.length()?;
+        let length: Int = value.length()?;
         output.write_byte(Byte(123))?;
-        let i -> Int = 0;
+        let i: Int = 0;
         while (i < length) {
             if (i > 0) { output.write_byte(Byte(44))?; }
             if (self.__indent > 0) { self.__write_indent(output, depth + 1)?; }
-            let key -> String = value.key_at(i)?;
+            let key: String = value.key_at(i)?;
             self.__write_string(output, key)?;
             output.write_byte(Byte(58))?;
             if (self.__indent > 0) { output.write_byte(Byte(32))?; }
@@ -115,9 +115,9 @@ class Encoder {
         return;
     }
 
-    method __write_value(output -> Builder, value -> Value, depth -> Int) -> Void? {
+    func __write_value(output: Builder, value: Value, depth: Int) -> Void? {
         if (value is null) { throw JsonError.InvalidValue; }
-        let kind -> Kind = value.kind();
+        let kind: Kind = value.kind();
         if (kind == Kind.Null) {
             output.write("null")?;
             return;
@@ -128,7 +128,7 @@ class Encoder {
             return;
         }
         if (kind == Kind.Number) {
-            let source -> String = value.as_number_text()?;
+            let source: String = value.as_number_text()?;
             validate_number(source)?;
             output.write(source)?;
             return;
@@ -151,20 +151,20 @@ class Encoder {
         throw JsonError.InvalidValue;
     }
 
-    method encode(value -> Value) -> String? {
+    func encode(value: Value) -> String? {
         if (self.__indent < 0 || self.__indent > 16) {
             throw JsonError.InvalidIndent;
         }
         if (self.__max_depth < 1 || self.__max_depth > __MAX_DEPTH) {
             throw JsonError.InvalidOption;
         }
-        let output -> Builder = Builder(256);
+        let output: Builder = Builder(256);
         self.__write_value(output, value, 0)?;
         return output.build()?;
     }
 }
 
-func encode(value -> Value) -> String? {
-    let encoder -> Encoder = Encoder();
+func encode(value: Value) -> String? {
+    let encoder: Encoder = Encoder();
     return encoder.encode(value)?;
 }

@@ -7,24 +7,24 @@ import "sys"
 extern "system" { func GetCurrentProcessId() -> Int; }
 extern "C" { func getpid() -> Int; }
 
-struct Payload(id -> Long, tag -> String)
-struct Node(val -> Int, data -> Payload, next -> Node)
-func compute_sum(a -> Int, b -> Int) -> Int { return a + b; }
+struct Payload(id: Long, tag: String)
+struct Node(val: Int, data: Payload, next: Node)
+func compute_sum(a: Int, b: Int) -> Int { return a + b; }
 
 func main() -> Int {
     // native FFI without introducing a Windows CRT dependency
-    let process_id -> Int = 0;
+    let process_id: Int = 0;
     if (sys.OS == sys.Os.Windows) { process_id = GetCurrentProcessId(); }
     else { process_id = getpid(); }
 
     // recursive Vector/Struct mix
-    let v_test -> Vector(Int) = [100, 200, 300];
-    let head -> Node = Node(1, Payload(10, "BASE"), null);
+    let v_test: Vector(Int) = [100, 200, 300];
+    let head: Node = Node(1, Payload(10, "BASE"), null);
     head.next = Node(2, Payload(20, "SUB"), null);
 
     // higher-order function dispatch
-    let fn_ptr -> Function(Int, Int, Int) = compute_sum;
-    let calc_res -> Int = fn_ptr(50, 50);
+    let fn_ptr: Function(Int, Int) -> Int = compute_sum;
+    let calc_res: Int = fn_ptr(50, 50);
 
     if (process_id > 0 && calc_res == 100 && v_test.length() == 3 && head.next.val == 2) {
         print("PASS: End-to-end language features");

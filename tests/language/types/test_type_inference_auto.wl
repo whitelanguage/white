@@ -3,18 +3,18 @@
 // Focus: Verify that the `Auto` keyword successfully deduces function and method signatures.
 
 
-func add_nums(x -> Int, y -> Int) -> Int {
+func add_nums(x: Int, y: Int) -> Int {
     return x + y;
 }
 
 class Counter {
-    let value -> Int = 0;
+    let value: Int = 0;
     
-    init(init_val -> Int) -> Void {
+    init(init_val: Int) -> Void {
         self.value = init_val;
     }
     
-    method increment(amount -> Int) -> Int {
+    func increment(amount: Int) -> Int {
         self.value += amount;
         return self.value;
     }
@@ -22,15 +22,15 @@ class Counter {
 
 func main() -> Int {
     // verify auto inference for global function pointers.
-    let add -> Auto = add_nums;
-    let res1 -> Int = add(10, 20);
+    let add: Auto = add_nums;
+    let res1: Int = add(10, 20);
 
     // verify auto inference for bound class methods.
-    let c -> Counter = Counter(100);
-    let inc -> Auto = c.increment;
-    let res2 -> Int = inc(5);
+    let c: Counter = Counter(100);
+    let inc: Auto = c.increment;
+    let res2: Int = inc(5);
     
-    let res -> Bool = true;
+    let res: Bool = true;
     if (res1 != 30) {
         res = false;
     }

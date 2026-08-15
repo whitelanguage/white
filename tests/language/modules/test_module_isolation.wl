@@ -6,8 +6,8 @@ import "../../fixtures/pkgs/iso_provider_b.wl" as modB
 
 
 func main() -> Int {
-    let str1 -> String = modA.str("A");
-    let str2 -> String = modB.str("B");
+    let str1: String = modA.str("A");
+    let str2: String = modB.str("B");
 
     if (str1 == "A" && str2 == "B") {
         print("PASS: Module symbol isolation");

@@ -6,7 +6,7 @@ import WireError from "../../fixtures/errors/custom_error_source.wl"
 import fail_wire from "../../fixtures/errors/custom_error_source.wl"
 
 func receives_imported_error() -> Bool {
-    let value -> Int = fail_wire()?;
+    let value: Int = fail_wire()?;
     catch(err) {
         return err == WireError.InvalidFrame &&
                err != WireError.Disconnected;

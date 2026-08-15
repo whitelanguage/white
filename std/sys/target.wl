@@ -31,16 +31,16 @@ enum BinaryFormat {
 }
 
 @CompilerIntrinsic("target_os")
-const OS -> Os = Os.Unknown;
+const OS: Os = Os.Unknown;
 
 @CompilerIntrinsic("target_arch")
-const ARCH -> Arch = Arch.Unknown;
+const ARCH: Arch = Arch.Unknown;
 
 @CompilerIntrinsic("target_abi")
-const ABI -> Abi = Abi.Unknown;
+const ABI: Abi = Abi.Unknown;
 
 @CompilerIntrinsic("target_binary_format")
-const BINARY_FORMAT -> BinaryFormat = BinaryFormat.Unknown;
+const BINARY_FORMAT: BinaryFormat = BinaryFormat.Unknown;
 
 @CompilerIntrinsic("target_pointer_bits")
-const POINTER_BITS -> Int = 0;
+const POINTER_BITS: Int = 0;

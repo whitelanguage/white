@@ -4,6 +4,6 @@
 // Expected Error: "InvalidSyntax: Expected ')' after Array type."
 
 func main() -> Int {
-    let values -> Array(Int, 2) = null;
+    let values: Array(Int, 2) = null;
     return values[0];
 }

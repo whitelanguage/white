@@ -7,20 +7,20 @@ func fail_text() -> String? {
 }
 
 func main() -> Int {
-    let first -> String = "";
+    let first: String = "";
     first = fail_text()?;
     catch(err) {
         if (first != "") { return 1; }
     }
 
-    let second -> String = fail_text()?;
+    let second: String = fail_text()?;
     catch(err) {
         print(err);
     }
     second = "ready";
     if (second != "ready") { return 2; }
 
-    let third -> String = fail_text()?;
+    let third: String = fail_text()?;
     catch(err) {
         third = "fallback";
     }

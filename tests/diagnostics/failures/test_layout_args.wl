@@ -4,6 +4,6 @@
 // Expected Error: "TypeError: Expected 1 arguments, got 2"
 
 func main() -> Int {
-    let value -> UIntSize = size_of(Int, Float);
+    let value: UIntSize = size_of(Int, Float);
     return Int(value);
 }

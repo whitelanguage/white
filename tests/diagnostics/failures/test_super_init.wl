@@ -4,17 +4,17 @@
 // Expected Error: "MissingInitializer: Call super.init(...) before initializing fields of 'Child'."
 
 class Parent {
-    let id -> Int;
+    let id: Int;
 
-    init(id -> Int) -> Void {
+    init(id: Int) -> Void {
         self.id = id;
     }
 }
 
 class Child(Parent) {
-    let name -> String;
+    let name: String;
 
-    init(id -> Int, name -> String) -> Void {
+    init(id: Int, name: String) -> Void {
         self.name = name;
     }
 }

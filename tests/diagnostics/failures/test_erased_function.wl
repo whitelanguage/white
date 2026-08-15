@@ -7,7 +7,7 @@ func answer() -> Int { return 42; }
 func make() -> Function { return answer; }
 
 func main() -> Int {
-    let callback -> Function(String) = make();
+    let callback: Function() -> String = make();
     callback();
     return 0;
 }

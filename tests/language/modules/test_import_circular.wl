@@ -6,8 +6,8 @@ import bar from "../../fixtures/pkgs/circular_dep_b.wl"
 import foo from "../../fixtures/pkgs/circular_dep_a.wl"
 
 func main() -> Int {
-    let a -> Int = foo();
-    let b -> Int = bar();
+    let a: Int = foo();
+    let b: Int = bar();
     
     // verify integrity of mutually recursive function calls
     if (a == 10 && b == 30) {

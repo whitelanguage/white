@@ -3,6 +3,6 @@
 // Focus: Rejecting conversion from a class that does not implement the interface.
 // Expected Error: "TypeError: class 'Value' does not implement interface 'Readable'"
 
-interface Readable { method read() -> Int; }
-class Value { method read() -> Int { return 1; } }
-func main() -> Int { let value -> Readable = Value(); return 0; }
+interface Readable { func read() -> Int; }
+class Value { func read() -> Int { return 1; } }
+func main() -> Int { let value: Readable = Value(); return 0; }

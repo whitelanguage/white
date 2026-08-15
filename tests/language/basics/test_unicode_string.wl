@@ -3,16 +3,16 @@
 // Focus: UTF-8 byte indexing, scalar access, validation, and boundaries.
 import Error from "errors"
 
-func rejects_invalid_utf8(value -> String) -> Bool {
-    let count -> Int = value.char_count()?;
+func rejects_invalid_utf8(value: String) -> Bool {
+    let count: Int = value.char_count()?;
     catch(err) {
         return err == Error.InvalidArgument;
     }
     return count < 0;
 }
 
-func rejects_missing_byte(value -> String) -> Bool {
-    let byte -> Byte = value.byte_at(value.length())?;
+func rejects_missing_byte(value: String) -> Bool {
+    let byte: Byte = value.byte_at(value.length())?;
     catch(err) {
         return err == Error.IndexOutOfBounds;
     }
@@ -20,17 +20,17 @@ func rejects_missing_byte(value -> String) -> Bool {
 }
 
 func main() -> Int {
-    let text -> String = "A中😀";
+    let text: String = "A中😀";
     if (text.length() != 8) {
         print("FAIL: String length is not the UTF-8 byte length");
         return 1;
     }
 
-    let first -> Byte = text[0];
-    let chinese_lead -> Byte = text[1];
-    let emoji_lead -> Byte = text[4];
-    let inferred -> Auto = text[0];
-    let inferred_byte -> Byte = inferred;
+    let first: Byte = text[0];
+    let chinese_lead: Byte = text[1];
+    let emoji_lead: Byte = text[4];
+    let inferred: Auto = text[0];
+    let inferred_byte: Byte = inferred;
     if (first != Byte(65) ||
         chinese_lead != Byte(228) ||
         emoji_lead != Byte(240) ||
@@ -39,7 +39,7 @@ func main() -> Int {
         return 1;
     }
 
-    let count -> Int = text.char_count()?;
+    let count: Int = text.char_count()?;
     catch(err) {
         print("FAIL: Valid UTF-8 was rejected");
         return 1;
@@ -49,12 +49,12 @@ func main() -> Int {
         return 1;
     }
 
-    let chinese -> Char = text.char_at(1)?;
+    let chinese: Char = text.char_at(1)?;
     catch(err) {
         print("FAIL: Chinese scalar lookup");
         return 1;
     }
-    let emoji -> Char = text.char_at(2)?;
+    let emoji: Char = text.char_at(2)?;
     catch(err) {
         print("FAIL: Emoji scalar lookup");
         return 1;
@@ -67,7 +67,7 @@ func main() -> Int {
         print("FAIL: Unicode character literals");
         return 1;
     }
-    let joined -> String = "char=" + '中' + " emoji=" + '😀';
+    let joined: String = "char=" + '中' + " emoji=" + '😀';
     if (joined != "char=中 emoji=😀") {
         print("FAIL: Unicode Char to String encoding");
         return 1;
@@ -84,7 +84,7 @@ func main() -> Int {
         return 1;
     }
 
-    let invalid -> String = "中".slice(0, 1);
+    let invalid: String = "中".slice(0, 1);
     if (invalid.is_valid_utf8() || !rejects_invalid_utf8(invalid)) {
         print("FAIL: Invalid UTF-8 detection");
         return 1;

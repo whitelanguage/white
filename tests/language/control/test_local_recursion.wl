@@ -3,7 +3,7 @@
 // Focus: Direct recursion from a named local function.
 
 func main() -> Int {
-    func factorial(value -> Int) -> Int {
+    func factorial(value: Int) -> Int {
         if (value <= 1) { return 1; }
         return value * factorial(value - 1);
     }

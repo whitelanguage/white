@@ -6,8 +6,8 @@ import "builtin"
 import "dict"
 
 func main() -> Int {
-    let values -> Dict = Dict(2);
-    let i -> Int = 0;
+    let values: Dict = Dict(2);
+    let i: Int = 0;
 
     while (i < 4096) {
         values.put(i, i);
@@ -15,7 +15,7 @@ func main() -> Int {
     }
 
     values.put(1, 999);
-    let updated -> Int = values[1];
+    let updated: Int = values[1];
     if (values.length() != 4096 || updated != 999) {
         print("FAIL: Dict update changed the table size");
         return 1;
@@ -54,7 +54,7 @@ func main() -> Int {
 
     i = 4096;
     while (i < 8192) {
-        let loaded -> Int = values[i];
+        let loaded: Int = values[i];
         if (!values.contains_key(i) || loaded != i * 2) {
             print("FAIL: Dict lookup failed after rehash");
             return 1;

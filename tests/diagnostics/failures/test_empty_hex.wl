@@ -4,6 +4,6 @@
 // Expected Error: "InvalidSyntax: Invalid numeric literal '0x'."
 
 func main() -> Int {
-    let value -> Int = 0x;
+    let value: Int = 0x;
     return value;
 }

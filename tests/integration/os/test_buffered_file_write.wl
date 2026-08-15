@@ -5,14 +5,14 @@
 import "file"
 
 func main() -> Int {
-    let path -> String = "wl_buffered_write_test.tmp";
-    let output -> file.File = file.create(path)?;
+    let path: String = "wl_buffered_write_test.tmp";
+    let output: file.File = file.create(path)?;
     catch(err) {
         print("FAIL: Could not create buffered output");
         return 1;
     }
 
-    let i -> Int = 0;
+    let i: Int = 0;
     while (i < 7000) {
         output.write("0123456789");
         if (output.last_error() != file.Error.None) {
@@ -27,12 +27,12 @@ func main() -> Int {
         return 1;
     }
 
-    let input -> file.File = file.open(path)?;
+    let input: file.File = file.open(path)?;
     catch(err) {
         print("FAIL: Could not reopen buffered output");
         return 1;
     }
-    let content -> String = input.read_all()?;
+    let content: String = input.read_all()?;
     catch(err) {
         print("FAIL: Could not read buffered output");
         return 1;

@@ -4,6 +4,6 @@
 // Expected Error: "OverflowError: Constant 256 overflows Byte"
 
 func main() -> Int {
-    let value -> Byte = Byte(256);
+    let value: Byte = Byte(256);
     return Int(value);
 }

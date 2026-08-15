@@ -22,22 +22,22 @@ For most programs, decoding starts like this:
 import "json"
 
 func main() -> Int {
-    let source -> String =
+    let source: String =
         "{\"name\":\"White Language\",\"version\":3,\"native\":true}";
 
-    let root -> json.Value = json.decode(source)?;
+    let root: json.Value = json.decode(source)?;
     catch(err) {
         print("invalid JSON: ", err);
         return 1;
     }
 
-    let name -> String = String(root.get("name")?)?;
+    let name: String = String(root.get("name")?)?;
     catch(err) {
         print("field 'name' is missing or is not a string");
         return 1;
     }
 
-    let version -> Long = Long(root.get("version")?)?;
+    let version: Long = Long(root.get("version")?)?;
     catch(err) {
         print("field 'version' must be an integer");
         return 1;
@@ -55,7 +55,7 @@ allowed; any other data after the root value returns
 A function which does not want to handle the error can propagate it:
 
 ```rs
-func parse_message(source -> String) -> json.Value? {
+func parse_message(source: String) -> json.Value? {
     return json.decode(source)?;
 }
 ```
@@ -77,7 +77,7 @@ Use `kind()` when the input may have more than one shape:
 
 ```rs
 if (value.kind() == json.Kind.Array) {
-    let count -> Int = value.length()?;
+    let count: Int = value.length()?;
     catch(err) { return 1; }
     print("array with ", count, " elements");
 }
@@ -88,8 +88,8 @@ actual JSON value. A null `json.Value` reference means that no value object
 exists at all.
 
 ```rs
-let json_null -> json.Value = json.null_value();
-let no_value -> json.Value = null;
+let json_null: json.Value = json.null_value();
+let no_value: json.Value = null;
 
 json_null.is_null(); // true
 json.encode(json_null)?; // "null"
@@ -105,10 +105,10 @@ kind `Kind.Null`.
 The usual way to extract a scalar is an explicit conversion:
 
 ```rs
-let flag -> Bool = Bool(value)?;
-let count -> Long = Long(value)?;
-let ratio -> Float = Float(value)?;
-let text -> String = String(value)?;
+let flag: Bool = Bool(value)?;
+let count: Long = Long(value)?;
+let ratio: Float = Float(value)?;
+let text: String = String(value)?;
 ```
 
 The method forms are equivalent:
@@ -139,7 +139,7 @@ The exact-number section below covers those cases.
 Use `get` when a member is required:
 
 ```rs
-let name -> json.Value = root.get("name")?;
+let name: json.Value = root.get("name")?;
 catch(err) {
     if (err == json.JsonError.MissingKey) {
         print("missing required field 'name'");
@@ -151,9 +151,9 @@ catch(err) {
 Use `find` when it is optional:
 
 ```rs
-let description -> json.Value = root.find("description");
+let description: json.Value = root.find("description");
 if (description is !null) {
-    let text -> String = String(description)?;
+    let text: String = String(description)?;
     catch(err) {
         print("field 'description' must be a string");
         return 1;
@@ -181,18 +181,18 @@ is the position of the first occurrence.
 Iteration is index based:
 
 ```rs
-let count -> Int = root.length()?;
+let count: Int = root.length()?;
 catch(err) { return 1; }
 
-let i -> Int = 0;
+let i: Int = 0;
 while (i < count) {
-    let key -> String = root.key_at(i)?;
+    let key: String = root.key_at(i)?;
     catch(err) { return 1; }
 
-    let member -> json.Value = root.get(key)?;
+    let member: json.Value = root.get(key)?;
     catch(err) { return 1; }
 
-    let encoded -> String = json.encode(member)?;
+    let encoded: String = json.encode(member)?;
     catch(err) { return 1; }
     print(key, " = ", encoded);
     i += 1;
@@ -220,12 +220,12 @@ key_at(index)     key in insertion order
 paired key/value traversal is wanted:
 
 ```rs
-let object -> json.Object = root.as_object()?;
+let object: json.Object = root.as_object()?;
 catch(err) { return 1; }
 
-let key -> String = object.key_at(0)?;
+let key: String = object.key_at(0)?;
 catch(err) { return 1; }
-let value -> json.Value = object.value_at(0)?;
+let value: json.Value = object.value_at(0)?;
 catch(err) { return 1; }
 ```
 
@@ -236,12 +236,12 @@ Most code should stay with the methods on `Value`.
 Arrays currently support length, indexed access, and append:
 
 ```rs
-let count -> Int = values.length()?;
+let count: Int = values.length()?;
 catch(err) { return 1; }
 
-let i -> Int = 0;
+let i: Int = 0;
 while (i < count) {
-    let item -> json.Value = values.at(i)?;
+    let item: json.Value = values.at(i)?;
     catch(err) { return 1; }
     i += 1;
 }
@@ -259,14 +259,14 @@ not an invitation to reach into the private vector field.
 Constructors mirror the JSON data model:
 
 ```rs
-let nothing -> json.Value = json.null_value();
-let enabled -> json.Value = json.boolean(true);
-let count -> json.Value = json.integer(42L)?;
-let ratio -> json.Value = json.number(0.75)?;
-let exact -> json.Value = json.number_from_text("1.2300e+4")?;
-let name -> json.Value = json.string("White Language")?;
-let items -> json.Value = json.array();
-let root -> json.Value = json.object();
+let nothing: json.Value = json.null_value();
+let enabled: json.Value = json.boolean(true);
+let count: json.Value = json.integer(42L)?;
+let ratio: json.Value = json.number(0.75)?;
+let exact: json.Value = json.number_from_text("1.2300e+4")?;
+let name: json.Value = json.string("White Language")?;
+let items: json.Value = json.array();
+let root: json.Value = json.object();
 ```
 
 String construction validates UTF-8 and copies the supplied bytes. Object keys
@@ -276,7 +276,7 @@ invalidate a JSON string or the object's hash table.
 Here is a complete object with a nested array:
 
 ```rs
-let project -> json.Value = json.object();
+let project: json.Value = json.object();
 
 project.set("name", json.string("White Language")?)?;
 catch(err) { return 1; }
@@ -285,7 +285,7 @@ catch(err) { return 1; }
 project.set("bootstrapped", json.boolean(true))?;
 catch(err) { return 1; }
 
-let targets -> json.Value = json.array();
+let targets: json.Value = json.array();
 targets.append(json.string("windows")?)?;
 catch(err) { return 1; }
 targets.append(json.string("linux")?)?;
@@ -302,9 +302,9 @@ large subtree can be passed around without copying it. It also means that a
 mutable array or object shared by two parents is genuinely shared.
 
 ```rs
-let shared -> json.Value = json.array();
-let left -> json.Value = json.object();
-let right -> json.Value = json.object();
+let shared: json.Value = json.array();
+let left: json.Value = json.object();
+let right: json.Value = json.object();
 
 left.set("items", shared)?;
 catch(err) { return 1; }
@@ -329,15 +329,15 @@ such as `1.2300e+4`. The package therefore keeps both the original decimal text
 and a floating-point approximation.
 
 ```rs
-let value -> json.Value =
+let value: json.Value =
     json.number_from_text("18446744073709551615")?;
 catch(err) { return 1; }
 
-let source -> String = value.as_number_text()?;
+let source: String = value.as_number_text()?;
 catch(err) { return 1; }
 print(source); // 18446744073709551615
 
-let encoded -> String = json.encode(value)?;
+let encoded: String = json.encode(value)?;
 catch(err) { return 1; }
 print(encoded); // 18446744073709551615
 ```
@@ -346,7 +346,7 @@ print(encoded); // 18446744073709551615
 and `1e` are rejected. The spelling is otherwise kept as supplied:
 
 ```rs
-let value -> json.Value = json.number_from_text("1.2300e+4")?;
+let value: json.Value = json.number_from_text("1.2300e+4")?;
 catch(err) { return 1; }
 
 print(json.encode(value)?); // 1.2300e+4
@@ -362,7 +362,7 @@ type is acceptable.
 `json.encode` produces compact output:
 
 ```rs
-let output -> String = json.encode(project)?;
+let output: String = json.encode(project)?;
 catch(err) {
     print("could not encode JSON: ", err);
     return 1;
@@ -376,10 +376,10 @@ rather than expanded into `\u` escapes.
 For indented output, use an `Encoder`:
 
 ```rs
-let encoder -> json.Encoder = json.Encoder();
+let encoder: json.Encoder = json.Encoder();
 encoder.set_indent(2);
 
-let output -> String = encoder.encode(project)?;
+let output: String = encoder.encode(project)?;
 catch(err) { return 1; }
 ```
 
@@ -391,10 +391,10 @@ invalid value is reported by the following `encode` call as
 The encoder also has a nesting limit:
 
 ```rs
-let encoder -> json.Encoder = json.Encoder();
+let encoder: json.Encoder = json.Encoder();
 encoder.set_max_depth(128);
 
-let output -> String = encoder.encode(project)?;
+let output: String = encoder.encode(project)?;
 catch(err) {
     if (err == json.JsonError.NestingTooDeep) {
         print("document is too deeply nested");
@@ -412,10 +412,10 @@ returns `JsonError.InvalidOption` when encoding begins.
 `json.Decoder` when an error location or a smaller nesting limit is needed:
 
 ```rs
-let decoder -> json.Decoder = json.Decoder(source);
+let decoder: json.Decoder = json.Decoder(source);
 decoder.set_max_depth(128);
 
-let root -> json.Value = decoder.decode()?;
+let root: json.Value = decoder.decode()?;
 catch(err) {
     print(
         "JSON error at ",
@@ -448,21 +448,21 @@ propagated through the same fallible function:
 import "file"
 import "json"
 
-func load_json(path -> String) -> json.Value? {
-    let input -> file.File = file.open(path)?;
-    let source -> String = input.read_all()?;
+func load_json(path: String) -> json.Value? {
+    let input: file.File = file.open(path)?;
+    let source: String = input.read_all()?;
     input.close_checked()?;
     return json.decode(source)?;
 }
 
-func main() -> Int {
-    let config -> json.Value = load_json("config.json")?;
+func main(): Int {
+    let config: json.Value = load_json("config.json")?;
     catch(err) {
         print("could not load config.json: ", err);
         return 1;
     }
 
-    let name -> String = String(config.get("name")?)?;
+    let name: String = String(config.get("name")?)?;
     catch(err) {
         print("config field 'name' must be a string");
         return 1;

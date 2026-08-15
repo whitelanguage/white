@@ -4,6 +4,6 @@
 // Expected Error: "TypeError: Attempt to dereference non-pointer."
 
 func main() -> Int {
-    let value -> Int = 7;
+    let value: Int = 7;
     return deref value;
 }

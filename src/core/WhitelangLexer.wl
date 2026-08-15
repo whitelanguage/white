@@ -4,88 +4,88 @@ import * from "WhitelangTokens.wl"
 import * from "WhitelangExceptions.wl"
 
 struct Lexer(
-    text -> String,
-    length -> Int,
-    pos  -> Position, 
-    current_char -> Char,
-    current_width -> Int,
-    current_valid -> Bool,
-    collect_trivia -> Bool,
-    trivia -> Vector(Struct)
+    text: String,
+    length: Int,
+    pos: Position, 
+    current_char: Char,
+    current_width: Int,
+    current_valid: Bool,
+    collect_trivia: Bool,
+    trivia: Vector(Struct)
 )
 
 struct Utf8Unit(
-    value -> Char,
-    width -> Int,
-    valid -> Bool
+    value: Char,
+    width: Int,
+    valid: Bool
 )
 
-const TRIVIA_LINE_COMMENT -> Int = 1;
-const TRIVIA_BLOCK_COMMENT -> Int = 2;
+const TRIVIA_LINE_COMMENT: Int = 1;
+const TRIVIA_BLOCK_COMMENT: Int = 2;
 
 struct LexerTrivia(
-    kind -> Int,
-    start_line -> Int,
-    start_col -> Int,
-    end_line -> Int,
-    end_col -> Int
+    kind: Int,
+    start_line: Int,
+    start_col: Int,
+    end_line: Int,
+    end_col: Int
 )
 
-func is_space(c -> Char) -> Bool {
+func is_space(c: Char) -> Bool {
     return (c == ' ') || (c == '\t') || (c == '\n') || (c == '\r');
 }
 
-func is_digit(c -> Char) -> Bool {
+func is_digit(c: Char) -> Bool {
     return (c >= '0') && (c <= '9');
 }
 
-func is_alpha(c -> Char) -> Bool {
+func is_alpha(c: Char) -> Bool {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_');
 }
 
-func decode_utf8_unit(text -> String, offset -> Int) -> Utf8Unit {
+func decode_utf8_unit(text: String, offset: Int) -> Utf8Unit {
     // lexer offsets remain byte based even though current_char is a Unicode scalar
     if (offset < 0 || offset >= text.length()) {
         return Utf8Unit(value='\0', width=0, valid=true);
     }
 
-    let first -> Int = Int(text[offset]);
+    let first: Int = Int(text[offset]);
     if (first <= 127) {
         return Utf8Unit(value=Char(first), width=1, valid=true);
     }
 
     if (first >= 194 && first <= 223 && offset + 1 < text.length()) {
-        let second -> Int = Int(text[offset + 1]);
+        let second: Int = Int(text[offset + 1]);
         if (second >= 128 && second <= 191) {
-            let scalar -> Int = ((first & 31) << 6) | (second & 63);
+            let scalar: Int = ((first & 31) << 6) | (second & 63);
             return Utf8Unit(value=Char(scalar), width=2, valid=true);
         }
     }
 
     if (first >= 224 && first <= 239 && offset + 2 < text.length()) {
-        let second -> Int = Int(text[offset + 1]);
-        let third -> Int = Int(text[offset + 2]);
-        let second_valid -> Bool = second >= 128 && second <= 191;
+        let second: Int = Int(text[offset + 1]);
+        let third: Int = Int(text[offset + 2]);
+        let second_valid: Bool = second >= 128 && second <= 191;
         if (first == 224) { second_valid = second >= 160 && second <= 191; }
         if (first == 237) { second_valid = second >= 128 && second <= 159; }
         if (second_valid && third >= 128 && third <= 191) {
-            let scalar -> Int =
+            let scalar: Int =
                 ((first & 15) << 12) | ((second & 63) << 6) | (third & 63);
             return Utf8Unit(value=Char(scalar), width=3, valid=true);
         }
     }
 
     if (first >= 240 && first <= 244 && offset + 3 < text.length()) {
-        let second -> Int = Int(text[offset + 1]);
-        let third -> Int = Int(text[offset + 2]);
-        let fourth -> Int = Int(text[offset + 3]);
-        let second_valid -> Bool = second >= 128 && second <= 191;
+        let second: Int = Int(text[offset + 1]);
+        let third: Int = Int(text[offset + 2]);
+        let fourth: Int = Int(text[offset + 3]);
+        let second_valid: Bool = second >= 128 && second <= 191;
         if (first == 240) { second_valid = second >= 144 && second <= 191; }
         if (first == 244) { second_valid = second >= 128 && second <= 143; }
         if (second_valid &&
             third >= 128 && third <= 191 &&
             fourth >= 128 && fourth <= 191) {
-            let scalar -> Int =
+            let scalar: Int =
                 ((first & 7) << 18) |
                 ((second & 63) << 12) |
                 ((third & 63) << 6) |
@@ -97,7 +97,7 @@ func decode_utf8_unit(text -> String, offset -> Int) -> Utf8Unit {
     return Utf8Unit(value=Char(65533), width=1, valid=false);
 }
 
-func is_digit_for_base(c -> Char, base -> Int) -> Bool {
+func is_digit_for_base(c: Char, base: Int) -> Bool {
     if (c >= '0' && c <= '9') {
         return Int(c) - Int('0') < base;
     }
@@ -107,15 +107,15 @@ func is_digit_for_base(c -> Char, base -> Int) -> Bool {
     return false;
 }
 
-func report_bad_number(l -> Lexer, line -> Int, col -> Int, value -> String) -> Void {
-    let pos -> Position = Position(idx=0, ln=line, col=col, text=l.text, fn=l.pos.fn);
+func report_bad_number(l: Lexer, line: Int, col: Int, value: String) -> Void {
+    let pos: Position = Position(idx=0, ln=line, col=col, text=l.text, fn=l.pos.fn);
     throw_invalid_syntax(pos, "Invalid numeric literal '" + value + "'.");
 }
 
-func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_float -> Bool) -> Bool {
+func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Bool) -> Bool {
     if (value.length() == 0) { return false; }
 
-    let end -> Int = value.length();
+    let end: Int = value.length();
     if is_float {
         if (value.ends_with("f") || value.ends_with("F")) { end -= 1; }
         if (end == 0) {
@@ -123,12 +123,12 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
             return false;
         }
 
-        let dot_seen -> Bool = false;
-        let digit_seen -> Bool = false;
-        let prev_digit -> Bool = false;
-        let i -> Int = 0;
+        let dot_seen: Bool = false;
+        let digit_seen: Bool = false;
+        let prev_digit: Bool = false;
+        let i: Int = 0;
         while (i < end) {
-            let ch -> Char = value[i];
+            let ch: Char = value[i];
             if (is_digit(ch)) {
                 digit_seen = true;
                 prev_digit = true;
@@ -159,7 +159,7 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
         return true;
     }
 
-    let suffix_len -> Int = 0;
+    let suffix_len: Int = 0;
     if (value.ends_with("ULL") || value.ends_with("ull")) {
         suffix_len = 3;
     } else if (value.ends_with("LL") || value.ends_with("ll") ||
@@ -171,10 +171,10 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
     }
 
     end -= suffix_len;
-    let base -> Int = 10;
-    let start -> Int = 0;
+    let base: Int = 10;
+    let start: Int = 0;
     if (end >= 2 && value[0] == '0') {
-        let prefix -> Char = value[1];
+        let prefix: Char = value[1];
         if (prefix == 'x' || prefix == 'X') { base = 16; start = 2; }
         else if (prefix == 'b' || prefix == 'B') { base = 2; start = 2; }
         else if (prefix == 'o' || prefix == 'O') { base = 8; start = 2; }
@@ -185,10 +185,10 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
         return false;
     }
 
-    let prev_digit -> Bool = false;
-    let i -> Int = start;
+    let prev_digit: Bool = false;
+    let i: Int = start;
     while (i < end) {
-        let ch -> Char = value[i];
+        let ch: Char = value[i];
         if (is_digit_for_base(ch, base)) {
             prev_digit = true;
         } else if (ch == '_') {
@@ -206,21 +206,21 @@ func validate_number(l -> Lexer, line -> Int, col -> Int, value -> String, is_fl
     return true;
 }
 
-func lexer_load_current(l -> Lexer) -> Void {
+func lexer_load_current(l: Lexer) -> Void {
     while (l.pos.idx < l.length) {
-        let first -> Int = Int(l.text[l.pos.idx]);
+        let first: Int = Int(l.text[l.pos.idx]);
         if (first > 0 && first <= 127) {
             l.current_char = Char(first);
             l.current_width = 1;
             l.current_valid = true;
             return;
         }
-        let unit -> Utf8Unit = decode_utf8_unit(l.text, l.pos.idx);
+        let unit: Utf8Unit = decode_utf8_unit(l.text, l.pos.idx);
         if (!unit.valid || unit.value == '\0') {
-            let err_pos -> Position = Position(idx=l.pos.idx, ln=l.pos.ln, col=l.pos.col, text=l.text, fn=l.pos.fn);
+            let err_pos: Position = Position(idx=l.pos.idx, ln=l.pos.ln, col=l.pos.col, text=l.text, fn=l.pos.fn);
             if (!unit.valid) { throw_illegal_char(err_pos, "Invalid UTF-8 byte in source."); }
             else { throw_illegal_char(err_pos, "NUL byte is not allowed in source."); }
-            let width -> Int = unit.width;
+            let width: Int = unit.width;
             if (width <= 0) { width = 1; }
             l.pos.idx += width;
             l.pos.col += width;
@@ -236,24 +236,24 @@ func lexer_load_current(l -> Lexer) -> Void {
     l.current_valid = true;
 }
 
-func __new_lexer(fn -> String, text -> String, collect_trivia -> Bool) -> Lexer {
-    let pos -> Position = Position(idx=0, ln=0, col=0, text=text, fn=fn);
-    let l -> Lexer = Lexer(text=text, length=text.length(), pos=pos, current_char='\0', current_width=0, current_valid=true, collect_trivia=collect_trivia, trivia=[]);
+func __new_lexer(fn: String, text: String, collect_trivia: Bool) -> Lexer {
+    let pos: Position = Position(idx=0, ln=0, col=0, text=text, fn=fn);
+    let l: Lexer = Lexer(text=text, length=text.length(), pos=pos, current_char='\0', current_width=0, current_valid=true, collect_trivia=collect_trivia, trivia=[]);
     lexer_load_current(l);
     return l;
 }
 
-func new_lexer(fn -> String, text -> String) -> Lexer {
+func new_lexer(fn: String, text: String) -> Lexer {
     return __new_lexer(fn, text, false);
 }
 
-func new_lexer_trivia(fn -> String, text -> String) -> Lexer {
+func new_lexer_trivia(fn: String, text: String) -> Lexer {
     return __new_lexer(fn, text, true);
 }
 
-func lexer_advance(l -> Lexer) -> Void {
+func lexer_advance(l: Lexer) -> Void {
     if (l.current_char == '\0') { return; }
-    let previous_width -> Int = l.current_width;
+    let previous_width: Int = l.current_width;
     if (l.current_char == '\n') {
         l.pos.ln += 1;
         l.pos.col = 0;
@@ -263,7 +263,7 @@ func lexer_advance(l -> Lexer) -> Void {
     l.pos.idx += previous_width;
 
     if (l.pos.idx < l.length) {
-        let next -> Int = Int(l.text[l.pos.idx]);
+        let next: Int = Int(l.text[l.pos.idx]);
         if (next > 0 && next <= 127) {
             l.current_char = Char(next);
             l.current_width = 1;
@@ -274,13 +274,13 @@ func lexer_advance(l -> Lexer) -> Void {
     lexer_load_current(l);
 }
 
-func get_string(l -> Lexer) -> Token {
-    let start_ln -> Int = l.pos.ln;
-    let start_col -> Int = l.pos.col;
+func get_string(l: Lexer) -> Token {
+    let start_ln: Int = l.pos.ln;
+    let start_col: Int = l.pos.col;
     lexer_advance(l);
 
-    let result -> String = "";
-    let chunk_start -> Int = l.pos.idx;
+    let result: String = "";
+    let chunk_start: Int = l.pos.idx;
     while (l.current_char != '"' && l.current_char != '\0') {
         if (l.current_char == '\\') {
             if (l.pos.idx > chunk_start) {
@@ -298,7 +298,7 @@ func get_string(l -> Lexer) -> Token {
             } else if (l.current_char == '\\') {
                 result += "\\";
             } else {
-                let idx -> Int = l.pos.idx;
+                let idx: Int = l.pos.idx;
                 result += l.text.slice(idx, idx + l.current_width);
             }
             lexer_advance(l);
@@ -323,12 +323,12 @@ func get_string(l -> Lexer) -> Token {
     return WhitelangTokens.Token(type=TOK_STR_LIT, value=result, line=start_ln, col=start_col);
 }
 
-func get_char_literal(l -> Lexer) -> Token {
-    let start_ln -> Int = l.pos.ln;
-    let start_col -> Int = l.pos.col;
+func get_char_literal(l: Lexer) -> Token {
+    let start_ln: Int = l.pos.ln;
+    let start_col: Int = l.pos.col;
     
     lexer_advance(l); // skip opening '
-    let char_val -> Int = 0;
+    let char_val: Int = 0;
     
     if (l.current_char == '\\') { // '\'
         lexer_advance(l);
@@ -355,12 +355,12 @@ func get_char_literal(l -> Lexer) -> Token {
 }
 
 
-func get_number(l -> Lexer) -> Token {
-    let start_line -> Int = l.pos.ln;
-    let start_col  -> Int = l.pos.col;
-    let start_pos  -> Int = l.pos.idx;
+func get_number(l: Lexer) -> Token {
+    let start_line: Int = l.pos.ln;
+    let start_col: Int = l.pos.col;
+    let start_pos: Int = l.pos.idx;
     
-    let dot_count -> Int = 0;
+    let dot_count: Int = 0;
     while (l.current_char != '\0') {
         if (l.current_char == '.') {
             if (dot_count == 1) { break; }
@@ -375,7 +375,7 @@ func get_number(l -> Lexer) -> Token {
         }
     }
     
-    let value -> String = l.text.slice(start_pos, l.pos.idx);
+    let value: String = l.text.slice(start_pos, l.pos.idx);
 
     if (value.length() > 0) {
         if (value[0] == '.') {
@@ -391,9 +391,9 @@ func get_number(l -> Lexer) -> Token {
     return WhitelangTokens.Token(type=TOK_INT, value=value, line=start_line, col=start_col);
 }
 
-func keyword_matches(text -> String, start -> Int, length -> Int, keyword -> String) -> Bool {
+func keyword_matches(text: String, start: Int, length: Int, keyword: String) -> Bool {
     if (length != keyword.length()) { return false; }
-    let i -> Int = 0;
+    let i: Int = 0;
     while (i < length) {
         if (text[start + i] != keyword[i]) { return false; }
         i += 1;
@@ -401,8 +401,8 @@ func keyword_matches(text -> String, start -> Int, length -> Int, keyword -> Str
     return true;
 }
 
-func keyword_type(text -> String, start -> Int, length -> Int) -> Int {
-    let first -> Char = text[start];
+func keyword_type(text: String, start: Int, length: Int) -> Int {
+    let first: Char = text[start];
     if (length == 2) {
         if (first == 'a') {
             if (keyword_matches(text, start, length, "as")) { return TOK_AS; }
@@ -493,26 +493,26 @@ func keyword_type(text -> String, start -> Int, length -> Int) -> Int {
     return TOK_IDENTIFIER;
 }
 
-func get_identifier(l -> Lexer) -> Token {
-    let start_line -> Int = l.pos.ln;
-    let start_col  -> Int = l.pos.col;
-    let start_pos  -> Int = l.pos.idx;
+func get_identifier(l: Lexer) -> Token {
+    let start_line: Int = l.pos.ln;
+    let start_col: Int = l.pos.col;
+    let start_pos: Int = l.pos.idx;
     while (l.current_char != '\0' && (is_alpha(l.current_char) || is_digit(l.current_char))) {
         lexer_advance(l);
     }
-    let length -> Int = l.pos.idx - start_pos;
-    let type -> Int = keyword_type(l.text, start_pos, length);
+    let length: Int = l.pos.idx - start_pos;
+    let type: Int = keyword_type(l.text, start_pos, length);
     if (type != TOK_IDENTIFIER) {
         return WhitelangTokens.Token(type=type, value=get_token_name(type), line=start_line, col=start_col);
     }
-    let value -> String = l.text.slice(start_pos, l.pos.idx);
+    let value: String = l.text.slice(start_pos, l.pos.idx);
     return WhitelangTokens.Token(type=type, value=value, line=start_line, col=start_col);
 }
 
 
-func handle_slash(l -> Lexer) -> Token {
-    let line -> Int = l.pos.ln;
-    let col  -> Int = l.pos.col;
+func handle_slash(l: Lexer) -> Token {
+    let line: Int = l.pos.ln;
+    let col: Int = l.pos.col;
     lexer_advance(l); // skip first /
 
     // /=
@@ -539,7 +539,7 @@ func handle_slash(l -> Lexer) -> Token {
     // /*  */
     if (l.current_char == '*') {
         lexer_advance(l);
-        let comment_closed -> Int = 0;
+        let comment_closed: Int = 0;
         while (l.current_char != '\0' && comment_closed == 0) {
             if (l.current_char == '*') {
                 lexer_advance(l);
@@ -566,7 +566,7 @@ func handle_slash(l -> Lexer) -> Token {
 }
 
 
-func get_next_token(l -> Lexer) -> Token {
+func get_next_token(l: Lexer) -> Token {
     while (l.current_char != '\0') {
         if (!l.current_valid) {
             throw_illegal_char(l.pos, "Invalid UTF-8 byte in source.");
@@ -586,9 +586,9 @@ func get_next_token(l -> Lexer) -> Token {
             return get_identifier(l);
         }
 
-        let char      -> Char = l.current_char;
-        let char_line -> Int  = l.pos.ln;
-        let char_col  -> Int  = l.pos.col;
+        let char: Char = l.current_char;
+        let char_line: Int  = l.pos.ln;
+        let char_col: Int  = l.pos.col;
 
         if (char == '"') {
             return get_string(l);
@@ -599,10 +599,10 @@ func get_next_token(l -> Lexer) -> Token {
 
         // . and ...
         if (char == '.') {
-            let is_ellipsis -> Bool = false;
+            let is_ellipsis: Bool = false;
             if (l.pos.idx + 2 < l.length) {
-                let n1 -> Char = l.text[l.pos.idx + 1];
-                let n2 -> Char = l.text[l.pos.idx + 2];
+                let n1: Char = l.text[l.pos.idx + 1];
+                let n2: Char = l.text[l.pos.idx + 2];
                 if (n1 == '.' && n2 == '.') { // . .
                     is_ellipsis = true;
                 }
@@ -625,7 +625,7 @@ func get_next_token(l -> Lexer) -> Token {
             return WhitelangTokens.Token(type=TOK_PLUS, value="+", line=char_line, col=char_col); 
         }
 
-        // - and -- and -> and -=
+        // - and -- and: and -=
         if (char == '-') { 
             lexer_advance(l); 
             if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_SUB_ASSIGN, value="-=", line=char_line, col=char_col); } // -=
@@ -648,7 +648,7 @@ func get_next_token(l -> Lexer) -> Token {
 
         // / /= // /*
         if (char == '/') {
-            let tok -> Token = handle_slash(l);
+            let tok: Token = handle_slash(l);
             if (tok is null) { continue; }
             return tok;
         }

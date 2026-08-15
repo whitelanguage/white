@@ -3,21 +3,21 @@
 // Focus: Inherited interface conformance and first-class interface methods.
 
 interface Valued {
-    method value() -> Int;
+    func value() -> Int;
 }
 
 class Base with Valued {
-    method value() -> Int { return 10; }
+    func value() -> Int { return 10; }
 }
 
 class Child(Base) {
-    method value() -> Int { return 20; }
+    func value() -> Int { return 20; }
 }
 
 func main() -> Int {
-    let child -> Child = Child();
-    let valued -> Valued = child;
-    let read -> Method(Int) = valued.value;
+    let child: Child = Child();
+    let valued: Valued = child;
+    let read: Method() -> Int = valued.value;
     if (read() != 20) { print("FAIL: inherited interface dispatch"); return 1; }
     print("PASS: inherited interface and method value");
     return 0;

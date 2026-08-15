@@ -4,6 +4,6 @@
 // Expected Error: "NameError: Undefined variable or function 'errors'."
 
 func main() -> Int {
-    let err -> Error = errors.Error.InvalidArgument;
+    let err: Error = errors.Error.InvalidArgument;
     return Int(err);
 }

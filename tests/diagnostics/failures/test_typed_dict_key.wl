@@ -6,6 +6,6 @@
 import Dict from "dict"
 
 func main() -> Int {
-    let values -> Dict(Vector(Int), String) = Dict();
+    let values: Dict(Vector(Int), String) = Dict();
     return 0;
 }

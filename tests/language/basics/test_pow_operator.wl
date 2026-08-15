@@ -2,15 +2,15 @@
 // File: tests/language/basics/test_pow_operator.wl
 // Focus: Power operator (**) precedence, calculation accuracy, and right-associativity.
 
-func close(left -> Float, right -> Float, tolerance -> Float) -> Bool {
-    let difference -> Float = left - right;
+func close(left: Float, right: Float, tolerance: Float) -> Bool {
+    let difference: Float = left - right;
     if (difference < 0.0) { difference = -difference; }
     return difference <= tolerance;
 }
 
 func main() -> Int {
-    let a -> Int = 2;
-    let b -> Int = 3;
+    let a: Int = 2;
+    let b: Int = 3;
 
     // 2^3 = 8
     if (a ** b == 8) {
@@ -27,12 +27,12 @@ func main() -> Int {
         return 1;
     }
 
-    let base -> Float = 9.0;
-    let half -> Float = 0.5;
-    let root -> Float = base ** half;
-    let inverse -> Float = 2.0 ** -3.0;
-    let signed -> Float = (-2.0) ** 3.0;
-    let invalid -> Float = (-2.0) ** half;
+    let base: Float = 9.0;
+    let half: Float = 0.5;
+    let root: Float = base ** half;
+    let inverse: Float = 2.0 ** -3.0;
+    let signed: Float = (-2.0) ** 3.0;
+    let invalid: Float = (-2.0) ** half;
     if (!close(root, 3.0, 0.000000000001) || !close(inverse, 0.125, 0.000000000001) || signed != -8.0 || invalid == invalid) {
         print("FAIL: Dynamic power edge cases");
         return 1;

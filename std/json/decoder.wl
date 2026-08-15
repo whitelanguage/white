@@ -11,55 +11,55 @@ import string from "value.wl"
 import array from "value.wl"
 import object from "value.wl"
 
-const __MAX_DEPTH -> Int = 1024;
+const __MAX_DEPTH: Int = 1024;
 
 class Decoder {
-    let __source -> String = null;
-    let __index -> Int = 0;
-    let __line -> Int = 1;
-    let __column -> Int = 1;
-    let __max_depth -> Int = 512;
-    let __error_offset -> Int = -1;
-    let __error_line -> Int = 0;
-    let __error_column -> Int = 0;
+    let __source: String = null;
+    let __index: Int = 0;
+    let __line: Int = 1;
+    let __column: Int = 1;
+    let __max_depth: Int = 512;
+    let __error_offset: Int = -1;
+    let __error_line: Int = 0;
+    let __error_column: Int = 0;
 
-    init(source -> String) {
+    init(source: String) {
         self.__source = source;
         self.__max_depth = 512;
     }
 
-    method set_max_depth(max_depth -> Int) -> Void {
+    func set_max_depth(max_depth: Int) -> Void {
         self.__max_depth = max_depth;
     }
 
-    method offset() -> Int {
+    func offset() -> Int {
         return self.__error_offset;
     }
 
-    method line() -> Int {
+    func line() -> Int {
         return self.__error_line;
     }
 
-    method column() -> Int {
+    func column() -> Int {
         return self.__error_column;
     }
 
-    method __fail(reason -> JsonError) -> Void? {
+    func __fail(reason: JsonError) -> Void? {
         self.__error_offset = self.__index;
         self.__error_line = self.__line;
         self.__error_column = self.__column;
         throw reason;
     }
 
-    method __peek() -> Int {
+    func __peek() -> Int {
         if (self.__source is null || self.__index >= self.__source.length()) {
             return -1;
         }
         return Int(self.__source[self.__index]);
     }
 
-    method __take() -> Int {
-        let value -> Int = self.__peek();
+    func __take() -> Int {
+        let value: Int = self.__peek();
         if (value < 0) { return -1; }
         self.__index += 1;
         if (value == 10) {
@@ -71,9 +71,9 @@ class Decoder {
         return value;
     }
 
-    method __skip_space() -> Void {
+    func __skip_space() -> Void {
         while true {
-            let value -> Int = self.__peek();
+            let value: Int = self.__peek();
             if (value != 32 && value != 9 && value != 10 && value != 13) {
                 return;
             }
@@ -81,8 +81,8 @@ class Decoder {
         }
     }
 
-    method __literal(expected -> String) -> Void? {
-        let i -> Int = 0;
+    func __literal(expected: String) -> Void? {
+        let i: Int = 0;
         while (i < expected.length()) {
             if (self.__peek() < 0) {
                 self.__fail(JsonError.UnexpectedEnd)?;
@@ -95,20 +95,20 @@ class Decoder {
         return;
     }
 
-    method __hex_digit(value -> Int) -> Int {
+    func __hex_digit(value: Int) -> Int {
         if (value >= 48 && value <= 57) { return value - 48; }
         if (value >= 65 && value <= 70) { return value - 55; }
         if (value >= 97 && value <= 102) { return value - 87; }
         return -1;
     }
 
-    method __unicode_escape() -> Char? {
+    func __unicode_escape() -> Char? {
     // json spells non-BMP scalars as a UTF-16 surrogate pair
-        let scalar -> Int = 0;
-        let i -> Int = 0;
+        let scalar: Int = 0;
+        let i: Int = 0;
         while (i < 4) {
-            let raw -> Int = self.__take();
-            let digit -> Int = self.__hex_digit(raw);
+            let raw: Int = self.__take();
+            let digit: Int = self.__hex_digit(raw);
             if (raw < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
             if (digit < 0) { self.__fail(JsonError.InvalidUnicodeEscape)?; }
             scalar = (scalar << 4) | digit;
@@ -119,11 +119,11 @@ class Decoder {
             if (self.__take() != 92 || self.__take() != 117) {
                 self.__fail(JsonError.InvalidUnicodeEscape)?;
             }
-            let low -> Int = 0;
+            let low: Int = 0;
             i = 0;
             while (i < 4) {
-                let raw -> Int = self.__take();
-                let digit -> Int = self.__hex_digit(raw);
+                let raw: Int = self.__take();
+                let digit: Int = self.__hex_digit(raw);
                 if (raw < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
                 if (digit < 0) { self.__fail(JsonError.InvalidUnicodeEscape)?; }
                 low = (low << 4) | digit;
@@ -139,12 +139,12 @@ class Decoder {
         return Char(scalar);
     }
 
-    method __string() -> String? {
+    func __string() -> String? {
         if (self.__take() != 34) { self.__fail(JsonError.UnexpectedToken)?; }
-        let output -> Builder = Builder(64);
+        let output: Builder = Builder(64);
 
         while true {
-            let value -> Int = self.__take();
+            let value: Int = self.__take();
             if (value < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
             if (value == 34) { return output.build()?; }
             if (value < 32) { self.__fail(JsonError.InvalidControlCharacter)?; }
@@ -154,7 +154,7 @@ class Decoder {
                 continue;
             }
 
-            let escaped -> Int = self.__take();
+            let escaped: Int = self.__take();
             if (escaped < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
             if (escaped == 34 || escaped == 92 || escaped == 47) {
                 output.write_byte(Byte(escaped))?;
@@ -177,14 +177,14 @@ class Decoder {
         return "";
     }
 
-    method __number() -> Value? {
-        let start -> Int = self.__index;
+    func __number() -> Value? {
+        let start: Int = self.__index;
         if (self.__peek() == 45) { self.__take(); }
         if (self.__peek() < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
 
         if (self.__peek() == 48) {
             self.__take();
-            let next -> Int = self.__peek();
+            let next: Int = self.__peek();
             if (next >= 48 && next <= 57) {
                 self.__fail(JsonError.InvalidNumber)?;
             }
@@ -220,14 +220,14 @@ class Decoder {
             }
         }
 
-        let source -> String = self.__source[start:self.__index];
+        let source: String = self.__source[start:self.__index];
         if (source is null) { throw Error.OutOfMemory; }
         return number_from_text(source)?;
     }
 
-    method __array(depth -> Int) -> Value? {
+    func __array(depth: Int) -> Value? {
         self.__take();
-        let result -> Value = array();
+        let result: Value = array();
         self.__skip_space();
         if (self.__peek() == 93) {
             self.__take();
@@ -235,10 +235,10 @@ class Decoder {
         }
 
         while true {
-            let item -> Value = self.__value(depth)?;
+            let item: Value = self.__value(depth)?;
             result.append(item)?;
             self.__skip_space();
-            let delimiter -> Int = self.__take();
+            let delimiter: Int = self.__take();
             if (delimiter == 93) { return result; }
             if (delimiter != 44) { self.__fail(JsonError.UnexpectedToken)?; }
             self.__skip_space();
@@ -246,9 +246,9 @@ class Decoder {
         return null_value();
     }
 
-    method __object(depth -> Int) -> Value? {
+    func __object(depth: Int) -> Value? {
         self.__take();
-        let result -> Value = object();
+        let result: Value = object();
         self.__skip_space();
         if (self.__peek() == 125) {
             self.__take();
@@ -259,16 +259,16 @@ class Decoder {
             if (self.__peek() != 34) {
                 self.__fail(JsonError.UnexpectedToken)?;
             }
-            let key -> String = self.__string()?;
+            let key: String = self.__string()?;
             self.__skip_space();
             if (self.__take() != 58) {
                 self.__fail(JsonError.UnexpectedToken)?;
             }
             self.__skip_space();
-            let item -> Value = self.__value(depth)?;
+            let item: Value = self.__value(depth)?;
             result.set(key, item)?;
             self.__skip_space();
-            let delimiter -> Int = self.__take();
+            let delimiter: Int = self.__take();
             if (delimiter == 125) { return result; }
             if (delimiter != 44) { self.__fail(JsonError.UnexpectedToken)?; }
             self.__skip_space();
@@ -276,9 +276,9 @@ class Decoder {
         return null_value();
     }
 
-    method __value(depth -> Int) -> Value? {
+    func __value(depth: Int) -> Value? {
         self.__skip_space();
-        let value -> Int = self.__peek();
+        let value: Int = self.__peek();
         if (value < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
         if (value == 34) { return string(self.__string()?)?; }
         if (value == 91) {
@@ -312,7 +312,7 @@ class Decoder {
         return null_value();
     }
 
-    method decode() -> Value? {
+    func decode() -> Value? {
     // validate the complete input before copying string bytes into values
         self.__index = 0;
         self.__line = 1;
@@ -328,14 +328,14 @@ class Decoder {
         if (!self.__source.is_valid_utf8()) { self.__fail(JsonError.InvalidUtf8)?; }
 
         self.__skip_space();
-        let result -> Value = self.__value(0)?;
+        let result: Value = self.__value(0)?;
         self.__skip_space();
         if (self.__peek() >= 0) { self.__fail(JsonError.TrailingData)?; }
         return result;
     }
 }
 
-func decode(source -> String) -> Value? {
-    let decoder -> Decoder = Decoder(source);
+func decode(source: String) -> Value? {
+    let decoder: Decoder = Decoder(source);
     return decoder.decode()?;
 }

@@ -10,8 +10,8 @@ class Value {
 }
 
 func main() -> Int {
-    let value -> Value = Value();
-    let result -> Int = Int(value)?;
+    let value: Value = Value();
+    let result: Int = Int(value)?;
     catch(err) {
         return 1;
     }

@@ -8,14 +8,14 @@ interface Named {
     func name(prefix: String) -> String;
 }
 
-struct Pair(left: Int, right -> Int)
+struct Pair(left: Int, right: Int)
 
 class Box<T> with Named {
     let value: T;
-    let label -> String;
+    let label: String;
     let enabled = true;
 
-    init(value: T, label -> String) {
+    init(value: T, label: String) {
         self.value = value;
         self.label = label;
     }
@@ -49,10 +49,10 @@ func main() -> Int {
     let box = Box(7, "White");
     let inferred = box.get();
     let typed: Int = apply(inferred, increment);
-    let legacy -> Int = 9;
+    let legacy: Int = 9;
     let pair: Pair = Pair(left=typed, right=legacy);
     let bound: Method(String) -> String = box.name;
-    let old_bound -> Method(String, String) = box.name;
+    let second_bound: Method(String) -> String = box.name;
     let producer: Function() -> Int = forty_two;
     let echoed = box.echo(" Language");
     let sum = 0;
@@ -63,7 +63,7 @@ func main() -> Int {
 
     if (pair.left != 8 || pair.right != 9 || sum != 3 || producer() != 42 ||
         TRANSITION_VERSION != 34 || !box.enabled ||
-        bound("Hello ") != "Hello White" || old_bound("Hi ") != "Hi White" ||
+        bound("Hello ") != "Hello White" || second_bound("Hi ") != "Hi White" ||
         echoed != " Language") {
         print("FAIL: transition syntax");
         return 1;

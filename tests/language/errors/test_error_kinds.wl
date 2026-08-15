@@ -3,7 +3,7 @@
 // Focus: Keeping standard error kinds distinct and available through the prelude.
 
 func main() -> Int {
-    let kinds -> Vector(Error) = [
+    let kinds: Vector(Error) = [
         Error.InvalidArgument,
         Error.InvalidData,
         Error.Unsupported,
@@ -15,9 +15,9 @@ func main() -> Int {
         Error.Underflow
     ];
 
-    let i -> Int = 0;
+    let i: Int = 0;
     while (i < kinds.length()) {
-        let j -> Int = i + 1;
+        let j: Int = i + 1;
         while (j < kinds.length()) {
             if (kinds[i] == kinds[j]) {
                 print("FAIL: Standard error kinds are not distinct");

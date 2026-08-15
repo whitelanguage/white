@@ -4,7 +4,7 @@
 // Expected Error: "NameError: Undefined variable or function 'io'."
 
 func main() -> Int {
-    let value -> String = io.stdin.read_bytes(0)?;
+    let value: String = io.stdin.read_bytes(0)?;
     catch(err) { return 1; }
     return value.length();
 }

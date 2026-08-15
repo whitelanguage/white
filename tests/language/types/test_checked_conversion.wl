@@ -4,8 +4,8 @@
 
 import Error from "errors"
 
-func to_byte(value -> Int) -> Int {
-    let result -> Byte = Byte(value)?;
+func to_byte(value: Int) -> Int {
+    let result: Byte = Byte(value)?;
     catch(err) {
         if (err == Error.Overflow) { return -1; }
         return -2;
@@ -13,8 +13,8 @@ func to_byte(value -> Int) -> Int {
     return Int(result);
 }
 
-func to_int(value -> Float) -> Int {
-    let result -> Int = Int(value)?;
+func to_int(value: Float) -> Int {
+    let result: Int = Int(value)?;
     catch(err) {
         if (err == Error.Overflow) { return -1; }
         return -2;
@@ -22,16 +22,16 @@ func to_int(value -> Float) -> Int {
     return result;
 }
 
-func to_char(value -> Int) -> Bool {
-    let result -> Char = Char(value)?;
+func to_char(value: Int) -> Bool {
+    let result: Char = Char(value)?;
     catch(err) {
         return err == Error.Overflow;
     }
     return result == 'A';
 }
 
-func to_bool(value -> Int) -> Bool {
-    let result -> Bool = Bool(value)?;
+func to_bool(value: Int) -> Bool {
+    let result: Bool = Bool(value)?;
     catch(err) {
         return err == Error.Overflow;
     }

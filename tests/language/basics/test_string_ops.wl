@@ -4,8 +4,8 @@
 
 
 func main() -> Int {
-    let str -> String = "Hi";
-    let combined -> String = "White" + "Lang";
+    let str: String = "Hi";
+    let combined: String = "White" + "Lang";
 
     if (str == "Hi" && combined == "WhiteLang") {
         print("PASS: String operations");

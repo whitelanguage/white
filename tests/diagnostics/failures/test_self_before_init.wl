@@ -4,7 +4,7 @@
 // Expected Error: "MissingInitializer: Cannot use 'self' before all fields of 'Escaping' are initialized."
 
 class Escaping {
-    let value -> Int;
+    let value: Int;
 
     init() -> Void {
         observe(self);
@@ -12,7 +12,7 @@ class Escaping {
     }
 }
 
-func observe(value -> Escaping) -> Void {
+func observe(value: Escaping) -> Void {
 }
 
 func main() -> Int {

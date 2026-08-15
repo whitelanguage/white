@@ -5,8 +5,8 @@
 import "json"
 
 func main() -> Int {
-    let root -> json.Value = json.object();
-    let name_value -> json.Value = json.string("White Language")?;
+    let root: json.Value = json.object();
+    let name_value: json.Value = json.string("White Language")?;
     catch(err) {
         print("FAIL: JSON value construction, error " + Int(err));
         return 1;
@@ -22,7 +22,7 @@ func main() -> Int {
         return 1;
     }
 
-    let values -> json.Value = json.array();
+    let values: json.Value = json.array();
     values.append(json.boolean(true))?;
     catch(err) {
         print("FAIL: JSON array construction");
@@ -34,22 +34,22 @@ func main() -> Int {
         return 1;
     }
 
-    let name -> String = String(root.get("name")?)?;
+    let name: String = String(root.get("name")?)?;
     catch(err) {
         print("FAIL: JSON string access");
         return 1;
     }
-    let year -> Long = Long(root.get("year")?)?;
+    let year: Long = Long(root.get("year")?)?;
     catch(err) {
         print("FAIL: JSON integer access");
         return 1;
     }
-    let first -> Bool = Bool(root.get("values")?.at(0)?)?;
+    let first: Bool = Bool(root.get("values")?.at(0)?)?;
     catch(err) {
         print("FAIL: JSON array access");
         return 1;
     }
-    let root_length -> Int = root.length()?;
+    let root_length: Int = root.length()?;
     catch(err) {
         print("FAIL: JSON object length");
         return 1;

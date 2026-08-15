@@ -5,7 +5,7 @@
 
 
 func main() -> Int {
-    let a -> Int = 0;
+    let a: Int = 0;
     
     // this should trigger a hardware trap or a software check
     print(3 / a); 

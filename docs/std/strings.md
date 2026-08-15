@@ -23,8 +23,8 @@ The constructor takes an initial capacity in bytes. The value is a sizing hint,
 not a length limit. Small capacities are rounded up to 64 bytes.
 
 ```rs
-func make_label(name -> String, count -> Int) -> String? {
-    let output -> strings.Builder = strings.Builder(64);
+func make_label(name: String, count: Int) -> String? {
+    let output: strings.Builder = strings.Builder(64);
     output.write(name)?;
     output.write(": ")?;
     output.write_int(count)?;
@@ -32,7 +32,7 @@ func make_label(name -> String, count -> Int) -> String? {
 }
 
 func main() -> Int {
-    let label -> String = make_label("workers", 8)?;
+    let label: String = make_label("workers", 8)?;
     catch(err) {
         print("could not build label: ", err);
         return 1;
@@ -121,7 +121,7 @@ format syntax and precision policy.
 least `n` additional bytes can be written without another allocation.
 
 ```rs
-let output -> strings.Builder = strings.Builder(64);
+let output: strings.Builder = strings.Builder(64);
 output.reserve(4096)?;
 
 print(output.length());   // 0
@@ -159,7 +159,7 @@ needed again.
 String:
 
 ```rs
-let result -> String = output.build()?;
+let result: String = output.build()?;
 catch(err) {
     if (err == strings.StringError.InvalidUtf8) {
         print("builder contains invalid UTF-8");
@@ -172,12 +172,12 @@ The backing allocation is transferred to the returned String. The builder is
 left empty with zero capacity and can be used again:
 
 ```rs
-let output -> strings.Builder = strings.Builder(64);
+let output: strings.Builder = strings.Builder(64);
 output.write("first")?;
-let first -> String = output.build()?;
+let first: String = output.build()?;
 
 output.write("second")?;
-let second -> String = output.build()?;
+let second: String = output.build()?;
 
 // first is still "first"
 ```

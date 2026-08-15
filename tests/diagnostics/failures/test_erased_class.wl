@@ -9,6 +9,6 @@ class Second { }
 func make() -> Class { return First(); }
 
 func main() -> Int {
-    let value -> Second = make();
+    let value: Second = make();
     return 0;
 }

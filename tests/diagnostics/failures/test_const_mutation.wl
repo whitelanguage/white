@@ -3,7 +3,7 @@
 // Focus: Ensuring symbols declared with 'const' cannot be reassigned or mutated.
 // Expected Error: "TypeError: Cannot modify constant variable 'VERSION'."
 
-const VERSION -> Int = 1;
+const VERSION: Int = 1;
 
 func main() -> Int {
     // intentional mutation error

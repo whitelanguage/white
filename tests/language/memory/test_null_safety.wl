@@ -3,17 +3,17 @@
 // Focus: 'null' for reference types, 'nullptr' for raw pointers, and 'is' operator checks.
 
 
-struct Box(val -> Int)
+struct Box(val: Int)
 
 func main() -> Int {
-    let s -> String = null;
-    let b -> Box = null;
-    let ptr p -> Int = nullptr;
+    let s: String = null;
+    let b: Box = null;
+    let ptr p: Int = nullptr;
     
-    let is_null_ok -> Bool = (s is null) && (b is null) && (p is nullptr);
+    let is_null_ok: Bool = (s is null) && (b is null) && (p is nullptr);
     
     s = "Not Null";
-    let is_not_null_ok -> Bool = (s is ! null);
+    let is_not_null_ok: Bool = (s is ! null);
 
     if (is_null_ok && is_not_null_ok) {
         print("PASS: Null and nullptr safety semantics");

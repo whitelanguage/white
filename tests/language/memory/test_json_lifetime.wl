@@ -5,10 +5,10 @@
 import "json"
 
 func main() -> Int {
-    let round -> Int = 0;
+    let round: Int = 0;
     while (round < 10) {
-        let value -> json.Value = json.array();
-        let i -> Int = 0;
+        let value: json.Value = json.array();
+        let i: Int = 0;
         while (i < 10000) {
             value.append(json.integer(Long(i))?)?;
             catch(err) {
@@ -17,7 +17,7 @@ func main() -> Int {
             }
             i += 1;
         }
-        let encoded -> String = json.encode(value)?;
+        let encoded: String = json.encode(value)?;
         catch(err) {
             print("FAIL: JSON encoding");
             return 1;

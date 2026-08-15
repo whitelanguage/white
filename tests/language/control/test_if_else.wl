@@ -4,7 +4,7 @@
 
 
 func main() -> Int {
-    let a -> Int = 10;
+    let a: Int = 10;
 
     if (true) {
         a++;
