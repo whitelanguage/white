@@ -448,6 +448,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     
     let clang_args: Vector(String) = [];
+    let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
     if (cfg.debug_info) { clang_args.append("-g"); }
     if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
@@ -456,6 +457,13 @@ func main(argc: Int, ptr argv: String) -> Int {
     if (cfg.opt_level == "-Oz") {
         clang_args.append("-mllvm");
         clang_args.append("-inline-threshold=0");
+        clang_args.append("-fno-vectorize");
+        clang_args.append("-fno-slp-vectorize");
+        clang_args.append("-fno-unroll-loops");
+    }
+    if size_opt {
+        clang_args.append("-ffunction-sections");
+        clang_args.append("-fdata-sections");
     }
     clang_args.append(ll_file);
 
@@ -478,6 +486,18 @@ func main(argc: Int, ptr argv: String) -> Int {
         clang_args.append(cfg.output_file);
     }
     else {
+        if size_opt {
+            clang_args.append("-Xlinker");
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
+            else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) { clang_args.append("-dead_strip"); }
+            else { clang_args.append("--gc-sections"); }
+
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+                clang_args.append("-Xlinker");
+                clang_args.append("/opt:icf");
+            }
+        }
+
         if (cfg.is_shared) {
             if (WhitelangTarget.get_target_os() == sys.Os.MacOS) {
                 clang_args.append("-dynamiclib");
