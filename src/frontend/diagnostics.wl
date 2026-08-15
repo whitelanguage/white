@@ -1,4 +1,4 @@
-// core/WhitelangExceptions.wl
+// frontend/diagnostics.wl
 import "file"
 import "process"
 import Dict from "dict"

@@ -36,7 +36,7 @@ class Sprite with Drawable, Resizable {
 }
 
 func get_drawable(is_circle: Bool) -> Drawable {
-    if (is_circle) {
+    if is_circle {
         return Circle();
     }
     return Square();

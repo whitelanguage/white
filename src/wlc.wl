@@ -3,15 +3,14 @@ import "sys"
 import "process"
 import "file"
 
-// Core components
-import "core/WhitelangTokens.wl"
-import "core/WhitelangLexer.wl"
-import "core/WhitelangNodes.wl"
-import "core/WhitelangParser.wl"
-import "core/WhitelangExceptions.wl"
-import "core/WhitelangCompiler.wl"
-import "core/WhitelangUtils.wl"
-import "core/WhitelangTarget.wl"
+import "frontend/tokens.wl" as WhitelangTokens
+import "frontend/lexer.wl" as WhitelangLexer
+import "frontend/ast.wl" as WhitelangNodes
+import "frontend/parser.wl" as WhitelangParser
+import "frontend/diagnostics.wl" as WhitelangExceptions
+import "compiler/lowering/core.wl" as WhitelangCompiler
+import "compiler/context.wl" as WhitelangUtils
+import "compiler/target.wl" as WhitelangTarget
 
 
 const VERSION      : String = "devel";

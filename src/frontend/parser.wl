@@ -1,9 +1,9 @@
-// core/WhitelangParser.wl
-import "WhitelangTokens.wl"
-import "WhitelangLexer.wl"
-import * from "WhitelangTokens.wl"
-import * from "WhitelangNodes.wl"
-import * from "WhitelangExceptions.wl"
+// frontend/parser.wl
+import "tokens.wl" as WhitelangTokens
+import "lexer.wl" as WhitelangLexer
+import * from "tokens.wl"
+import * from "ast.wl"
+import * from "diagnostics.wl"
 
 struct Parser(
     lexer: WhitelangLexer.Lexer,
@@ -420,7 +420,7 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
     }
 
     let kind: String = "Function";
-    if (is_method) { kind = "Method"; }
+    if is_method { kind = "Method"; }
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after " + kind + " signature.");
@@ -453,7 +453,7 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
         }
     }
 
-    if (is_method) {
+    if is_method {
         return MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, return_type=return_type, pos=pos);
     }
     return FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, return_type=return_type, pos=pos);
@@ -653,7 +653,7 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
         }
     } else if (separator == TOK_TYPE_ARROW) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (is_ptr) {
+        if is_ptr {
             throw_invalid_syntax(err_pos, "Type annotations use ':'; write 'ptr " + name_tok.value + ": Type'.");
         } else {
             throw_invalid_syntax(err_pos, "Type annotations use ':'; write '" + name_tok.value + ": Type'.");
@@ -664,7 +664,7 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
         type_node = inferred_type(start_pos);
     } else {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (allow_inference) {
+        if allow_inference {
             throw_invalid_syntax(err_pos, "Expected a type annotation or initializer after '" + name_tok.value + "'.");
         } else {
             throw_invalid_syntax(err_pos, "Expected ':' after '" + name_tok.value + "'.");
@@ -1284,6 +1284,8 @@ func factor(p: Parser) -> Struct {
 }
 
 func expression(p: Parser) -> Struct {
+// precedence lives in the expression call chain, assignment is the lowest level
+
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
     let result: Struct = assignment(p);
@@ -2309,7 +2311,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
 func parse_enum_def(p: Parser, anns: Vector(Struct), is_error: Bool) -> Struct {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let kind: String = "enum";
-    if (is_error) { kind = "error"; }
+    if is_error { kind = "error"; }
 
     parser_advance(p); // skip 'enum' or 'error'
 

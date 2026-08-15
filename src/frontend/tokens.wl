@@ -1,4 +1,4 @@
-// core/WhitelangTokens.wl
+// frontend/tokens.wl
 const TOK_EOF           : Int = 0;  // end of file
 const TOK_INT           : Int = 1;  // Integer
 const TOK_FLOAT         : Int = 2;  // Decimals

@@ -119,7 +119,7 @@ class Builder {
         }
         let negative: Bool = value < 0L;
         let width: Int = digits;
-        if (negative) { width += 1; }
+        if negative { width += 1; }
         self.__reserve(width)?;
 
         let start: Int = self.__length;
@@ -133,7 +133,7 @@ class Builder {
             if (work == 0L) { break; }
             pos -= 1;
         }
-        if (negative) { bytes[start] = Byte(45); }
+        if negative { bytes[start] = Byte(45); }
         self.__length += width;
         runtime_string.set_length(self.__storage, self.__length);
         return;

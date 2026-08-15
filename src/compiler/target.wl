@@ -1,4 +1,4 @@
-// core/WhitelangTarget.wl
+// compiler/target.wl
 import "sys"
 
 let __target_triple: String = "";

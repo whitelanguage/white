@@ -2,9 +2,9 @@
 // File: tests/integration/tooling/test_lexer_encoding.wl
 // Focus: Rejecting malformed UTF-8 and embedded NUL bytes in every lexical context.
 
-import "../../../src/core/WhitelangExceptions.wl"
-import Lexer, new_lexer, get_next_token from "../../../src/core/WhitelangLexer.wl"
-import TOK_EOF from "../../../src/core/WhitelangTokens.wl"
+import "../../../src/frontend/diagnostics.wl" as WhitelangExceptions
+import Lexer, new_lexer, get_next_token from "../../../src/frontend/lexer.wl"
+import TOK_EOF from "../../../src/frontend/tokens.wl"
 
 func rejects(text: String) -> Bool {
     WhitelangExceptions.begin_error_collection();

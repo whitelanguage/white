@@ -19,7 +19,7 @@ func main() -> Int {
     let assign_ok: Bool = test_assignment();
     
     // if the compiler reaches here without memory leaks or crashes, scope logic is valid
-    if (assign_ok) {
+    if assign_ok {
         print("PASS: ARC lifecycle and assignment");
     } else {
         print("FAIL: ARC assignment logic error");

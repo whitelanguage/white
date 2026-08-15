@@ -135,7 +135,7 @@ class Value {
 
         let negative: Bool = source[0] == '-';
         let i: Int = 0;
-        if (negative) { i = 1; }
+        if negative { i = 1; }
         if (i >= source.length()) { throw JsonError.InvalidNumber; }
 
         let value: Long = 0L;

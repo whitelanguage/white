@@ -1,14 +1,14 @@
-// core/WhitelangUtils.wl
+// compiler/context.wl
 import "sys"
 import "file"
 import Dict from "dict"
 
-import "WhitelangTokens.wl"
-import * from "WhitelangNodes.wl"
-import * from "WhitelangExceptions.wl"
-import * from "WhitelangTarget.wl"
+import "../frontend/tokens.wl" as WhitelangTokens
+import * from "../frontend/ast.wl"
+import * from "../frontend/diagnostics.wl"
+import * from "target.wl"
 
-// Type constants
+// primitive and compiler-only type ids
 const TYPE_INT: Int = 1;
 const TYPE_FLOAT: Int = 2;
 const TYPE_BOOL: Int = 3;
@@ -49,13 +49,13 @@ const TYPE_POISON: Int = 98;
 const TYPE_NULLPTR: Int = 99;
 
 
-// Annotation Flags
+// parsed annotation flags
 const FLAG_ANN_INTRINSIC: Int = 0x001;
 const FLAG_ANN_COMP_LINK: Int = 0x002;
 const FLAG_ANN_EXPORT: Int = 0x004;
 
 
-// Core data structures
+// state shared by semantic analysis and lowering
 struct GCTracker(
     reg: String,
     type: Int
@@ -539,7 +539,7 @@ func export_module_symbols(c: Compiler, prefix: String, as_submodule: Bool, modu
     
     let p_len: Int = prefix.length();
     let export_prefix: String = c.current_package_prefix;
-    if (as_submodule) {
+    if as_submodule {
         export_prefix = c.current_package_prefix + module_name + ".";
     }
 
@@ -1300,26 +1300,19 @@ func is_unsigned_integer(t: Int) -> Bool {
 }
 
 func is_integer_type(t: Int) -> Bool {
-// Checks if the type is an integer (int, long, byte, char, etc)
-
     return is_signed_integer(t) || is_unsigned_integer(t);
 }
 
 func is_numeric_type(t: Int) -> Bool {
-// Checks if the type is a number (integer or float)
-
     return is_integer_type(t) || t == TYPE_FLOAT || t == TYPE_FLOAT32;
 }
 
 func is_primitive_type(t: Int) -> Bool {
-// Checks if the type is a non-nullable value type stored directly on the stack or in registers.
-
+// these values never carry ARC ownership
     return is_numeric_type(t) || t == TYPE_BOOL || t == TYPE_ANY_ERROR;
 }
 
 func is_small_primitive_type(t: Int) -> Bool {
-// Checks if the type is smaller than 64 bits
-
     return t == TYPE_BOOL || 
            t == TYPE_BYTE || t == TYPE_CHAR || 
            t == TYPE_INT || t == TYPE_INT8 || t == TYPE_INT16 || 
@@ -1538,7 +1531,7 @@ func needs_explicit_cast(c: Compiler, source_type: Int, target_type: Int) -> Boo
     if (source_unsigned == target_unsigned) {
         return source_bits > target_bits;
     }
-    if (source_unsigned) {
+    if source_unsigned {
         return source_bits >= target_bits;
     }
     return true;
@@ -2533,6 +2526,7 @@ func check_generic_constraints(c: Compiler, template: GenericTemplate, bindings:
 }
 
 func register_generic_class(c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
+    // the instance key is canonical, every use of the same binding shares one type id
     let key: String = generic_instance_name(template.name, types, c);
     let cached: SymbolInfo = c.generic_instances.lookup(key);
     if (cached is !null) { return cached.type; }
@@ -2554,6 +2548,7 @@ func register_generic_class(c: Compiler, template: GenericTemplate, types: Vecto
     c.type_counter += 1;
 
     let info: StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name="%class.__generic." + new_id, init_body=node, is_class=true, vtable_name="@vtable.__generic." + new_id, parent_id=0, vtable=null, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=false, interfaces=null);
+    // publish the shell before resolving fields so recursive types find this instance
     c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, c)));
     c.generic_instance_bindings.put("" + new_id, bindings);
@@ -2799,6 +2794,7 @@ func bind_inferred_type(inferred: Dict(String, SymbolInfo), name: String, actual
 }
 
 func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, actual: Int, inferred: Dict(String, SymbolInfo), pos: Position) -> Bool {
+    // walk the declared type shape and bind parameters from the concrete argument
     if (pattern is null || actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
     let base: BaseNode = pattern;
 
@@ -3266,6 +3262,7 @@ func register_generic_func(c: Compiler, template: GenericTemplate, types: Vector
 }
 
 func resolve_type(c: Compiler, node: Struct) -> Int {
+    // compound and generic types are interned here, callers directly compare their ids
     if (node is null) { return TYPE_VOID; }
     let base: BaseNode = node;
 

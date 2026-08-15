@@ -120,7 +120,7 @@ class File {
             windows.free_utf16(wide_path);
             if (!windows.is_invalid_handle(raw_handle)) {
                 self.handle = raw_handle;
-                if (append_mode) { windows.SetFilePointerEx(self.handle, 0L, nullptr, windows.FILE_END); }
+                if append_mode { windows.SetFilePointerEx(self.handle, 0L, nullptr, windows.FILE_END); }
             } else {
                 self.__last_error = __last_error();
             }

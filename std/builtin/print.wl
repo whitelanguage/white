@@ -63,7 +63,7 @@ func write_float(value: Float) -> Void {
 @CompilerLink("print_bool")
 func write_bool(value: Bool) -> Void {
     let s: String = "false";
-    if (value) { s = "true"; }
+    if value { s = "true"; }
     write_bytes(runtime_string.data(s), s.length());
 }
 

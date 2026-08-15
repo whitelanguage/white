@@ -22,7 +22,7 @@ class Box<T> with Reader(T) {
     }
 
     func require<U>(value: U, fail: Bool) -> U? {
-        if (fail) { throw Error.InvalidArgument; }
+        if fail { throw Error.InvalidArgument; }
         return value;
     }
 }

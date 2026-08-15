@@ -189,7 +189,7 @@ func float_pow(base: Float, exponent: Float) -> Float {
     if (base_abs_bits == __FLOAT_EXP || base_abs_bits == UInt64(0)) {
         let result: Float = 0.0;
         if ((base_abs_bits == __FLOAT_EXP) != exponent_negative) { result = __float_from_bits(__FLOAT_INF); }
-        if (negative_result) { return -result; }
+        if negative_result { return -result; }
         return result;
     }
     if (base_negative && integer_kind == 0) { return __float_from_bits(__FLOAT_NAN); }
@@ -197,6 +197,6 @@ func float_pow(base: Float, exponent: Float) -> Float {
     let logarithm_low: Float = 0.0;
     let logarithm_high: Float = __float_log(base_abs, ref logarithm_low);
     let result: Float = __float_exp_product(exponent, logarithm_high, logarithm_low);
-    if (negative_result) { return -result; }
+    if negative_result { return -result; }
     return result;
 }

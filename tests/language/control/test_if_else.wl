@@ -6,7 +6,7 @@
 func main() -> Int {
     let a: Int = 10;
 
-    if (true) {
+    if true {
         a++;
         a++;
     }

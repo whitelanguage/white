@@ -1,6 +1,6 @@
-// core/WhitelangNodes.wl
-import Token from "WhitelangTokens.wl"
-import Position from "WhitelangExceptions.wl"
+// frontend/ast.wl
+import Token from "tokens.wl"
+import Position from "diagnostics.wl"
 
 const NODE_INT            : Int = 1;
 const NODE_FLOAT          : Int = 2;
@@ -226,7 +226,7 @@ struct ReturnNode(
     pos   : Position
 )
 
-// Function(Type)
+// function type syntax: Function(Type)
 struct FunctionTypeNode(
     type        : Int,    // NODE_FUNCTION_TYPE
     arg_types   : Vector(Struct),

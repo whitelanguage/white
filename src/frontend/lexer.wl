@@ -1,7 +1,7 @@
-// core/WhitelangLexer.wl
-import "WhitelangTokens.wl"
-import * from "WhitelangTokens.wl"
-import * from "WhitelangExceptions.wl"
+// frontend/lexer.wl
+import "tokens.wl" as WhitelangTokens
+import * from "tokens.wl"
+import * from "diagnostics.wl"
 
 struct Lexer(
     text: String,
@@ -133,7 +133,7 @@ func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Boo
                 digit_seen = true;
                 prev_digit = true;
             } else if (ch == '.') {
-                if (dot_seen) {
+                if dot_seen {
                     report_bad_number(l, line, col, value);
                     return false;
                 }
