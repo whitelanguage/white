@@ -2,7 +2,7 @@
 // dynamic hash table with type-aware keys and values
 
 import "internal/runtime"
-import Hash, Eq from "hash"
+import Hash from "protocol"
 
 error Error {
     KeyNotFound
@@ -252,7 +252,7 @@ class Dict {
     }
 }
 
-class Dict<K: Hash + Eq(K), V> {
+class Dict<K: Hash, V> {
     let ptr keys: K = nullptr;
     let ptr values: V = nullptr;
     let ptr hashes: Int = nullptr;

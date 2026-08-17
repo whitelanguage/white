@@ -5,6 +5,88 @@ import * from "../frontend/diagnostics.wl"
 import * from "lowering/dictionary.wl"
 import * from "validation.wl"
 
+func append_interface_method(methods: Vector(Struct), names: Dict(String, StringConstant), method_node: MethodDefNode, owner: String) -> Bool {
+    let name: String = method_node.name_tok.value;
+    if (names.contains_key(name)) {
+        let i: Int = 0;
+        while (i < methods.length()) {
+            let existing: MethodDefNode = methods[i];
+            if (existing.name_tok.value == name && existing.pos.fn == method_node.pos.fn && 
+                existing.pos.ln == method_node.pos.ln && existing.pos.col == method_node.pos.col) {
+                return true;
+            }
+            i += 1;
+        }
+        throw_name_error(method_node.pos, "Method '" + name + "' is inherited more than once by interface '" + owner + "'.");
+        return false;
+    }
+    names.put(name, StringConstant(id=0, value=name));
+    methods.append(method_node);
+    return true;
+}
+
+func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct), pos: Position) -> Bool {
+    let i: Int = 0;
+    while (i < stack.length()) {
+        let item: TypeListNode = stack[i];
+        if (item.type == info.type_id) {
+            throw_type_error(pos, "Interface inheritance cycle involving '" + info.name + "'.");
+            return false;
+        }
+        i += 1;
+    }
+
+    if (info.interfaces is !null) { return true; }
+
+    stack.append(TypeListNode(type=info.type_id));
+    info.interfaces = [];
+    let node: InterfaceDefNode = info.init_body;
+    let methods: Vector(Struct) = [];
+    let names: Dict(String, StringConstant) = Dict();
+
+    i = 0;
+    while (node is !null && node.interfaces is !null && i < node.interfaces.length()) {
+        let parent_id: Int = resolve_type(c, node.interfaces[i]);
+        let parent: StructInfo = c.struct_id_map.lookup("" + parent_id);
+        if (parent is null || !parent.is_interface) {
+            throw_type_error(pos, "Interface '" + info.name + "' can only inherit from another interface.");
+            stack.drop();
+            return false;
+        }
+        if (!resolve_interface_info(c, parent, stack, pos)) {
+            stack.drop();
+            return false;
+        }
+        if (!add_interface_type(c, info.interfaces, parent_id, pos)) {
+            stack.drop();
+            return false;
+        }
+        let method_index: Int = 0;
+        while (parent.vtable is !null && method_index < parent.vtable.length()) {
+            let inherited: MethodDefNode = parent.vtable[method_index];
+            if (!append_interface_method(methods, names, inherited, info.name)) {
+                stack.drop();
+                return false;
+            }
+            method_index += 1;
+        }
+        i += 1;
+    }
+
+    i = 0;
+    while (node is !null && node.methods is !null && i < node.methods.length()) {
+        let declared: MethodDefNode = node.methods[i];
+        if (!append_interface_method(methods, names, declared, info.name)) {
+            stack.drop();
+            return false;
+        }
+        i += 1;
+    }
+    info.vtable = methods;
+    stack.drop();
+    return true;
+}
+
 func pre_register_structs(c: Compiler, node: Struct) -> Void {
     let block: BlockNode = node;
     let stmts: Vector(Struct) = block.stmts;
@@ -163,7 +245,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 type_id=new_id, 
                 fields=null, 
                 llvm_name="{ i8*, i8* }", 
-                init_body=null, 
+                init_body=i_node, 
                 is_class=false, 
                 vtable_name="", 
                 parent_id=0, 
@@ -207,6 +289,19 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             c.struct_id_map.put("" + new_id, info);
             if (info.is_error) {
                 c.error_types.append(info);
+            }
+        }
+        i += 1;
+    }
+
+    i = 0;
+    while (i < len) {
+        let base: BaseNode = stmts[i];
+        if (base.type == NODE_INTERFACE_DEF) {
+            let node: InterfaceDefNode = stmts[i];
+            if (node.type_params is null || node.type_params.length() == 0) {
+                let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
+                if (info is !null && !resolve_interface_info(c, info, [], node.pos)) { return; }
             }
         }
         i += 1;

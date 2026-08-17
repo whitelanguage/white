@@ -96,9 +96,9 @@ The language currently has:
 This list says what the compiler accepts, not that every subsystem is finished.
 Generic functions, methods, structs, classes and interfaces are monomorphized,
 and interface constraints are checked before an instance is emitted. `Dict(K,
-V)` is fully typed and requires keys to implement `Hash` and `Eq(K)`. Built-in
-scalar keys already provide those contracts; user classes opt in explicitly.
-The standard library is still small.
+V)` is fully typed and requires `K: Hash`; `Hash` inherits the `Equal` contract.
+The `protocol` package also defines comparison, display, cloning and iteration
+contracts used by generic code. The standard library is still small.
 
 ## Errors
 

@@ -84,10 +84,17 @@ func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
 }
 
 func add_interface_type(c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
+    if (type_id == TYPE_POISON) { return false; }
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (info is null || !info.is_interface) {
         throw_type_error(pos, "Type " + get_type_name(c, type_id) + " is not an interface.");
         return false;
+    }
+    let parent_index: Int = 0;
+    while (info.interfaces is !null && parent_index < info.interfaces.length()) {
+        let parent: TypeListNode = info.interfaces[parent_index];
+        if (!add_interface_type(c, list, parent.type, pos)) { return false; }
+        parent_index += 1;
     }
     let i: Int = 0;
     while (i < list.length()) {

@@ -505,6 +505,7 @@ struct InterfaceDefNode(
     type     : Int, // NODE_INTERFACE_DEF
     name_tok : Token,
     type_params : Vector(Struct),
+    interfaces : Vector(Struct),
     methods  : Vector(Struct),
     annotations : Vector(Struct),
     pos      : Position

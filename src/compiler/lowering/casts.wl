@@ -358,6 +358,10 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
 
     if (ex_info is !null && ex_info.is_interface) {
         if (val_info is !null && val_info.is_class) {
+            if (interface_uses_self(ex_info)) {
+                throw_type_error(pos, "interface '" + interface_diagnostic_name(c, expected_type) + "' uses Self and can only be used as a static constraint.");
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
             if (!class_has_interface(c, val_info, ex_info)) {
                 throw_type_error(pos, "class '" + val_info.name + "' does not implement interface '" + ex_info.name + "'");
                 return CompileResult(reg="poison", type=TYPE_POISON);

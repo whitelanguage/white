@@ -2585,7 +2585,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
                         let f: FuncInfo = vtable_vec[vt_idx];
                         if (f.base_name == req_name) {
                             let match: Bool = true;
-                            let req_ret_type: Int = interface_method_type(c, i_info, req_m.return_type);
+                            let req_ret_type: Int = interface_method_type_for(c, i_info, req_m.return_type, info.type_id);
                             if (f.ret_type != req_ret_type) {
                                 match = false;
                             } else {
@@ -2602,7 +2602,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
                                     let p_idx: Int = 0;
                                     while (p_idx < req_p_len) {
                                         let req_p: ParamNode = req_params[p_idx];
-                                        let req_p_type: Int = interface_method_type(c, i_info, req_p.type_tok);
+                                        let req_p_type: Int = interface_method_type_for(c, i_info, req_p.type_tok, info.type_id);
                                         let f_p: TypeListNode = f.arg_types[p_idx + 1];
                                         
                                         if (f_p.type != req_p_type) {
@@ -4518,6 +4518,98 @@ func compile_type_layout(c: Compiler, node: TypeLayoutNode) -> CompileResult {
     return CompileResult(reg=value, type=TYPE_UINTSIZE);
 }
 
+func ordering_ordinal(c: Compiler, name: String, pos: Position) -> Int {
+    let ordering: StructInfo = c.struct_table.lookup("comparison.Ordering");
+    let field: FieldInfo = find_field(ordering, name);
+    if (ordering is null || field is null) {
+        throw_internal_compiler_error(pos, "Ordering." + name + " is unavailable while lowering a comparison.");
+        return 0;
+    }
+    return field.offset;
+}
+
+func compile_protocol_comparison(c: Compiler, left: CompileResult, right: CompileResult, op_type: Int, pos: Position) -> CompileResult {
+    if (left.type != right.type || left.type < 100) { return null; }
+    let info: StructInfo = c.struct_id_map.lookup("" + left.type);
+    if (info is null || !info.is_class) { return null; }
+
+    let method_name: String = "equals";
+    let protocol_name: String = "comparison.Equal";
+    let ordered: Bool = op_type == TOK_LT || op_type == TOK_GT || op_type == TOK_LTE || op_type == TOK_GTE;
+    if ordered {
+        method_name = "compare";
+        protocol_name = "comparison.Comparable";
+    }
+    if (!class_has_named_interface(c, info, protocol_name)) { return null; }
+
+    let method_index: Int = 0;
+    let method_info: FuncInfo = null;
+    while (info.vtable is !null && method_index < info.vtable.length()) {
+        let candidate: FuncInfo = info.vtable[method_index];
+        if (candidate.base_name == method_name) {
+            method_info = candidate;
+            break;
+        }
+        method_index += 1;
+    }
+    if (method_info is null || method_info.arg_types is null || method_info.arg_types.length() != 2) {
+        throw_internal_compiler_error(pos, "Protocol method '" + method_name + "' is missing from '" + info.name + "'.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    queue_generic_class_method(c, info, method_name);
+    emit_method_nullcheck(c, left.reg, info.llvm_name, method_name, pos);
+
+    let vptr_addr: String = next_reg(c);
+    c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + left.reg + ", i32 0, i32 0\n");
+
+    let vtable_raw: String = next_reg(c);
+    c.output_file.write(c.indent + vtable_raw + " = load i8*, i8** " + vptr_addr + "\n");
+
+    let vtable: String = next_reg(c);
+    c.output_file.write(c.indent + vtable + " = bitcast i8* " + vtable_raw + " to " + class_vtable_type(c, info) + "*\n");
+
+    let slot: String = next_reg(c);
+    c.output_file.write(c.indent + slot + " = getelementptr inbounds " + class_vtable_type(c, info) + ", " + class_vtable_type(c, info) + "* " + vtable + ", i32 0, i32 " + method_index + "\n");
+
+    let method_raw: String = next_reg(c);
+    c.output_file.write(c.indent + method_raw + " = load i8*, i8** " + slot + "\n");
+
+    let method_ptr: String = next_reg(c);
+    c.output_file.write(c.indent + method_ptr + " = bitcast i8* " + method_raw + " to " + get_func_sig_str(c, method_info) + "\n");
+
+    let call_result: String = next_reg(c);
+    let return_llvm: String = get_llvm_type_str(c, method_info.ret_type);
+    c.output_file.write(c.indent + call_result + " = call " + return_llvm + " " + method_ptr + "(" + info.llvm_name + "* " + left.reg + ", " + info.llvm_name + "* " + right.reg + ")\n");
+
+    emit_release_owned(c, left);
+    emit_release_owned(c, right);
+
+    if (!ordered) {
+        if (op_type == TOK_EE) { return CompileResult(reg=call_result, type=TYPE_BOOL); }
+        let inverted: String = next_reg(c);
+        c.output_file.write(c.indent + inverted + " = xor i1 " + call_result + ", true\n");
+        return CompileResult(reg=inverted, type=TYPE_BOOL);
+    }
+
+    let result: String = next_reg(c);
+    let predicate: String = "eq";
+    let ordinal: Int = ordering_ordinal(c, "Less", pos);
+    if (op_type == TOK_GT) {
+        ordinal = ordering_ordinal(c, "Greater", pos);
+    }
+    else if (op_type == TOK_LTE) {
+        predicate = "ne";
+        ordinal = ordering_ordinal(c, "Greater", pos);
+    }
+    else if (op_type == TOK_GTE) {
+        predicate = "ne";
+    }
+
+    c.output_file.write(c.indent + result + " = icmp " + predicate + " i32 " + call_result + ", " + ordinal + "\n");
+    return CompileResult(reg=result, type=TYPE_BOOL);
+}
+
 func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
     let left: CompileResult = compile_node(c, node.left);
     if (left is !null && left.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
@@ -4606,6 +4698,13 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
         let not_equal: String = next_reg(c);
         c.output_file.write(c.indent + not_equal + " = xor i1 " + equal + ", true\n");
         return CompileResult(reg=not_equal, type=TYPE_BOOL);
+    }
+
+    if (op_type == TOK_EE || op_type == TOK_NE || op_type == TOK_LT || op_type == TOK_GT || op_type == TOK_LTE || op_type == TOK_GTE) {
+        let protocol_result: CompileResult = compile_protocol_comparison(c, left, right, op_type, node.pos);
+        if (protocol_result is !null) {
+            return protocol_result;
+        }
     }
 
     // string
@@ -5100,6 +5199,111 @@ func compile_generic_value(c: Compiler, node: GenericTypeNode) -> CompileResult 
     }
 
     return emit_function_value(c, instance, node.pos);
+}
+
+func compile_builtin_protocol_call(c: Compiler, receiver: Struct, receiver_type: Int, name: String, call: CallNode) -> CompileResult {
+    let available: Bool = false;
+    if (name == "equals" && has_builtin_equal(c, receiver_type)) {
+        available = c.struct_table.lookup("comparison.Equal") is !null;
+    } else if (name == "hash" && has_builtin_hash(c, receiver_type)) {
+        available = c.struct_table.lookup("hashing.Hash") is !null;
+    } else if (name == "compare" && has_builtin_order(c, receiver_type)) {
+        available = c.struct_table.lookup("comparison.Comparable") is !null;
+    } else if (name == "display" && has_builtin_display(c, receiver_type)) {
+        available = c.struct_table.lookup("formatting.Display") is !null;
+    }
+
+    if (!available) { return null; }
+
+    let count: Int = 0;
+    if (call.args is !null) {
+        count = call.args.length();
+    }
+
+    let expected: Int = 0;
+    if (name == "equals" || name == "compare") {
+        expected = 1;
+    }
+
+    if (count != expected) {
+        throw_type_error(call.pos, "Method '" + name + "' expects " + expected + " arguments, got " + count + ".");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    if (reject_named_args(call.args, call.pos, "protocol method '" + name + "'")) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    if (name == "equals") {
+        let arg: ArgNode = call.args[0];
+        let op: Token = Token(type=TOK_EE, value="==", line=call.pos.ln, col=call.pos.col);
+        return compile_binop(c, BinOpNode(type=NODE_BINOP, left=receiver, op_tok=op, right=arg.val, pos=call.pos));
+    }
+
+    let value: CompileResult = compile_node(c, receiver);
+    if (value.type == TYPE_POISON) { return value; }
+
+    if (name == "display") {
+        return convert_to_string(c, value);
+    }
+
+    if (name == "hash") {
+        c.hash_types.put("" + receiver_type, StringConstant(id=receiver_type, value=""));
+
+        let result: String = next_reg(c);
+        c.output_file.write(c.indent + result + " = call i32 @__wl_hash_value_" + receiver_type + "(" + get_llvm_type_str(c, receiver_type) + " " + value.reg + ")\n");
+
+        emit_release_owned(c, value);
+
+        return CompileResult(reg=result, type=TYPE_INT);
+    }
+
+    let ordering: StructInfo = c.struct_table.lookup("comparison.Ordering");
+    if (ordering is null) {
+        throw_internal_compiler_error(call.pos, "Ordering is unavailable while lowering Comparable.compare.");
+        emit_release_owned(c, value);
+
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let less_ordinal: Int = ordering_ordinal(c, "Less", call.pos);
+    let equal_ordinal: Int = ordering_ordinal(c, "Equal", call.pos);
+    let greater_ordinal: Int = ordering_ordinal(c, "Greater", call.pos);
+
+    let arg: ArgNode = call.args[0];
+
+    let other: CompileResult = emit_implicit_cast(c, compile_node(c, arg.val), receiver_type, call.pos);
+    if (other.type == TYPE_POISON) {
+        return other;
+    }
+
+    let comparison: String = "";
+    if (receiver_type == TYPE_STRING) {
+        let compare_hook: String = get_mangled_symbol(c, "string_compare", call.pos);
+
+        comparison = next_reg(c);
+        c.output_file.write(c.indent + comparison + " = call i32 @" + compare_hook + "(%struct.$String* " + value.reg + ", %struct.$String* " + other.reg + ")\n");
+    } else {
+        let llvm_type: String = get_llvm_type_str(c, receiver_type);
+        let suffix: String = "s";
+        if (is_unsigned_integer(receiver_type) || receiver_type == TYPE_CHAR) { suffix = "u"; }
+
+        let less: String = next_reg(c);
+        let greater: String = next_reg(c);
+        let greater_value: String = next_reg(c);
+
+        comparison = next_reg(c);
+
+        c.output_file.write(c.indent + less + " = icmp " + suffix + "lt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
+        c.output_file.write(c.indent + greater + " = icmp " + suffix + "gt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
+        c.output_file.write(c.indent + greater_value + " = select i1 " + greater + ", i32 " + greater_ordinal + ", i32 " + equal_ordinal + "\n");
+        c.output_file.write(c.indent + comparison + " = select i1 " + less + ", i32 " + less_ordinal + ", i32 " + greater_value + "\n");
+    }
+
+    emit_release_owned(c, value);
+    emit_release_owned(c, other);
+
+    return CompileResult(reg=comparison, type=ordering.type_id);
 }
 
 func compile_node(c: Compiler, node: Struct) -> CompileResult {
@@ -5668,6 +5872,9 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let try_string_method: Bool = false;
             let guessed_type: Int = get_expr_type(c, f_acc.obj);
             if (!is_package_call) {
+                let protocol_call: CompileResult = compile_builtin_protocol_call(c, f_acc.obj, guessed_type, f_acc.field_name, n_call);
+                if (protocol_call is !null) { return protocol_call; }
+
                 if (f_acc.field_name == "length") {
                     if (guessed_type == TYPE_STRING || c.vector_base_map.lookup("" + guessed_type) is !null || c.array_info_map.lookup("" + guessed_type) is !null) {
                         return compile_length_method(c, f_acc.obj, n_call);

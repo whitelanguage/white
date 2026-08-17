@@ -182,14 +182,29 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     c.output_file.write("  switch i64 %tag, label %invalid [\n");
     c.output_file.write("    i64 0, label %bits\n");
     let key_cases: String = "";
+    let class_hash_blocks: String = "";
+
     let seen_keys: Dict(String, StringConstant) = Dict();
     seen_keys.put("0", StringConstant(id=0, value="null"));
+
+    let hash_interface: StructInfo = c.struct_table.lookup("hashing.Hash");
     let type_id: Int = 1;
     while (type_id < c.type_counter) {
         if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(c, type_id)) {
             let label: String = "%bits";
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
+    
+            let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
+            if (class_info is !null && class_info.is_class && hash_interface is !null && implements_interface(c, type_id, hash_interface.type_id)) {
+                label = "%class.hash." + type_id;
+                c.hash_types.put("" + type_id, StringConstant(id=type_id, value=""));
+                class_hash_blocks += "class.hash." + type_id + ":\n";
+                class_hash_blocks += "  %class.ptr." + type_id + " = inttoptr i64 %low to " + class_info.llvm_name + "*\n";
+                class_hash_blocks += "  %class.result." + type_id + " = call i32 @__wl_hash_value_" + type_id + "(" + class_info.llvm_name + "* %class.ptr." + type_id + ")\n";
+                class_hash_blocks += "  ret i32 %class.result." + type_id + "\n";
+            }
+
             key_cases = append_dict_key_case(c, key_cases, seen_keys, type_id, label);
         }
         type_id++;
@@ -236,6 +251,7 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     c.output_file.write("  %string.len.wide = zext i32 %string.len to i64\n");
     c.output_file.write("  %string.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %string.state, i64 %string.len.wide)\n");
     c.output_file.write("  ret i32 %string.hash\n");
+    c.output_file.write(class_hash_blocks);
     c.output_file.write("invalid:\n");
     c.output_file.write("  ret i32 0\n");
     c.output_file.write("}\n\n");
@@ -256,11 +272,34 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     c.output_file.write("  %right.tag = load i64, i64* %right.tag.addr\n");
     c.output_file.write("  %same.tag = icmp eq i64 %left.tag, %right.tag\n");
     c.output_file.write("  br i1 %same.tag, label %dispatch, label %different\n");
+
+    let class_equal_cases: String = "";
+    let class_equal_blocks: String = "";
+
+    type_id = 1;
+    while (type_id < c.type_counter) {
+        let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
+        if (class_info is !null && class_info.is_class && hash_interface is !null && implements_interface(c, type_id, hash_interface.type_id)) {
+            class_equal_cases += "    i64 " + type_fingerprint(c, type_id) + ", label %class.equal." + type_id + "\n";
+            class_equal_blocks += "class.equal." + type_id + ":\n";
+            class_equal_blocks += "  %class.left.addr." + type_id + " = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n";
+            class_equal_blocks += "  %class.right.addr." + type_id + " = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n";
+            class_equal_blocks += "  %class.left.raw." + type_id + " = load i64, i64* %class.left.addr." + type_id + "\n";
+            class_equal_blocks += "  %class.right.raw." + type_id + " = load i64, i64* %class.right.addr." + type_id + "\n";
+            class_equal_blocks += "  %class.left." + type_id + " = inttoptr i64 %class.left.raw." + type_id + " to " + class_info.llvm_name + "*\n";
+            class_equal_blocks += "  %class.right." + type_id + " = inttoptr i64 %class.right.raw." + type_id + " to " + class_info.llvm_name + "*\n";
+            class_equal_blocks += "  %class.equal.result." + type_id + " = call i1 @__wl_values_equal_" + type_id + "(" + class_info.llvm_name + "* %class.left." + type_id + ", " + class_info.llvm_name + "* %class.right." + type_id + ")\n";
+            class_equal_blocks += "  ret i1 %class.equal.result." + type_id + "\n";
+        }
+        type_id += 1;
+    }
+
     c.output_file.write("dispatch:\n");
     c.output_file.write("  switch i64 %left.tag, label %bits [\n");
     c.output_file.write("    i64 " + type_fingerprint(c, TYPE_STRING) + ", label %string\n");
     c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT) + ", label %float\n");
     c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT32) + ", label %float\n");
+    c.output_file.write(class_equal_cases);
     c.output_file.write("  ]\n");
     c.output_file.write("bits:\n");
     c.output_file.write("  %left.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
@@ -293,6 +332,7 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     c.output_file.write("  %string.right = inttoptr i64 %string.right.raw to %struct.$String*\n");
     c.output_file.write("  %string.equal = call i1 @__wl_dict_string_equal(%struct.$String* %string.left, %struct.$String* %string.right)\n");
     c.output_file.write("  ret i1 %string.equal\n");
+    c.output_file.write(class_equal_blocks);
     c.output_file.write("equal:\n");
     c.output_file.write("  ret i1 true\n");
     c.output_file.write("different:\n");
@@ -316,7 +356,7 @@ func emit_class_hash_helpers(c: Compiler, info: StructInfo, type_id: Int, llvm_t
     let hash_index: Int = class_method_index(info, "hash");
     let equal_index: Int = class_method_index(info, "equals");
     if (hash_index < 0 || equal_index < 0) {
-        throw_internal_compiler_error(null, "Hash or Eq method missing from " + get_type_name(c, type_id));
+        throw_internal_compiler_error(null, "Hash implementation is incomplete for " + get_type_name(c, type_id));
         return;
     }
 

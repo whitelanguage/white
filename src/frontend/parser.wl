@@ -2063,6 +2063,16 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
         type_params = parse_type_params(p);
     }
 
+    let interfaces: Vector(Struct) = [];
+    if (p.current_tok.type == TOK_WITH) {
+        parser_advance(p); // skip 'with'
+        interfaces.append(parse_return_type(p));
+        while (p.current_tok.type == TOK_COMMA) {
+            parser_advance(p); // skip ','
+            interfaces.append(parse_return_type(p));
+        }
+    }
+
     if (p.current_tok.type != TOK_LBRACE) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '{' before interface body.");
@@ -2135,7 +2145,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '}'
 
-    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, methods=methods, annotations=anns, pos=pos);
+    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, interfaces=interfaces, methods=methods, annotations=anns, pos=pos);
 }
 
 func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {

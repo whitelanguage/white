@@ -5,7 +5,7 @@
 import "builtin"
 import Dict from "dict"
 import Error as DictError from "dict"
-import Hash, Eq from "hash"
+import Hash from "protocol"
 
 let DROPPED: Int = 0;
 
@@ -21,7 +21,7 @@ class DictProbe {
     }
 }
 
-class DictKey with Hash, Eq(DictKey) {
+class DictKey with Hash {
     let value: Int;
 
     init(value: Int) {

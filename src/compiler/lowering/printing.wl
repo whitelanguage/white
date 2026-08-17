@@ -21,6 +21,157 @@ func is_printable_type(c: Compiler, type_id: Int) -> Bool {
            c.array_info_map.lookup("" + type_id) is !null;
 }
 
+func class_has_named_interface(c: Compiler, info: StructInfo, name: String) -> Bool {
+    let current: StructInfo = info;
+    while (current is !null) {
+        let i: Int = 0;
+        while (current.interfaces is !null && i < current.interfaces.length()) {
+            let item: TypeListNode = current.interfaces[i];
+            let interface_info: StructInfo = c.struct_id_map.lookup("" + item.type);
+            if (interface_info is !null && interface_info.name == name) { return true; }
+            i += 1;
+        }
+
+        if (current.parent_id == 0) { break; }
+        current = c.struct_id_map.lookup("" + current.parent_id);
+    }
+    return false;
+}
+
+func interface_has_name(c: Compiler, info: StructInfo, name: String) -> Bool {
+    if (info is null || !info.is_interface) { return false; }
+    if (info.name == name) { return true; }
+
+    let i: Int = 0;
+    while (info.interfaces is !null && i < info.interfaces.length()) {
+        let item: TypeListNode = info.interfaces[i];
+        let parent: StructInfo = c.struct_id_map.lookup("" + item.type);
+        if (parent is !null && parent.name == name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+func compile_interface_display(c: Compiler, reg: String, info: StructInfo, pos: Position) -> Bool {
+    if (!interface_has_name(c, info, "formatting.Display")) { return false; }
+
+    let method_index: Int = 0;
+    let method_node: MethodDefNode = null;
+    while (info.vtable is !null && method_index < info.vtable.length()) {
+        let candidate: MethodDefNode = info.vtable[method_index];
+        if (candidate.name_tok.value == "display") { method_node = candidate; break; }
+        method_index += 1;
+    }
+
+    if (method_node is null) {
+        throw_internal_compiler_error(pos, "Display method is missing from interface '" + info.name + "'.");
+        return true;
+    }
+
+    let object: String = next_reg(c);
+    let table: String = next_reg(c);
+    c.output_file.write(c.indent + object + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
+    c.output_file.write(c.indent + table + " = extractvalue { i8*, i8* } " + reg + ", 1\n");
+
+    let null_label: String = next_label(c);
+    let value_label: String = next_label(c);
+    let end_label: String = next_label(c);
+    let is_null: String = next_reg(c);
+    c.output_file.write(c.indent + is_null + " = icmp eq i8* " + object + ", null\n");
+    c.output_file.write(c.indent + "br i1 " + is_null + ", label %" + null_label + ", label %" + value_label + "\n");
+
+    c.output_file.write("\n" + null_label + ":\n");
+
+    compile_print(c, "null", TYPE_NULL, pos, TYPE_NULL);
+
+    c.output_file.write(c.indent + "br label %" + end_label + "\n");
+    c.output_file.write("\n" + value_label + ":\n");
+
+    let table_type: String = "[ " + info.vtable.length() + " x i8* ]";
+    let typed_table: String = next_reg(c);
+    c.output_file.write(c.indent + typed_table + " = bitcast i8* " + table + " to " + table_type + "*\n");
+
+    let slot: String = next_reg(c);
+    c.output_file.write(c.indent + slot + " = getelementptr inbounds " + table_type + ", " + table_type + "* " + typed_table + ", i32 0, i32 " + method_index + "\n");
+
+    let method_raw: String = next_reg(c);
+    c.output_file.write(c.indent + method_raw + " = load i8*, i8** " + slot + "\n");
+    let method_ptr: String = next_reg(c);
+    c.output_file.write(c.indent + method_ptr + " = bitcast i8* " + method_raw + " to " + interface_method_sig(c, info, method_node) + "\n");
+
+    let text: String = next_reg(c);
+    c.output_file.write(c.indent + text + " = call %struct.$String* " + method_ptr + "(i8* " + object + ")\n");
+
+    compile_print(c, text, TYPE_STRING, pos, TYPE_STRING);
+    emit_release_owned(c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true));
+
+    c.output_file.write(c.indent + "br label %" + end_label + "\n");
+    c.output_file.write("\n" + end_label + ":\n");
+
+    return true;
+}
+
+func compile_display(c: Compiler, reg: String, info: StructInfo, pos: Position) -> Bool {
+    if (!info.is_class || !class_has_named_interface(c, info, "formatting.Display")) { return false; }
+
+    let method_index: Int = 0;
+    let method_info: FuncInfo = null;
+    while (info.vtable is !null && method_index < info.vtable.length()) {
+        let candidate: FuncInfo = info.vtable[method_index];
+        if (candidate.base_name == "display") {
+            method_info = candidate;
+            break;
+        }
+        method_index += 1;
+    }
+
+    if (method_info is null || method_info.ret_type != TYPE_STRING || method_info.arg_types.length() != 1) {
+        throw_internal_compiler_error(pos, "Display implementation for '" + info.name + "' has an invalid signature.");
+        return true;
+    }
+
+    queue_generic_class_method(c, info, method_info.base_name);
+
+    let null_label: String = next_label(c);
+    let value_label: String = next_label(c);
+    let end_label: String = next_label(c);
+    let is_null: String = next_reg(c);
+    c.output_file.write(c.indent + is_null + " = icmp eq " + info.llvm_name + "* " + reg + ", null\n");
+    c.output_file.write(c.indent + "br i1 " + is_null + ", label %" + null_label + ", label %" + value_label + "\n");
+
+    c.output_file.write("\n" + null_label + ":\n");
+    compile_print(c, "null", TYPE_NULL, pos, TYPE_NULL);
+    c.output_file.write(c.indent + "br label %" + end_label + "\n");
+
+    c.output_file.write("\n" + value_label + ":\n");
+    let vptr_addr: String = next_reg(c);
+    c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + reg + ", i32 0, i32 0\n");
+    let vtable_raw: String = next_reg(c);
+    c.output_file.write(c.indent + vtable_raw + " = load i8*, i8** " + vptr_addr + "\n");
+    let vtable: String = next_reg(c);
+    c.output_file.write(c.indent + vtable + " = bitcast i8* " + vtable_raw + " to " + class_vtable_type(c, info) + "*\n");
+    let slot: String = next_reg(c);
+    c.output_file.write(c.indent + slot + " = getelementptr inbounds " + class_vtable_type(c, info) + ", " + class_vtable_type(c, info) + "* " + vtable + ", i32 0, i32 " + method_index + "\n");
+
+    let method_raw: String = next_reg(c);
+    c.output_file.write(c.indent + method_raw + " = load i8*, i8** " + slot + "\n");
+    let method_ptr: String = next_reg(c);
+
+    let signature: String = get_func_sig_str(c, method_info);
+    c.output_file.write(c.indent + method_ptr + " = bitcast i8* " + method_raw + " to " + signature + "\n");
+
+    let text: String = next_reg(c);
+    c.output_file.write(c.indent + text + " = call %struct.$String* " + method_ptr + "(" + info.llvm_name + "* " + reg + ")\n");
+
+    compile_print(c, text, TYPE_STRING, pos, TYPE_STRING);
+    emit_release_owned(c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true));
+
+    c.output_file.write(c.indent + "br label %" + end_label + "\n");
+    c.output_file.write("\n" + end_label + ":\n");
+
+    return true;
+}
+
 func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin_id: Int) -> Void {
     if (type_id == TYPE_POISON) { return; }
     if (is_fallible_type(c, type_id)) {
@@ -140,6 +291,7 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
             if (s_info_real is !null) {
                 let cast_reg: String = next_reg(c);
                 c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + reg + " to " + s_info_real.llvm_name + "*\n");
+                if (compile_display(c, cast_reg, s_info_real, pos)) { return; }
                 compile_print_struct_internal(c, cast_reg, s_info_real, pos);
                 return;
             }
@@ -154,6 +306,8 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
     if (type_id >= 100) {
         let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
         if (s_info is !null) {
+            if (compile_interface_display(c, reg, s_info, pos)) { return; }
+            if (compile_display(c, reg, s_info, pos)) { return; }
             if (s_info.name == "$Variant") {
                 compile_print_variant_internal(c, reg, s_info, pos);
                 return;

@@ -2451,10 +2451,23 @@ func register_generic_struct(c: Compiler, template: GenericTemplate, types: Vect
     return new_id;
 }
 
+func append_type_once(list: Vector(Struct), type_id: Int) -> Void {
+    let i: Int = 0;
+    while (i < list.length()) {
+        let item: TypeListNode = list[i];
+        if (item.type == type_id) { return; }
+        i += 1;
+    }
+    list.append(TypeListNode(type=type_id));
+}
+
 func register_generic_interface(c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
     let key: String = generic_instance_name(template.name, types, c);
     let cached: SymbolInfo = c.generic_instances.lookup(key);
     if (cached is !null) {
+        if (cached.type == TYPE_POISON) {
+            throw_type_error(pos, "Generic interface inheritance cycle involving '" + generic_type_name(template.name, types, c) + "'.");
+        }
         return cached.type;
     }
 
@@ -2470,8 +2483,10 @@ func register_generic_interface(c: Compiler, template: GenericTemplate, types: V
 
     let node: InterfaceDefNode = template.node;
     let bindings: Dict(String, SymbolInfo) = generic_bindings(template.type_params, types);
+    c.generic_instances.put(key, SymbolInfo(reg="", type=TYPE_POISON, origin_type=TYPE_POISON));
     c.generic_depth++;
     if (!check_generic_constraints(c, template, bindings, types, pos)) {
+        c.generic_instances.remove(key);
         c.generic_depth--;
         return TYPE_POISON;
     }
@@ -2487,12 +2502,14 @@ func register_generic_interface(c: Compiler, template: GenericTemplate, types: V
         let method_node: MethodDefNode = node.methods[i];
         if (method_node.type_params is !null && method_node.type_params.length() > 0) {
             throw_type_error(method_node.pos, "Interface methods cannot declare type parameters.");
+            c.generic_instances.remove(key);
             restore_generic_context(c, previous, previous_bindings);
             c.generic_depth--;
             return TYPE_POISON;
         }
         if (method_names.contains_key(method_node.name_tok.value)) {
             throw_name_error(method_node.pos, "Method '" + method_node.name_tok.value + "' is already declared in interface '" + key + "'.");
+            c.generic_instances.remove(key);
             restore_generic_context(c, previous, previous_bindings);
             c.generic_depth--;
             return TYPE_POISON;
@@ -2501,7 +2518,78 @@ func register_generic_interface(c: Compiler, template: GenericTemplate, types: V
         i++;
     }
 
-    let info: StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name="{ i8*, i8* }", init_body=null, is_class=false, vtable_name="", parent_id=0, vtable=node.methods, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=true, interfaces=null);
+    let interfaces: Vector(Struct) = [];
+    let methods: Vector(Struct) = [];
+    i = 0;
+    while (node.interfaces is !null && i < node.interfaces.length()) {
+        let parent_id: Int = resolve_type(c, node.interfaces[i]);
+        if (parent_id == TYPE_POISON) {
+            if (GLOBAL_ERROR_COUNT == 0) {
+                throw_type_error(pos, "Generic interface inheritance cycle involving '" + generic_type_name(template.name, types, c) + "'.");
+            }
+            c.generic_instances.remove(key);
+            restore_generic_context(c, previous, previous_bindings);
+            c.generic_depth--;
+            return TYPE_POISON;
+        }
+
+        let parent: StructInfo = c.struct_id_map.lookup("" + parent_id);
+        if (parent is null || !parent.is_interface) {
+            throw_type_error(pos, "Generic interface '" + key + "' can only inherit from another interface.");
+            c.generic_instances.remove(key);
+            restore_generic_context(c, previous, previous_bindings);
+            c.generic_depth--;
+            return TYPE_POISON;
+        }
+
+        let inherited_index: Int = 0;
+        while (parent.interfaces is !null && inherited_index < parent.interfaces.length()) {
+            let inherited_type: TypeListNode = parent.interfaces[inherited_index];
+            append_type_once(interfaces, inherited_type.type);
+            inherited_index += 1;
+        }
+        append_type_once(interfaces, parent_id);
+
+        let method_index: Int = 0;
+        while (parent.vtable is !null && method_index < parent.vtable.length()) {
+            let inherited_method: MethodDefNode = parent.vtable[method_index];
+            if (method_names.contains_key(inherited_method.name_tok.value)) {
+                let repeated: Bool = false;
+                let existing_index: Int = 0;
+                while (existing_index < methods.length()) {
+                    let existing: MethodDefNode = methods[existing_index];
+                    if (existing.name_tok.value == inherited_method.name_tok.value && 
+                        existing.pos.fn == inherited_method.pos.fn && 
+                        existing.pos.ln == inherited_method.pos.ln && 
+                        existing.pos.col == inherited_method.pos.col) {
+                        repeated = true;
+                        break;
+                    }
+                    existing_index++;
+                }
+                if (!repeated) {
+                    throw_name_error(inherited_method.pos, "Method '" + inherited_method.name_tok.value + "' is inherited more than once by interface '" + key + "'.");
+                    c.generic_instances.remove(key);
+                    restore_generic_context(c, previous, previous_bindings);
+                    c.generic_depth--;
+                    return TYPE_POISON;
+                }
+                method_index++;
+                continue;
+            }
+            method_names.put(inherited_method.name_tok.value, StringConstant(id=0, value=inherited_method.name_tok.value));
+            methods.append(inherited_method);
+            method_index++;
+        }
+        i++;
+    }
+
+    i = 0;
+    while (node.methods is !null && i < node.methods.length()) {
+        methods.append(node.methods[i]); i += 1;
+    }
+
+    let info: StructInfo = StructInfo(name=key, type_id=new_id, fields=null, llvm_name="{ i8*, i8* }", init_body=node, is_class=false, vtable_name="", parent_id=0, vtable=methods, ann_flags=0, compiler_link_name="", is_enum=false, is_error=false, is_interface=true, interfaces=interfaces);
     c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, c)));
     c.generic_instance_bindings.put("" + new_id, bindings);
@@ -2514,21 +2602,146 @@ func register_generic_interface(c: Compiler, template: GenericTemplate, types: V
     return new_id;
 }
 
-func interface_method_type(c: Compiler, info: StructInfo, node: Struct) -> Int {
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
-    if (template is null) {
-        return resolve_type(c, node);
+func type_node_contains_self(node: Struct) -> Bool {
+    if (node is null) { return false; }
+
+    let base: BaseNode = node;
+    if (base.type == NODE_VAR_ACCESS) {
+        let named: VarAccessNode = node;
+        return named.name_tok.value == "Self";
     }
 
+    if (base.type == NODE_GENERIC_TYPE) {
+        let generic: GenericTypeNode = node;
+        if (type_node_contains_self(generic.base_type)) { return true; }
+        let i: Int = 0;
+        while (generic.type_args is !null && i < generic.type_args.length()) {
+            if (type_node_contains_self(generic.type_args[i])) { return true; }
+            i += 1;
+        }
+        return false;
+    }
+
+    if (base.type == NODE_PTR_TYPE) {
+        let pointer: PointerTypeNode = node;
+        return type_node_contains_self(pointer.base_type);
+    }
+
+    if (base.type == NODE_ARRAY_TYPE) {
+        let array: ArrayTypeNode = node;
+        return type_node_contains_self(array.base_type);
+    }
+
+    if (base.type == NODE_VECTOR_TYPE) {
+        let vector: VectorTypeNode = node;
+        return type_node_contains_self(vector.element_type);
+    }
+
+    if (base.type == NODE_SLICE_TYPE) {
+        let slice: SliceTypeNode = node;
+        return type_node_contains_self(slice.element_type);
+    }
+
+    if (base.type == NODE_FALLIBLE_TYPE) {
+        let fallible: FallibleTypeNode = node;
+        return type_node_contains_self(fallible.base_type);
+    }
+
+    if (base.type == NODE_FUNCTION_TYPE) {
+        let function_type: FunctionTypeNode = node;
+        if (type_node_contains_self(function_type.return_type)) { return true; }
+
+        let i: Int = 0;
+        while (function_type.arg_types is !null && i < function_type.arg_types.length()) {
+            if (type_node_contains_self(function_type.arg_types[i])) { return true; }
+            i += 1;
+        }
+        return false;
+    }
+
+    if (base.type == NODE_METHOD_TYPE) {
+        let method_type: MethodTypeNode = node;
+        if (type_node_contains_self(method_type.return_type)) { return true; }
+
+        let i: Int = 0;
+        while (method_type.arg_types is !null && i < method_type.arg_types.length()) {
+            if (type_node_contains_self(method_type.arg_types[i])) { return true; }
+            i += 1;
+        }
+        return false;
+    }
+    return false;
+}
+
+func interface_uses_self(info: StructInfo) -> Bool {
+    let i: Int = 0;
+    while (info is !null && info.vtable is !null && i < info.vtable.length()) {
+        let method_node: MethodDefNode = info.vtable[i];
+        if (type_node_contains_self(method_node.return_type)) { return true; }
+
+        let param_index: Int = 0;
+        while (method_node.params is !null && param_index < method_node.params.length()) {
+            let param: ParamNode = method_node.params[param_index];
+            if (type_node_contains_self(param.type_tok)) { return true; }
+            param_index += 1;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+func interface_type_bindings(c: Compiler, info: StructInfo, self_type: Int) -> Dict(String, SymbolInfo) {
     let bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + info.type_id);
-    let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
-    let previous: GenericTemplate = use_generic_context(c, template, bindings);
-    let result: Int = resolve_type(c, node);
-    restore_generic_context(c, previous, previous_bindings);
+    let result: Dict(String, SymbolInfo) = extend_generic_bindings(bindings, null, null);
+    if (self_type != 0) {
+        result.put("Self", SymbolInfo(reg="", type=self_type, origin_type=self_type));
+    }
+
     return result;
 }
 
+func interface_method_type_for(c: Compiler, info: StructInfo, node: Struct, self_type: Int) -> Int {
+    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
+    let bindings: Dict(String, SymbolInfo) = interface_type_bindings(c, info, self_type);
+
+    let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
+    let previous: GenericTemplate = null;
+    if (template is !null) {
+        previous = use_generic_context(c, template, bindings);
+    } else {
+        c.generic_bindings = bindings;
+    }
+
+    let result: Int = resolve_type(c, node);
+    if (template is !null) {
+        restore_generic_context(c, previous, previous_bindings);
+    } else {
+        c.generic_bindings = previous_bindings;
+    }
+
+    return result;
+}
+
+func interface_method_type(c: Compiler, info: StructInfo, node: Struct) -> Int {
+    return interface_method_type_for(c, info, node, 0);
+}
+
 func interface_method_sig(c: Compiler, info: StructInfo, node: MethodDefNode) -> String {
+    if (type_node_contains_self(node.return_type)) {
+        throw_type_error(node.pos, "Method '" + node.name_tok.value + "' uses Self and cannot be called through an interface value.");
+        return "void (i8*)*";
+    }
+
+    let param_index: Int = 0;
+    while (node.params is !null && param_index < node.params.length()) {
+        let param: ParamNode = node.params[param_index];
+        if (type_node_contains_self(param.type_tok)) {
+            throw_type_error(node.pos, "Method '" + node.name_tok.value + "' uses Self and cannot be called through an interface value.");
+            return "void (i8*)*";
+        }
+        param_index += 1;
+    }
+
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
     if (template is null) {
         return get_method_def_sig_str(c, node);
@@ -2544,7 +2757,7 @@ func interface_method_sig(c: Compiler, info: StructInfo, node: MethodDefNode) ->
 
 func is_hash_interface(c: Compiler, type_id: Int) -> Bool {
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    return info is !null && info.is_interface && info.name == "hash.Hash";
+    return info is !null && info.is_interface && (info.name == "hash.Hash" || info.name == "hashing.Hash");
 }
 
 func is_eq_interface(c: Compiler, type_id: Int) -> Bool {
@@ -2552,6 +2765,7 @@ func is_eq_interface(c: Compiler, type_id: Int) -> Bool {
     if (info is null || !info.is_interface) {
         return false;
     }
+    if (info.name == "comparison.Equal") { return true; }
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + type_id);
     return template is !null && template.name == "hash.Eq";
 }
@@ -2573,11 +2787,51 @@ func has_builtin_hash(c: Compiler, type_id: Int) -> Bool {
     return info is !null && info.is_enum;
 }
 
+func has_builtin_equal(c: Compiler, type_id: Int) -> Bool {
+    if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { return true; }
+    return has_builtin_hash(c, type_id);
+}
+
+func is_comparable_interface(c: Compiler, type_id: Int) -> Bool {
+    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    return info is !null && info.is_interface && info.name == "comparison.Comparable";
+}
+
+func is_display_interface(c: Compiler, type_id: Int) -> Bool {
+    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    return info is !null && info.is_interface && info.name == "formatting.Display";
+}
+
+func interface_diagnostic_name(c: Compiler, type_id: Int) -> String {
+    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    if (info is null || !info.is_interface) { return get_type_name(c, type_id); }
+    if (info.name == "comparison.Equal") { return "protocol.Equal"; }
+    if (info.name == "comparison.Comparable") { return "protocol.Comparable"; }
+    if (info.name == "hashing.Hash") { return "protocol.Hash"; }
+    if (info.name == "formatting.Display") { return "protocol.Display"; }
+    if (info.name == "formatting.Debug") { return "protocol.Debug"; }
+    if (info.name == "clone.Clone") { return "protocol.Clone"; }
+    return get_type_name(c, type_id);
+}
+
+func has_builtin_order(c: Compiler, type_id: Int) -> Bool {
+    if (type_id == TYPE_STRING || type_id == TYPE_CHAR) { return true; }
+    return is_integer_type(type_id);
+}
+
+func has_builtin_display(c: Compiler, type_id: Int) -> Bool {
+    if (type_id == TYPE_STRING || type_id == TYPE_CHAR || type_id == TYPE_BOOL || type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { return true; }
+    if (is_integer_type(type_id)) { return true; }
+    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    return info is !null && info.is_enum;
+}
+
 func implements_interface(c: Compiler, type_id: Int, interface_id: Int) -> Bool {
     if (type_id == interface_id) { return true; }
-    if ((is_hash_interface(c, interface_id) || is_eq_interface(c, interface_id)) && has_builtin_hash(c, type_id)) {
-        return true;
-    }
+    if (is_hash_interface(c, interface_id) && has_builtin_hash(c, type_id)) { return true; }
+    if (is_eq_interface(c, interface_id) && has_builtin_equal(c, type_id)) { return true; }
+    if (is_comparable_interface(c, interface_id) && has_builtin_order(c, type_id)) { return true; }
+    if (is_display_interface(c, interface_id) && has_builtin_display(c, type_id)) { return true; }
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
     while (info is !null) {
         let i: Int = 0;
@@ -2606,12 +2860,12 @@ func check_generic_constraints(c: Compiler, template: GenericTemplate, bindings:
             let constraint_type: Int = resolve_type(c, param.constraints[constraint_index]);
             let constraint_info: StructInfo = c.struct_id_map.lookup("" + constraint_type);
             if (constraint_info is null || !constraint_info.is_interface) {
-                throw_type_error(param.pos, "Generic constraint " + get_type_name(c, constraint_type) + " is not an interface.");
+                throw_type_error(param.pos, "Generic constraint " + interface_diagnostic_name(c, constraint_type) + " is not an interface.");
                 restore_generic_context(c, previous, previous_bindings);
                 return false;
             }
             if (!implements_interface(c, actual.type, constraint_type)) {
-                throw_type_error(pos, "Type " + get_type_name(c, actual.type) + " does not satisfy " + get_type_name(c, constraint_type) + " for '" + param.name_tok.value + "'.");
+                throw_type_error(pos, "Type " + get_type_name(c, actual.type) + " does not satisfy " + interface_diagnostic_name(c, constraint_type) + " for '" + param.name_tok.value + "'.");
                 restore_generic_context(c, previous, previous_bindings);
                 return false;
             }
@@ -3563,6 +3817,10 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
 
         let generic_type: SymbolInfo = c.generic_bindings.lookup(name);
         if (generic_type is !null) { return generic_type.type; }
+        if (name == "Self") {
+            throw_type_error(v.pos, "Self is only available in an interface method declaration.");
+            return TYPE_POISON;
+        }
 
         if (name == "Int" || name == "Int32") { return TYPE_INT; }
         if (name == "Long" || name == "Int64") { return TYPE_LONG; }
@@ -3815,6 +4073,10 @@ func mangle_wl_name(c: Compiler, prefix: String, base_name: String, arg_types: V
     let i: Int = 0;
     while (i < len) {
         let t_node: TypeListNode = arg_types[i];
+        if (t_node.type == TYPE_POISON) {
+            throw_internal_compiler_error(null, "Cannot mangle '" + prefix + base_name + "': parameter " + i + " has no resolved type.");
+            return mangled + "v";
+        }
         mangled += mangle_type(c, t_node.type);
         i += 1;
     }
