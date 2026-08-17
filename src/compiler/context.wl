@@ -95,7 +95,9 @@ struct SymbolInfo(
     origin_type: Int, // for generic type
     is_const: Bool, // const
     is_const_access: Bool,
-    func_arg_types: Vector(Struct)
+    func_arg_types: Vector(Struct),
+    arg_names: Vector(String),
+    variadic_param: Int
 )
 
 struct FuncInfo(
@@ -1159,7 +1161,13 @@ func get_type_name(c: Compiler, type_id: Int) -> String {
                 while (a_idx < len) {
                     let a_node: TypeListNode = f_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    sig += get_type_name(c, a_node.type);
+                    if (f_info.arg_names is !null && a_idx < f_info.arg_names.length() && f_info.arg_names[a_idx].length() > 0) { sig += f_info.arg_names[a_idx] + ": "; }
+                    if (f_info.variadic_param == a_idx + 1) {
+                        let pack: ArrayInfo = c.array_info_map.lookup("" + a_node.type);
+                        sig += get_type_name(c, pack.base_type) + "...";
+                    } else {
+                        sig += get_type_name(c, a_node.type);
+                    }
                     a_idx += 1;
                 }
             }
@@ -1176,7 +1184,13 @@ func get_type_name(c: Compiler, type_id: Int) -> String {
                 while (a_idx < len) {
                     let a_node: TypeListNode = m_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    sig += get_type_name(c, a_node.type);
+                    if (m_info.arg_names is !null && a_idx < m_info.arg_names.length() && m_info.arg_names[a_idx].length() > 0) { sig += m_info.arg_names[a_idx] + ": "; }
+                    if (m_info.variadic_param == a_idx + 1) {
+                        let pack: ArrayInfo = c.array_info_map.lookup("" + a_node.type);
+                        sig += get_type_name(c, pack.base_type) + "...";
+                    } else {
+                        sig += get_type_name(c, a_node.type);
+                    }
                     a_idx += 1;
                 }
             }
@@ -1390,12 +1404,15 @@ func get_fallible_type_id(c: Compiler, base_id: Int) -> Int {
     return new_id;
 }
 
-func get_func_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int) -> Int {
-    let key: String = "func_" + ret_type_id;
+func get_func_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int, variadic_param: Int, arg_names: Vector(String)) -> Int {
+    let key: String = "func_" + ret_type_id + "_var_" + variadic_param;
     let i: Int = 0;
     while (i < arg_types.length()) { 
         let arg_node: TypeListNode = arg_types[i];
-        key += "_" + arg_node.type; 
+        key += "_" + arg_node.type;
+        if (arg_names is !null && i < arg_names.length() && arg_names[i].length() > 0) {
+            key += "_label_" + arg_names[i].length() + "_" + arg_names[i];
+        }
         i += 1; 
     }
     
@@ -1404,17 +1421,20 @@ func get_func_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int) 
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    c.func_ret_map.put("" + new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types));
-    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types));
+    c.func_ret_map.put("" + new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
+    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
     return new_id;
 }
 
-func get_method_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int) -> Int {
-    let key: String = "meth_" + ret_type_id;
+func get_method_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int, variadic_param: Int, arg_names: Vector(String)) -> Int {
+    let key: String = "meth_" + ret_type_id + "_var_" + variadic_param;
     let i: Int = 0;
     while (i < arg_types.length()) { 
         let arg_node: TypeListNode = arg_types[i];
-        key += "_" + arg_node.type; 
+        key += "_" + arg_node.type;
+        if (arg_names is !null && i < arg_names.length() && arg_names[i].length() > 0) {
+            key += "_label_" + arg_names[i].length() + "_" + arg_names[i];
+        }
         i += 1; 
     }
     
@@ -1423,8 +1443,8 @@ func get_method_type_id(c: Compiler, arg_types: Vector(Struct), ret_type_id: Int
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    c.method_ret_map.put("" + new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types));
-    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types));
+    c.method_ret_map.put("" + new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
+    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
     return new_id;
 }
 
@@ -1486,6 +1506,38 @@ func param_defaults(params: Vector(Struct)) -> Vector(Struct) {
         i += 1;
     }
     return defaults;
+}
+
+func callable_param_names(params: Vector(Struct)) -> Vector(String) {
+    let names: Vector(String) = [];
+    let variadic: Int = variadic_param_index(params);
+    let i: Int = 0;
+    while (params is !null && i < params.length()) {
+        let name: String = "";
+        if (variadic > 0 && i + 1 > variadic) {
+            let param: ParamNode = params[i];
+            name = param.name_tok.value;
+        }
+        names.append(name);
+        i += 1;
+    }
+    return names;
+}
+
+func callable_arg_names(info: FuncInfo, skip: Int) -> Vector(String) {
+    let names: Vector(String) = [];
+    let count: Int = info.arg_types.length() - skip;
+    let i: Int = 0;
+    while (i < count) {
+        let name: String = "";
+        if (info.variadic_param > 0 && i + 1 > info.variadic_param && 
+            info.arg_names is !null && i + skip < info.arg_names.length()) {
+            name = info.arg_names[i + skip];
+        }
+        names.append(name);
+        i += 1;
+    }
+    return names;
 }
 
 func get_builtin_cast_target(name: String) -> Int {
@@ -1646,7 +1698,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
                 args.append(method_info.arg_types[i]);
                 i++;
             }
-            return get_method_type_id(c, args, method_info.ret_type);
+            return get_method_type_id(c, args, method_info.ret_type, method_info.variadic_param, callable_arg_names(method_info, 1));
         }
 
         let name: String = generic_symbol_name(c, generic.base_type, true);
@@ -1664,7 +1716,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
             return TYPE_POISON;
         }
 
-        return get_func_type_id(c, instance.arg_types, instance.ret_type);
+        return get_func_type_id(c, instance.arg_types, instance.ret_type, instance.variadic_param, callable_arg_names(instance, 0));
     }
     
     if (base.type == NODE_VAR_ACCESS) {
@@ -1681,7 +1733,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
 
         let f_info: FuncInfo = c.func_table.lookup(v.name_tok.value);
         if (f_info is null && c.current_package_prefix != "") { f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value); }
-        if (f_info is !null) { return get_func_type_id(c, f_info.arg_types, f_info.ret_type); }
+        if (f_info is !null) { return get_func_type_id(c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0)); }
 
         return 0;
     }
@@ -1711,7 +1763,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
                                 bound_args.append(m_info.arg_types[a_idx]);
                                 a_idx += 1;
                             }
-                            return get_method_type_id(c, bound_args, m_info.ret_type);
+                            return get_method_type_id(c, bound_args, m_info.ret_type, m_info.variadic_param, callable_arg_names(m_info, 1));
                         }
                         m_idx += 1;
                     }
@@ -3406,10 +3458,15 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         let i: Int = 0;
         let p_len: Int = 0; if (f_node.arg_types is !null) { p_len = f_node.arg_types.length(); }
         while (i < p_len) {
-            arg_types.append(TypeListNode(type=resolve_type(c, f_node.arg_types[i])));
+            let arg_type: Int = resolve_type(c, f_node.arg_types[i]);
+            if (f_node.variadic_param == i + 1 && arg_type != TYPE_POISON) {
+                arg_type = get_slice_type_id(c, arg_type);
+            }
+
+            arg_types.append(TypeListNode(type=arg_type));
             i += 1;
         }
-        return get_func_type_id(c, arg_types, ret_id);
+        return get_func_type_id(c, arg_types, ret_id, f_node.variadic_param, f_node.arg_names);
     }
     if (base.type == NODE_METHOD_TYPE) {
         let m_node: MethodTypeNode = node;
@@ -3418,10 +3475,15 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         let i: Int = 0;
         let p_len: Int = 0; if (m_node.arg_types is !null) { p_len = m_node.arg_types.length(); }
         while (i < p_len) {
-            arg_types.append(TypeListNode(type=resolve_type(c, m_node.arg_types[i])));
+            let arg_type: Int = resolve_type(c, m_node.arg_types[i]);
+            if (m_node.variadic_param == i + 1 && arg_type != TYPE_POISON) {
+                arg_type = get_slice_type_id(c, arg_type);
+            }
+
+            arg_types.append(TypeListNode(type=arg_type));
             i += 1;
         }
-        return get_method_type_id(c, arg_types, ret_id);
+        return get_method_type_id(c, arg_types, ret_id, m_node.variadic_param, m_node.arg_names);
     }
     if (base.type == NODE_FALLIBLE_TYPE) {
         let fll_node: FallibleTypeNode = node;
@@ -3704,6 +3766,7 @@ func mangle_type(c: Compiler, type_id: Int) -> String {
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
+            if (func_info.variadic_param == i + 1) { encoded += "Z"; }
             encoded += mangle_type(c, arg.type);
             i += 1;
         }
@@ -3718,6 +3781,7 @@ func mangle_type(c: Compiler, type_id: Int) -> String {
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
+            if (method_info.variadic_param == i + 1) { encoded += "Z"; }
             encoded += mangle_type(c, arg.type);
             i += 1;
         }

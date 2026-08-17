@@ -3,6 +3,7 @@ import Dict from "dict"
 import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
+import * from "../validation.wl"
 import * from "dictionary.wl"
 import * from "literals.wl"
 import * from "../target.wl"
@@ -1028,10 +1029,14 @@ func emit_erased_check_helpers(c: Compiler) -> Void {
             c.output_file.write("  %tag = load i32, i32* %tag_slot\n");
             c.output_file.write("  switch i32 %tag, label %reject [\n");
 
-            let candidate: Int = 100;
-            while (candidate < c.type_counter) {
-                let accepted: Bool = candidate == expected;
-                let expected_info: StructInfo = c.struct_id_map.lookup("" + expected);
+                let candidate: Int = 100;
+                while (candidate < c.type_counter) {
+                    let accepted: Bool = candidate == expected;
+                    if (!accepted) {
+                        accepted = callable_types_compatible(c, candidate, expected);
+                    }
+        
+                    let expected_info: StructInfo = c.struct_id_map.lookup("" + expected);
                 if (!accepted && expected_info is !null && expected_info.is_class) {
                     accepted = is_subclass(c, candidate, expected);
                 }

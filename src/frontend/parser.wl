@@ -411,12 +411,51 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
     parser_advance(p);
 
     let signature_types: Vector(Struct) = [];
+    let signature_names: Vector(String) = [];
+    let variadic_param: Int = 0;
     if (p.current_tok.type != TOK_RPAREN) {
-        signature_types.append(parse_return_type(p));
-        while (p.current_tok.type == TOK_COMMA) {
-            parser_advance(p);
+        while (true) {
+            let label: String = "";
+            if (is_name_token(p.current_tok.type) && peek_type(p) == TOK_COLON) {
+                label = p.current_tok.value;
+                parser_advance(p);
+                parser_advance(p);
+            }
+
             signature_types.append(parse_return_type(p));
+            signature_names.append(label);
+            if (p.current_tok.type == TOK_ELLIPSIS) {
+                if (variadic_param > 0) {
+                    let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+                    throw_invalid_syntax(err_pos, "A callable type can contain only one variadic parameter.");
+                }
+                if (label.length() > 0) {
+                    let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+                    throw_invalid_syntax(err_pos, "The variadic parameter in a callable type cannot have a label.");
+                }
+                variadic_param = signature_types.length();
+                parser_advance(p);
+            }
+
+            if (p.current_tok.type != TOK_COMMA) { break; }
+            parser_advance(p);
         }
+    }
+
+    let signature_index: Int = 0;
+    while (signature_index < signature_types.length()) {
+        let label: String = signature_names[signature_index];
+        if (variadic_param == 0 && label.length() > 0) {
+            let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Callable labels are only allowed after a variadic parameter.");
+        } else if (variadic_param > 0 && signature_index + 1 < variadic_param && label.length() > 0) {
+            let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Parameters before the variadic parameter in a callable type are positional.");
+        } else if (variadic_param > 0 && signature_index + 1 > variadic_param && label.length() == 0) {
+            let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Parameters after a variadic parameter in a callable type require labels.");
+        }
+        signature_index += 1;
     }
 
     let kind: String = "Function";
@@ -429,12 +468,14 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
 
     let return_type: Struct = null;
     let arg_types: Vector(Struct) = [];
+    let arg_names: Vector(String) = [];
     if (p.current_tok.type == TOK_TYPE_ARROW) {
         parser_advance(p);
         return_type = parse_return_type(p);
         let i: Int = 0;
         while (i < signature_types.length()) {
             arg_types.append(signature_types[i]);
+            arg_names.append(signature_names[i]);
             i += 1;
         }
     } else {
@@ -448,15 +489,16 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
             let i: Int = 0;
             while (i < signature_types.length() - 1) {
                 arg_types.append(signature_types[i]);
+                arg_names.append(signature_names[i]);
                 i += 1;
             }
         }
     }
 
     if is_method {
-        return MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, return_type=return_type, pos=pos);
+        return MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
     }
-    return FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, return_type=return_type, pos=pos);
+    return FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
 }
 
 func parse_type_base_inner(p: Parser) -> Struct {

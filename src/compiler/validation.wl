@@ -249,11 +249,153 @@ func bind_native_args(args: Vector(Struct), info: FuncInfo, skip: Int, pos: Posi
     return BoundCallArgs(ordered=ordered, variadic=packed);
 }
 
+func validate_callable_value(info: FuncInfo, skip: Int, pos: Position, kind: String) -> Bool {
+    if (info.is_varargs) {
+        throw_type_error(pos, "A C variadic function cannot be used as a White Language " + kind + " value.");
+        return false;
+    }
+    return true;
+}
+
+func callable_types_compatible(c: Compiler, actual: Int, expected: Int) -> Bool {
+    let actual_info: SymbolInfo = c.func_ret_map.lookup("" + actual);
+    let expected_info: SymbolInfo = c.func_ret_map.lookup("" + expected);
+    if (actual_info is null || expected_info is null) {
+        actual_info = c.method_ret_map.lookup("" + actual);
+        expected_info = c.method_ret_map.lookup("" + expected);
+    }
+    if (actual_info is null || expected_info is null) { return false; }
+    if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) { return false; }
+    if (actual_info.func_arg_types.length() != expected_info.func_arg_types.length()) { return false; }
+
+    let i: Int = 0;
+    while (i < actual_info.func_arg_types.length()) {
+        let actual_arg: TypeListNode = actual_info.func_arg_types[i];
+        let expected_arg: TypeListNode = expected_info.func_arg_types[i];
+        if (actual_arg.type != expected_arg.type) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+func bind_callable_args(args: Vector(Struct), signature: SymbolInfo, pos: Position) -> BoundCallArgs {
+    let expected: Int = signature.func_arg_types.length();
+    let count: Int = 0; if (args is !null) { count = args.length(); }
+    let pack_index: Int = signature.variadic_param - 1;
+    let ordered: Vector(Struct) = [];
+    let packed: Vector(Struct) = [];
+
+    if (pack_index < 0) {
+        if (reject_named_args(args, pos, "a Function or Method value")) { return null; }
+        if (count != expected) {
+            throw_type_error(pos, "Argument count mismatch in Function or Method call. Expected " + expected + ", got " + count + ".");
+            return null;
+        }
+        let i: Int = 0;
+        while (i < count) {
+            let arg: ArgNode = args[i];
+            if (arg.is_spread) {
+                throw_invalid_syntax(pos, "A spread argument requires a variadic callable type.");
+                return null;
+            }
+            ordered.append(arg);
+            i += 1;
+        }
+        return BoundCallArgs(ordered=ordered, variadic=packed);
+    }
+
+    let i: Int = 0;
+    while (i < expected) {
+        ordered.append(null); i += 1;
+    }
+
+    let next_positional: Int = 0;
+    let saw_named: Bool = false;
+
+    i = 0;
+    while (i < count) {
+        let arg: ArgNode = args[i];
+        if (arg.name is null || arg.name.length() == 0) {
+            if saw_named {
+                throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
+                return null;
+            }
+            if (next_positional < pack_index) {
+                if (arg.is_spread) {
+                    throw_invalid_syntax(pos, "A spread argument cannot replace a fixed callable argument.");
+                    return null;
+                }
+                ordered[next_positional] = arg;
+                next_positional += 1;
+            } else {
+                packed.append(arg);
+                next_positional = pack_index;
+            }
+        } else {
+            saw_named = true;
+            let target: Int = -1;
+            let name_index: Int = pack_index + 1;
+            while (name_index < expected) {
+                if (signature.arg_names is !null && name_index < signature.arg_names.length() && signature.arg_names[name_index] == arg.name) {
+                    target = name_index;
+                    break;
+                }
+                name_index += 1;
+            }
+            if (target < 0) {
+                throw_name_error(pos, "Unknown callable argument '" + arg.name + "'.");
+                return null;
+            }
+            if (ordered[target] is !null) {
+                throw_name_error(pos, "Argument '" + arg.name + "' is specified more than once.");
+                return null;
+            }
+            ordered[target] = arg;
+        }
+        i += 1;
+    }
+
+    i = 0;
+    while (i < expected) {
+        if (i != pack_index && ordered[i] is null) {
+            let name: String = "";
+            if (signature.arg_names is !null && i < signature.arg_names.length()) {
+                name = signature.arg_names[i];
+            }
+            if (name.length() > 0) {
+                throw_type_error(pos, "Missing callable argument '" + name + "'.");
+            }
+            else {
+                throw_type_error(pos, "Missing positional argument " + (i + 1) + " in Function or Method call.");
+            }
+            return null;
+        }
+        i += 1;
+    }
+    return BoundCallArgs(ordered=ordered, variadic=packed);
+}
+
 func reject_named_args(args: Vector(Struct), pos: Position, target: String) -> Bool {
     let i: Int = 0;
     while (args is !null && i < args.length()) {
         let arg: ArgNode = args[i];
-        if (arg.name is !null && arg.name.length() > 0) { throw_invalid_syntax(pos, "Named arguments are not available when calling " + target); return true; }
+        if (arg.name is !null && arg.name.length() > 0) {
+            throw_invalid_syntax(pos, "Named arguments are not available when calling " + target);
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+func reject_spread_args(args: Vector(Struct), pos: Position, target: String) -> Bool {
+    let i: Int = 0;
+    while (args is !null && i < args.length()) {
+        let arg: ArgNode = args[i];
+        if (arg.is_spread) {
+            throw_invalid_syntax(pos, "Argument expansion is not available when calling " + target + ".");
+            return true;
+        }
         i += 1;
     }
     return false;

@@ -812,7 +812,7 @@ func compile_print_call(c: Compiler, node: CallNode) -> CompileResult {
             }
         }
         if (!is_printable_type(c, elem_type)) {
-            throw_type_error(node.pos, "Type " + get_type_name(c, elem_type) + " does not implement Printable.");
+            throw_type_error(node.pos, "Type " + get_type_name(c, elem_type) + " cannot be printed.");
             emit_release_owned(c, value);
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -1628,9 +1628,14 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
     let scope: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
     let params: Vector(Struct) = func_def.params;
     let p_len: Int = 0; if (params is !null) { p_len = params.length(); }
+    let local_variadic: Int = variadic_param_index(params);
     let p_i: Int = 0;
     while (p_i < p_len) {
         let p_node: ParamNode = params[p_i];
+        if (p_node.default_val is !null) {
+            throw_type_error(p_node.pos, "A local function value cannot declare default parameters.");
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
         scope.local_vars.put(p_node.name_tok.value, TypeListNode(type=1));
         p_i += 1;
     }
@@ -1750,16 +1755,16 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
     p_i = 0;
     while (p_i < p_len) {
         let p_node: ParamNode = params[p_i];
-        arg_types.append(TypeListNode(type=resolve_type(c, p_node.type_tok)));
+        arg_types.append(TypeListNode(type=callable_param_type(c, p_node)));
         p_i += 1;
     }
-    let specific_type_id: Int = get_func_type_id(c, arg_types, ret_type_id);
+    let specific_type_id: Int = get_func_type_id(c, arg_types, ret_type_id, local_variadic, callable_param_names(params));
     let sig_def: String = "i8* %raw_env";
     let sig_ty: String = "i8*";
     p_i = 0;
     while (p_i < p_len) {
         let p_node: ParamNode = params[p_i];
-        let p_ty: String = get_llvm_type_str(c, resolve_type(c, p_node.type_tok));
+        let p_ty: String = get_llvm_type_str(c, callable_param_type(c, p_node));
         sig_def = sig_def + ", " + p_ty + " %arg" + p_i;
         sig_ty = sig_ty + ", " + p_ty;
         p_i += 1;
@@ -1817,7 +1822,7 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
     p_i = 0;
     while (p_i < p_len) {
         let p_node: ParamNode = params[p_i];
-        let p_ty_id: Int = resolve_type(c, p_node.type_tok);
+        let p_ty_id: Int = callable_param_type(c, p_node);
         let p_ty: String = get_llvm_type_str(c, p_ty_id);
         let addr_reg: String = next_reg(c);
         c.output_file.write("  " + addr_reg + " = alloca " + p_ty + "\n");
@@ -2897,7 +2902,7 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
                 param_index += 1;
             }
             let return_type: Int = resolve_type(c, method_node.return_type);
-            let specific_type_id: Int = get_method_type_id(c, bound_args, return_type);
+            let specific_type_id: Int = get_method_type_id(c, bound_args, return_type, 0, []);
             let closure: String = emit_alloc_closure(c, specific_type_id);
             let function_slot: String = next_reg(c);
             c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
@@ -2954,7 +2959,11 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
                 bound_args.append(target_func.arg_types[ba_idx]);
                 ba_idx += 1;
             }
-            let specific_type_id: Int = get_method_type_id(c, bound_args, target_func.ret_type);
+            if (!validate_callable_value(target_func, 1, node.pos, "Method")) {
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+
+            let specific_type_id: Int = get_method_type_id(c, bound_args, target_func.ret_type, target_func.variadic_param, callable_arg_names(target_func, 1));
             let clo_payload: String = emit_alloc_closure(c, specific_type_id);
             
             let clo_func_ptr: String = next_reg(c);
@@ -4226,7 +4235,11 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
             f_info = c.func_table.lookup(c.current_package_prefix + name);
         }
         if (f_info is !null) {
-            let specific_type_id: Int = get_func_type_id(c, f_info.arg_types, f_info.ret_type);
+            if (!validate_callable_value(f_info, 0, pos, "Function")) {
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+
+            let specific_type_id: Int = get_func_type_id(c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
             let sig: String = get_func_sig_str(c, f_info);
             let func_ptr: String = "@" + f_info.name;
             let cast_reg: String = next_reg(c);
@@ -4396,7 +4409,12 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
                         bound_args.append(m_info.arg_types[ba_idx]);
                         ba_idx += 1;
                     }
-                    let specific_type_id: Int = get_method_type_id(c, bound_args, m_info.ret_type);
+
+                    if (!validate_callable_value(m_info, 1, f_acc.pos, "Method")) {
+                        return CompileResult(reg="poison", type=TYPE_POISON);
+                    }
+
+                    let specific_type_id: Int = get_method_type_id(c, bound_args, m_info.ret_type, m_info.variadic_param, callable_arg_names(m_info, 1));
                     let sig: String = get_func_sig_str(c, m_info);
                     
                     let vtable_ptr_addr: String = next_reg(c);
@@ -4958,12 +4976,17 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
     return CompileResult(reg=res_reg, type=target_type);
 }
 
-func emit_function_value(c: Compiler, info: FuncInfo) -> CompileResult {
+func emit_function_value(c: Compiler, info: FuncInfo, pos: Position) -> CompileResult {
     if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+        throw_type_error(pos, "Compiler intrinsic '" + info.base_name + "' cannot be used as a function value.");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    let specific_type: Int = get_func_type_id(c, info.arg_types, info.ret_type);
+    if (!validate_callable_value(info, 0, pos, "Function")) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+
+    let specific_type: Int = get_func_type_id(c, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
     let cast: String = next_reg(c);
     c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(c, info) + " @" + info.name + " to i8*\n");
 
@@ -5018,6 +5041,9 @@ func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> Compile
         throw_type_error(generic.pos, "Cannot bind mutating method '" + field.field_name + "' through const value");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
+    if (!validate_callable_value(method_info, 1, generic.pos, "Method")) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
 
     emit_method_nullcheck(c, object.reg, info.llvm_name, field.field_name, generic.pos);
     let args: Vector(Struct) = [];
@@ -5027,7 +5053,7 @@ func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> Compile
         i++;
     }
 
-    let method_type: Int = get_method_type_id(c, args, method_info.ret_type);
+    let method_type: Int = get_method_type_id(c, args, method_info.ret_type, method_info.variadic_param, callable_arg_names(method_info, 1));
     let closure: String = emit_alloc_closure(c, method_type);
     let cast: String = next_reg(c);
     c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(c, method_info) + " @" + method_info.name + " to i8*\n");
@@ -5073,7 +5099,7 @@ func compile_generic_value(c: Compiler, node: GenericTypeNode) -> CompileResult 
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    return emit_function_value(c, instance);
+    return emit_function_value(c, instance, node.pos);
 }
 
 func compile_node(c: Compiler, node: Struct) -> CompileResult {
@@ -5448,7 +5474,11 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                     throw_type_error(v.pos, "Compiler intrinsic '" + f_info.base_name + "' cannot be used as a function value.");
                     return CompileResult(reg="poison", type=TYPE_POISON);
                 }
-                let specific_type_id: Int = get_func_type_id(c, f_info.arg_types, f_info.ret_type);
+                if (!validate_callable_value(f_info, 0, v.pos, "Function")) {
+                    return CompileResult(reg="poison", type=TYPE_POISON);
+                }
+
+                let specific_type_id: Int = get_func_type_id(c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
                 let sig: String = get_func_sig_str(c, f_info);
                 let func_ptr: String = "@" + f_info.name;
                 
@@ -5873,6 +5903,8 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 a_len = type_len;
             } else if (reject_named_args(args, n_call.pos, "a variadic function")) {
                 return CompileResult(reg="poison", type=TYPE_POISON);
+            } else if (reject_spread_args(args, n_call.pos, "a C variadic function")) {
+                return CompileResult(reg="poison", type=TYPE_POISON);
             }
             
             let is_first: Bool = true;
@@ -6070,21 +6102,22 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
                 let args: Vector(Struct) = n_call.args;
                 let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
-                if (reject_named_args(args, n_call.pos, "a Function or Method value")) { return CompileResult(reg="poison", type=TYPE_POISON); }
                 
                 let expected_args: Vector(Struct) = null;
+                let signature_info: SymbolInfo = null;
+                let bound_args: BoundCallArgs = null;
                 if (ptr_type != TYPE_GENERIC_FUNCTION && ptr_type != TYPE_GENERIC_METHOD) {
-                    let sig_info: SymbolInfo = c.func_ret_map.lookup("" + ptr_type);
-                    if (sig_info is null) { sig_info = c.method_ret_map.lookup("" + ptr_type); }
-                    if (sig_info is !null) { expected_args = sig_info.func_arg_types; }
-                }
-
-                if (expected_args is !null) {
-                    let exp_len: Int = expected_args.length();
-                    if (a_len != exp_len) {
-                        throw_type_error(n_call.pos, "Argument count mismatch in Function/Method call. Expected " + exp_len + ", got " + a_len);
-                        return void_result();
+                    signature_info = c.func_ret_map.lookup("" + ptr_type);
+                    if (signature_info is null) { signature_info = c.method_ret_map.lookup("" + ptr_type); }
+                    if (signature_info is !null) {
+                        expected_args = signature_info.func_arg_types;
+                        bound_args = bind_callable_args(args, signature_info, n_call.pos);
+                        if (bound_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+                        args = bound_args.ordered;
+                        a_len = expected_args.length();
                     }
+                } else if (reject_named_args(args, n_call.pos, "a Function or Method value")) {
+                    return CompileResult(reg="poison", type=TYPE_POISON);
                 }
 
                 let a_idx: Int = 0;
@@ -6097,6 +6130,30 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 let owned_args: Vector(Struct) = [];
                 
                 while (a_idx < a_len) {
+                    if (signature_info is !null && signature_info.variadic_param > 0 && a_idx == signature_info.variadic_param - 1) {
+                        let pack_type: TypeListNode = expected_args[a_idx];
+                        let pack_info: ArrayInfo = c.array_info_map.lookup("" + pack_type.type);
+                        let pack: CompileResult = compile_variadic_pack(c, bound_args.variadic, pack_info.base_type, n_call.pos);
+                        if (pack.type == TYPE_POISON) { return pack; }
+
+                        let pack_llvm: String = get_llvm_type_str(c, pack.type);
+                        if (!first) {
+                            sig_g += ", ";
+                            args_g_str += ", ";
+                            sig_c += ", ";
+                            args_c_str += ", ";
+                        } else {
+                            sig_c += ", ";
+                            args_c_str += ", ";
+                        }
+                        sig_g += pack_llvm;
+                        args_g_str += pack_llvm + " " + pack.reg;
+                        sig_c += pack_llvm;
+                        args_c_str += pack_llvm + " " + pack.reg;
+                        first = false;
+                        a_idx += 1;
+                        continue;
+                    }
                     let curr_arg: ArgNode = args[a_idx];
                     let a_res: CompileResult = compile_node(c, curr_arg.val);
                     

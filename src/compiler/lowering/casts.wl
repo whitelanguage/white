@@ -26,6 +26,10 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     if (val_res.type == expected_type) { return val_res; }
     if (val_res is !null && val_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
     if (expected_type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    if (callable_types_compatible(c, val_res.type, expected_type)) {
+        val_res.type = expected_type;
+        return val_res;
+    }
     let origin: Int = val_res.origin_type;
 
     let variant_info: StructInfo = c.struct_table.lookup("$Variant");
@@ -457,7 +461,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
     if (val_res.type == TYPE_GENERIC_FUNCTION && expected_type >= 100) {
         if (c.func_ret_map.lookup("" + expected_type) is !null) {
-            if (origin != 0 && origin != expected_type) {
+            if (origin != 0 && !callable_types_compatible(c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Function as " + get_type_name(c, expected_type));
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
@@ -467,7 +471,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
     if (val_res.type == TYPE_GENERIC_METHOD && expected_type >= 100) {
         if (c.method_ret_map.lookup("" + expected_type) is !null) {
-            if (origin != 0 && origin != expected_type) {
+            if (origin != 0 && !callable_types_compatible(c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Method as " + get_type_name(c, expected_type));
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }

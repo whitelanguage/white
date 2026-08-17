@@ -1,6 +1,6 @@
 // Test: PRINT_OPTIONS
 // File: tests/language/basics/test_print_options.wl
-// Focus: Printable arguments, separators, endings, and sequence expansion.
+// Focus: Print arguments, separators, endings, and sequence expansion.
 
 func main() -> Int {
     let values: Vector(Int) = [1, 2, 3];

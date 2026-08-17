@@ -4,6 +4,14 @@ import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 
+func runtime_type_name(c: Compiler, type_id: Int) -> String {
+    if (c.func_ret_map.lookup("" + type_id) is !null || c.method_ret_map.lookup("" + type_id) is !null) {
+        // callable labels belong to source binding, not runtime type identity
+        return mangle_type(c, type_id);
+    }
+    return get_type_name(c, type_id);
+}
+
 func type_fingerprint(c: Compiler, type_id: Int) -> UInt64 {
     /*
     fnv-1a over the canonical type name:
@@ -16,7 +24,7 @@ func type_fingerprint(c: Compiler, type_id: Int) -> UInt64 {
 
     using the type name keeps erased tags independent of addresses and table order
     */
-    let name: String = "whitelang:" + get_type_name(c, type_id);
+    let name: String = "whitelang:" + runtime_type_name(c, type_id);
     let hash: UInt64 = 14695981039346656037UL;
     let i: Int = 0;
     while (i < name.length()) {
@@ -73,7 +81,7 @@ func append_dict_key_case(c: Compiler, cases: String, seen: Dict(String, StringC
     let fingerprint: UInt64 = type_fingerprint(c, type_id);
     let key: String = "" + fingerprint;
     let previous: StringConstant = seen.lookup(key);
-    let type_name: String = get_type_name(c, type_id);
+    let type_name: String = runtime_type_name(c, type_id);
     if (previous is !null && previous.value != type_name) {
         throw_internal_compiler_error(null, "Dict key fingerprint collision between " + previous.value + " and " + type_name);
         return cases;
@@ -87,7 +95,7 @@ func append_variant_ref_case(c: Compiler, cases: String, seen: Dict(String, Stri
     let fingerprint: UInt64 = type_fingerprint(c, type_id);
     let key: String = "" + fingerprint;
     let previous: StringConstant = seen.lookup(key);
-    let type_name: String = get_type_name(c, type_id);
+    let type_name: String = runtime_type_name(c, type_id);
     if (previous is !null && previous.value != type_name) {
         throw_internal_compiler_error(null, "Variant fingerprint collision between " + previous.value + " and " + type_name);
         return cases;

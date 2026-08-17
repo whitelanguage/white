@@ -151,7 +151,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             }
             let sys_anns: SystemAnnResult = consume_annotations(i_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
-                if (raw_name != "Printable") {
+                if (raw_name != "__Printable") {
                     throw_internal_compiler_error(i_node.pos, "Unknown intrinsic interface '" + raw_name + "'.");
                     return;
                 }

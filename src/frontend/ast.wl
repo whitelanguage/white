@@ -238,7 +238,9 @@ struct ReturnNode(
 struct FunctionTypeNode(
     type        : Int,    // NODE_FUNCTION_TYPE
     arg_types   : Vector(Struct),
+    arg_names   : Vector(String),
     return_type : Struct,
+    variadic_param : Int,
     pos         : Position
 )
 
@@ -405,7 +407,9 @@ struct SuperNode(
 struct MethodTypeNode(
     type        : Int,    // NODE_METHOD_TYPE
     arg_types   : Vector(Struct),
+    arg_names   : Vector(String),
     return_type : Struct,
+    variadic_param : Int,
     pos         : Position
 )
 

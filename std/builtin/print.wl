@@ -5,7 +5,7 @@ import "internal/runtime/string" as runtime_string
 
 
 @CompilerIntrinsic
-interface Printable {
+interface __Printable {
     /* compiler internal implementation */
 }
 
@@ -74,6 +74,6 @@ func write_bool(value: Bool) -> Void {
 }
 
 @CompilerIntrinsic("print")
-func print(values: Printable..., sep: String = " ", end: String = "\n") -> Void {
+func print(values: __Printable..., sep: String = " ", end: String = "\n") -> Void {
     /* compiler internal implementation */
 }
