@@ -143,9 +143,19 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 if (method_names.contains_key(method_name)) { throw_name_error(iface_method.pos, "method '" + method_name + "' is already declared in interface '" + i_name + "'"); break; }
                 method_names.put(method_name, StringConstant(id=0, value=method_name));
                 check_duplicate_params(iface_method.params, "interface method '" + method_name + "'", iface_method.pos);
+                if (variadic_param_index(iface_method.params) > 0) {
+                    throw_type_error(iface_method.pos, "Interface methods cannot declare variadic parameters.");
+                    break;
+                }
                 method_index += 1;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(null, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(i_node.annotations, raw_name);
+            if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+                if (raw_name != "Printable") {
+                    throw_internal_compiler_error(i_node.pos, "Unknown intrinsic interface '" + raw_name + "'.");
+                    return;
+                }
+            }
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
             let info: StructInfo = StructInfo(
@@ -269,7 +279,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
             
             while (p_idx < p_len) {
                 let p: ParamNode = params[p_idx];
-                let p_id: Int = resolve_type(c, p.type_tok);
+                let p_id: Int = callable_param_type(c, p);
                 if (p_id == TYPE_AUTO) {
                     throw_type_error(p.pos, "Auto cannot be used in function parameters.");
                     return;
@@ -292,12 +302,19 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
 
             let sys_anns: SystemAnnResult = consume_annotations(f_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
-                if ((raw_name != "size_of" && raw_name != "align_of") || sys_anns.intrinsic_name != raw_name) {
+                let layout_intrinsic: Bool = (raw_name == "size_of" || raw_name == "align_of") && sys_anns.intrinsic_name == raw_name;
+                let print_intrinsic: Bool = raw_name == "print" &&
+                                            (sys_anns.intrinsic_name == "print" || sys_anns.intrinsic_name.length() == 0);
+                if (!layout_intrinsic && !print_intrinsic) {
                     throw_internal_compiler_error(f_node.pos, "Unknown intrinsic function '" + sys_anns.intrinsic_name + "'.");
                     return;
                 }
-                if (p_len != 0 || ret_type_id != TYPE_UINTSIZE) {
+                if (layout_intrinsic && (p_len != 0 || ret_type_id != TYPE_UINTSIZE)) {
                     throw_internal_compiler_error(f_node.pos, "Intrinsic '" + raw_name + "' must be declared as func " + raw_name + "() -> UIntSize.");
+                    return;
+                }
+                if (print_intrinsic && (p_len != 3 || variadic_param_index(params) != 1 || ret_type_id != TYPE_VOID)) {
+                    throw_internal_compiler_error(f_node.pos, "Intrinsic 'print' has an invalid standard library declaration.");
                     return;
                 }
             }
@@ -318,7 +335,11 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                 return;
             }
 
-            let f_info: FuncInfo = FuncInfo(name=llvm_func_name, base_name=raw_name, ret_type=ret_type_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=sys_anns.ann_flags, compiler_link_name=sys_anns.compiler_link_name, mutates_self=false);
+            let f_info: FuncInfo = FuncInfo(name=llvm_func_name, base_name=raw_name, ret_type=ret_type_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=sys_anns.ann_flags, compiler_link_name=sys_anns.compiler_link_name, mutates_self=false, variadic_param=variadic_param_index(params), default_args=param_defaults(params));
+            if ((sys_anns.ann_flags & FLAG_ANN_COMP_LINK) != 0 && f_info.variadic_param > 0) {
+                throw_type_error(f_node.pos, "CompilerLink functions cannot declare variadic parameters.");
+                return;
+            }
             c.func_table.put(func_key, f_info);
 
             if ((sys_anns.ann_flags & FLAG_ANN_COMP_LINK) != 0) {
@@ -381,7 +402,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                 let p_idx: Int = 0;
                 while (p_idx < p_len) {
                     let p: ParamNode = p_vec[p_idx];
-                    let p_type: Int = resolve_type(c, p.type_tok);
+                    let p_type: Int = callable_param_type(c, p);
                     if (p_type == TYPE_AUTO) { 
                         throw_type_error(p.pos, "Auto cannot be used in method parameters."); 
                         return; 
@@ -407,7 +428,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                     return;
                 }
 
-                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(m_node.body));
+                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(m_node.body), variadic_param=variadic_param_index(p_vec), default_args=param_defaults(p_vec));
                 c.func_table.put(m_key, f_info);
                 m_idx += 1;
             }

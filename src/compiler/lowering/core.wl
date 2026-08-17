@@ -704,6 +704,343 @@ func compile_ptr_assign(c: Compiler, node: PtrAssignNode) -> CompileResult {
     return val_res;
 }
 
+func emit_print_text(c: Compiler, value: CompileResult, fallback: String, pos: Position) -> Void {
+    if (value is !null) {
+        compile_print(c, value.reg, TYPE_STRING, pos, TYPE_STRING);
+        return;
+    }
+    let hook: String = get_mangled_symbol(c, "print_bytes", pos);
+    let id: Int = register_string_constant(c, fallback);
+    c.output_file.write(c.indent + "call void @" + hook + "(i8* " + get_string_ptr(id, fallback) + ", i32 " + fallback.length() + ")\n");
+}
+
+func emit_print_item(c: Compiler, reg: String, type_id: Int, origin_id: Int, printed: String, separator: CompileResult, pos: Position) -> Void {
+    let has_value: String = next_reg(c);
+    c.output_file.write(c.indent + has_value + " = load i1, i1* " + printed + "\n");
+    let separator_label: String = next_label(c);
+    let value_label: String = next_label(c);
+    let done_label: String = next_label(c);
+    c.output_file.write(c.indent + "br i1 " + has_value + ", label %" + separator_label + ", label %" + value_label + "\n");
+    c.output_file.write("\n" + separator_label + ":\n");
+    emit_print_text(c, separator, " ", pos);
+    c.output_file.write(c.indent + "br label %" + value_label + "\n");
+    c.output_file.write("\n" + value_label + ":\n");
+    compile_print(c, reg, type_id, pos, origin_id);
+    c.output_file.write(c.indent + "store i1 true, i1* " + printed + "\n");
+    c.output_file.write(c.indent + "br label %" + done_label + "\n");
+    c.output_file.write("\n" + done_label + ":\n");
+}
+
+func compile_print_call(c: Compiler, node: CallNode) -> CompileResult {
+    let values: Vector(Struct) = [];
+    let separator: CompileResult = null;
+    let ending: CompileResult = null;
+    let saw_named: Bool = false;
+    let i: Int = 0;
+    while (node.args is !null && i < node.args.length()) {
+        let arg: ArgNode = node.args[i];
+        if (arg.name is !null && arg.name.length() > 0) {
+            saw_named = true;
+            if (arg.name != "sep" && arg.name != "end") {
+                throw_name_error(node.pos, "Unknown print argument '" + arg.name + "'.");
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+            if ((arg.name == "sep" && separator is !null) || (arg.name == "end" && ending is !null)) {
+                throw_name_error(node.pos, "Argument '" + arg.name + "' is specified more than once.");
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+            let old_expected: Int = c.expected_type;
+            c.expected_type = TYPE_STRING;
+            let text: CompileResult = compile_node(c, arg.val);
+            c.expected_type = old_expected;
+            text = emit_implicit_cast(c, text, TYPE_STRING, node.pos);
+            if (text.type == TYPE_POISON) { return text; }
+            if (arg.name == "sep") { separator = text; }
+            else { ending = text; }
+            i += 1;
+            continue;
+        }
+        if saw_named {
+            throw_invalid_syntax(node.pos, "Positional argument cannot follow a named argument.");
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+
+        let old_expected: Int = c.expected_type;
+        c.expected_type = 0;
+        let value: CompileResult = compile_node(c, arg.val);
+        c.expected_type = old_expected;
+        if (value is null || value.type == TYPE_POISON) {
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+
+        let length: String = "1";
+        let data: String = "";
+        let elem_type: Int = value.type;
+        if (arg.is_spread) {
+            let array_info: ArrayInfo = c.array_info_map.lookup("" + value.type);
+            let vector_info: SymbolInfo = c.vector_base_map.lookup("" + value.type);
+            let size_ty: String = get_size_llvm_type();
+            if (array_info is !null) {
+                elem_type = array_info.base_type;
+                let elem_ty: String = get_llvm_type_str(c, elem_type);
+                if (array_info.size == -1) {
+                    let parts: SliceParts = emit_slice_parts(c, value.reg, value.type, node.pos);
+                    length = parts.length;
+                    data = next_reg(c);
+                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
+                } else {
+                    length = "" + array_info.size;
+                    data = next_reg(c);
+                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
+                }
+            } else if (vector_info is !null) {
+                elem_type = vector_info.type;
+                let elem_ty: String = get_llvm_type_str(c, elem_type);
+                let vector_ty: String = get_vector_llvm_type(c, elem_type);
+                let size_slot: String = next_reg(c);
+                c.output_file.write(c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
+                length = next_reg(c);
+                c.output_file.write(c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + size_slot + "\n");
+                let data_slot: String = next_reg(c);
+                c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
+                data = next_reg(c);
+                c.output_file.write(c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
+            } else {
+                throw_type_error(node.pos, "Only an Array or Vector can be expanded into print.");
+                emit_release_owned(c, value);
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+        }
+        if (!is_printable_type(c, elem_type)) {
+            throw_type_error(node.pos, "Type " + get_type_name(c, elem_type) + " does not implement Printable.");
+            emit_release_owned(c, value);
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+        values.append(PrintArgument(value=value, spread=arg.is_spread, length=length, data=data, elem_type=elem_type));
+        i += 1;
+    }
+
+    let printed: String = next_reg(c);
+    c.output_file.write(c.indent + printed + " = alloca i1\n");
+    c.output_file.write(c.indent + "store i1 false, i1* " + printed + "\n");
+    i = 0;
+    while (i < values.length()) {
+        let item: PrintArgument = values[i];
+        if (!item.spread) {
+            emit_print_item(c, item.value.reg, item.elem_type, item.value.origin_type, printed, separator, node.pos);
+        } else {
+            let size_ty: String = get_size_llvm_type();
+            let elem_ty: String = get_llvm_type_str(c, item.elem_type);
+            let index: String = next_reg(c);
+            c.output_file.write(c.indent + index + " = alloca " + size_ty + "\n");
+            c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + index + "\n");
+            let cond_label: String = next_label(c);
+            let body_label: String = next_label(c);
+            let done_label: String = next_label(c);
+            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
+            c.output_file.write("\n" + cond_label + ":\n");
+            let current: String = next_reg(c);
+            c.output_file.write(c.indent + current + " = load " + size_ty + ", " + size_ty + "* " + index + "\n");
+            let more: String = next_reg(c);
+            c.output_file.write(c.indent + more + " = icmp ult " + size_ty + " " + current + ", " + item.length + "\n");
+            c.output_file.write(c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
+            c.output_file.write("\n" + body_label + ":\n");
+            let slot: String = next_reg(c);
+            c.output_file.write(c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + item.data + ", " + size_ty + " " + current + "\n");
+            let value_reg: String = slot;
+            let nested_array: ArrayInfo = c.array_info_map.lookup("" + item.elem_type);
+            if (nested_array is null || nested_array.size < 0) {
+                value_reg = next_reg(c);
+                c.output_file.write(c.indent + value_reg + " = load " + elem_ty + ", " + elem_ty + "* " + slot + "\n");
+            }
+            emit_print_item(c, value_reg, item.elem_type, item.elem_type, printed, separator, node.pos);
+            let next: String = next_reg(c);
+            c.output_file.write(c.indent + next + " = add " + size_ty + " " + current + ", 1\n");
+            c.output_file.write(c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + index + "\n");
+            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
+            c.output_file.write("\n" + done_label + ":\n");
+        }
+        emit_release_owned(c, item.value);
+        i += 1;
+    }
+    emit_print_text(c, ending, "\n", node.pos);
+    emit_release_owned(c, separator);
+    emit_release_owned(c, ending);
+    return void_result();
+}
+
+func compile_variadic_pack(c: Compiler, args: Vector(Struct), elem_type: Int, pos: Position) -> CompileResult {
+    let sources: Vector(Struct) = [];
+    let size_ty: String = get_size_llvm_type();
+    let elem_ty: String = get_llvm_type_str(c, elem_type);
+    let total: String = "0";
+    let i: Int = 0;
+
+    while (args is !null && i < args.length()) {
+        let arg: ArgNode = args[i];
+        let old_expected: Int = c.expected_type;
+        c.expected_type = 0;
+        if (!arg.is_spread) { c.expected_type = elem_type; }
+        let value: CompileResult = compile_node(c, arg.val);
+        c.expected_type = old_expected;
+        if (value is null || value.type == TYPE_POISON) {
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+
+        let length: String = "1";
+        let data: String = "";
+        if (arg.is_spread) {
+            let source_elem: Int = 0;
+            let array_info: ArrayInfo = c.array_info_map.lookup("" + value.type);
+            let vector_info: SymbolInfo = c.vector_base_map.lookup("" + value.type);
+            if (array_info is !null) {
+                source_elem = array_info.base_type;
+                if (array_info.size == -1) {
+                    let parts: SliceParts = emit_slice_parts(c, value.reg, value.type, pos);
+                    length = parts.length;
+                    data = next_reg(c);
+                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
+                } else {
+                    length = "" + array_info.size;
+                    data = next_reg(c);
+                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
+                }
+            } else if (vector_info is !null) {
+                source_elem = vector_info.type;
+                let vector_ty: String = get_vector_llvm_type(c, source_elem);
+                let length_slot: String = next_reg(c);
+                c.output_file.write(c.indent + length_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
+                length = next_reg(c);
+                c.output_file.write(c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + length_slot + "\n");
+                let data_slot: String = next_reg(c);
+                c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
+                data = next_reg(c);
+                c.output_file.write(c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
+            } else {
+                throw_type_error(pos, "Only an Array or Vector can be expanded into a variadic argument.");
+                emit_release_owned(c, value);
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+            if (source_elem != elem_type) {
+                throw_type_error(pos, "Cannot expand " + get_type_name(c, value.type) + " into a variadic parameter of " + get_type_name(c, elem_type) + ".");
+                emit_release_owned(c, value);
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+        } else {
+            value = emit_implicit_cast(c, value, elem_type, pos);
+        }
+
+        let remaining: String = next_reg(c);
+        let limit: Long = vector_capacity_limit(get_type_size_bytes(c, elem_type));
+        c.output_file.write(c.indent + remaining + " = sub " + size_ty + " " + limit + ", " + total + "\n");
+        let overflow: String = next_reg(c);
+        c.output_file.write(c.indent + overflow + " = icmp ugt " + size_ty + " " + length + ", " + remaining + "\n");
+        let fail_label: String = next_label(c);
+        let next_label_: String = next_label(c);
+        c.output_file.write(c.indent + "br i1 " + overflow + ", label %" + fail_label + ", label %" + next_label_ + "\n");
+        c.output_file.write("\n" + fail_label + ":\n");
+        c.output_file.write(c.indent + "call void @__wl_oom()\n");
+        c.output_file.write(c.indent + "unreachable\n");
+        c.output_file.write("\n" + next_label_ + ":\n");
+        let next_total: String = next_reg(c);
+        c.output_file.write(c.indent + next_total + " = add " + size_ty + " " + total + ", " + length + "\n");
+        total = next_total;
+        sources.append(VariadicSource(value=value, spread=arg.is_spread, length=length, data=data));
+        i += 1;
+    }
+
+    let vector_type: Int = get_vector_type_id(c, elem_type);
+    let vector_ty: String = get_vector_llvm_type(c, elem_type);
+    let vector_size_ptr: String = next_reg(c);
+    c.output_file.write(c.indent + vector_size_ptr + " = getelementptr " + vector_ty + ", " + vector_ty + "* null, i32 1\n");
+    let vector_size: String = next_reg(c);
+    c.output_file.write(c.indent + vector_size + " = ptrtoint " + vector_ty + "* " + vector_size_ptr + " to " + size_ty + "\n");
+    let vector: String = emit_alloc_obj(c, vector_size, "" + vector_type, vector_ty + "*");
+
+    let empty: String = next_reg(c);
+    c.output_file.write(c.indent + empty + " = icmp eq " + size_ty + " " + total + ", 0\n");
+    let alloc_count: String = next_reg(c);
+    c.output_file.write(c.indent + alloc_count + " = select i1 " + empty + ", " + size_ty + " 1, " + size_ty + " " + total + "\n");
+    let bytes: String = next_reg(c);
+    c.output_file.write(c.indent + bytes + " = mul " + size_ty + " " + alloc_count + ", " + get_type_size_bytes(c, elem_type) + "\n");
+    let alloc_hook: String = get_mangled_symbol(c, "memory_alloc", pos);
+    let raw_data: String = next_reg(c);
+    c.output_file.write(c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + bytes + ")\n");
+    emit_alloc_check(c, raw_data);
+    let storage: String = next_reg(c);
+    c.output_file.write(c.indent + storage + " = bitcast i8* " + raw_data + " to " + elem_ty + "*\n");
+
+    let size_slot: String = next_reg(c);
+    c.output_file.write(c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 0\n");
+    c.output_file.write(c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + size_slot + "\n");
+    let cap_slot: String = next_reg(c);
+    c.output_file.write(c.indent + cap_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 1\n");
+    c.output_file.write(c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + cap_slot + "\n");
+    let data_slot: String = next_reg(c);
+    c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 2\n");
+    c.output_file.write(c.indent + "store " + elem_ty + "* " + storage + ", " + elem_ty + "** " + data_slot + "\n");
+
+    let dest_index: String = next_reg(c);
+    c.output_file.write(c.indent + dest_index + " = alloca " + size_ty + "\n");
+    c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + dest_index + "\n");
+    i = 0;
+    while (i < sources.length()) {
+        let source: VariadicSource = sources[i];
+        if (!source.spread) {
+            let index: String = next_reg(c);
+            c.output_file.write(c.indent + index + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
+            let slot: String = next_reg(c);
+            c.output_file.write(c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + index + "\n");
+            if (result_owns_value(c, elem_type) && !source.value.owns_ref) {
+                emit_retain_value(c, source.value.reg, elem_type);
+            }
+            c.output_file.write(c.indent + "store " + elem_ty + " " + source.value.reg + ", " + elem_ty + "* " + slot + "\n");
+            let next: String = next_reg(c);
+            c.output_file.write(c.indent + next + " = add " + size_ty + " " + index + ", 1\n");
+            c.output_file.write(c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + dest_index + "\n");
+        } else {
+            let source_index: String = next_reg(c);
+            c.output_file.write(c.indent + source_index + " = alloca " + size_ty + "\n");
+            c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + source_index + "\n");
+            let cond_label: String = next_label(c);
+            let body_label: String = next_label(c);
+            let done_label: String = next_label(c);
+            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
+            c.output_file.write("\n" + cond_label + ":\n");
+            let source_i: String = next_reg(c);
+            c.output_file.write(c.indent + source_i + " = load " + size_ty + ", " + size_ty + "* " + source_index + "\n");
+            let more: String = next_reg(c);
+            c.output_file.write(c.indent + more + " = icmp ult " + size_ty + " " + source_i + ", " + source.length + "\n");
+            c.output_file.write(c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
+            c.output_file.write("\n" + body_label + ":\n");
+            let source_slot: String = next_reg(c);
+            c.output_file.write(c.indent + source_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source.data + ", " + size_ty + " " + source_i + "\n");
+            let item: String = next_reg(c);
+            c.output_file.write(c.indent + item + " = load " + elem_ty + ", " + elem_ty + "* " + source_slot + "\n");
+            let target_i: String = next_reg(c);
+            c.output_file.write(c.indent + target_i + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
+            let target_slot: String = next_reg(c);
+            c.output_file.write(c.indent + target_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + target_i + "\n");
+            c.output_file.write(c.indent + "store " + elem_ty + " " + item + ", " + elem_ty + "* " + target_slot + "\n");
+            if (result_owns_value(c, elem_type)) { emit_retain_value(c, item, elem_type); }
+            let next_source: String = next_reg(c);
+            c.output_file.write(c.indent + next_source + " = add " + size_ty + " " + source_i + ", 1\n");
+            c.output_file.write(c.indent + "store " + size_ty + " " + next_source + ", " + size_ty + "* " + source_index + "\n");
+            let next_target: String = next_reg(c);
+            c.output_file.write(c.indent + next_target + " = add " + size_ty + " " + target_i + ", 1\n");
+            c.output_file.write(c.indent + "store " + size_ty + " " + next_target + ", " + size_ty + "* " + dest_index + "\n");
+            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
+            c.output_file.write("\n" + done_label + ":\n");
+            emit_release_owned(c, source.value);
+        }
+        i += 1;
+    }
+
+    let owner: String = next_reg(c);
+    c.output_file.write(c.indent + owner + " = bitcast " + vector_ty + "* " + vector + " to i8*\n");
+    return emit_make_slice(c, elem_type, owner, data_slot, size_slot, "0", total);
+}
+
 func compile_func_def(c: Compiler, node: FunctionDefNode) -> CompileResult {
     if (node.type_params is !null && node.type_params.length() > 0 && 
         c.generic_func_key.length() == 0) {
@@ -741,7 +1078,7 @@ func compile_func_def(c: Compiler, node: FunctionDefNode) -> CompileResult {
     
     while (arg_idx < p_len) {
         let p: ParamNode = params[arg_idx];
-        let p_type_id: Int = resolve_type(c, p.type_tok);
+        let p_type_id: Int = callable_param_type(c, p);
         let p_llvm_type: String = get_llvm_type_str(c, p_type_id);
         if (arg_idx > 0) { params_str = params_str + ", "; }
         params_str += p_llvm_type + " %arg" + arg_idx;
@@ -776,7 +1113,7 @@ func compile_func_def(c: Compiler, node: FunctionDefNode) -> CompileResult {
         let p: ParamNode = params[arg_idx];
         let p_name: String = p.name_tok.value;
         
-        let target_type_id: Int = resolve_type(c, p.type_tok);
+        let target_type_id: Int = callable_param_type(c, p);
         let llvm_ty: String = get_llvm_type_str(c, target_type_id);
         let addr_reg: String = next_reg(c); 
         c.output_file.write(c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
@@ -857,7 +1194,7 @@ func compile_method_def(c: Compiler, class_name: String, node: MethodDefNode) ->
     
     while (arg_idx < p_len) {
         let p: ParamNode = params[arg_idx];
-        let p_type_id: Int = resolve_type(c, p.type_tok);
+        let p_type_id: Int = callable_param_type(c, p);
         let p_llvm_type: String = get_llvm_type_str(c, p_type_id);
         let arg_num: Int = arg_idx + 1;
         params_str = params_str + ", " + p_llvm_type + " %arg" + arg_num;
@@ -884,7 +1221,7 @@ func compile_method_def(c: Compiler, class_name: String, node: MethodDefNode) ->
     while (arg_idx < p_len) {
         let p: ParamNode = params[arg_idx];
         let p_name: String = p.name_tok.value;
-        let target_type_id: Int = resolve_type(c, p.type_tok);
+        let target_type_id: Int = callable_param_type(c, p);
         let llvm_ty: String = get_llvm_type_str(c, target_type_id);
         let addr_reg: String = next_reg(c); 
         c.output_file.write(c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
@@ -1165,14 +1502,17 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
     if (expected_types is !null) { exp_len = expected_types.length(); }
     if (!s_info.is_interface && exp_len > 0) { exp_len -= 1; }
     
-    if (a_len != exp_len) {
+    let native_args: BoundCallArgs = null;
+    if (!s_info.is_interface && f_info is !null) {
+        native_args = bind_native_args(args, f_info, 1, n_call.pos);
+        if (native_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        args = native_args.ordered;
+        a_len = exp_len;
+    } else if (a_len != exp_len) {
         throw_type_error(n_call.pos, "Argument count mismatch in method call. Expected " + exp_len + ", got " + a_len);
         return CompileResult(reg="0", type=ret_type, origin_type=0);
     }
-    if (!s_info.is_interface && f_info is !null) {
-        args = bind_call_args(args, f_info.arg_names, 1, n_call.pos);
-        if (args is null && exp_len > 0) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    } else if (s_info.is_interface) {
+    if (s_info.is_interface) {
         let interface_names: Vector(String) = [];
         let name_index: Int = 0;
         while (m_node.params is !null && name_index < m_node.params.length()) { let param: ParamNode = m_node.params[name_index]; interface_names.append(param.name_tok.value); name_index += 1; }
@@ -1182,6 +1522,15 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
 
     let arg_idx: Int = 0;
     while (arg_idx < a_len) {
+        if (!s_info.is_interface && f_info.variadic_param > 0 && arg_idx == f_info.variadic_param - 1) {
+            let pack_type: TypeListNode = expected_types[arg_idx + 1];
+            let pack_info: ArrayInfo = c.array_info_map.lookup("" + pack_type.type);
+            let pack: CompileResult = compile_variadic_pack(c, native_args.variadic, pack_info.base_type, n_call.pos);
+            if (pack.type == TYPE_POISON) { return pack; }
+            args_str += ", " + get_llvm_type_str(c, pack.type) + " " + pack.reg;
+            arg_idx += 1;
+            continue;
+        }
         let arg_node_curr: ArgNode = args[arg_idx];
         let expected_type: Int = 0;
         
@@ -1887,15 +2236,21 @@ func compile_class_init(c: Compiler, s_info: StructInfo, n_call: CallNode) -> Co
         let expected_arg_count: Int = 0;
         if (arg_types is !null) { expected_arg_count = arg_types.length() - 1; }
         
-        if (a_len != expected_arg_count) {
-            throw_type_error(n_call.pos, "Class init expects " + expected_arg_count + " arguments, got " + a_len + ".");
-            return void_result();
-        }
-
-        args = bind_call_args(args, init_func.arg_names, 1, n_call.pos);
-        if (args is null && expected_arg_count > 0) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        let native_args: BoundCallArgs = bind_native_args(args, init_func, 1, n_call.pos);
+        if (native_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        args = native_args.ordered;
+        a_len = expected_arg_count;
 
         while (arg_idx < a_len) {
+            if (init_func.variadic_param > 0 && arg_idx == init_func.variadic_param - 1) {
+                let pack_type: TypeListNode = arg_types[arg_idx + 1];
+                let pack_info: ArrayInfo = c.array_info_map.lookup("" + pack_type.type);
+                let pack: CompileResult = compile_variadic_pack(c, native_args.variadic, pack_info.base_type, n_call.pos);
+                if (pack.type == TYPE_POISON) { return pack; }
+                args_str += ", " + get_llvm_type_str(c, pack.type) + " " + pack.reg;
+                arg_idx += 1;
+                continue;
+            }
             let arg_node_curr: ArgNode = args[arg_idx];
             let type_node_curr: TypeListNode = arg_types[arg_idx + 1]; // +1 skip self
             let expected_type: Int = type_node_curr.type;
@@ -1960,7 +2315,7 @@ func register_class_methods(c: Compiler, class_name: String, class_type_id: Int,
         let param_index: Int = 0;
         while (method_node.params is !null && param_index < method_node.params.length()) {
             let param: ParamNode = method_node.params[param_index];
-            let param_type: Int = resolve_type(c, param.type_tok);
+            let param_type: Int = callable_param_type(c, param);
             if (param_type == TYPE_AUTO) {
                 throw_type_error(param.pos, "Auto cannot be used in method parameters.");
                 return false;
@@ -1974,7 +2329,7 @@ func register_class_methods(c: Compiler, class_name: String, class_type_id: Int,
         let key: String = class_name + "_" + method_name;
         if (c.func_table.lookup(key) is !null) { throw_name_error(method_node.pos, "Method '" + key + "' is already defined."); return false; }
         let symbol: String = mangle_wl_name(c, class_name + ".", method_name, arg_types);
-        c.func_table.put(key, FuncInfo(name=symbol, base_name=method_name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(method_node.body)));
+        c.func_table.put(key, FuncInfo(name=symbol, base_name=method_name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(method_node.body), variadic_param=variadic_param_index(method_node.params), default_args=param_defaults(method_node.params)));
         index += 1;
     }
     return true;
@@ -5206,14 +5561,21 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 let expected_arg_count: Int = 0;
                 if (expected_types is !null) { expected_arg_count = expected_types.length() - 1; }
                 
-                if (a_len != expected_arg_count) {
-                    throw_type_error(n_call.pos, "'super.'" + target_m_name + " expects " + expected_arg_count + " arguments, got " + a_len + ".");
-                    return void_result();
-                }
-                args = bind_call_args(args, f_info.arg_names, 1, n_call.pos);
-                if (args is null && expected_arg_count > 0) { return CompileResult(reg="poison", type=TYPE_POISON); }
+                let native_args: BoundCallArgs = bind_native_args(args, f_info, 1, n_call.pos);
+                if (native_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+                args = native_args.ordered;
+                a_len = expected_arg_count;
 
                 while (arg_idx < a_len) {
+                    if (f_info.variadic_param > 0 && arg_idx == f_info.variadic_param - 1) {
+                        let pack_type: TypeListNode = expected_types[arg_idx + 1];
+                        let pack_info: ArrayInfo = c.array_info_map.lookup("" + pack_type.type);
+                        let pack: CompileResult = compile_variadic_pack(c, native_args.variadic, pack_info.base_type, n_call.pos);
+                        if (pack.type == TYPE_POISON) { return pack; }
+                        args_str += ", " + get_llvm_type_str(c, pack.type) + " " + pack.reg;
+                        arg_idx += 1;
+                        continue;
+                    }
                     let arg_node_curr: ArgNode = args[arg_idx];
                     let expected_type_node: TypeListNode = expected_types[arg_idx + 1];
                     let expected_type: Int = expected_type_node.type;
@@ -5460,42 +5822,10 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let check_built: FuncInfo = c.func_table.lookup(func_name);
             if (check_built is !null) { target_func_name = check_built.base_name; }
 
-            let intr_print: String = c.compiler_link.lookup("print");
-            let is_print: Bool = false;
-            if (intr_print is !null) {
-                if (func_name == intr_print) { is_print = true; }
-            } else {
-                if (target_func_name == "print") { is_print = true; }
-            }
+            let is_print: Bool = check_built is !null && target_func_name == "print" &&
+                                 (check_built.ann_flags & FLAG_ANN_INTRINSIC) != 0;
             if is_print {
-                let args: Vector(Struct) = n_call.args;
-                let a_len: Int = 0;
-                if (args is !null) { a_len = args.length(); }
-                if (reject_named_args(args, n_call.pos, "print")) { return CompileResult(reg="poison", type=TYPE_POISON); }
-
-                let print_hook: String = get_mangled_symbol(c, "print_bytes", null);
-                if (print_hook is null) {
-                    throw_type_error(n_call.pos, "Missing CompilerLink hook 'print_bytes'. Did you import 'builtin'?");
-                    return void_result();
-                }
-
-                if (a_len == 0) {
-                    let fmt_ptr: String = next_reg(c);
-                    c.output_file.write(c.indent + "call void @" + print_hook + "(i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str_newline, i32 0, i32 0), i32 1)\n");
-                    return void_result();
-                }
-                
-                let a_idx: Int = 0;
-                while (a_idx < a_len) {
-                    let curr_arg: ArgNode = args[a_idx];
-                    let arg_res: CompileResult = compile_node(c, curr_arg.val);
-                    compile_print(c, arg_res.reg, arg_res.type, n_call.pos, arg_res.origin_type);
-                    emit_release_owned(c, arg_res);
-                    a_idx += 1;
-                }
-
-                c.output_file.write(c.indent + "call void @" + print_hook + "(i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str_newline, i32 0, i32 0), i32 1)\n");
-                return void_result();
+                return compile_print_call(c, n_call);
             }
 
             let s_info: StructInfo = c.struct_table.lookup(func_name);
@@ -5535,9 +5865,12 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let arg_types: Vector(Struct) = func_info.arg_types;
             let type_len: Int = 0; 
             if (arg_types is !null) { type_len = arg_types.length(); }
+            let native_args: BoundCallArgs = null;
             if (!func_info.is_varargs) {
-                args = bind_call_args(args, func_info.arg_names, 0, n_call.pos);
-                if (args is null && type_len > 0) { return CompileResult(reg="poison", type=TYPE_POISON); }
+                native_args = bind_native_args(args, func_info, 0, n_call.pos);
+                if (native_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+                args = native_args.ordered;
+                a_len = type_len;
             } else if (reject_named_args(args, n_call.pos, "a variadic function")) {
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
@@ -5545,6 +5878,17 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let is_first: Bool = true;
             
             while (arg_idx < a_len) {
+                if (func_info.variadic_param > 0 && arg_idx == func_info.variadic_param - 1) {
+                    let pack_type: TypeListNode = arg_types[arg_idx];
+                    let pack_info: ArrayInfo = c.array_info_map.lookup("" + pack_type.type);
+                    let pack: CompileResult = compile_variadic_pack(c, native_args.variadic, pack_info.base_type, n_call.pos);
+                    if (pack.type == TYPE_POISON) { return pack; }
+                    if (!is_first) { args_str += ", "; }
+                    args_str += get_llvm_type_str(c, pack.type) + " " + pack.reg;
+                    is_first = false;
+                    arg_idx += 1;
+                    continue;
+                }
                 let arg_node_curr: ArgNode = args[arg_idx];
 
                 if (arg_idx >= type_len) { 
@@ -6046,8 +6390,10 @@ func compile_string_method_call(c: Compiler, obj_node: Struct, method_name: Stri
     let args: Vector(Struct) = call_node.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
-    args = bind_call_args(args, f_info.arg_names, 1, call_node.pos);
-    if (args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    let native_args: BoundCallArgs = bind_native_args(args, f_info, 1, call_node.pos);
+    if (native_args is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    args = native_args.ordered;
+    a_len = f_info.arg_types.length() - 1;
     let a_idx: Int = 0;
     let owned_args: Vector(Struct) = [];
     

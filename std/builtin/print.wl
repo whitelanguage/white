@@ -3,6 +3,12 @@ import "internal/io" as standard_io
 import "internal/runtime"
 import "internal/runtime/string" as runtime_string
 
+
+@CompilerIntrinsic
+interface Printable {
+    /* compiler internal implementation */
+}
+
 @CompilerLink("print_bytes")
 func write_bytes(data: AnyPtr, length: Int) -> Void {
     if (data is nullptr) {
@@ -67,10 +73,7 @@ func write_bool(value: Bool) -> Void {
     write_bytes(runtime_string.data(s), s.length());
 }
 
-@CompilerLink
-func print(s: String) -> Void {
-    if (s is null) { s = "null"; }
-    write_bytes(runtime_string.data(s), s.length());
-    let newline: String = "\n";
-    write_bytes(runtime_string.data(newline), 1);
+@CompilerIntrinsic("print")
+func print(values: Printable..., sep: String = " ", end: String = "\n") -> Void {
+    /* compiler internal implementation */
 }

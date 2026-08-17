@@ -139,6 +139,10 @@ func bind_call_args(args: Vector(Struct), names: Vector(String), skip: Int, pos:
     i = 0;
     while (i < count) {
         let arg: ArgNode = args[i];
+        if (arg.is_spread) {
+            throw_invalid_syntax(pos, "A spread argument requires a variadic parameter.");
+            return null;
+        }
         let target: Int = -1;
         if (arg.name is null || arg.name.length() == 0) {
             if saw_named {
@@ -161,6 +165,88 @@ func bind_call_args(args: Vector(Struct), names: Vector(String), skip: Int, pos:
     i = 0;
     while (i < expected) { if (ordered[i] is null) { throw_type_error(pos, "Missing argument '" + names[i + skip] + "'"); return null; } i += 1; }
     return ordered;
+}
+
+func bind_native_args(args: Vector(Struct), info: FuncInfo, skip: Int, pos: Position) -> BoundCallArgs {
+    let names: Vector(String) = info.arg_names;
+    let expected: Int = names.length() - skip;
+    let pack_index: Int = info.variadic_param - 1;
+    let ordered: Vector(Struct) = [];
+    let packed: Vector(Struct) = [];
+    let i: Int = 0;
+    while (i < expected) { ordered.append(null); i += 1; }
+
+    let next_positional: Int = 0;
+    let saw_named: Bool = false;
+    i = 0;
+    while (args is !null && i < args.length()) {
+        let arg: ArgNode = args[i];
+        if (arg.name is null || arg.name.length() == 0) {
+            if saw_named {
+                throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
+                return null;
+            }
+            if (pack_index >= 0 && next_positional >= pack_index) {
+                packed.append(arg);
+                next_positional = pack_index;
+            } else {
+                if (arg.is_spread) {
+                    throw_invalid_syntax(pos, "A spread argument requires a variadic parameter.");
+                    return null;
+                }
+                if (next_positional >= expected) {
+                    throw_type_error(pos, "Too many arguments.");
+                    return null;
+                }
+                ordered[next_positional] = arg;
+                next_positional += 1;
+            }
+        } else {
+            saw_named = true;
+            let target: Int = -1;
+            let name_index: Int = skip;
+            while (name_index < names.length()) {
+                if (names[name_index] == arg.name) {
+                    target = name_index - skip;
+                    break;
+                }
+                name_index += 1;
+            }
+            if (target < 0) {
+                throw_name_error(pos, "Unknown argument '" + arg.name + "'.");
+                return null;
+            }
+            if (target == pack_index) {
+                throw_type_error(pos, "Variadic parameter '" + arg.name + "' must be supplied with positional arguments.");
+                return null;
+            }
+            if (ordered[target] is !null) {
+                throw_name_error(pos, "Argument '" + arg.name + "' is specified more than once.");
+                return null;
+            }
+            ordered[target] = arg;
+        }
+        i += 1;
+    }
+
+    i = 0;
+    while (i < expected) {
+        if (i == pack_index) {
+            i += 1;
+            continue;
+        }
+        if (ordered[i] is null) {
+            let default_index: Int = i;
+            if (info.default_args is !null && default_index < info.default_args.length() && info.default_args[default_index] is !null) {
+                ordered[i] = ArgNode(val=info.default_args[default_index], name=names[i + skip], is_spread=false);
+            } else {
+                throw_type_error(pos, "Missing argument '" + names[i + skip] + "'.");
+                return null;
+            }
+        }
+        i += 1;
+    }
+    return BoundCallArgs(ordered=ordered, variadic=packed);
 }
 
 func reject_named_args(args: Vector(Struct), pos: Position, target: String) -> Bool {

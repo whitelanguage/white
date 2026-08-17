@@ -897,7 +897,16 @@ func parse_args(p: Parser) -> Vector(Struct) {
         }
         
         let val: Struct = expression(p);
-        args.append(ArgNode(val=val, name=arg_name));
+        let is_spread: Bool = false;
+        if (p.current_tok.type == TOK_ELLIPSIS) {
+            if (arg_name is !null) {
+                let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+                throw_invalid_syntax(err_pos, "A spread argument cannot be named.");
+            }
+            is_spread = true;
+            parser_advance(p);
+        }
+        args.append(ArgNode(val=val, name=arg_name, is_spread=is_spread));
 
         if (p.current_tok.type == TOK_COMMA) { parser_advance(p); }
         else { break; }
@@ -1567,28 +1576,69 @@ func statement(p: Parser) -> Struct {
 }
 
 
-func parse_params(p: Parser) -> Vector(Struct) {
+func is_default_param(node: Struct) -> Bool {
+    if (node is null) { return false; }
+    let base: BaseNode = node;
+    if (base.type == NODE_INT || base.type == NODE_FLOAT || base.type == NODE_STRING ||
+        base.type == NODE_CHAR || base.type == NODE_BOOL || base.type == NODE_NULL ||
+        base.type == NODE_NULLPTR) {
+        return true;
+    }
+    if (base.type == NODE_UNARYOP) {
+        let unary: UnaryOpNode = node;
+        return is_default_param(unary.node);
+    }
+    if (base.type == NODE_BINOP) {
+        let binary: BinOpNode = node;
+        return is_default_param(binary.left) && is_default_param(binary.right);
+    }
+    return false;
+}
+
+func parse_params(p: Parser, callable: Bool) -> Vector(Struct) {
     if (p.current_tok.type == TOK_RPAREN) {
         return null;
     }
     let params: Vector(Struct) = [];
-    
-    let tid: TypedIdent = parse_typed_name(p, false);
-    let pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    let p_node: ParamNode = ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pos=pos);
-    
-    params.append(p_node);
-    
-    while (p.current_tok.type == TOK_COMMA) {
-        parser_advance(p); // skip ','
-        
-        let next_tid: TypedIdent = parse_typed_name(p, false);
-        let next_pos: Position = Position(idx=0, ln=next_tid.name_tok.line, col=next_tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        
-        let next_p: ParamNode = ParamNode(type=NODE_PARAM, name_tok=next_tid.name_tok, type_tok=next_tid.type_node, pos=next_pos);
-        params.append(next_p);
+
+    let saw_variadic: Bool = false;
+    let saw_default: Bool = false;
+    while (p.current_tok.type != TOK_RPAREN && p.current_tok.type != TOK_EOF) {
+        let tid: TypedIdent = parse_typed_name(p, false);
+        let pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+        let is_variadic: Bool = false;
+        if (p.current_tok.type == TOK_ELLIPSIS) {
+            if (!callable) {
+                throw_invalid_syntax(pos, "Variadic parameters are only allowed in functions and methods.");
+            } else if (saw_variadic) {
+                throw_invalid_syntax(pos, "A parameter list can contain only one variadic parameter.");
+            }
+            is_variadic = true;
+            saw_variadic = true;
+            parser_advance(p);
+        }
+
+        let default_val: Struct = null;
+        if (p.current_tok.type == TOK_ASSIGN) {
+            if (!callable) {
+                throw_invalid_syntax(pos, "Default values are only allowed in functions and methods.");
+            } else if is_variadic {
+                throw_invalid_syntax(pos, "A variadic parameter cannot have a default value.");
+            }
+            parser_advance(p);
+            default_val = expression(p);
+            if (!is_default_param(default_val)) {
+                throw_invalid_syntax(pos, "A default parameter value must be a constant expression.");
+            }
+            saw_default = true;
+        } else if (saw_default && !saw_variadic) {
+            throw_invalid_syntax(pos, "A required parameter cannot follow a parameter with a default value.");
+        }
+
+        params.append(ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pos=pos, is_variadic=is_variadic, default_val=default_val));
+        if (p.current_tok.type != TOK_COMMA) { break; }
+        parser_advance(p);
     }
-    
     return params;
 }
 
@@ -1614,7 +1664,7 @@ func func_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '('
     
-    let params: Struct = parse_params(p);
+    let params: Struct = parse_params(p, true);
     
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1683,7 +1733,7 @@ func parse_struct_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '('
 
-    let fields: Struct = parse_params(p);
+    let fields: Struct = parse_params(p, false);
 
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2007,7 +2057,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p); 
+            let params: Vector(Struct) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2043,7 +2093,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '}'
 
-    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, methods=methods, pos=pos);
+    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, methods=methods, annotations=anns, pos=pos);
 }
 
 func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
@@ -2141,7 +2191,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p); 
+            let params: Vector(Struct) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2186,7 +2236,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p); 
+            let params: Vector(Struct) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2217,7 +2267,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p);
+            let params: Vector(Struct) = parse_params(p, true);
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);

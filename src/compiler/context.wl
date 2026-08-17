@@ -108,7 +108,24 @@ struct FuncInfo(
     ann_flags: Int,
     compiler_link_name: String,
     abi_name: String,
-    mutates_self: Bool
+    mutates_self: Bool,
+    variadic_param: Int,
+    default_args: Vector(Struct)
+)
+
+struct VariadicSource(
+    value: CompileResult,
+    spread: Bool,
+    length: String,
+    data: String
+)
+
+struct PrintArgument(
+    value: CompileResult,
+    spread: Bool,
+    length: String,
+    data: String,
+    elem_type: Int
 )
 
 struct FieldInfo(
@@ -1442,6 +1459,35 @@ func get_slice_type_id(c: Compiler, base_id: Int) -> Int {
     return new_id;
 }
 
+func callable_param_type(c: Compiler, param: ParamNode) -> Int {
+    let type_id: Int = resolve_type(c, param.type_tok);
+    if (param.is_variadic && type_id != TYPE_POISON) {
+        return get_slice_type_id(c, type_id);
+    }
+    return type_id;
+}
+
+func variadic_param_index(params: Vector(Struct)) -> Int {
+    let i: Int = 0;
+    while (params is !null && i < params.length()) {
+        let param: ParamNode = params[i];
+        if (param.is_variadic) { return i + 1; }
+        i += 1;
+    }
+    return 0;
+}
+
+func param_defaults(params: Vector(Struct)) -> Vector(Struct) {
+    let defaults: Vector(Struct) = [];
+    let i: Int = 0;
+    while (params is !null && i < params.length()) {
+        let param: ParamNode = params[i];
+        defaults.append(param.default_val);
+        i += 1;
+    }
+    return defaults;
+}
+
 func get_builtin_cast_target(name: String) -> Int {
     if (name == "Int" || name == "Int32") { return TYPE_INT; }
     if (name == "Long" || name == "Int64") { return TYPE_LONG; }
@@ -2695,7 +2741,7 @@ func register_generic_class(c: Compiler, template: GenericTemplate, types: Vecto
                 return TYPE_POISON;
             }
 
-            let param_type: Int = resolve_type(c, param.type_tok);
+            let param_type: Int = callable_param_type(c, param);
             if (param_type == TYPE_AUTO || param_type == TYPE_POISON) {
                 throw_type_error(param.pos, "Auto cannot be used in method parameters.");
                 restore_generic_context(c, previous, previous_bindings);
@@ -2722,7 +2768,7 @@ func register_generic_class(c: Compiler, template: GenericTemplate, types: Vecto
             link_name = method_anns.compiler_link_name;
         }
 
-        let func_info: FuncInfo = FuncInfo(name=symbol, base_name=method_name, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, compiler_link_name=link_name, mutates_self=true);
+        let func_info: FuncInfo = FuncInfo(name=symbol, base_name=method_name, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, compiler_link_name=link_name, mutates_self=true, variadic_param=variadic_param_index(method_node.params), default_args=param_defaults(method_node.params));
         c.func_table.put(method_key, func_info);
         c.generic_class_methods.put(method_key, GenericTemplate(name=method_key, node=method_node, type_params=null, prefix=template.prefix, dir=template.dir, visible=template.visible, namespaces=template.namespaces, types=template.types, funcs=template.funcs, globals=template.globals));
         if (method_name == "$init" || method_name == "$deinit") {
@@ -2994,6 +3040,10 @@ func generic_constructor_params(template: GenericTemplate) -> Vector(Struct) {
 func generic_call_param(params: Vector(Struct), arg: ArgNode, index: Int) -> ParamNode {
     if (params is null) {return null; }
     if (arg.name is null) {
+        let variadic: Int = variadic_param_index(params);
+        if (variadic > 0 && index >= variadic - 1) {
+            return params[variadic - 1];
+        }
         if (index < params.length()) {
             return params[index];
         }
@@ -3009,6 +3059,20 @@ func generic_call_param(params: Vector(Struct), arg: ArgNode, index: Int) -> Par
         i += 1;
     }
     return null;
+}
+
+func generic_arg_type(c: Compiler, arg: ArgNode, param: ParamNode) -> Int {
+    let previous_expected: Int = c.expected_type;
+    c.expected_type = 0;
+    let actual_type: Int = get_expr_type(c, arg.val);
+    c.expected_type = previous_expected;
+    if (!arg.is_spread || param is null || !param.is_variadic) { return actual_type; }
+
+    let array_info: ArrayInfo = c.array_info_map.lookup("" + actual_type);
+    if (array_info is !null) { return array_info.base_type; }
+    let vector_info: SymbolInfo = c.vector_base_map.lookup("" + actual_type);
+    if (vector_info is !null) { return vector_info.type; }
+    return actual_type;
 }
 
 func resolve_generic_constructor_args(c: Compiler, template: GenericTemplate, explicit: Vector(Struct), args: Vector(Struct), expected: Int, pos: Position) -> Vector(Struct) {
@@ -3041,10 +3105,7 @@ func resolve_generic_constructor_args(c: Compiler, template: GenericTemplate, ex
             i += 1;
             continue;
         }
-        let previous_expected: Int = c.expected_type;
-        c.expected_type = 0;
-        let actual_type: Int = get_expr_type(c, arg.val);
-        c.expected_type = previous_expected;
+        let actual_type: Int = generic_arg_type(c, arg, param);
         if (actual_type == TYPE_POISON) { return null; }
         if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
         i += 1;
@@ -3094,11 +3155,7 @@ func resolve_generic_args(c: Compiler, template: GenericTemplate, explicit: Vect
             continue;
         }
 
-        let previous_expected: Int = c.expected_type;
-        c.expected_type = 0;
-
-        let actual_type: Int = get_expr_type(c, arg.val);
-        c.expected_type = previous_expected;
+        let actual_type: Int = generic_arg_type(c, arg, param);
 
         if (actual_type == TYPE_POISON) { return null; }
         if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
@@ -3148,10 +3205,7 @@ func resolve_generic_method_args(c: Compiler, template: GenericTemplate, explici
         let arg: ArgNode = args[i];
         let param: ParamNode = generic_call_param(node.params, arg, i);
         if (param is !null) {
-            let previous_expected: Int = c.expected_type;
-            c.expected_type = 0;
-            let actual_type: Int = get_expr_type(c, arg.val);
-            c.expected_type = previous_expected;
+            let actual_type: Int = generic_arg_type(c, arg, param);
             if (actual_type == TYPE_POISON) { return null; }
             if (!infer_type_args(c, template, param.type_tok, actual_type, inferred, pos)) { return null; }
         }
@@ -3200,13 +3254,13 @@ func register_generic_method(c: Compiler, template: GenericTemplate, owner: Stru
     let i: Int = 0;
     while (node.params is !null && i < node.params.length()) {
         let param: ParamNode = node.params[i];
-        arg_types.append(TypeListNode(type=resolve_type(c, param.type_tok)));
+        arg_types.append(TypeListNode(type=callable_param_type(c, param)));
         arg_names.append(param.name_tok.value);
         i++;
     }
 
     let symbol: String = mangle_wl_name(c, owner.name + ".", key, arg_types);
-    let info: FuncInfo = FuncInfo(name=symbol, base_name=node.name_tok.value, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false);
+    let info: FuncInfo = FuncInfo(name=symbol, base_name=node.name_tok.value, ret_type=return_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=variadic_param_index(node.params), default_args=param_defaults(node.params));
     c.func_table.put(key, info);
     c.generic_method_worklist.append(GenericMethodInstance(template=template, bindings=bindings, func_key=key, owner_name=owner.name, depth=c.generic_depth));
 
@@ -3246,13 +3300,13 @@ func register_generic_func(c: Compiler, template: GenericTemplate, types: Vector
     let i: Int = 0;
     while (node.params is !null && i < node.params.length()) {
         let param: ParamNode = node.params[i];
-        arg_types.append(TypeListNode(type=resolve_type(c, param.type_tok)));
+        arg_types.append(TypeListNode(type=callable_param_type(c, param)));
         arg_names.append(param.name_tok.value);
         i += 1;
     }
 
     let symbol: String = mangle_wl_name(c, template.prefix, key, arg_types);
-    let info: FuncInfo = FuncInfo(name=symbol, base_name=template.name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false);
+    let info: FuncInfo = FuncInfo(name=symbol, base_name=template.name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=variadic_param_index(node.params), default_args=param_defaults(node.params));
     c.func_table.put(key, info);
     c.generic_worklist.append(GenericFuncInstance(template=template, bindings=bindings, func_key=key, depth=c.generic_depth));
 
@@ -3584,7 +3638,7 @@ func get_method_def_sig_str(c: Compiler, m_node: MethodDefNode) -> String {
     
     while (i < len) {
         let p_node: ParamNode = params[i];
-        let p_type: Int = resolve_type(c, p_node.type_tok);
+        let p_type: Int = callable_param_type(c, p_node);
         args_str = args_str + ", " + get_llvm_type_str(c, p_type);
         i += 1;
     }

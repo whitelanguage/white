@@ -186,19 +186,27 @@ struct CallNode(
 
 struct ArgNode(
     val  : Struct, // expression
-    name : String
+    name : String,
+    is_spread : Bool
 )
 
 struct ParamNode(
     type     : Int,    // NODE_PARAM
     name_tok : Token,
     type_tok : Struct,
-    pos      : Position
+    pos      : Position,
+    is_variadic : Bool,
+    default_val : Struct
 )
 
 
 struct ParamListNode(
     param : Struct // ParamNode
+)
+
+struct BoundCallArgs(
+    ordered : Vector(Struct),
+    variadic : Vector(Struct)
 )
 
 struct GenericParamNode(
@@ -494,5 +502,6 @@ struct InterfaceDefNode(
     name_tok : Token,
     type_params : Vector(Struct),
     methods  : Vector(Struct),
+    annotations : Vector(Struct),
     pos      : Position
 )

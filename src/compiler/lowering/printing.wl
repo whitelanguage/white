@@ -8,6 +8,19 @@ import * from "casts.wl"
 import * from "literals.wl"
 import * from "ownership.wl"
 
+func is_printable_type(c: Compiler, type_id: Int) -> Bool {
+    if (type_id == TYPE_POISON || is_fallible_type(c, type_id)) { return false; }
+    if (type_id == TYPE_STRING || type_id == TYPE_CHAR || type_id == TYPE_ANY_ERROR ||
+        type_id == TYPE_NULL || type_id == TYPE_NULLPTR || is_primitive_type(type_id) ||
+        is_pointer_type(c, type_id) || type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
+        return true;
+    }
+    if (type_id < 100) { return false; }
+    return c.struct_id_map.lookup("" + type_id) is !null ||
+           c.vector_base_map.lookup("" + type_id) is !null ||
+           c.array_info_map.lookup("" + type_id) is !null;
+}
+
 func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin_id: Int) -> Void {
     if (type_id == TYPE_POISON) { return; }
     if (is_fallible_type(c, type_id)) {
@@ -165,6 +178,8 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
             return;
         }
     }
+
+    throw_type_error(pos, "Type " + get_type_name(c, type_id) + " cannot be printed.");
 }
 
 func compile_print_error_internal(c: Compiler, error_reg: String, pos: Position) -> Void {
