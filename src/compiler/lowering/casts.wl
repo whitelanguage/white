@@ -1105,7 +1105,9 @@ func compile_type_cast(c: Compiler, val_res: CompileResult, target_type: Int, po
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
     
-    let src_is_ptr: Bool = is_pointer_type(c, val_res.type) || val_res.type == TYPE_STRING || val_res.type == TYPE_ANYPTR || val_res.type == TYPE_NULLPTR;
+    let src_is_erased_struct: Bool = val_res.type == TYPE_GENERIC_STRUCT;
+    let src_is_ptr: Bool = is_pointer_type(c, val_res.type) || val_res.type == TYPE_STRING ||
+                           val_res.type == TYPE_ANYPTR || val_res.type == TYPE_NULLPTR || src_is_erased_struct;
     let dst_is_ptr: Bool = is_pointer_type(c, target_type) || target_type == TYPE_STRING || target_type == TYPE_ANYPTR;
 
     if (src_is_ptr && dst_is_ptr) {
