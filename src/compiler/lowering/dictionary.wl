@@ -68,8 +68,8 @@ func is_generic_class(c: Compiler, info: StructInfo) -> Bool {
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
     if (template is null || template.node is null) { return false; }
 
-    let base: BaseNode = template.node;
-    return base.type == NODE_CLASS_DEF;
+    let base: Int = node_kind(template.node);
+    return base == NODE_CLASS_DEF;
 }
 
 func is_dynamic_dict_key_method(name: String) -> Bool {

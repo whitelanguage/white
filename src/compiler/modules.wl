@@ -19,8 +19,8 @@ func precompile_ast(c: Compiler, node: Struct, final_path: String, import_prefix
     let imports: Vector(Struct) = [];
     let i: Int = 0;
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_IMPORT) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_IMPORT) {
             compile_import(c, stmts[i]);
             imports.append(stmts[i]);
         }

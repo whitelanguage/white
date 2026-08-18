@@ -61,7 +61,12 @@ const NODE_FALLIBLE_TYPE  : Int = 57;
 const NODE_TYPE_LAYOUT    : Int = 58;
 const NODE_GENERIC_TYPE   : Int = 59;
 
-struct BaseNode(type: Int) // Used to read node type
+func node_kind(node: Struct) -> Int {
+// ast nodes share the integer tag in their first field
+    if (node is null) { return 0; }
+    let ptr fields: Int = AnyPtr(node);
+    return fields[0];
+}
 
 struct IntNode(
     type  : Int,

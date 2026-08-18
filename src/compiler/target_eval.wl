@@ -7,15 +7,15 @@ import * from "target.wl"
 
 func target_intrinsic(c: Compiler, node: Struct) -> String {
     if (node is null) { return ""; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
     let info: SymbolInfo = null;
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let name: String = format_ast_path(node);
         let mapped: String = c.current_file_global_aliases.lookup(name);
         if (mapped is null) { mapped = c.global_var_aliases.lookup(name); }
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
         if (info is null) { info = c.global_symbol_table.lookup(name); }
-    } else if (base.type == NODE_VAR_ACCESS) {
+    } else if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = node;
         info = find_symbol(c, access.name_tok.value);
     }
@@ -69,9 +69,9 @@ func target_enum_name(name: String) -> String {
 func fold_target_cond(c: Compiler, node: Struct) -> Int {
 // return 1 or 0 for a known target condition, and -1 when runtime code is still needed
     if (node is null) { return -1; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         if (unary.op_tok.value == "!") {
             let value: Int = fold_target_cond(c, unary.node);
@@ -81,7 +81,7 @@ func fold_target_cond(c: Compiler, node: Struct) -> Int {
         return -1;
     }
 
-    if (base.type != NODE_BINOP) { return -1; }
+    if (base != NODE_BINOP) { return -1; }
     let binary: BinOpNode = node;
     let op: String = binary.op_tok.value;
 
@@ -109,12 +109,12 @@ func fold_target_cond(c: Compiler, node: Struct) -> Int {
     }
     if (intrinsic.length() == 0) { return -1; }
 
-    let literal_base: BaseNode = literal_node;
+    let literal_base: Int = node_kind(literal_node);
     let equal: Bool = false;
-    if (intrinsic == "target_pointer_bits" && literal_base is !null && literal_base.type == NODE_INT) {
+    if (intrinsic == "target_pointer_bits" && literal_base != 0 && literal_base == NODE_INT) {
         let literal: IntNode = literal_node;
         equal = get_target_pointer_bits() == string_to_int(literal.tok.value, literal.pos);
-    } else if (literal_base is !null && literal_base.type == NODE_FIELD_ACCESS) {
+    } else if (literal_base != 0 && literal_base == NODE_FIELD_ACCESS) {
         let field: FieldAccessNode = literal_node;
         let enum_name: String = target_enum_name(intrinsic);
         let field_path: String = format_ast_path(literal_node);

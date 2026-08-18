@@ -6,12 +6,12 @@ import * from "../frontend/diagnostics.wl"
 
 func expr_root_name(node: Struct) -> String {
     if (node is null) { return ""; }
-    let base: BaseNode = node;
-    if (base.type == NODE_VAR_ACCESS) { let value: VarAccessNode = node; return value.name_tok.value; }
-    if (base.type == NODE_FIELD_ACCESS) { let value: FieldAccessNode = node; return expr_root_name(value.obj); }
-    if (base.type == NODE_INDEX_ACCESS) { let value: IndexAccessNode = node; return expr_root_name(value.target); }
-    if (base.type == NODE_SLICE_ACCESS) { let value: SliceAccessNode = node; return expr_root_name(value.target); }
-    if (base.type == NODE_DEREF) { let value: DerefNode = node; return expr_root_name(value.node); }
+    let base: Int = node_kind(node);
+    if (base == NODE_VAR_ACCESS) { let value: VarAccessNode = node; return value.name_tok.value; }
+    if (base == NODE_FIELD_ACCESS) { let value: FieldAccessNode = node; return expr_root_name(value.obj); }
+    if (base == NODE_INDEX_ACCESS) { let value: IndexAccessNode = node; return expr_root_name(value.target); }
+    if (base == NODE_SLICE_ACCESS) { let value: SliceAccessNode = node; return expr_root_name(value.target); }
+    if (base == NODE_DEREF) { let value: DerefNode = node; return expr_root_name(value.node); }
     return "";
 }
 
@@ -32,31 +32,31 @@ func reject_const_write(c: Compiler, node: Struct, pos: Position) -> Bool {
 
 func method_mutates_self(node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
-    if (base.type == NODE_FIELD_ASSIGN) { let value: FieldAssignNode = node; return expr_root_name(value.obj) == "self" || expr_root_name(value.value) == "self"; }
-    if (base.type == NODE_INDEX_ASSIGN) { let value: IndexAssignNode = node; return expr_root_name(value.target) == "self" || expr_root_name(value.value) == "self"; }
-    if (base.type == NODE_PTR_ASSIGN) { let value: PtrAssignNode = node; return expr_root_name(value.pointer) == "self" || expr_root_name(value.value) == "self"; }
-    if (base.type == NODE_POSTFIX) { let value: PostfixOpNode = node; return expr_root_name(value.node) == "self"; }
-    if (base.type == NODE_REF) { let value: RefNode = node; return expr_root_name(value.node) == "self"; }
-    if (base.type == NODE_VAR_DECL) { let value: VarDeclareNode = node; return expr_root_name(value.value) == "self"; }
-    if (base.type == NODE_VAR_ASSIGN) { let value: VarAssignNode = node; return expr_root_name(value.value) == "self"; }
-    if (base.type == NODE_CALL) {
+    let base: Int = node_kind(node);
+    if (base == NODE_FIELD_ASSIGN) { let value: FieldAssignNode = node; return expr_root_name(value.obj) == "self" || expr_root_name(value.value) == "self"; }
+    if (base == NODE_INDEX_ASSIGN) { let value: IndexAssignNode = node; return expr_root_name(value.target) == "self" || expr_root_name(value.value) == "self"; }
+    if (base == NODE_PTR_ASSIGN) { let value: PtrAssignNode = node; return expr_root_name(value.pointer) == "self" || expr_root_name(value.value) == "self"; }
+    if (base == NODE_POSTFIX) { let value: PostfixOpNode = node; return expr_root_name(value.node) == "self"; }
+    if (base == NODE_REF) { let value: RefNode = node; return expr_root_name(value.node) == "self"; }
+    if (base == NODE_VAR_DECL) { let value: VarDeclareNode = node; return expr_root_name(value.value) == "self"; }
+    if (base == NODE_VAR_ASSIGN) { let value: VarAssignNode = node; return expr_root_name(value.value) == "self"; }
+    if (base == NODE_CALL) {
         let call: CallNode = node;
-        let callee: BaseNode = call.callee;
-        if (callee is !null && callee.type == NODE_FIELD_ACCESS) { let field: FieldAccessNode = call.callee; if (expr_root_name(field.obj) == "self") { return true; } }
+        let callee: Int = node_kind(call.callee);
+        if (callee != 0 && callee == NODE_FIELD_ACCESS) { let field: FieldAccessNode = call.callee; if (expr_root_name(field.obj) == "self") { return true; } }
         let i: Int = 0;
         while (call.args is !null && i < call.args.length()) { let arg: ArgNode = call.args[i]; if (expr_root_name(arg.val) == "self") { return true; } i += 1; }
     }
-    if (base.type == NODE_FUNC_DEF) { let value: FunctionDefNode = node; return method_mutates_self(value.body); }
-    if (base.type == NODE_BLOCK) {
+    if (base == NODE_FUNC_DEF) { let value: FunctionDefNode = node; return method_mutates_self(value.body); }
+    if (base == NODE_BLOCK) {
         let block: BlockNode = node;
         let i: Int = 0;
         while (block.stmts is !null && i < block.stmts.length()) { if (method_mutates_self(block.stmts[i])) { return true; } i += 1; }
     }
-    if (base.type == NODE_IF) { let value: IfNode = node; return method_mutates_self(value.body) || method_mutates_self(value.else_body); }
-    if (base.type == NODE_WHILE) { let value: WhileNode = node; return method_mutates_self(value.body); }
-    if (base.type == NODE_FOR) { let value: ForNode = node; return method_mutates_self(value.init) || method_mutates_self(value.step) || method_mutates_self(value.body); }
-    if (base.type == NODE_CATCH) { let value: CatchNode = node; return method_mutates_self(value.stmt) || method_mutates_self(value.body); }
+    if (base == NODE_IF) { let value: IfNode = node; return method_mutates_self(value.body) || method_mutates_self(value.else_body); }
+    if (base == NODE_WHILE) { let value: WhileNode = node; return method_mutates_self(value.body); }
+    if (base == NODE_FOR) { let value: ForNode = node; return method_mutates_self(value.init) || method_mutates_self(value.step) || method_mutates_self(value.body); }
+    if (base == NODE_CATCH) { let value: CatchNode = node; return method_mutates_self(value.stmt) || method_mutates_self(value.body); }
     return false;
 }
 
@@ -127,8 +127,8 @@ func class_has_interface(c: Compiler, class_info: StructInfo, target: StructInfo
 
 func is_unsuffix_int_literal(node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
-    if (base.type != NODE_INT) { return false; }
+    let base: Int = node_kind(node);
+    if (base != NODE_INT) { return false; }
     let value: IntNode = node;
     let text: String = value.tok.value;
     return !text.ends_with("u") && !text.ends_with("U") && !text.ends_with("ul") && !text.ends_with("UL") && !text.ends_with("ull") && !text.ends_with("ULL");
@@ -407,4 +407,3 @@ func reject_spread_args(args: Vector(Struct), pos: Position, target: String) -> 
     }
     return false;
 }
-

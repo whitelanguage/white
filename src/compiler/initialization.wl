@@ -126,41 +126,41 @@ func check_local_init_block(c: Compiler, node: BlockNode, parent: LocalInitScope
 func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, initialized: Vector(String)) -> InitFlow {
 // each result carries the definite set together with control-flow termination
     if (node is null) { return InitFlow(initialized, false); }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_BLOCK) { return check_local_init_block(c, node, scope, initialized); }
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_BLOCK) { return check_local_init_block(c, node, scope, initialized); }
+    if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = node;
         read_local_init(scope, initialized, access.name_tok.value, access.pos);
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_VAR_DECL) {
+    if (base == NODE_VAR_DECL) {
         let declaration: VarDeclareNode = node;
         let value_flow: InitFlow = check_local_init_node(c, declaration.value, scope, initialized);
         bind_local_init(scope, declaration);
         init_add(value_flow.initialized, local_init_key(declaration));
         return InitFlow(value_flow.initialized, false);
     }
-    if (base.type == NODE_VAR_ASSIGN) {
+    if (base == NODE_VAR_ASSIGN) {
         let assignment: VarAssignNode = node;
         let value_flow: InitFlow = check_local_init_node(c, assignment.value, scope, initialized);
         let key: String = lookup_local_init(scope, assignment.name_tok.value);
         if (key.length() > 0) { init_add(value_flow.initialized, key); }
         return InitFlow(value_flow.initialized, false);
     }
-    if (base.type == NODE_CATCH) {
+    if (base == NODE_CATCH) {
         let caught: CatchNode = node;
         let before: Vector(String) = init_copy(initialized);
         let success: InitFlow = check_local_init_node(c, caught.stmt, scope, init_copy(initialized));
         let failure: InitFlow = check_local_init_block(c, caught.body, scope, init_copy(before));
         return merge_local_init(before, success, failure);
     }
-    if (base.type == NODE_IF) {
+    if (base == NODE_IF) {
         let branch: IfNode = node;
         let condition_flow: InitFlow = check_local_init_node(c, branch.condition, scope, initialized);
         let selected: Int = fold_target_cond(c, branch.condition);
-        let condition: BaseNode = branch.condition;
-        if (condition is !null && condition.type == NODE_BOOL) {
+        let condition: Int = node_kind(branch.condition);
+        if (condition != 0 && condition == NODE_BOOL) {
             let boolean: BooleanNode = branch.condition;
             selected = boolean.value;
         }
@@ -171,13 +171,13 @@ func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, ini
         if (branch.else_body is !null) { else_flow = check_local_init_node(c, branch.else_body, scope, init_copy(condition_flow.initialized)); }
         return merge_local_init(condition_flow.initialized, then_flow, else_flow);
     }
-    if (base.type == NODE_WHILE) {
+    if (base == NODE_WHILE) {
         let loop: WhileNode = node;
         let condition_flow: InitFlow = check_local_init_node(c, loop.condition, scope, initialized);
         check_local_init_node(c, loop.body, scope, init_copy(condition_flow.initialized));
         return InitFlow(condition_flow.initialized, must_terminate(c, node));
     }
-    if (base.type == NODE_FOR) {
+    if (base == NODE_FOR) {
         let loop: ForNode = node;
         let state: Vector(String) = initialized;
         if (loop.init is !null) { state = check_local_init_node(c, loop.init, scope, state).initialized; }
@@ -186,43 +186,43 @@ func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, ini
         if (!body_flow.terminates) { check_local_init_node(c, loop.step, scope, body_flow.initialized); }
         return InitFlow(state, must_terminate(c, node));
     }
-    if (base.type == NODE_RETURN) {
+    if (base == NODE_RETURN) {
         let statement: ReturnNode = node;
         check_local_init_node(c, statement.value, scope, initialized);
         return InitFlow(initialized, true);
     }
-    if (base.type == NODE_THROW) {
+    if (base == NODE_THROW) {
         let statement: ThrowNode = node;
         check_local_init_node(c, statement.value, scope, initialized);
         return InitFlow(initialized, true);
     }
-    if (base.type == NODE_BREAK || base.type == NODE_CONTINUE) { return InitFlow(initialized, true); }
-    if (base.type == NODE_BINOP || base.type == NODE_IS || base.type == NODE_IS_NOT) {
+    if (base == NODE_BREAK || base == NODE_CONTINUE) { return InitFlow(initialized, true); }
+    if (base == NODE_BINOP || base == NODE_IS || base == NODE_IS_NOT) {
         let binary: BinOpNode = node;
         let left_flow: InitFlow = check_local_init_node(c, binary.left, scope, initialized);
         return check_local_init_node(c, binary.right, scope, left_flow.initialized);
     }
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         return check_local_init_node(c, unary.node, scope, initialized);
     }
-    if (base.type == NODE_POSTFIX) {
+    if (base == NODE_POSTFIX) {
         let postfix: PostfixOpNode = node;
         return check_local_init_node(c, postfix.node, scope, initialized);
     }
-    if (base.type == NODE_REF) {
+    if (base == NODE_REF) {
         let reference: RefNode = node;
         return check_local_init_node(c, reference.node, scope, initialized);
     }
-    if (base.type == NODE_DEREF) {
+    if (base == NODE_DEREF) {
         let dereference: DerefNode = node;
         return check_local_init_node(c, dereference.node, scope, initialized);
     }
-    if (base.type == NODE_TRY_UNWRAP) {
+    if (base == NODE_TRY_UNWRAP) {
         let unwrap: TryUnwrapNode = node;
         return check_local_init_node(c, unwrap.expr, scope, initialized);
     }
-    if (base.type == NODE_CALL) {
+    if (base == NODE_CALL) {
         let call: CallNode = node;
         let state: Vector(String) = check_local_init_node(c, call.callee, scope, initialized).initialized;
         let i: Int = 0;
@@ -233,38 +233,38 @@ func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, ini
         }
         return InitFlow(state, false);
     }
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let access: FieldAccessNode = node;
         return check_local_init_node(c, access.obj, scope, initialized);
     }
-    if (base.type == NODE_FIELD_ASSIGN) {
+    if (base == NODE_FIELD_ASSIGN) {
         let assignment: FieldAssignNode = node;
         let object_flow: InitFlow = check_local_init_node(c, assignment.obj, scope, initialized);
         return check_local_init_node(c, assignment.value, scope, object_flow.initialized);
     }
-    if (base.type == NODE_PTR_ASSIGN) {
+    if (base == NODE_PTR_ASSIGN) {
         let assignment: PtrAssignNode = node;
         let pointer_flow: InitFlow = check_local_init_node(c, assignment.pointer, scope, initialized);
         return check_local_init_node(c, assignment.value, scope, pointer_flow.initialized);
     }
-    if (base.type == NODE_INDEX_ACCESS) {
+    if (base == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = node;
         let target_flow: InitFlow = check_local_init_node(c, access.target, scope, initialized);
         return check_local_init_node(c, access.index_node, scope, target_flow.initialized);
     }
-    if (base.type == NODE_INDEX_ASSIGN) {
+    if (base == NODE_INDEX_ASSIGN) {
         let assignment: IndexAssignNode = node;
         let target_flow: InitFlow = check_local_init_node(c, assignment.target, scope, initialized);
         let index_flow: InitFlow = check_local_init_node(c, assignment.index_node, scope, target_flow.initialized);
         return check_local_init_node(c, assignment.value, scope, index_flow.initialized);
     }
-    if (base.type == NODE_SLICE_ACCESS) {
+    if (base == NODE_SLICE_ACCESS) {
         let access: SliceAccessNode = node;
         let state: Vector(String) = check_local_init_node(c, access.target, scope, initialized).initialized;
         state = check_local_init_node(c, access.start_idx, scope, state).initialized;
         return check_local_init_node(c, access.end_idx, scope, state);
     }
-    if (base.type == NODE_VECTOR_LIT) {
+    if (base == NODE_VECTOR_LIT) {
         let vector: VectorLitNode = node;
         let state: Vector(String) = initialized;
         let i: Int = 0;
@@ -275,7 +275,7 @@ func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, ini
         }
         return InitFlow(state, false);
     }
-    if (base.type == NODE_MAP_LIT) {
+    if (base == NODE_MAP_LIT) {
         let map: MapLitNode = node;
         let state: Vector(String) = initialized;
         let i: Int = 0;
@@ -287,7 +287,7 @@ func check_local_init_node(c: Compiler, node: Struct, scope: LocalInitScope, ini
         }
         return InitFlow(state, false);
     }
-    if (base.type == NODE_FUNC_DEF) {
+    if (base == NODE_FUNC_DEF) {
         let function: FunctionDefNode = node;
         let captures: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
         let i: Int = 0;
@@ -349,8 +349,8 @@ func init_require_complete(class_name: String, required: Vector(String), initial
 
 func init_is_self(node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
-    if (base.type != NODE_VAR_ACCESS) { return false; }
+    let base: Int = node_kind(node);
+    if (base != NODE_VAR_ACCESS) { return false; }
     let access: VarAccessNode = node;
     return access.name_tok.value == "self";
 }
@@ -379,9 +379,9 @@ func class_requires_initialization(c: Compiler, info: StructInfo) -> Bool {
 func check_init_node(c: Compiler, class_name: String, node: Struct, required: Vector(String), known_fields: Vector(String), initialized: Vector(String)) -> InitFlow {
 // field initialization uses the same forward meet as locals, with self reads checked here
     if (node is null) { return InitFlow(initialized, false); }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_BLOCK) {
+    if (base == NODE_BLOCK) {
         let block: BlockNode = node;
         let state: Vector(String) = initialized;
         let i: Int = 0;
@@ -396,15 +396,15 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(state, false);
     }
 
-    if (base.type == NODE_IF) {
+    if (base == NODE_IF) {
         let branch: IfNode = node;
         check_init_node(
             c, class_name, branch.condition, required, known_fields, initialized
         );
 
         let selected: Int = fold_target_cond(c, branch.condition);
-        let condition: BaseNode = branch.condition;
-        if (condition is !null && condition.type == NODE_BOOL) {
+        let condition: Int = node_kind(branch.condition);
+        if (condition != 0 && condition == NODE_BOOL) {
             let boolean: BooleanNode = branch.condition;
             selected = boolean.value;
         }
@@ -464,7 +464,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
     }
 
-    if (base.type == NODE_WHILE) {
+    if (base == NODE_WHILE) {
         let loop: WhileNode = node;
         check_init_node(
             c, class_name, loop.condition, required, known_fields, initialized
@@ -480,7 +480,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, must_terminate(c, node));
     }
 
-    if (base.type == NODE_FOR) {
+    if (base == NODE_FOR) {
         let loop: ForNode = node;
         let state: Vector(String) = initialized;
         if (loop.init is !null) {
@@ -509,7 +509,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(state, must_terminate(c, node));
     }
 
-    if (base.type == NODE_CATCH) {
+    if (base == NODE_CATCH) {
         let caught: CatchNode = node;
         let success: InitFlow = check_init_node(
             c,
@@ -538,7 +538,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
     }
 
-    if (base.type == NODE_RETURN) {
+    if (base == NODE_RETURN) {
         let return_node: ReturnNode = node;
         check_init_node(
             c, class_name, return_node.value, required, known_fields, initialized
@@ -547,7 +547,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, true);
     }
 
-    if (base.type == NODE_THROW) {
+    if (base == NODE_THROW) {
         let thrown: ThrowNode = node;
         check_init_node(
             c, class_name, thrown.value, required, known_fields, initialized
@@ -555,11 +555,11 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, true);
     }
 
-    if (base.type == NODE_BREAK || base.type == NODE_CONTINUE) {
+    if (base == NODE_BREAK || base == NODE_CONTINUE) {
         return InitFlow(initialized, true);
     }
 
-    if (base.type == NODE_FIELD_ASSIGN) {
+    if (base == NODE_FIELD_ASSIGN) {
         let assignment: FieldAssignNode = node;
         check_init_node(
             c, class_name, assignment.value, required, known_fields, initialized
@@ -585,7 +585,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, false);
     }
 
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let access: FieldAccessNode = node;
         if (init_is_self(access.obj)) {
             if (init_has(known_fields, access.field_name)) {
@@ -611,16 +611,16 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, false);
     }
 
-    if (base.type == NODE_CALL) {
+    if (base == NODE_CALL) {
         let call: CallNode = node;
         let is_super_init: Bool = false;
         if (call.callee is !null) {
-            let callee_base: BaseNode = call.callee;
-            if (callee_base.type == NODE_FIELD_ACCESS) {
+            let callee_base: Int = node_kind(call.callee);
+            if (callee_base == NODE_FIELD_ACCESS) {
                 let member: FieldAccessNode = call.callee;
                 if (member.field_name == "init" && member.obj is !null) {
-                    let owner: BaseNode = member.obj;
-                    is_super_init = owner.type == NODE_SUPER;
+                    let owner: Int = node_kind(member.obj);
+                    is_super_init = owner == NODE_SUPER;
                 }
             }
         }
@@ -644,7 +644,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, false);
     }
 
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = node;
         if (access.name_tok.value == "self" &&
             !init_complete(required, initialized)) {
@@ -657,9 +657,9 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, false);
     }
 
-    if (base.type == NODE_BINOP ||
-        base.type == NODE_IS ||
-        base.type == NODE_IS_NOT) {
+    if (base == NODE_BINOP ||
+        base == NODE_IS ||
+        base == NODE_IS_NOT) {
         let binary: BinOpNode = node;
         check_init_node(
             c, class_name, binary.left, required, known_fields, initialized
@@ -670,52 +670,52 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         return InitFlow(initialized, false);
     }
 
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         return check_init_node(
             c, class_name, unary.node, required, known_fields, initialized
         );
     }
-    if (base.type == NODE_POSTFIX) {
+    if (base == NODE_POSTFIX) {
         let postfix: PostfixOpNode = node;
         return check_init_node(
             c, class_name, postfix.node, required, known_fields, initialized
         );
     }
-    if (base.type == NODE_REF) {
+    if (base == NODE_REF) {
         let reference: RefNode = node;
         return check_init_node(
             c, class_name, reference.node, required, known_fields, initialized
         );
     }
-    if (base.type == NODE_DEREF) {
+    if (base == NODE_DEREF) {
         let dereference: DerefNode = node;
         return check_init_node(
             c, class_name, dereference.node, required, known_fields, initialized
         );
     }
-    if (base.type == NODE_TRY_UNWRAP) {
+    if (base == NODE_TRY_UNWRAP) {
         let unwrap: TryUnwrapNode = node;
         return check_init_node(
             c, class_name, unwrap.expr, required, known_fields, initialized
         );
     }
 
-    if (base.type == NODE_VAR_DECL) {
+    if (base == NODE_VAR_DECL) {
         let declaration: VarDeclareNode = node;
         check_init_node(
             c, class_name, declaration.value, required, known_fields, initialized
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_VAR_ASSIGN) {
+    if (base == NODE_VAR_ASSIGN) {
         let assignment: VarAssignNode = node;
         check_init_node(
             c, class_name, assignment.value, required, known_fields, initialized
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_PTR_ASSIGN) {
+    if (base == NODE_PTR_ASSIGN) {
         let assignment: PtrAssignNode = node;
         check_init_node(
             c, class_name, assignment.pointer, required, known_fields, initialized
@@ -725,7 +725,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_INDEX_ACCESS) {
+    if (base == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = node;
         check_init_node(
             c, class_name, access.target, required, known_fields, initialized
@@ -735,7 +735,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_INDEX_ASSIGN) {
+    if (base == NODE_INDEX_ASSIGN) {
         let assignment: IndexAssignNode = node;
         check_init_node(
             c, class_name, assignment.target, required, known_fields, initialized
@@ -748,7 +748,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_SLICE_ACCESS) {
+    if (base == NODE_SLICE_ACCESS) {
         let access: SliceAccessNode = node;
         check_init_node(
             c, class_name, access.target, required, known_fields, initialized
@@ -761,7 +761,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         );
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_VECTOR_LIT) {
+    if (base == NODE_VECTOR_LIT) {
         let vector: VectorLitNode = node;
         let i: Int = 0;
         while (vector.elements is !null && i < vector.elements.length()) {
@@ -773,7 +773,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         }
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_MAP_LIT) {
+    if (base == NODE_MAP_LIT) {
         let map: MapLitNode = node;
         let i: Int = 0;
         while (map.pairs is !null && i < map.pairs.length()) {
@@ -788,7 +788,7 @@ func check_init_node(c: Compiler, class_name: String, node: Struct, required: Ve
         }
         return InitFlow(initialized, false);
     }
-    if (base.type == NODE_SUPER &&
+    if (base == NODE_SUPER &&
         init_has(required, "$super") &&
         !init_has(initialized, "$super")) {
         let super_node: SuperNode = node;
@@ -940,20 +940,20 @@ func emit_class_field_initializers(c: Compiler, class_info: StructInfo, object_r
 
 func must_terminate(c: Compiler, node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_RETURN || base.type == NODE_BREAK ||
-        base.type == NODE_CONTINUE || base.type == NODE_THROW) {
+    if (base == NODE_RETURN || base == NODE_BREAK ||
+        base == NODE_CONTINUE || base == NODE_THROW) {
         return true;
     }
 
-    if (base.type == NODE_BLOCK) {
+    if (base == NODE_BLOCK) {
         let block: BlockNode = node;
         if (block.stmts is null || block.stmts.length() == 0) { return false; }
         return must_terminate(c, block.stmts[block.stmts.length() - 1]);
     }
 
-    if (base.type == NODE_IF) {
+    if (base == NODE_IF) {
         let if_node: IfNode = node;
         let platform_value: Int = fold_target_cond(c, if_node.condition);
         if (platform_value == 1) {
@@ -972,20 +972,20 @@ func must_terminate(c: Compiler, node: Struct) -> Bool {
         }
     }
 
-    if (base.type == NODE_WHILE) {
+    if (base == NODE_WHILE) {
         let loop: WhileNode = node;
-        let condition: BaseNode = loop.condition;
-        if (condition is !null && condition.type == NODE_BOOL) {
+        let condition: Int = node_kind(loop.condition);
+        if (condition != 0 && condition == NODE_BOOL) {
             let boolean: BooleanNode = loop.condition;
             return boolean.value == 1 && !has_loop_break(loop.body);
         }
     }
-    if (base.type == NODE_FOR) {
+    if (base == NODE_FOR) {
         let loop: ForNode = node;
         if (loop.cond is null && !has_loop_break(loop.body)) { return true; }
         if (loop.cond is !null) {
-            let condition: BaseNode = loop.cond;
-            if (condition.type == NODE_BOOL) { let boolean: BooleanNode = loop.cond; if (boolean.value == 1 && !has_loop_break(loop.body)) { return true; } }
+            let condition: Int = node_kind(loop.cond);
+            if (condition == NODE_BOOL) { let boolean: BooleanNode = loop.cond; if (boolean.value == 1 && !has_loop_break(loop.body)) { return true; } }
         }
     }
     return false;
@@ -993,10 +993,10 @@ func must_terminate(c: Compiler, node: Struct) -> Bool {
 
 func has_loop_break(node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
-    if (base.type == NODE_BREAK) { return true; }
-    if (base.type == NODE_WHILE || base.type == NODE_FOR) { return false; }
-    if (base.type == NODE_BLOCK) {
+    let base: Int = node_kind(node);
+    if (base == NODE_BREAK) { return true; }
+    if (base == NODE_WHILE || base == NODE_FOR) { return false; }
+    if (base == NODE_BLOCK) {
         let block: BlockNode = node;
         let i: Int = 0;
         while (block.stmts is !null && i < block.stmts.length()) {
@@ -1005,12 +1005,12 @@ func has_loop_break(node: Struct) -> Bool {
         }
         return false;
     }
-    if (base.type == NODE_IF) {
+    if (base == NODE_IF) {
         let branch: IfNode = node;
         return has_loop_break(branch.body) ||
                has_loop_break(branch.else_body);
     }
-    if (base.type == NODE_CATCH) {
+    if (base == NODE_CATCH) {
         let caught: CatchNode = node;
         return has_loop_break(caught.stmt) ||
                has_loop_break(caught.body);

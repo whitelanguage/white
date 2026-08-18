@@ -221,38 +221,8 @@ func emit_alloc_closure(c: Compiler, type_id: Int) -> String {
     return closure;
 }
 
-func erased_struct_compatible(c: Compiler, actual: Int, expected: Int) -> Bool {
-    if (actual == expected) { return true; }
-
-    let actual_info: StructInfo = c.struct_id_map.lookup("" + actual);
-    let expected_info: StructInfo = c.struct_id_map.lookup("" + expected);
-    if (actual_info is null || expected_info is null || 
-        actual_info.is_class || expected_info.is_class || 
-        actual_info.is_enum || expected_info.is_enum || 
-        actual_info.is_interface || expected_info.is_interface) {
-        return false;
-    }
-
-    let actual_count: Int = 0;
-    let expected_count: Int = 0;
-    if (actual_info.fields is !null) {
-        actual_count = actual_info.fields.length();
-    }
-
-    if (expected_info.fields is !null) {
-        expected_count = expected_info.fields.length();
-    }
-
-    if (expected_count != 1 || expected_count > actual_count) { return false; }
-
-    let index: Int = 0;
-    while (index < expected_count) {
-        let actual_field: FieldInfo = actual_info.fields[index];
-        let expected_field: FieldInfo = expected_info.fields[index];
-        if (actual_field.type != expected_field.type) { return false; }
-        index += 1;
-    }
-    return true;
+func erased_struct_matches(actual: Int, expected: Int) -> Bool {
+    return actual == expected;
 }
 
 func emit_erased_type_check(c: Compiler, value: String, expected: Int, pos: Position) -> Void {
@@ -274,8 +244,8 @@ func hoist_allocas(c: Compiler, node: Struct) -> Void {
         return;
     }
 
-    let base: BaseNode = node;
-    if (base.type == NODE_BLOCK) {
+    let base: Int = node_kind(node);
+    if (base == NODE_BLOCK) {
         let block: BlockNode = node;
         let old_scope: Scope = c.hoist_scope;
         c.hoist_scope = Scope(parent=old_scope, table=Dict(), gc_vars=[], depth=0);
@@ -290,18 +260,18 @@ func hoist_allocas(c: Compiler, node: Struct) -> Void {
         }
 
         c.hoist_scope = old_scope;
-    } else if (base.type == NODE_IF) {
+    } else if (base == NODE_IF) {
         let if_n: IfNode = node;
         hoist_allocas(c, if_n.body);
         hoist_allocas(c, if_n.else_body);
-    } else if (base.type == NODE_WHILE) {
+    } else if (base == NODE_WHILE) {
         let w_n: WhileNode = node;
         hoist_allocas(c, w_n.body);
-    } else if (base.type == NODE_FOR) {
+    } else if (base == NODE_FOR) {
         let f_n: ForNode = node;
         hoist_allocas(c, f_n.init);
         hoist_allocas(c, f_n.body);
-    } else if (base.type == NODE_CATCH) {
+    } else if (base == NODE_CATCH) {
         let c_node: CatchNode = node;
         let err_reg: String = next_reg(c);
         c_node.alloc_id = c.alloc_regs.length();
@@ -310,7 +280,7 @@ func hoist_allocas(c: Compiler, node: Struct) -> Void {
         
         hoist_allocas(c, c_node.stmt);
         hoist_allocas(c, c_node.body);
-    } else if (base.type == NODE_VAR_DECL) {
+    } else if (base == NODE_VAR_DECL) {
         let v_node: VarDeclareNode = node;
         if (c.scope_depth > 0) {
             let target_type_id: Int = resolve_type(c, v_node.type_node);
@@ -1041,7 +1011,7 @@ func emit_erased_check_helpers(c: Compiler) -> Void {
                     accepted = is_subclass(c, candidate, expected);
                 }
                 if (!accepted && expected_info is !null && !expected_info.is_class) {
-                    accepted = erased_struct_compatible(c, candidate, expected);
+                    accepted = erased_struct_matches(candidate, expected);
                 }
                 if accepted {
                     c.output_file.write("    i32 " + candidate + ", label %accept\n");

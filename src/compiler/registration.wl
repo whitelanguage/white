@@ -95,8 +95,8 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
     let i: Int = 0;
     
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_STRUCT_DEF) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_STRUCT_DEF) {
             let n: StructDefNode = stmts[i];
             let raw_name: String = n.name_tok.value;
             let s_name: String = c.current_package_prefix + raw_name;
@@ -157,7 +157,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             c.struct_table.put(s_name, info);
             c.struct_id_map.put("" + new_id, info);
             
-        } else if (base.type == NODE_CLASS_DEF) {
+        } else if (base == NODE_CLASS_DEF) {
             let c_node: ClassDefNode = stmts[i];
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
@@ -199,7 +199,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             );
             c.struct_table.put(c_name, info);
             c.struct_id_map.put("" + new_id, info);
-        } else if (base.type == NODE_INTERFACE_DEF) {
+        } else if (base == NODE_INTERFACE_DEF) {
             let i_node: InterfaceDefNode = stmts[i];
             let raw_name: String = i_node.name_tok.value;
             let i_name: String = c.current_package_prefix + raw_name;
@@ -259,7 +259,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             );
             c.struct_table.put(i_name, info);
             c.struct_id_map.put("" + new_id, info);
-        } else if (base.type == NODE_ENUM_DEF) {
+        } else if (base == NODE_ENUM_DEF) {
             let e_node: EnumDefNode = stmts[i];
             let raw_name: String = e_node.name_tok.value;
             let e_name: String = c.current_package_prefix + raw_name;
@@ -296,8 +296,8 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
 
     i = 0;
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_INTERFACE_DEF) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_INTERFACE_DEF) {
             let node: InterfaceDefNode = stmts[i];
             if (node.type_params is null || node.type_params.length() == 0) {
                 let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
@@ -315,8 +315,8 @@ func pre_register_globals(c: Compiler, node: Struct) -> Void {
     let i: Int = 0;
     
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_VAR_DECL) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_VAR_DECL) {
             let var_decl: VarDeclareNode = stmts[i];
             let var_name: String = var_decl.name_tok.value;
             let full_var_name: String = var_name;
@@ -343,8 +343,8 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
     let i: Int = 0;
     
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_FUNC_DEF) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_FUNC_DEF) {
             let f_node: FunctionDefNode = stmts[i];
             let raw_name: String = f_node.name_tok.value;
 
@@ -441,7 +441,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                 c.compiler_link.put(sys_anns.compiler_link_name, func_key);
             }
 
-        } else if (base.type == NODE_CLASS_DEF) {
+        } else if (base == NODE_CLASS_DEF) {
             let c_node: ClassDefNode = stmts[i];
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
                 i += 1;

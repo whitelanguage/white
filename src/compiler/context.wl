@@ -978,12 +978,12 @@ func export_named_imports(c: Compiler, node: ImportNode) -> Void {
 }
 
 func format_ast_path(node_raw: Struct) -> String {
-    let node: BaseNode = node_raw;
-    if (node.type == NODE_VAR_ACCESS) {
+    let node: Int = node_kind(node_raw);
+    if (node == NODE_VAR_ACCESS) {
         let v: VarAccessNode = node_raw;
         return v.name_tok.value;
     }
-    if (node.type == NODE_FIELD_ACCESS) {
+    if (node == NODE_FIELD_ACCESS) {
         let f: FieldAccessNode = node_raw;
         return format_ast_path(f.obj) + "." + f.field_name;
     }
@@ -1637,9 +1637,9 @@ func needs_explicit_cast(c: Compiler, source_type: Int, target_type: Int) -> Boo
 
 func get_expr_type(c: Compiler, node: Struct) -> Int {
     if (node is null) { return 0; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_INT) { 
+    if (base == NODE_INT) { 
         let n: IntNode = node;
         let raw_val: String = n.tok.value;
         if (raw_val.ends_with("ULL") || raw_val.ends_with("ull")) { return TYPE_UINT128; }
@@ -1653,9 +1653,9 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         if (parsed_val < -2147483648L || parsed_val > 2147483647L) { return TYPE_LONG; }
         return TYPE_INT; 
     }
-    if (base.type == NODE_STRING) { return TYPE_STRING; }
-    if (base.type == NODE_CHAR) { return TYPE_CHAR; }
-    if (base.type == NODE_FLOAT) {
+    if (base == NODE_STRING) { return TYPE_STRING; }
+    if (base == NODE_CHAR) { return TYPE_CHAR; }
+    if (base == NODE_FLOAT) {
         let fn: FloatNode = node;
         let val_str: String = fn.tok.value;
         if (val_str.ends_with("f") || val_str.ends_with("F")) {
@@ -1663,12 +1663,12 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         }
         return TYPE_FLOAT;
     }
-    if (base.type == NODE_BOOL) { return TYPE_BOOL; }
-    if (base.type == NODE_TYPE_LAYOUT) { return TYPE_UINTSIZE; }
-    if (base.type == NODE_GENERIC_TYPE) {
+    if (base == NODE_BOOL) { return TYPE_BOOL; }
+    if (base == NODE_TYPE_LAYOUT) { return TYPE_UINTSIZE; }
+    if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = node;
-        let generic_base: BaseNode = generic.base_type;
-        if (generic_base.type == NODE_FIELD_ACCESS) {
+        let generic_base: Int = node_kind(generic.base_type);
+        if (generic_base == NODE_FIELD_ACCESS) {
             let field: FieldAccessNode = generic.base_type;
 
             let owner_type: Int = get_expr_type(c, field.obj);
@@ -1719,7 +1719,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return get_func_type_id(c, instance.arg_types, instance.ret_type, instance.variadic_param, callable_arg_names(instance, 0));
     }
     
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let v: VarAccessNode = node;
         let info: SymbolInfo = find_symbol(c, v.name_tok.value);
         if (info is !null) { return info.type; }
@@ -1738,7 +1738,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
     
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let f: FieldAccessNode = node;
         let obj_type: Int = get_expr_type(c, f.obj);
         if (is_pointer_type(c, obj_type)) {
@@ -1771,8 +1771,8 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
             }
         }
 
-        let obj_base: BaseNode = f.obj;
-        if (obj_base.type == NODE_VAR_ACCESS) {
+        let obj_base: Int = node_kind(f.obj);
+        if (obj_base == NODE_VAR_ACCESS) {
             let v_node: VarAccessNode = f.obj;
             let target_name: String = v_node.name_tok.value;
             if (c.current_package_prefix != "") {
@@ -1788,7 +1788,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
     
-    if (base.type == NODE_INDEX_ACCESS) {
+    if (base == NODE_INDEX_ACCESS) {
         let idx_node: IndexAccessNode = node;
         let target_type: Int = get_expr_type(c, idx_node.target);
         if (is_pointer_type(c, target_type) == true) {
@@ -1814,10 +1814,10 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_REF) {
+    if (base == NODE_REF) {
         let ref_node: RefNode = node;
-        let ref_base: BaseNode = ref_node.node;
-        if (ref_base.type == NODE_SLICE_ACCESS) {
+        let ref_base: Int = node_kind(ref_node.node);
+        if (ref_base == NODE_SLICE_ACCESS) {
             let slice_node: SliceAccessNode = ref_node.node;
             let target_type: Int = get_expr_type(c, slice_node.target);
             if (target_type == TYPE_STRING) { return TYPE_STRING; }
@@ -1839,7 +1839,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_DEREF) {
+    if (base == NODE_DEREF) {
         let deref_node: DerefNode = node;
         let ptr_type: Int = get_expr_type(c, deref_node.node);
         if (is_pointer_type(c, ptr_type)) {
@@ -1849,7 +1849,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_SLICE_ACCESS) {
+    if (base == NODE_SLICE_ACCESS) {
         let slice_node: SliceAccessNode = node;
         let target_type: Int = get_expr_type(c, slice_node.target);
         if (target_type == TYPE_STRING) { return TYPE_STRING; }
@@ -1870,17 +1870,17 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_TRY_UNWRAP) {
+    if (base == NODE_TRY_UNWRAP) {
         let t_node: TryUnwrapNode = node;
         let base_type: Int = get_expr_type(c, t_node.expr);
         if (is_fallible_type(c, base_type)) {
             return get_inner_fallible_type(c, base_type);
         }
-        let expr_base: BaseNode = t_node.expr;
-        if (expr_base.type == NODE_CALL) {
+        let expr_base: Int = node_kind(t_node.expr);
+        if (expr_base == NODE_CALL) {
             let call: CallNode = t_node.expr;
-            let callee_base: BaseNode = call.callee;
-            if (callee_base.type == NODE_VAR_ACCESS) {
+            let callee_base: Int = node_kind(call.callee);
+            if (callee_base == NODE_VAR_ACCESS) {
                 let callee: VarAccessNode = call.callee;
                 let target_type: Int = get_builtin_cast_target(callee.name_tok.value);
                 if (target_type != 0) {
@@ -1893,14 +1893,14 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_CALL) {
+    if (base == NODE_CALL) {
         let call_node: CallNode = node;
         let callee_node: Struct = call_node.callee;
-        let callee: BaseNode = callee_node;
-        if (callee.type == NODE_GENERIC_TYPE) {
+        let callee: Int = node_kind(callee_node);
+        if (callee == NODE_GENERIC_TYPE) {
             let generic: GenericTypeNode = callee_node;
             callee_node = generic.base_type;
-            callee = callee_node;
+            callee = node_kind(callee_node);
         }
 
         let generic_type_name: String = generic_symbol_name(c, callee_node, false);
@@ -1909,8 +1909,8 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
             let types: Vector(Struct) = resolve_generic_constructor_args(c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
             if (types is null) { return TYPE_POISON; }
     
-            let template_base: BaseNode = generic_type_template.node;
-            if (template_base.type == NODE_CLASS_DEF) {
+            let template_base: Int = node_kind(generic_type_template.node);
+            if (template_base == NODE_CLASS_DEF) {
                 return register_generic_class(c, generic_type_template, types, call_node.pos);
             }
             return register_generic_struct(c, generic_type_template, types, call_node.pos);
@@ -1935,7 +1935,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
             return instance.ret_type;
         }
 
-        if (callee.type == NODE_VAR_ACCESS) {
+        if (callee == NODE_VAR_ACCESS) {
             let v: VarAccessNode = callee_node;
             let callee_name: String = v.name_tok.value;
 
@@ -1978,20 +1978,20 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
                 if (m_ret_info is !null) { return m_ret_info.type; }
             }
         }
-        else if (callee.type == NODE_FIELD_ACCESS) {
+        else if (callee == NODE_FIELD_ACCESS) {
             let f: FieldAccessNode = callee_node;
             let obj_type: Int = get_expr_type(c, f.obj);
             if (obj_type == 0) {
                 let path_parts: Vector(String) = [];
                 let curr_obj: Struct = f.obj;
-                let curr_base: BaseNode = curr_obj;
-                while (curr_base.type == NODE_FIELD_ACCESS) {
+                let curr_base: Int = node_kind(curr_obj);
+                while (curr_base == NODE_FIELD_ACCESS) {
                     let inner_f: FieldAccessNode = curr_obj;
                     path_parts.append(inner_f.field_name);
                     curr_obj = inner_f.obj;
-                    curr_base = curr_obj;
+                    curr_base = node_kind(curr_obj);
                 }
-                if (curr_base.type == NODE_VAR_ACCESS) {
+                if (curr_base == NODE_VAR_ACCESS) {
                     let inner_v: VarAccessNode = curr_obj;
                     let root_name: String = inner_v.name_tok.value;
                     if (find_symbol(c, root_name) is null) {
@@ -2078,7 +2078,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
                 }
             }
         }
-        let ptr_type: Int = get_expr_type(c, callee);
+        let ptr_type: Int = get_expr_type(c, callee_node);
         if (ptr_type != 0) {
             let f_ret_info: SymbolInfo = c.func_ret_map.lookup("" + ptr_type);
             if (f_ret_info is !null) { return f_ret_info.type; }
@@ -2089,7 +2089,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_VECTOR_LIT) {
+    if (base == NODE_VECTOR_LIT) {
         let vec_node: VectorLitNode = node;
         if (vec_node.count > 0) {
             let arg: ArgNode = vec_node.elements[0];
@@ -2102,13 +2102,13 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return 0;
     }
 
-    if (base.type == NODE_MAP_LIT) {
+    if (base == NODE_MAP_LIT) {
         let s_info: StructInfo = c.struct_table.lookup("Dict");
         if (s_info is !null) { return s_info.type_id; }
         return 0;
     }
 
-    if (base.type == NODE_BINOP) {
+    if (base == NODE_BINOP) {
         let b: BinOpNode = node;
         let op: Int = b.op_tok.type;
 
@@ -2137,7 +2137,7 @@ func get_expr_type(c: Compiler, node: Struct) -> Int {
         return left_ty;
     }
 
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = node;
         let op: Int = u.op_tok.type;
         if (op == WhitelangTokens.TOK_NOT) { return TYPE_BOOL; }
@@ -2324,8 +2324,8 @@ func restore_generic_context(c: Compiler, previous: GenericTemplate, bindings: D
 func generic_symbol_name(c: Compiler, node: Struct, is_function: Bool) -> String {
     if (node is null) { return ""; }
 
-    let base: BaseNode = node;
-    if (base.type == NODE_VAR_ACCESS) {
+    let base: Int = node_kind(node);
+    if (base == NODE_VAR_ACCESS) {
         let named: VarAccessNode = node;
         let name: String = named.name_tok.value;
         let alias: String = null;
@@ -2357,19 +2357,19 @@ func generic_symbol_name(c: Compiler, node: Struct, is_function: Bool) -> String
         return name;
     }
 
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let field: FieldAccessNode = node;
         let path_parts: Vector(String) = [];
         let current: Struct = field.obj;
-        let current_base: BaseNode = current;
-        while (current_base.type == NODE_FIELD_ACCESS) {
+        let current_base: Int = node_kind(current);
+        while (current_base == NODE_FIELD_ACCESS) {
             let inner: FieldAccessNode = current;
             path_parts.append(inner.field_name);
             current = inner.obj;
-            current_base = current;
+            current_base = node_kind(current);
         }
 
-        if (current_base.type != NODE_VAR_ACCESS) {
+        if (current_base != NODE_VAR_ACCESS) {
             return "";
         }
 
@@ -2605,13 +2605,13 @@ func register_generic_interface(c: Compiler, template: GenericTemplate, types: V
 func type_node_contains_self(node: Struct) -> Bool {
     if (node is null) { return false; }
 
-    let base: BaseNode = node;
-    if (base.type == NODE_VAR_ACCESS) {
+    let base: Int = node_kind(node);
+    if (base == NODE_VAR_ACCESS) {
         let named: VarAccessNode = node;
         return named.name_tok.value == "Self";
     }
 
-    if (base.type == NODE_GENERIC_TYPE) {
+    if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = node;
         if (type_node_contains_self(generic.base_type)) { return true; }
         let i: Int = 0;
@@ -2622,32 +2622,32 @@ func type_node_contains_self(node: Struct) -> Bool {
         return false;
     }
 
-    if (base.type == NODE_PTR_TYPE) {
+    if (base == NODE_PTR_TYPE) {
         let pointer: PointerTypeNode = node;
         return type_node_contains_self(pointer.base_type);
     }
 
-    if (base.type == NODE_ARRAY_TYPE) {
+    if (base == NODE_ARRAY_TYPE) {
         let array: ArrayTypeNode = node;
         return type_node_contains_self(array.base_type);
     }
 
-    if (base.type == NODE_VECTOR_TYPE) {
+    if (base == NODE_VECTOR_TYPE) {
         let vector: VectorTypeNode = node;
         return type_node_contains_self(vector.element_type);
     }
 
-    if (base.type == NODE_SLICE_TYPE) {
+    if (base == NODE_SLICE_TYPE) {
         let slice: SliceTypeNode = node;
         return type_node_contains_self(slice.element_type);
     }
 
-    if (base.type == NODE_FALLIBLE_TYPE) {
+    if (base == NODE_FALLIBLE_TYPE) {
         let fallible: FallibleTypeNode = node;
         return type_node_contains_self(fallible.base_type);
     }
 
-    if (base.type == NODE_FUNCTION_TYPE) {
+    if (base == NODE_FUNCTION_TYPE) {
         let function_type: FunctionTypeNode = node;
         if (type_node_contains_self(function_type.return_type)) { return true; }
 
@@ -2659,7 +2659,7 @@ func type_node_contains_self(node: Struct) -> Bool {
         return false;
     }
 
-    if (base.type == NODE_METHOD_TYPE) {
+    if (base == NODE_METHOD_TYPE) {
         let method_type: MethodTypeNode = node;
         if (type_node_contains_self(method_type.return_type)) { return true; }
 
@@ -3148,9 +3148,9 @@ func bind_inferred_type(inferred: Dict(String, SymbolInfo), name: String, actual
 func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, actual: Int, inferred: Dict(String, SymbolInfo), pos: Position) -> Bool {
     // walk the declared type shape and bind parameters from the concrete argument
     if (pattern is null || actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
-    let base: BaseNode = pattern;
+    let base: Int = node_kind(pattern);
 
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let named: VarAccessNode = pattern;
         if (is_type_parameter(template, named.name_tok.value)) {
             return bind_inferred_type(inferred, named.name_tok.value, actual, pos);
@@ -3158,7 +3158,7 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return true;
     }
 
-    if (base.type == NODE_VECTOR_TYPE) {
+    if (base == NODE_VECTOR_TYPE) {
         let vector: SymbolInfo = c.vector_base_map.lookup("" + actual);
         if (vector is null) {
             return true;
@@ -3167,7 +3167,7 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return infer_type_args(c, template, pattern_vector.element_type, vector.type, inferred, pos);
     }
 
-    if (base.type == NODE_SLICE_TYPE) {
+    if (base == NODE_SLICE_TYPE) {
         let slice: ArrayInfo = c.array_info_map.lookup("" + actual);
         if (slice is null || slice.size != -1) {
             return true;
@@ -3176,7 +3176,7 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return infer_type_args(c, template, pattern_slice.element_type, slice.base_type, inferred, pos);
     }
 
-    if (base.type == NODE_ARRAY_TYPE) {
+    if (base == NODE_ARRAY_TYPE) {
         let array: ArrayInfo = c.array_info_map.lookup("" + actual);
         if (array is null || array.size < 0) {
             return true;
@@ -3185,7 +3185,7 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return infer_type_args(c, template, pattern_array.base_type, array.base_type, inferred, pos);
     }
 
-    if (base.type == NODE_PTR_TYPE) {
+    if (base == NODE_PTR_TYPE) {
         let pointer: PointerTypeNode = pattern;
         let current: Int = actual;
         let level: Int = 0;
@@ -3201,7 +3201,7 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return infer_type_args(c, template, pointer.base_type, current, inferred, pos);
     }
 
-    if (base.type == NODE_FALLIBLE_TYPE) {
+    if (base == NODE_FALLIBLE_TYPE) {
         let fallible: SymbolInfo = c.fallible_base_map.lookup("" + actual);
         if (fallible is null) {
             return true;
@@ -3210,10 +3210,10 @@ func infer_type_args(c: Compiler, template: GenericTemplate, pattern: Struct, ac
         return infer_type_args(c, template, pattern_fallible.base_type, fallible.type, inferred, pos);
     }
 
-    if (base.type == NODE_GENERIC_TYPE) {
+    if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = pattern;
-        let generic_base: BaseNode = generic.base_type;
-        if (generic_base.type == NODE_VAR_ACCESS) {
+        let generic_base: Int = node_kind(generic.base_type);
+        if (generic_base == NODE_VAR_ACCESS) {
             let named: VarAccessNode = generic.base_type;
             if (named.name_tok.value == "Vector") {
                 let vector: SymbolInfo = c.vector_base_map.lookup("" + actual);
@@ -3324,12 +3324,12 @@ func use_generic_constructor(c: Compiler, name: String, template: GenericTemplat
 }
 
 func generic_constructor_params(template: GenericTemplate) -> Vector(Struct) {
-    let base: BaseNode = template.node;
-    if (base.type == NODE_STRUCT_DEF) {
+    let base: Int = node_kind(template.node);
+    if (base == NODE_STRUCT_DEF) {
         let node: StructDefNode = template.node;
         return node.fields;
     }
-    if (base.type == NODE_CLASS_DEF) {
+    if (base == NODE_CLASS_DEF) {
         let node: ClassDefNode = template.node;
         let i: Int = 0;
         while (node.methods is !null && i < node.methods.length()) {
@@ -3624,18 +3624,18 @@ func register_generic_func(c: Compiler, template: GenericTemplate, types: Vector
 func resolve_type(c: Compiler, node: Struct) -> Int {
     // compound and generic types are interned here, callers directly compare their ids
     if (node is null) { return TYPE_VOID; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_GENERIC_TYPE) {
+    if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = node;
-        let base_node: BaseNode = generic.base_type;
-        if (base_node.type != NODE_VAR_ACCESS && base_node.type != NODE_FIELD_ACCESS) {
+        let base_node: Int = node_kind(generic.base_type);
+        if (base_node != NODE_VAR_ACCESS && base_node != NODE_FIELD_ACCESS) {
             throw_type_error(generic.pos, "Generic types must name a declared type.");
             return TYPE_POISON;
         }
         let args: Vector(Struct) = generic.type_args;
         let simple_name: String = "";
-        if (base_node.type == NODE_VAR_ACCESS) {
+        if (base_node == NODE_VAR_ACCESS) {
             let named: VarAccessNode = generic.base_type; simple_name = named.name_tok.value;
         }
         if (simple_name == "Vector") {
@@ -3661,7 +3661,7 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
                 key = exported_key;
             }
         }
-        if (template is null && base_node.type == NODE_VAR_ACCESS) {
+        if (template is null && base_node == NODE_VAR_ACCESS) {
             let named: VarAccessNode = generic.base_type;
             let import_key: String = c.current_file_type_aliases.lookup(named.name_tok.value);
             if (import_key is !null) {
@@ -3694,18 +3694,18 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         let cached: SymbolInfo = c.generic_instances.lookup(instance_key);
         if (cached is !null) { return cached.type; }
 
-        let template_base: BaseNode = template.node;
-        if (template_base.type == NODE_CLASS_DEF) {
+        let template_base: Int = node_kind(template.node);
+        if (template_base == NODE_CLASS_DEF) {
             return register_generic_class(c, template, concrete, generic.pos);
         }
-        if (template_base.type == NODE_INTERFACE_DEF) {
+        if (template_base == NODE_INTERFACE_DEF) {
             return register_generic_interface(c, template, concrete, generic.pos);
         }
 
         return register_generic_struct(c, template, concrete, generic.pos);
     }
 
-    if (base.type == NODE_FUNCTION_TYPE) {
+    if (base == NODE_FUNCTION_TYPE) {
         let f_node: FunctionTypeNode = node;
         let ret_id: Int = resolve_type(c, f_node.return_type);
         let arg_types: Vector(Struct) = [];
@@ -3722,7 +3722,7 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         }
         return get_func_type_id(c, arg_types, ret_id, f_node.variadic_param, f_node.arg_names);
     }
-    if (base.type == NODE_METHOD_TYPE) {
+    if (base == NODE_METHOD_TYPE) {
         let m_node: MethodTypeNode = node;
         let ret_id: Int = resolve_type(c, m_node.return_type);
         let arg_types: Vector(Struct) = [];
@@ -3739,7 +3739,7 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         }
         return get_method_type_id(c, arg_types, ret_id, m_node.variadic_param, m_node.arg_names);
     }
-    if (base.type == NODE_FALLIBLE_TYPE) {
+    if (base == NODE_FALLIBLE_TYPE) {
         let fll_node: FallibleTypeNode = node;
         let base_id: Int = resolve_type(c, fll_node.base_type);
         if (is_fallible_type(c, base_id)) {
@@ -3749,7 +3749,7 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
     }
 
     // Pointer Type (ptr*N Type)
-    if (base.type == NODE_PTR_TYPE) {
+    if (base == NODE_PTR_TYPE) {
         let p_node: PointerTypeNode = node;
         let base_id: Int = resolve_type(c, p_node.base_type);
 
@@ -3768,13 +3768,13 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
     }
 
     // Vector
-    if (base.type == NODE_VECTOR_TYPE) {
+    if (base == NODE_VECTOR_TYPE) {
         let v_node: VectorTypeNode = node;
         let elem_id: Int = resolve_type(c, v_node.element_type);
         return get_vector_type_id(c, elem_id);
     }
 
-    if (base.type == NODE_ARRAY_TYPE) {
+    if (base == NODE_ARRAY_TYPE) {
         let arr_node: ArrayTypeNode = node;
         let base_id: Int = resolve_type(c, arr_node.base_type);
 
@@ -3804,14 +3804,14 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         return new_id;
     }
 
-    if (base.type == NODE_SLICE_TYPE) {
+    if (base == NODE_SLICE_TYPE) {
         let s_node: SliceTypeNode = node;
         let elem_id: Int = resolve_type(c, s_node.element_type);
         return get_slice_type_id(c, elem_id);
     }
     
     // Named Type (Int, Float, StructName)
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let v: VarAccessNode = node;
         let name: String = v.name_tok.value;
 
@@ -3877,18 +3877,18 @@ func resolve_type(c: Compiler, node: Struct) -> Int {
         throw_type_error(v.pos, "Unknown type: " + name);
     }
 
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let f_acc: FieldAccessNode = node;
         let path_parts: Vector(String) = [];
         let curr_obj: Struct = f_acc.obj;
-        let curr_base: BaseNode = curr_obj;
-        while (curr_base.type == NODE_FIELD_ACCESS) {
+        let curr_base: Int = node_kind(curr_obj);
+        while (curr_base == NODE_FIELD_ACCESS) {
             let inner_f: FieldAccessNode = curr_obj;
             path_parts.append(inner_f.field_name);
             curr_obj = inner_f.obj;
-            curr_base = curr_obj;
+            curr_base = node_kind(curr_obj);
         }
-        if (curr_base.type == NODE_VAR_ACCESS) {
+        if (curr_base == NODE_VAR_ACCESS) {
             let pkg_node: VarAccessNode = curr_obj;
             let pkg_name: String = pkg_node.name_tok.value;
             let type_name: String = f_acc.field_name;
@@ -4124,8 +4124,8 @@ func consume_annotations(anns: Vector(Struct), default_name: String) -> SystemAn
                 throw_invalid_syntax(ann_node.pos, "@CompilerIntrinsic accepts at most one string literal argument.");
             } else if (arg_count == 1) {
                 let a_node: ArgNode = ann_node.args[0];
-                let base_val: BaseNode = a_node.val;
-                if (base_val is null || base_val.type != NODE_STRING) {
+                let base_val: Int = node_kind(a_node.val);
+                if (base_val == 0 || base_val != NODE_STRING) {
                     throw_invalid_syntax(ann_node.pos, "@CompilerIntrinsic argument must be a string literal.");
                 } else {
                     let str_node: StringNode = a_node.val;
@@ -4137,8 +4137,8 @@ func consume_annotations(anns: Vector(Struct), default_name: String) -> SystemAn
             let link_name: String = default_name;
             if (ann_node.args is !null && ann_node.args.length() > 0) {
                 let a_node: ArgNode = ann_node.args[0];
-                let base_val: BaseNode = a_node.val;
-                if (base_val is null || base_val.type != NODE_STRING) {
+                let base_val: Int = node_kind(a_node.val);
+                if (base_val == 0 || base_val != NODE_STRING) {
                     throw_invalid_syntax(ann_node.pos, "@CompilerLink argument must be a string literal.");
                 } else {
                     let str_node: StringNode = a_node.val;
@@ -4545,8 +4545,8 @@ func record_capture(scope: CaptureScope, v_name: String) -> Void {
 
 func analyze_captures(node: Struct, scope: CaptureScope) -> Void {
     if (node is null) { return; }
-    let base: BaseNode = node;
-    let type: Int = base.type;
+    let base: Int = node_kind(node);
+    let type: Int = base;
 
     if (type == NODE_BLOCK) {
         let b: BlockNode = node;
@@ -4695,8 +4695,8 @@ func analyze_captures(node: Struct, scope: CaptureScope) -> Void {
 
 // vector util
 func check_out_index(c: Compiler, target_node: Struct, index_node: Struct, pos: Position) -> Void {
-    let base_idx: BaseNode = index_node;
-    if (base_idx.type == NODE_INT) {
+    let base_idx: Int = node_kind(index_node);
+    if (base_idx == NODE_INT) {
         let i_node: IntNode = index_node;
         let val_str: String = i_node.tok.value;
         let idx_val: Long = string_to_long(i_node.tok.value, i_node.pos);
@@ -4705,8 +4705,8 @@ func check_out_index(c: Compiler, target_node: Struct, index_node: Struct, pos: 
             throw_index_error(pos, "Negative index " + val_str + " is not supported yet.");
         }
 
-        let base_target: BaseNode = target_node;
-        if (base_target.type == NODE_VECTOR_LIT) {
+        let base_target: Int = node_kind(target_node);
+        if (base_target == NODE_VECTOR_LIT) {
             let vec_node: VectorLitNode = target_node;
             let count: Int = vec_node.count;
             
@@ -4715,7 +4715,7 @@ func check_out_index(c: Compiler, target_node: Struct, index_node: Struct, pos: 
             }
         }
 
-        if (base_target.type == NODE_STRING) {
+        if (base_target == NODE_STRING) {
             let str_node: StringNode = target_node;
             let s_len: Int = str_node.tok.value.length();
 

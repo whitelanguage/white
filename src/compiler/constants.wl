@@ -26,21 +26,26 @@ func check_layout_type(c: Compiler, type_id: Int, is_align: Bool, pos: Position)
 
 func eval_const_long(c: Compiler, node: Struct, pos: Position) -> Long {
     if (node is null) { return 0L; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
     
-    if (base.type == NODE_INT) {
+    if (base == NODE_INT) {
         let n: IntNode = node;
         return string_to_long(n.tok.value, n.pos);
     }
-    if (base.type == NODE_VAR_ACCESS) { return get_const_integer(c, node, pos); }
-    if (base.type == NODE_TYPE_LAYOUT) {
+
+    if (base == NODE_VAR_ACCESS) {
+        return get_const_integer(c, node, pos);
+    }
+
+    if (base == NODE_TYPE_LAYOUT) {
         let layout: TypeLayoutNode = node;
         let type_id: Int = resolve_type(c, layout.type_node);
         if (!check_layout_type(c, type_id, layout.is_align, layout.pos)) { return 0L; }
         if (layout.is_align) { return Long(get_type_align_bytes(c, type_id)); }
         return Long(get_type_size_bytes(c, type_id));
     }
-    if (base.type == NODE_UNARYOP) {
+
+    if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = node;
         let op_str: String = u.op_tok.value;
         let val: Long = eval_const_long(c, u.node, pos);
@@ -49,7 +54,8 @@ func eval_const_long(c: Compiler, node: Struct, pos: Position) -> Long {
         throw_type_error(pos, "Invalid unary operator for const integer.");
         return 0L;
     }
-    if (base.type == NODE_BINOP) {
+
+    if (base == NODE_BINOP) {
         let b: BinOpNode = node;
         let op_str: String = b.op_tok.value;
         let left: Long = eval_const_long(c, b.left, pos);
@@ -127,12 +133,12 @@ func get_const_wide_integer(c: Compiler, node: VarAccessNode, pos: Position) -> 
 
 func eval_const_float(c: Compiler, node: Struct, pos: Position) -> Float {
     if (node is null) { return 0.0; }
-    let base: BaseNode = node;
-    if (base.type == NODE_FLOAT) {
+    let base: Int = node_kind(node);
+    if (base == NODE_FLOAT) {
         let value: FloatNode = node;
         return parse_decimal_float_literal(value.tok.value);
     }
-    if (base.type == NODE_INT) {
+    if (base == NODE_INT) {
         let value_type: Int = get_expr_type(c, node);
         if (get_type_bitwidth(value_type) == 128) {
             throw_type_error(pos, "128-bit integers are not supported in floating-point constant expressions.");
@@ -140,16 +146,18 @@ func eval_const_float(c: Compiler, node: Struct, pos: Position) -> Float {
         }
         return Float(eval_const_long(c, node, pos));
     }
-    if (base.type == NODE_CHAR) {
+    if (base == NODE_CHAR) {
         let value: CharNode = node;
         return Float(string_to_int(value.tok.value, value.pos));
     }
-    if (base.type == NODE_BOOL) {
+    if (base == NODE_BOOL) {
         let value: BooleanNode = node;
         return Float(value.value);
     }
-    if (base.type == NODE_VAR_ACCESS) { return get_const_num(c, node, pos); }
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_VAR_ACCESS) {
+        return get_const_num(c, node, pos);
+    }
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         let value: Float = eval_const_float(c, unary.node, pos);
         if (unary.op_tok.type == TOK_PLUS) { return value; }
@@ -157,7 +165,7 @@ func eval_const_float(c: Compiler, node: Struct, pos: Position) -> Float {
         throw_type_error(pos, "Invalid unary operator in floating-point constant expression.");
         return 0.0;
     }
-    if (base.type == NODE_BINOP) {
+    if (base == NODE_BINOP) {
         let binary: BinOpNode = node;
         let left: Float = eval_const_float(c, binary.left, pos);
         let right: Float = eval_const_float(c, binary.right, pos);
@@ -227,9 +235,9 @@ func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
 
 func eval_const_wide(c: Compiler, node: Struct, pos: Position, is_unsigned: Bool) -> UInt128 {
     if (node is null) { return UInt128(0); }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_INT) {
+    if (base == NODE_INT) {
         let value: IntNode = node;
         let parsed: UInt128 = parse_const_uint128(value.tok.value, value.pos);
         if (!is_unsigned && parsed > 170141183460469231731687303715884105727ULL) {
@@ -238,9 +246,13 @@ func eval_const_wide(c: Compiler, node: Struct, pos: Position, is_unsigned: Bool
         }
         return parsed;
     }
-    if (base.type == NODE_VAR_ACCESS) { return get_const_wide_integer(c, node, pos); }
-    if (base.type == NODE_TYPE_LAYOUT) { return UInt128(eval_const_long(c, node, pos)); }
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_VAR_ACCESS) {
+        return get_const_wide_integer(c, node, pos);
+    }
+    if (base == NODE_TYPE_LAYOUT) {
+        return UInt128(eval_const_long(c, node, pos));
+    }
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         let value: UInt128 = eval_const_wide(c, unary.node, pos, is_unsigned);
         if (unary.op_tok.value == "-") { return UInt128(0) - value; }
@@ -248,7 +260,7 @@ func eval_const_wide(c: Compiler, node: Struct, pos: Position, is_unsigned: Bool
         throw_type_error(pos, "Invalid unary operator for 128-bit constant integer.");
         return UInt128(0);
     }
-    if (base.type == NODE_BINOP) {
+    if (base == NODE_BINOP) {
         let binary: BinOpNode = node;
         let op: String = binary.op_tok.value;
         let left: UInt128 = eval_const_wide(c, binary.left, pos, is_unsigned);
@@ -294,20 +306,20 @@ func eval_const_wide(c: Compiler, node: Struct, pos: Position, is_unsigned: Bool
 }
 func eval_const_bool(c: Compiler, node: Struct, pos: Position) -> Int {
     if (node is null) { return 0; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_BOOL) {
+    if (base == NODE_BOOL) {
         let b: BooleanNode = node;
         return b.value;
     }
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let value: Long = get_const_integer(c, node, pos);
         if (value == 0L) { return 0; }
         if (value == 1L) { return 1; }
         throw_type_error(pos, "Boolean constant expression requires a Bool value.");
         return 0;
     }
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = node;
         let op_str: String = u.op_tok.value;
         if (op_str == "!") {
@@ -317,7 +329,7 @@ func eval_const_bool(c: Compiler, node: Struct, pos: Position) -> Int {
         throw_type_error(pos, "Invalid unary operator for const boolean.");
         return 0;
     }
-    if (base.type == NODE_BINOP) {
+    if (base == NODE_BINOP) {
         let b: BinOpNode = node;
         let op_str: String = b.op_tok.value;
 

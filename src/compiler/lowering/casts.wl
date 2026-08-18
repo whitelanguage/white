@@ -397,7 +397,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
             if (origin >= 100) {
                 let compatible: Bool = origin == expected_type;
                 if (val_res.type == TYPE_GENERIC_STRUCT) {
-                    compatible = erased_struct_compatible(c, origin, expected_type);
+                    compatible = erased_struct_matches(origin, expected_type);
                 }
                 if (val_res.type == TYPE_GENERIC_CLASS) {
                     compatible = is_subclass(c, origin, expected_type);
@@ -681,12 +681,12 @@ func float_integer_limit(type_id: Int) -> Float {
 
 func is_numeric_literal_expression(node: Struct) -> Bool {
     if (node is null) { return false; }
-    let base: BaseNode = node;
-    if (base.type == NODE_INT || base.type == NODE_FLOAT ||
-        base.type == NODE_CHAR || base.type == NODE_BOOL) {
+    let base: Int = node_kind(node);
+    if (base == NODE_INT || base == NODE_FLOAT ||
+        base == NODE_CHAR || base == NODE_BOOL) {
         return true;
     }
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
         if (unary.op_tok.type == TOK_PLUS || unary.op_tok.type == TOK_SUB) {
             return is_numeric_literal_expression(unary.node);
@@ -697,38 +697,38 @@ func is_numeric_literal_expression(node: Struct) -> Bool {
 
 func validate_explicit_literal_cast(node: Struct, target_type: Int, pos: Position) -> Bool {
     if (node is null) { return true; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
     let magnitude: UInt128 = UInt128(0);
     let negative: Bool = false;
     let literal_text: String = "";
     let is_float_literal: Bool = false;
     let float_value: Float = 0.0;
 
-    if (base.type == NODE_INT) {
+    if (base == NODE_INT) {
         let integer: IntNode = node;
         literal_text = integer.tok.value;
         magnitude = parse_const_uint128(integer.tok.value, integer.pos);
-    } else if (base.type == NODE_FLOAT) {
+    } else if (base == NODE_FLOAT) {
         let float_node: FloatNode = node;
         literal_text = float_node.tok.value;
         float_value = parse_decimal_float_literal(float_node.tok.value);
         is_float_literal = true;
-    } else if (base.type == NODE_CHAR) {
+    } else if (base == NODE_CHAR) {
         let char_node: CharNode = node;
         literal_text = "'" + char_node.tok.value + "'";
         magnitude = UInt128(string_to_int(char_node.tok.value, char_node.pos));
-    } else if (base.type == NODE_BOOL) {
+    } else if (base == NODE_BOOL) {
         return true;
-    } else if (base.type == NODE_UNARYOP) {
+    } else if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = node;
-        let inner_base: BaseNode = unary.node;
+        let inner_base: Int = node_kind(unary.node);
         if (unary.op_tok.type != TOK_SUB) { return true; }
-        if (inner_base.type == NODE_INT) {
+        if (inner_base == NODE_INT) {
             let integer: IntNode = unary.node;
             literal_text = "-" + integer.tok.value;
             magnitude = parse_const_uint128(integer.tok.value, integer.pos);
             negative = magnitude != UInt128(0);
-        } else if (inner_base.type == NODE_FLOAT) {
+        } else if (inner_base == NODE_FLOAT) {
             let float_node: FloatNode = unary.node;
             literal_text = "-" + float_node.tok.value;
             float_value = 0.0 - parse_decimal_float_literal(float_node.tok.value);

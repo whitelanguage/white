@@ -64,8 +64,8 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
 
     i = 0;
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type == NODE_ENUM_DEF) {
+        let base: Int = node_kind(stmts[i]);
+        if (base == NODE_ENUM_DEF) {
             compile_node(c, stmts[i]);
         }
         i += 1;
@@ -73,8 +73,8 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
 
     i = 0;
     while (i < len) {
-        let base: BaseNode = stmts[i];
-        if (base.type != NODE_IMPORT && base.type != NODE_ENUM_DEF) {
+        let base: Int = node_kind(stmts[i]);
+        if (base != NODE_IMPORT && base != NODE_ENUM_DEF) {
             compile_node(c, stmts[i]);
         }
         i += 1;
@@ -86,14 +86,14 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
 
 func discard_statement_result(c: Compiler, node: Struct, result: CompileResult) -> Void {
     if (node is null || result is null) { return; }
-    let base: BaseNode = node;
-    if (base.type == NODE_VAR_ASSIGN || base.type == NODE_FIELD_ASSIGN || base.type == NODE_INDEX_ASSIGN || base.type == NODE_PTR_ASSIGN || base.type == NODE_CATCH) { return; }
+    let base: Int = node_kind(node);
+    if (base == NODE_VAR_ASSIGN || base == NODE_FIELD_ASSIGN || base == NODE_INDEX_ASSIGN || base == NODE_PTR_ASSIGN || base == NODE_CATCH) { return; }
     if (result.owns_ref) {
         emit_release_owned(c, result);
         result.owns_ref = false;
         return;
     }
-    if (base.type == NODE_CALL && result_owns_value(c, result.type)) {
+    if (base == NODE_CALL && result_owns_value(c, result.type)) {
         emit_retain_value(c, result.reg, result.type);
         emit_drop_value(c, result.reg, result.type);
     }
@@ -125,7 +125,7 @@ func compile_block(c: Compiler, node: BlockNode) -> CompileResult {
     let last_res: CompileResult = null;
     let terminated: Bool = false;
     while (i < len) {
-        let stmt: BaseNode = stmts[i];
+        let stmt: Int = node_kind(stmts[i]);
         last_res = compile_node(c, stmts[i]);
         discard_statement_result(c, stmts[i], last_res);
         if (must_terminate(c, stmts[i])) {
@@ -245,21 +245,21 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
 
         if (node.value is !null) {
-            let val_node: BaseNode = node.value;
-            if (val_node.type == NODE_STRING) {
+            let val_node: Int = node_kind(node.value);
+            if (val_node == NODE_STRING) {
                 let s_node: StringNode = node.value;
                 let s_val: String = s_node.tok.value;
                 let s_id: Int = register_string_constant(c, s_val);
                 init_val_str = get_string_object_ptr(s_id);
             }
-            else if (val_node.type == NODE_NULLPTR) {
+            else if (val_node == NODE_NULLPTR) {
                 if (!is_pointer_type(c, target_type_id)) {
                     throw_invalid_syntax(node.pos, "Global 'nullptr' can only be assigned to pointer types.");
                     return void_result();
                 }
                 init_val_str = "null";
             }
-            else if (val_node.type == NODE_NULL) {
+            else if (val_node == NODE_NULL) {
                 if (is_pointer_type(c, target_type_id)) {
                     throw_invalid_syntax(node.pos, "Global 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
                     return void_result();
@@ -271,7 +271,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                 init_val_str = "null";
             }
             else if (is_integer_type(target_type_id)) {
-                let expr_type: Int = get_expr_type(c, val_node);
+                let expr_type: Int = get_expr_type(c, node.value);
                 if (get_type_bitwidth(target_type_id) < 64 && expr_type == TYPE_LONG) {
                     throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(c, target_type_id) + ", got Long.");
                     return void_result();
@@ -279,7 +279,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
 
                 let bits: Int = get_type_bitwidth(target_type_id);
                 if (bits == 128) {
-                    let folded_wide: UInt128 = eval_const_wide(c, val_node, node.pos, is_unsigned_integer(target_type_id));
+                    let folded_wide: UInt128 = eval_const_wide(c, node.value, node.pos, is_unsigned_integer(target_type_id));
                     if (is_unsigned_integer(target_type_id)) {
                         init_val_str = "" + folded_wide;
                     } else {
@@ -287,7 +287,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                     }
                     if (node.is_const) { c.constant_wide_integers.put(global_name, folded_wide); }
                 } else {
-                    let folded_val: Long = eval_const_long(c, val_node, node.pos);
+                    let folded_val: Long = eval_const_long(c, node.value, node.pos);
                     const_num = Float(folded_val);
                     has_const_num = true;
                     if (node.is_const) { c.constant_integers.put(global_name, folded_val); }
@@ -322,7 +322,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                 }
             }
             else if (target_type_id == TYPE_CHAR) {
-                if (val_node.type != NODE_CHAR) {
+                if (val_node != NODE_CHAR) {
                     throw_type_error(node.pos, "Type mismatch. Expected Char literal for Char type.");
                     return void_result();
                 }
@@ -333,14 +333,14 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                 if (node.is_const) { c.constant_integers.put(global_name, Long(string_to_int(cn.tok.value, cn.pos))); }
             }
             else if (target_type_id == TYPE_BOOL) {
-                let folded_val: Int = eval_const_bool(c, val_node, node.pos);
+                let folded_val: Int = eval_const_bool(c, node.value, node.pos);
                 if (folded_val == 1) { init_val_str = "1"; } else { init_val_str = "0"; }
                 const_num = Float(folded_val);
                 has_const_num = true;
                 if (node.is_const) { c.constant_integers.put(global_name, Long(folded_val)); }
             }
             else if (target_type_id == TYPE_FLOAT || target_type_id == TYPE_FLOAT32) {
-                const_num = eval_const_float(c, val_node, node.pos);
+                const_num = eval_const_float(c, node.value, node.pos);
                 if (target_type_id == TYPE_FLOAT32) { const_num = Float(Float32(const_num)); }
                 init_val_str = llvm_float_literal(const_num);
                 has_const_num = true;
@@ -411,9 +411,9 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
     } else {
         let is_array_init: Bool = false;
-        let val_base: BaseNode = node.value;
+        let val_base: Int = node_kind(node.value);
         let target_arr: ArrayInfo = c.array_info_map.lookup("" + target_type_id);
-        if (target_arr is !null && val_base.type == NODE_VECTOR_LIT) {
+        if (target_arr is !null && val_base == NODE_VECTOR_LIT) {
             if (target_arr.size == -1) {
                 throw_type_error(node.pos, "Cannot initialise Array(Type) slice directly from a literal.");
                 return void_result();
@@ -2655,7 +2655,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
 }
 
 func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
-    let obj_base: BaseNode = node.obj;
+    let obj_base: Int = node_kind(node.obj);
 
     let is_module: Bool = false;
     let full_name: String = "";
@@ -2664,14 +2664,14 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
     
     let path_parts: Vector(String) = [];
     let curr_obj: Struct = node.obj;
-    let curr_base: BaseNode = curr_obj;
-    while (curr_base.type == NODE_FIELD_ACCESS) {
+    let curr_base: Int = node_kind(curr_obj);
+    while (curr_base == NODE_FIELD_ACCESS) {
         let inner_f: FieldAccessNode = curr_obj;
         path_parts.append(inner_f.field_name);
         curr_obj = inner_f.obj;
-        curr_base = curr_obj;
+        curr_base = node_kind(curr_obj);
     }
-    if (curr_base.type == NODE_VAR_ACCESS) {
+    if (curr_base == NODE_VAR_ACCESS) {
         let inner_v: VarAccessNode = curr_obj;
         let root_name: String = inner_v.name_tok.value;
         if (find_symbol(c, root_name) is null) {
@@ -2812,8 +2812,8 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
 
 
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
-        let base_obj: BaseNode = node.obj;
-        if (base_obj.type == NODE_VAR_ACCESS) {
+        let base_obj: Int = node_kind(node.obj);
+        if (base_obj == NODE_VAR_ACCESS) {
             let v_node: VarAccessNode = node.obj;
             let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
             if (info is !null && info.origin_type >= 100) {
@@ -2992,20 +2992,20 @@ func compile_field_assign(c: Compiler, node: FieldAssignNode) -> CompileResult {
     if (reject_const_write(c, node.obj, node.pos)) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
-    let obj_base: BaseNode = node.obj;
+    let obj_base: Int = node_kind(node.obj);
 
     let is_module: Bool = false;
     let full_name: String = "";
     let path_parts: Vector(String) = [];
     let curr_obj: Struct = node.obj;
-    let curr_base: BaseNode = curr_obj;
-    while (curr_base.type == NODE_FIELD_ACCESS) {
+    let curr_base: Int = node_kind(curr_obj);
+    while (curr_base == NODE_FIELD_ACCESS) {
         let inner_f: FieldAccessNode = curr_obj;
         path_parts.append(inner_f.field_name);
         curr_obj = inner_f.obj;
-        curr_base = curr_obj;
+        curr_base = node_kind(curr_obj);
     }
-    if (curr_base.type == NODE_VAR_ACCESS) {
+    if (curr_base == NODE_VAR_ACCESS) {
         let root_node: VarAccessNode = curr_obj;
         let root_name: String = root_node.name_tok.value;
         if (find_symbol(c, root_name) is null) {
@@ -3060,7 +3060,7 @@ func compile_field_assign(c: Compiler, node: FieldAssignNode) -> CompileResult {
         return val_res;
     }
 
-    if (obj_base.type == NODE_CALL || obj_base.type == NODE_VECTOR_LIT || obj_base.type == NODE_STRING) {
+    if (obj_base == NODE_CALL || obj_base == NODE_VECTOR_LIT || obj_base == NODE_STRING) {
         throw_invalid_syntax(node.pos, "Cannot assign to a field of a temporary right-value object. Assign it to a variable first.");
         return void_result();
     }
@@ -3143,13 +3143,13 @@ func compile_array_literal(c: Compiler, lit_node: VectorLitNode, target_arr_id: 
     
     while (lit_i < lit_node.count) {
         let elem_node: ArgNode = lit_node.elements[lit_i];
-        let elem_base: BaseNode = elem_node.val;
+        let elem_base: Int = node_kind(elem_node.val);
         
         let elem_ptr_reg: String = next_reg(c);
         c.output_file.write(c.indent + elem_ptr_reg + " = getelementptr inbounds " + target_arr.llvm_name + ", " + target_arr.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + lit_i + "\n");
         
         let is_nested: Bool = false;
-        if (elem_base.type == NODE_VECTOR_LIT) {
+        if (elem_base == NODE_VECTOR_LIT) {
             let inner_arr_info: ArrayInfo = c.array_info_map.lookup("" + target_arr.base_type);
             if (inner_arr_info is !null) {
                 is_nested = true;
@@ -4068,9 +4068,9 @@ func compile_enum_def(c: Compiler, node: EnumDefNode) -> CompileResult {
 }
 
 func compile_try_unwrap(c: Compiler, node: TryUnwrapNode) -> CompileResult {
-    let expr_base: BaseNode = node.expr;
+    let expr_base: Int = node_kind(node.expr);
     let expr_res: CompileResult = null;
-    if (expr_base.type == NODE_INDEX_ACCESS) {
+    if (expr_base == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = node.expr;
         expr_res = compile_index_access(c, access, true);
     } else {
@@ -4079,10 +4079,10 @@ func compile_try_unwrap(c: Compiler, node: TryUnwrapNode) -> CompileResult {
 
     let fallible_type: Int = expr_res.type;
     if (!is_fallible_type(c, fallible_type)) {
-        if (expr_base.type == NODE_CALL) {
+        if (expr_base == NODE_CALL) {
             let call: CallNode = node.expr;
-            let callee_base: BaseNode = call.callee;
-            if (callee_base.type == NODE_VAR_ACCESS) {
+            let callee_base: Int = node_kind(call.callee);
+            if (callee_base == NODE_VAR_ACCESS) {
                 let callee: VarAccessNode = call.callee;
                 let target_type: Int = get_builtin_cast_target(callee.name_tok.value);
                 if (target_type != 0) {
@@ -4218,9 +4218,9 @@ func compile_throw(c: Compiler, node: ThrowNode) -> CompileResult {
 
 func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResult {
     if (node is null) { return null; }
-    let base: BaseNode = node;
+    let base: Int = node_kind(node);
 
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let v: VarAccessNode = node;
         let name: String = v.name_tok.value;
 
@@ -4263,7 +4263,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    if (base.type == NODE_INDEX_ACCESS) {
+    if (base == NODE_INDEX_ACCESS) {
         let ia: IndexAccessNode = node;
         check_out_index(c, ia.target, ia.index_node, ia.pos);
         let target_res: CompileResult = compile_node(c, ia.target);
@@ -4340,7 +4340,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
         return null;
     }
 
-    if (base.type == NODE_FIELD_ACCESS) {
+    if (base == NODE_FIELD_ACCESS) {
         let f_acc: FieldAccessNode = node;
         let obj_res: CompileResult = compile_node(c, f_acc.obj);
         let struct_type_id: Int = obj_res.type;
@@ -4455,7 +4455,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
         return CompileResult(reg=f_ptr, type=field.type, origin_type=field.type);
     }
 
-    if (base.type == NODE_DEREF) {
+    if (base == NODE_DEREF) {
         let d_node: DerefNode = node;
         let res: CompileResult = compile_node(c, d_node.node);
         if (res is null || res.type == TYPE_POISON || res.reg == "") {
@@ -5104,8 +5104,8 @@ func emit_function_value(c: Compiler, info: FuncInfo, pos: Position) -> CompileR
 }
 
 func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> CompileResult {
-    let field_base: BaseNode = generic.base_type;
-    if (field_base.type != NODE_FIELD_ACCESS) {
+    let field_base: Int = node_kind(generic.base_type);
+    if (field_base != NODE_FIELD_ACCESS) {
         throw_type_error(generic.pos, "A generic method instance must name a class method.");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
@@ -5176,8 +5176,8 @@ func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> Compile
 }
 
 func compile_generic_value(c: Compiler, node: GenericTypeNode) -> CompileResult {
-    let base: BaseNode = node.base_type;
-    if (base.type == NODE_FIELD_ACCESS) {
+    let base: Int = node_kind(node.base_type);
+    if (base == NODE_FIELD_ACCESS) {
         return emit_generic_method_value(c, node);
     }
 
@@ -5311,15 +5311,15 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return void_result();
     }
 
-    let base: BaseNode = node;
-    if (base.type == NODE_GENERIC_TYPE) { return compile_generic_value(c, node); }
-    if (base.type == NODE_TYPE_LAYOUT) { return compile_type_layout(c, node); }
+    let base: Int = node_kind(node);
+    if (base == NODE_GENERIC_TYPE) { return compile_generic_value(c, node); }
+    if (base == NODE_TYPE_LAYOUT) { return compile_type_layout(c, node); }
 
-    if (base.type == NODE_BLOCK) {
+    if (base == NODE_BLOCK) {
         return compile_block(c, node);
     }
 
-    if (base.type == NODE_STRING) {
+    if (base == NODE_STRING) {
         let n: StringNode = node;
         let val: String = n.tok.value;
         let id: Int = register_string_constant(c, val);
@@ -5331,29 +5331,29 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=res_reg, type=TYPE_STRING, origin_type=0);
     }
 
-    if (base.type == NODE_VAR_DECL) { return compile_var_decl(c, node); }
-    if (base.type == NODE_IF)       { return compile_if(c, node); }
-    if (base.type == NODE_WHILE)    { return compile_while(c, node); }
-    if (base.type == NODE_FOR)      { return compile_for(c, node); }
-    if (base.type == NODE_BINOP)    { return compile_binop(c, node); }
-    if (base.type == NODE_RETURN)   { return compile_return(c, node); }
-    if (base.type == NODE_STRUCT_DEF) { return compile_struct_def(c, node); }
-    if (base.type == NODE_CLASS_DEF)  { return compile_class_def(c, node); }
-    if (base.type == NODE_FIELD_ACCESS) { return compile_field_access(c, node); }
-    if (base.type == NODE_FIELD_ASSIGN) { return compile_field_assign(c, node); }
-    if (base.type == NODE_EXTERN_BLOCK) { return compile_extern_block(c, node); }
-    if (base.type == NODE_VECTOR_LIT) { return compile_vector_lit(c, node); }
-    if (base.type == NODE_INDEX_ACCESS) { return compile_index_access(c, node, false); }
-    if (base.type == NODE_INDEX_ASSIGN) { return compile_index_assign(c, node); }
-    if (base.type == NODE_SLICE_ACCESS) { return compile_slice_access(c, node, false); }
-    if (base.type == NODE_MAP_LIT) { return compile_map_lit(c, node); }
-    if (base.type == NODE_ENUM_DEF) { return compile_enum_def(c, node); }
-    if (base.type == NODE_TRY_UNWRAP) { return compile_try_unwrap(c, node); }
-    if (base.type == NODE_CATCH) { return compile_catch(c, node); }
-    if (base.type == NODE_THROW) { return compile_throw(c, node); }
+    if (base == NODE_VAR_DECL) { return compile_var_decl(c, node); }
+    if (base == NODE_IF)       { return compile_if(c, node); }
+    if (base == NODE_WHILE)    { return compile_while(c, node); }
+    if (base == NODE_FOR)      { return compile_for(c, node); }
+    if (base == NODE_BINOP)    { return compile_binop(c, node); }
+    if (base == NODE_RETURN)   { return compile_return(c, node); }
+    if (base == NODE_STRUCT_DEF) { return compile_struct_def(c, node); }
+    if (base == NODE_CLASS_DEF)  { return compile_class_def(c, node); }
+    if (base == NODE_FIELD_ACCESS) { return compile_field_access(c, node); }
+    if (base == NODE_FIELD_ASSIGN) { return compile_field_assign(c, node); }
+    if (base == NODE_EXTERN_BLOCK) { return compile_extern_block(c, node); }
+    if (base == NODE_VECTOR_LIT) { return compile_vector_lit(c, node); }
+    if (base == NODE_INDEX_ACCESS) { return compile_index_access(c, node, false); }
+    if (base == NODE_INDEX_ASSIGN) { return compile_index_assign(c, node); }
+    if (base == NODE_SLICE_ACCESS) { return compile_slice_access(c, node, false); }
+    if (base == NODE_MAP_LIT) { return compile_map_lit(c, node); }
+    if (base == NODE_ENUM_DEF) { return compile_enum_def(c, node); }
+    if (base == NODE_TRY_UNWRAP) { return compile_try_unwrap(c, node); }
+    if (base == NODE_CATCH) { return compile_catch(c, node); }
+    if (base == NODE_THROW) { return compile_throw(c, node); }
 
     // function and closure
-    if (base.type == NODE_FUNC_DEF) {
+    if (base == NODE_FUNC_DEF) {
             let func_def: FunctionDefNode = node;
             if (c.scope_depth == 0) {
                 compile_func_def(c, func_def);
@@ -5379,15 +5379,15 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
 
     // ptr
-    if (base.type == NODE_PTR_ASSIGN) {return compile_ptr_assign(c, node);}
+    if (base == NODE_PTR_ASSIGN) {return compile_ptr_assign(c, node);}
     // ref
-    if (base.type == NODE_REF) {
+    if (base == NODE_REF) {
         let r_node: RefNode = node;
 
         if (reject_const_write(c, r_node.node, r_node.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
 
-        let ref_base: BaseNode = r_node.node;
-        if (ref_base.type == NODE_SLICE_ACCESS) {
+        let ref_base: Int = node_kind(r_node.node);
+        if (ref_base == NODE_SLICE_ACCESS) {
             let slice_node: SliceAccessNode = r_node.node;
             return compile_slice_access(c, slice_node, true);
         }
@@ -5399,7 +5399,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=lval.reg, type=ptr_id);
     }
     // deref
-    if (base.type == NODE_DEREF) {
+    if (base == NODE_DEREF) {
         let d_node: DerefNode = node;
         let res: CompileResult = compile_node(c, d_node.node);
         if (res is null || res.type == TYPE_POISON || res.reg == "") {
@@ -5439,20 +5439,20 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=curr_reg, type=curr_type, is_const_access=res.is_const_access);
     }
 
-    if (base.type == NODE_IMPORT) { 
+    if (base == NODE_IMPORT) { 
         compile_import(c, node);
         return void_result();
     }
     
-    if (base.type == NODE_NULLPTR) {
+    if (base == NODE_NULLPTR) {
         return CompileResult(reg="null", type=TYPE_NULLPTR);
     }
 
-    if (base.type == NODE_NULL) {
+    if (base == NODE_NULL) {
         return CompileResult(reg="null", type=TYPE_NULL);
     }
 
-    if (base.type == NODE_IS || base.type == NODE_IS_NOT) {
+    if (base == NODE_IS || base == NODE_IS_NOT) {
         let b_node: BinOpNode = node;
         let lhs_res: CompileResult = compile_node(c, b_node.left);
         let rhs_res: CompileResult = compile_node(c, b_node.right);
@@ -5512,13 +5512,13 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
         let cmp_reg: String = next_reg(c);
         let cond: String = "eq";
-        if (base.type == NODE_IS_NOT) { cond = "ne"; }
+        if (base == NODE_IS_NOT) { cond = "ne"; }
         
         c.output_file.write(c.indent + cmp_reg + " = icmp " + cond + " i8* " + l_reg + ", " + r_reg + "\n");
         return CompileResult(reg=cmp_reg, type=TYPE_BOOL);
     }
 
-    if (base.type == NODE_INT) {
+    if (base == NODE_INT) {
         let n: IntNode = node;
         let raw_val: String = n.tok.value;
         let t_id: Int = c.expected_type;
@@ -5632,12 +5632,12 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
         return CompileResult(reg="" + parsed_val, type=t_id); 
     }
-    if (base.type == NODE_CHAR) {
+    if (base == NODE_CHAR) {
         let cn: CharNode = node;
         let char_val: Int = string_to_int(cn.tok.value, cn.pos);
         return CompileResult(reg="" + char_val, type=TYPE_CHAR);
     }
-    if (base.type == NODE_FLOAT) {
+    if (base == NODE_FLOAT) {
         let n: FloatNode = node;
         let val_str: String = n.tok.value;
         let is_f32: Bool = false;
@@ -5655,14 +5655,14 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=val_str, type=TYPE_FLOAT); 
     }
 
-    if (base.type == NODE_BOOL) {
+    if (base == NODE_BOOL) {
         let b: BooleanNode = node;
         let val_str: String = "0";
         if (b.value == 1) { val_str = "1"; }
         return CompileResult(reg=val_str, type=TYPE_BOOL);
     }
 
-    if (base.type == NODE_VAR_ACCESS) {
+    if (base == NODE_VAR_ACCESS) {
         let v: VarAccessNode = node;
         let var_name: String = v.name_tok.value; 
         
@@ -5730,29 +5730,29 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=val_reg, type=info.type, origin_type=info.origin_type, is_const_access=info.is_const || info.is_const_access);
     }
 
-    if (base.type == NODE_VAR_ASSIGN) {
+    if (base == NODE_VAR_ASSIGN) {
         return compile_var_assign(c, node);
     }
 
-    if (base.type == NODE_CALL) {
+    if (base == NODE_CALL) {
         let n_call: CallNode = node;
         let callee_node: Struct = n_call.callee;
-        let callee: BaseNode = callee_node;
-        if (callee.type == NODE_GENERIC_TYPE) {
+        let callee: Int = node_kind(callee_node);
+        if (callee == NODE_GENERIC_TYPE) {
             let generic_callee: GenericTypeNode = callee_node;
             callee_node = generic_callee.base_type;
-            callee = callee_node;
+            callee = node_kind(callee_node);
         }
 
         let func_name: String = "";
         let is_direct: Bool = false;
         let is_package_call: Bool = false;
 
-        if (callee.type == NODE_FIELD_ACCESS) {
+        if (callee == NODE_FIELD_ACCESS) {
             let f_acc: FieldAccessNode = callee_node;
 
-            let obj_base_pre: BaseNode = f_acc.obj;
-            if (obj_base_pre.type == NODE_SUPER) {
+            let obj_base_pre: Int = node_kind(f_acc.obj);
+            if (obj_base_pre == NODE_SUPER) {
                 let self_info: SymbolInfo = find_symbol(c, "self");
                 if (self_info is null) { throw_invalid_syntax(n_call.pos, "Cannot use 'super' outside of a method."); }
 
@@ -5843,14 +5843,14 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let is_module_path: Bool = true;
             let path_parts: Vector(String) = [];
             let curr_obj: Struct = f_acc.obj;
-            let curr_base: BaseNode = curr_obj;
-            while (curr_base.type == NODE_FIELD_ACCESS) {
+            let curr_base: Int = node_kind(curr_obj);
+            while (curr_base == NODE_FIELD_ACCESS) {
                 let inner_f: FieldAccessNode = curr_obj;
                 path_parts.append(inner_f.field_name);
                 curr_obj = inner_f.obj;
-                curr_base = curr_obj;
+                curr_base = node_kind(curr_obj);
             }
-            if (curr_base.type == NODE_VAR_ACCESS) {
+            if (curr_base == NODE_VAR_ACCESS) {
                 let inner_v: VarAccessNode = curr_obj;
                 let root_name: String = inner_v.name_tok.value;
                 if (find_symbol(c, root_name) is null) {
@@ -5912,7 +5912,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             }
         }
 
-        if (callee.type == NODE_VAR_ACCESS) {
+        if (callee == NODE_VAR_ACCESS) {
             let v_node: VarAccessNode = callee_node;
             func_name = v_node.name_tok.value;
         }
@@ -5923,23 +5923,23 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let types: Vector(Struct) = resolve_generic_constructor_args(c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
             if (types is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
 
-            let template_base: BaseNode = generic_type_template.node;
+            let template_base: Int = node_kind(generic_type_template.node);
             let instance_type: Int = 0;
-            if (template_base.type == NODE_CLASS_DEF) {
+            if (template_base == NODE_CLASS_DEF) {
                 instance_type = register_generic_class(c, generic_type_template, types, n_call.pos);
             } else {
                 instance_type = register_generic_struct(c, generic_type_template, types, n_call.pos);
             }
 
             let instance: StructInfo = c.struct_id_map.lookup("" + instance_type);
-            if (template_base.type == NODE_CLASS_DEF) {
+            if (template_base == NODE_CLASS_DEF) {
                 return compile_class_init(c, instance, n_call);
             }
 
             return compile_struct_init(c, instance, n_call);
         }
 
-        if (callee.type == NODE_VAR_ACCESS || callee.type == NODE_FIELD_ACCESS) {
+        if (callee == NODE_VAR_ACCESS || callee == NODE_FIELD_ACCESS) {
             let generic_name: String = generic_symbol_name(c, callee_node, true);
             let template: GenericTemplate = c.generic_funcs.lookup(generic_name);
             if (template is !null) {
@@ -5971,8 +5971,8 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 }
                 let old_exp: Int = c.expected_type;
                 c.expected_type = 0;
-                let arg_base: BaseNode = arg_curr.val;
-                if (arg_base.type == NODE_INT && is_integer_type(cast_target) &&
+                let arg_base: Int = node_kind(arg_curr.val);
+                if (arg_base == NODE_INT && is_integer_type(cast_target) &&
                     cast_target != TYPE_CHAR) {
                     c.expected_type = cast_target;
                 }
@@ -6222,7 +6222,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
 
         else {
-            if (callee.type == NODE_VAR_ACCESS) {
+            if (callee == NODE_VAR_ACCESS) {
                 let v_node: VarAccessNode = callee_node;
                 let s_info: StructInfo = c.struct_table.lookup(v_node.name_tok.value);
                 if (s_info is !null) {
@@ -6242,7 +6242,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let is_valid_call: Bool = false;
 
             if (ptr_type == TYPE_GENERIC_FUNCTION || ptr_type == TYPE_GENERIC_METHOD) {
-                if (callee.type == NODE_VAR_ACCESS) {
+                if (callee == NODE_VAR_ACCESS) {
                     let v_node: VarAccessNode = callee_node;
                     let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
                     if (info is !null && info.origin_type >= 100) {
@@ -6452,7 +6452,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
     }
 
-    if (base.type == NODE_BREAK) {
+    if (base == NODE_BREAK) {
         let n_break: BreakNode = node;
         if (c.loop_stack is null) {
             throw_invalid_syntax(n_break.pos, "'break' outside of loop. ");
@@ -6465,7 +6465,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return void_result();
     }
 
-    if (base.type == NODE_CONTINUE) {
+    if (base == NODE_CONTINUE) {
         let n_cont: ContinueNode = node;
         if (c.loop_stack is null) {
             throw_invalid_syntax(n_cont.pos, "'continue' outside of loop. ");
@@ -6478,17 +6478,17 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return void_result();
     }
 
-    if (base.type == NODE_POSTFIX) {
+    if (base == NODE_POSTFIX) {
         let u: PostfixOpNode = node;
         let op_type: Int = u.op_tok.type;
 
-        let var_node: BaseNode = u.node;
+        let var_node: Int = node_kind(u.node);
 
         let target_reg: String = "";
         let target_type: Int = 0;
         let type_str: String = "";
 
-        if (var_node.type == NODE_VAR_ACCESS) {
+        if (var_node == NODE_VAR_ACCESS) {
             let v_acc: VarAccessNode = u.node;
             let var_name: String = v_acc.name_tok.value;
 
@@ -6507,7 +6507,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             type_str = get_llvm_type_str(c, info.type);
             
         }
-        else if (var_node.type == NODE_FIELD_ACCESS) {
+        else if (var_node == NODE_FIELD_ACCESS) {
             let f_acc: FieldAccessNode = u.node;
             if (reject_const_write(c, f_acc.obj, u.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
             let obj_res: CompileResult = compile_node(c, f_acc.obj);
@@ -6517,8 +6517,8 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let obj_reg: String = obj_res.reg;
             
             if (type_id == TYPE_GENERIC_STRUCT) {
-                let base_obj: BaseNode = f_acc.obj;
-                if (base_obj.type == NODE_VAR_ACCESS) {
+                let base_obj: Int = node_kind(f_acc.obj);
+                if (base_obj == NODE_VAR_ACCESS) {
                     let v_node: VarAccessNode = f_acc.obj;
                     let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
                     if (info is !null && info.origin_type >= 100) {
@@ -6581,7 +6581,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=old_val_reg, type=target_type);
     }
 
-    if (base.type == NODE_UNARYOP) {
+    if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = node;
         let op_type: Int = u.op_tok.type; 
         
