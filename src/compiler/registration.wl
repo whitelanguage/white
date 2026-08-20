@@ -1,5 +1,6 @@
 // compiler/registration.wl
 import * from "../frontend/ast.wl"
+import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "lowering/dictionary.wl"
@@ -11,13 +12,13 @@ func is_builtin_type_name(name: String) -> Bool {
            name == "Method" || name == "Enum";
 }
 
-func reserve_named_types(c: Compiler, node: Struct) -> Void {
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+func reserve_named_types(c: Compiler, node: NodeID) -> Void {
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
     while (stmts is !null && i < stmts.length()) {
-        if (node_kind(stmts[i]) == NODE_TYPE_DECL) {
-            let decl: TypeDeclNode = stmts[i];
+        if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
+            let decl: TypeDeclNode = get_type_decl_node(c.arena, stmts[i]);
             let raw_name: String = decl.name_tok.value;
             let name: String = c.current_package_prefix + raw_name;
             if (is_builtin_type_name(raw_name) || c.named_types.lookup(name) is !null ||
@@ -42,13 +43,13 @@ func reserve_named_types(c: Compiler, node: Struct) -> Void {
     }
 }
 
-func resolve_named_types(c: Compiler, node: Struct) -> Void {
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+func resolve_named_types(c: Compiler, node: NodeID) -> Void {
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
     while (stmts is !null && i < stmts.length()) {
-        if (node_kind(stmts[i]) == NODE_TYPE_DECL) {
-            let decl: TypeDeclNode = stmts[i];
+        if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
+            let decl: TypeDeclNode = get_type_decl_node(c.arena, stmts[i]);
             let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
             resolve_named_type(c, info);
         }
@@ -91,12 +92,12 @@ func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct)
 
     stack.append(TypeListNode(type=info.type_id));
     info.interfaces = [];
-    let node: InterfaceDefNode = info.init_body;
+    let node: InterfaceDefNode = get_interface_def_node(c.arena, info.init_body);
     let methods: Vector(Struct) = [];
     let names: Dict(String, StringConstant) = Dict();
 
     i = 0;
-    while (node is !null && node.interfaces is !null && i < node.interfaces.length()) {
+    while (node.interfaces is !null && i < node.interfaces.length()) {
         let parent_id: Int = resolve_type(c, node.interfaces[i]);
         let parent: StructInfo = c.struct_id_map.lookup("" + parent_id);
         if (parent is null || !parent.is_interface) {
@@ -125,8 +126,8 @@ func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct)
     }
 
     i = 0;
-    while (node is !null && node.methods is !null && i < node.methods.length()) {
-        let declared: MethodDefNode = node.methods[i];
+    while (node.methods is !null && i < node.methods.length()) {
+        let declared: MethodDefNode = get_method_def_node(c.arena, node.methods[i]);
         if (!append_interface_method(methods, names, declared, info.name)) {
             stack.drop();
             return false;
@@ -138,17 +139,17 @@ func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct)
     return true;
 }
 
-func pre_register_structs(c: Compiler, node: Struct) -> Void {
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+func pre_register_structs(c: Compiler, node: NodeID) -> Void {
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
     let i: Int = 0;
     
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_STRUCT_DEF) {
-            let n: StructDefNode = stmts[i];
+            let n: StructDefNode = get_struct_def_node(c.arena, stmts[i]);
             let raw_name: String = n.name_tok.value;
             let s_name: String = c.current_package_prefix + raw_name;
 
@@ -158,13 +159,13 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                     i += 1;
                     continue;
                 }
-                c.generic_structs.put(s_name, GenericTemplate(name=s_name, node=n, type_params=n.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                c.generic_structs.put(s_name, GenericTemplate(name=s_name, node=stmts[i], type_params=n.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
                 i += 1;
                 continue;
             }
 
             // for dict.wl
-            let sys_anns: SystemAnnResult = consume_annotations(n.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(c, n.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 if (c.current_package_prefix != "dict." && c.current_package_prefix != "") {
                     throw_internal_compiler_error(n.pos, "@CompilerIntrinsic is restricted to compiler internal libraries.");
@@ -209,7 +210,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             c.struct_id_map.put("" + new_id, info);
             
         } else if (base == NODE_CLASS_DEF) {
-            let c_node: ClassDefNode = stmts[i];
+            let c_node: ClassDefNode = get_class_def_node(c.arena, stmts[i]);
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
@@ -219,7 +220,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                     continue;
                 }
 
-                c.generic_structs.put(c_name, GenericTemplate(name=c_name, node=c_node, type_params=c_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                c.generic_structs.put(c_name, GenericTemplate(name=c_name, node=stmts[i], type_params=c_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
                 i++;
                 continue;
             }
@@ -228,7 +229,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 i += 1;
                 continue;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(c_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(c, c_node.annotations, raw_name);
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
             let info: StructInfo = StructInfo(
@@ -236,7 +237,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 type_id=new_id, 
                 fields=null, 
                 llvm_name="%class." + c_name, 
-                init_body=c_node, 
+                init_body=stmts[i], 
                 is_class=true, 
                 vtable_name="@vtable." + c_name, 
                 parent_id=0, 
@@ -246,12 +247,12 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 is_enum=false,
                 is_error=false,
                 is_interface=false,
-                interfaces=c_node.interfaces
+                interfaces=null
             );
             c.struct_table.put(c_name, info);
             c.struct_id_map.put("" + new_id, info);
         } else if (base == NODE_INTERFACE_DEF) {
-            let i_node: InterfaceDefNode = stmts[i];
+            let i_node: InterfaceDefNode = get_interface_def_node(c.arena, stmts[i]);
             let raw_name: String = i_node.name_tok.value;
             let i_name: String = c.current_package_prefix + raw_name;
             if (c.struct_table.lookup(i_name) is !null || c.generic_structs.lookup(i_name) is !null || c.named_types.lookup(i_name) is !null) {
@@ -260,14 +261,14 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 continue;
             }
             if (i_node.type_params is !null && i_node.type_params.length() > 0) {
-                c.generic_structs.put(i_name, GenericTemplate(name=i_name, node=i_node, type_params=i_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                c.generic_structs.put(i_name, GenericTemplate(name=i_name, node=stmts[i], type_params=i_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
                 i++;
                 continue;
             }
             let method_names: Dict(String, StringConstant) = Dict();
             let method_index: Int = 0;
             while (i_node.methods is !null && method_index < i_node.methods.length()) {
-                let iface_method: MethodDefNode = i_node.methods[method_index];
+                let iface_method: MethodDefNode = get_method_def_node(c.arena, i_node.methods[method_index]);
                 let method_name: String = iface_method.name_tok.value;
                 if (iface_method.type_params is !null && iface_method.type_params.length() > 0) {
                     throw_type_error(iface_method.pos, "Interface methods cannot declare type parameters.");
@@ -282,7 +283,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 }
                 method_index += 1;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(i_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(c, i_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 if (raw_name != "__Printable") {
                     throw_internal_compiler_error(i_node.pos, "Unknown intrinsic interface '" + raw_name + "'.");
@@ -296,11 +297,11 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 type_id=new_id, 
                 fields=null, 
                 llvm_name="{ i8*, i8* }", 
-                init_body=i_node, 
+                init_body=stmts[i], 
                 is_class=false, 
                 vtable_name="", 
                 parent_id=0, 
-                vtable=i_node.methods,
+                vtable=[],
                 ann_flags=sys_anns.ann_flags,
                 compiler_link_name=sys_anns.compiler_link_name,
                 is_enum=false,
@@ -311,7 +312,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             c.struct_table.put(i_name, info);
             c.struct_id_map.put("" + new_id, info);
         } else if (base == NODE_ENUM_DEF) {
-            let e_node: EnumDefNode = stmts[i];
+            let e_node: EnumDefNode = get_enum_def_node(c.arena, stmts[i]);
             let raw_name: String = e_node.name_tok.value;
             let e_name: String = c.current_package_prefix + raw_name;
             if (c.struct_table.lookup(e_name) is !null || 
@@ -320,7 +321,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 i += 1;
                 continue;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(e_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(c, e_node.annotations, raw_name);
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
             
@@ -329,7 +330,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 type_id=new_id, 
                 fields=[], 
                 llvm_name="i32", 
-                init_body=null, 
+                init_body=NO_NODE, 
                 is_class=false, 
                 vtable_name="", 
                 parent_id=0, 
@@ -352,9 +353,9 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
 
     i = 0;
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_INTERFACE_DEF) {
-            let node: InterfaceDefNode = stmts[i];
+            let node: InterfaceDefNode = get_interface_def_node(c.arena, stmts[i]);
             if (node.type_params is null || node.type_params.length() == 0) {
                 let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
                 if (info is !null && !resolve_interface_info(c, info, [], node.pos)) { return; }
@@ -363,17 +364,17 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
         i += 1;
     }
 }
-func pre_register_globals(c: Compiler, node: Struct) -> Void {
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+func pre_register_globals(c: Compiler, node: NodeID) -> Void {
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
     let i: Int = 0;
     
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_VAR_DECL) {
-            let var_decl: VarDeclareNode = stmts[i];
+            let var_decl: VarDeclareNode = get_var_decl_node(c.arena, stmts[i]);
             let var_name: String = var_decl.name_tok.value;
             let full_var_name: String = var_name;
             if (c.current_package_prefix != "") {
@@ -391,17 +392,17 @@ func pre_register_globals(c: Compiler, node: Struct) -> Void {
         i += 1;
     }
 }
-func pre_register_funcs(c: Compiler, node: Struct) -> Void {
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
     let i: Int = 0;
     
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_FUNC_DEF) {
-            let f_node: FunctionDefNode = stmts[i];
+            let f_node: FunctionDefNode = get_func_def_node(c.arena, stmts[i]);
             let raw_name: String = f_node.name_tok.value;
 
             if (f_node.type_params is !null && f_node.type_params.length() > 0) {
@@ -410,7 +411,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                     throw_name_error(f_node.pos, "Function '" + template_name + "' is already defined.");
                     return;
                 }
-                c.generic_funcs.put(template_name, GenericTemplate(name=template_name, node=f_node, type_params=f_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                c.generic_funcs.put(template_name, GenericTemplate(name=template_name, node=stmts[i], type_params=f_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
                 i += 1;
                 continue;
             }
@@ -423,7 +424,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
             let arg_types: Vector(Struct) = [];
             let arg_names: Vector(String) = [];
             
-            let params: Vector(Struct) = f_node.params;
+            let params: Vector(ParamNode) = f_node.params;
             if (!check_duplicate_params(params, "function '" + raw_name + "'", f_node.pos)) { return; }
             let p_len: Int = 0; if (params is !null) { p_len = params.length(); }
             let p_idx: Int = 0;
@@ -451,7 +452,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                 if (!valid_main) { throw_type_error(f_node.pos, "function 'main' must be 'func main() -> Int' or 'func main(argc: Int, ptr argv: String) -> Int'"); return; }
             }
 
-            let sys_anns: SystemAnnResult = consume_annotations(f_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(c, f_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 let layout_intrinsic: Bool = (raw_name == "size_of" || raw_name == "align_of") && sys_anns.intrinsic_name == raw_name;
                 let print_intrinsic: Bool = raw_name == "print" &&
@@ -498,7 +499,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
             }
 
         } else if (base == NODE_CLASS_DEF) {
-            let c_node: ClassDefNode = stmts[i];
+            let c_node: ClassDefNode = get_class_def_node(c.arena, stmts[i]);
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
                 i += 1;
                 continue;
@@ -506,7 +507,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
 
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
-            let m_vec: Vector(Struct) = c_node.methods;
+            let m_vec: Vector(NodeID) = c_node.methods;
             let m_len: Int = 0; if (m_vec is !null) { m_len = m_vec.length(); }
 
             let c_info: StructInfo = c.struct_table.lookup(c_name);
@@ -514,7 +515,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
 
             let m_idx: Int = 0;
             while (m_idx < m_len) {
-                let m_node: MethodDefNode = m_vec[m_idx];
+                let m_node: MethodDefNode = get_method_def_node(c.arena, m_vec[m_idx]);
                 let m_raw_name: String = method_base_name(c, m_node);
 
                 if (m_node.type_params is !null && m_node.type_params.length() > 0) {
@@ -523,7 +524,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                         throw_name_error(m_node.pos, "Method '" + method_key + "' is already defined.");
                         return;
                     }
-                    c.generic_methods.put(method_key, GenericTemplate(name=method_key, node=m_node, type_params=m_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
+                    c.generic_methods.put(method_key, GenericTemplate(name=method_key, node=m_vec[m_idx], type_params=m_node.type_params, prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases));
                     m_idx++;
                     continue;
                 }
@@ -547,7 +548,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
 
                 arg_types.append(TypeListNode(type=class_type_id));
                 
-                let p_vec: Vector(Struct) = m_node.params;
+                let p_vec: Vector(ParamNode) = m_node.params;
                 if (!check_duplicate_params(p_vec, "method '" + m_raw_name + "'", m_node.pos)) { return; }
                 let p_len: Int = 0; if (p_vec is !null) { p_len = p_vec.length(); }
                 let p_idx: Int = 0;
@@ -579,7 +580,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                     return;
                 }
 
-                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(m_node.body), variadic_param=variadic_param_index(p_vec), default_args=param_defaults(p_vec));
+                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(c, m_node.body), variadic_param=variadic_param_index(p_vec), default_args=param_defaults(p_vec));
                 c.func_table.put(m_key, f_info);
                 m_idx += 1;
             }

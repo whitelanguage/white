@@ -5,6 +5,7 @@ import "process"
 import Dict from "dict"
 
 import * from "../../frontend/ast.wl"
+import * from "../../frontend/arena.wl"
 import * from "../context.wl"
 import * from "../../frontend/tokens.wl"
 import * from "../../frontend/diagnostics.wl"
@@ -39,11 +40,11 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
     c.current_module_is_package     = p_mod.is_package;
     c.current_dir                   = p_mod.dir;
 
-    let imports: Vector(Struct) = p_mod.imports;
+    let imports: Vector(NodeID) = p_mod.imports;
     let i_len: Int = 0; if (imports is !null) { i_len = imports.length(); }
     let i: Int = 0;
     while (i < i_len) {
-        let imp: ImportNode = imports[i];
+        let imp: ImportNode = get_import_node(c.arena, imports[i]);
         if (imp.symbols is !null) {
             let raw_path: String = imp.path_tok.value;
             let final_path: String = resolve_import_path(c, raw_path, imp.pos);
@@ -57,14 +58,14 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
         i += 1;
     }
 
-    let block: BlockNode = p_mod.ast;
-    let stmts: Vector(Struct) = block.stmts;
+    let block: BlockNode = get_block_node(c.arena, p_mod.ast);
+    let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
 
     i = 0;
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_ENUM_DEF) {
             compile_node(c, stmts[i]);
         }
@@ -73,20 +74,19 @@ func compile_ast_pass(c: Compiler, p_mod: ParsedModule) -> Void {
 
     i = 0;
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base != NODE_IMPORT && base != NODE_ENUM_DEF) {
             compile_node(c, stmts[i]);
         }
         i += 1;
     }
 
-    // free AST memory immediately since code generation for this module is done
-    p_mod.ast = null;
+    p_mod.ast = NO_NODE;
 }
 
-func discard_statement_result(c: Compiler, node: Struct, result: CompileResult) -> Void {
-    if (node is null || result is null) { return; }
-    let base: Int = node_kind(node);
+func discard_statement_result(c: Compiler, node: NodeID, result: CompileResult) -> Void {
+    if (!has_node(node) || result is null) { return; }
+    let base: Int = node_tag(node);
     if (base == NODE_VAR_ASSIGN || base == NODE_FIELD_ASSIGN || base == NODE_INDEX_ASSIGN || base == NODE_PTR_ASSIGN || base == NODE_CATCH) { return; }
     if (result.owns_ref) {
         emit_release_owned(c, result);
@@ -117,7 +117,7 @@ func compile_block(c: Compiler, node: BlockNode) -> CompileResult {
         enter_scope(c);
     }
     
-    let stmts: Vector(Struct) = node.stmts;
+    let stmts: Vector(NodeID) = node.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
     let i: Int = 0;
@@ -125,7 +125,7 @@ func compile_block(c: Compiler, node: BlockNode) -> CompileResult {
     let last_res: CompileResult = null;
     let terminated: Bool = false;
     while (i < len) {
-        let stmt: Int = node_kind(stmts[i]);
+        let stmt: Int = node_tag(stmts[i]);
         last_res = compile_node(c, stmts[i]);
         discard_statement_result(c, stmts[i], last_res);
         if (must_terminate(c, stmts[i])) {
@@ -192,7 +192,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
     let var_name: String = node.name_tok.value;
 
     if (c.scope_depth == 0) {
-        let sys_anns: SystemAnnResult = consume_annotations(node.annotations, var_name);
+        let sys_anns: SystemAnnResult = consume_annotations(c, node.annotations, var_name);
 
         let full_var_name: String = var_name;
         if (c.current_package_prefix != "") {
@@ -244,15 +244,15 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
             }
         }
 
-        if (node.value is !null) {
-            let value_node: Struct = node.value;
+        if (has_node(node.value)) {
+            let value_node: NodeID = node.value;
             let target_repr: Int = get_repr_type(c, target_type_id);
             let named_target: NamedTypeInfo = get_named_type(c, target_type_id);
             let unwrapped_named_cast: Bool = false;
-            if (named_target is !null && node_kind(value_node) == NODE_CALL) {
-                let cast_call: CallNode = value_node;
-                if (node_kind(cast_call.callee) == NODE_VAR_ACCESS && cast_call.args is !null && cast_call.args.length() == 1) {
-                    let cast_name: VarAccessNode = cast_call.callee;
+            if (named_target is !null && node_tag(value_node) == NODE_CALL) {
+                let cast_call: CallNode = get_call_node(c.arena, value_node);
+                if (node_tag(cast_call.callee) == NODE_VAR_ACCESS && cast_call.args is !null && cast_call.args.length() == 1) {
+                    let cast_name: VarAccessNode = get_var_access_node(c.arena, cast_call.callee);
                     if (get_cast_target(c, cast_name.name_tok.value) == target_type_id) {
                         let cast_arg: ArgNode = cast_call.args[0];
                         value_node = cast_arg.val;
@@ -264,9 +264,9 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                 throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(c, target_type_id) + ", got " + get_type_name(c, get_expr_type(c, value_node)) + ".");
                 return void_result();
             }
-            let val_node: Int = node_kind(value_node);
+            let val_node: Int = node_tag(value_node);
             if (val_node == NODE_STRING) {
-                let s_node: StringNode = value_node;
+                let s_node: StringNode = get_string_node(c.arena, value_node);
                 let s_val: String = s_node.tok.value;
                 let s_id: Int = register_string_constant(c, s_val);
                 init_val_str = get_string_object_ptr(s_id);
@@ -345,7 +345,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                     throw_type_error(node.pos, "Type mismatch. Expected Char literal for Char type.");
                     return void_result();
                 }
-                let cn: CharNode = value_node;
+                let cn: CharNode = get_char_node(c.arena, value_node);
                 init_val_str = "" + string_to_int(cn.tok.value, cn.pos);
                 const_num = Float(string_to_int(cn.tok.value, cn.pos));
                 has_const_num = true;
@@ -394,7 +394,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
     let ptr_reg: String = c.alloc_regs[node.alloc_id];
     let origin_id: Int = target_type_id;
 
-    if (node.value is null) {
+    if (!has_node(node.value)) {
         let s_info: StructInfo = c.struct_id_map.lookup("" + target_type_id);
         let is_valid_struct: Bool = false;
         
@@ -408,8 +408,8 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
 
         if is_valid_struct {
-            let fake_args: Vector(Struct) = [];
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
+            let fake_args: Vector(ArgNode) = [];
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
             let val_res: CompileResult = null;
             
             if (s_info.is_class) {
@@ -430,7 +430,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
     } else {
         let is_array_init: Bool = false;
-        let val_base: Int = node_kind(node.value);
+        let val_base: Int = node_tag(node.value);
         let target_arr: ArrayInfo = c.array_info_map.lookup("" + target_type_id);
         if (target_arr is !null && val_base == NODE_VECTOR_LIT) {
             if (target_arr.size == -1) {
@@ -439,7 +439,7 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
             }
 
             is_array_init = true;
-            let lit_node: VectorLitNode = node.value;
+            let lit_node: VectorLitNode = get_vector_lit_node(c.arena, node.value);
             
             if (lit_node.count > target_arr.size) {
                 throw_type_error(node.pos, "Array literal too large: expected " + target_arr.size + " elements.");
@@ -524,7 +524,7 @@ func compile_if(c: Compiler, node: IfNode) -> CompileResult {
         return void_result();
     }
     if (platform_value == 0) {
-        if (node.else_body is !null) { compile_node(c, node.else_body); }
+        if (has_node(node.else_body)) { compile_node(c, node.else_body); }
         return void_result();
     }
 
@@ -541,17 +541,17 @@ func compile_if(c: Compiler, node: IfNode) -> CompileResult {
 
     let then_terminates: Bool = must_terminate(c, node.body);
     let else_terminates: Bool = false;
-    if (node.else_body is !null) {
+    if (has_node(node.else_body)) {
         else_terminates = must_terminate(c, node.else_body);
     }
 
     let needs_merge: Bool = true;
-    if (node.else_body is !null && then_terminates && else_terminates) {
+    if (has_node(node.else_body) && then_terminates && else_terminates) {
         needs_merge = false;
     }
     
     let target_else: String = label_else;
-    if (node.else_body is null) {
+    if (!has_node(node.else_body)) {
         target_else = label_merge;
     }
     
@@ -563,7 +563,7 @@ func compile_if(c: Compiler, node: IfNode) -> CompileResult {
         c.output_file.write(c.indent + "br label %" + label_merge + "\n");
     }
     
-    if (node.else_body is !null) {
+    if (has_node(node.else_body)) {
         c.output_file.write("\n" + label_else + ":\n");
         compile_node(c, node.else_body);
         if (!else_terminates) {
@@ -577,7 +577,8 @@ func compile_if(c: Compiler, node: IfNode) -> CompileResult {
     return void_result();
 }
 
-func compile_while(c: Compiler, node: WhileNode) -> CompileResult {
+func compile_while(c: Compiler, node_id: NodeID) -> CompileResult {
+    let node: WhileNode = get_while_node(c.arena, node_id);
     let label_cond: String = next_label(c);
     let label_body: String = next_label(c);
     let label_end: String = next_label(c);
@@ -603,16 +604,17 @@ func compile_while(c: Compiler, node: WhileNode) -> CompileResult {
     }
 
     c.output_file.write("\n" + label_end + ":\n");
-    if (must_terminate(c, node)) {
+    if (must_terminate(c, node_id)) {
         c.output_file.write(c.indent + "unreachable\n");
     }
     c.loop_stack = current_scope.parent;
     return void_result();
 }
 
-func compile_for(c: Compiler, node: ForNode) -> CompileResult {
+func compile_for(c: Compiler, node_id: NodeID) -> CompileResult {
+    let node: ForNode = get_for_node(c.arena, node_id);
     enter_scope(c);
-    if (node.init is !null) {
+    if (has_node(node.init)) {
         let init_res: CompileResult = compile_node(c, node.init);
         discard_statement_result(c, node.init, init_res);
     }
@@ -626,7 +628,7 @@ func compile_for(c: Compiler, node: ForNode) -> CompileResult {
     
     c.output_file.write(c.indent + "br label %" + label_cond + "\n");
     c.output_file.write("\n" + label_cond + ":\n");
-    if (node.cond is !null) {
+    if (has_node(node.cond)) {
         let cond_res: CompileResult = compile_node(c, node.cond);
         if (cond_res is !null && cond_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
         if (cond_res.type != TYPE_BOOL) {
@@ -643,7 +645,7 @@ func compile_for(c: Compiler, node: ForNode) -> CompileResult {
 
     c.output_file.write(c.indent + "br label %" + label_step + "\n");
     c.output_file.write("\n" + label_step + ":\n");
-    if (node.step is !null) {
+    if (has_node(node.step)) {
         let step_res: CompileResult = compile_node(c, node.step);
         discard_statement_result(c, node.step, step_res);
     }
@@ -651,13 +653,13 @@ func compile_for(c: Compiler, node: ForNode) -> CompileResult {
     c.output_file.write("\n" + label_end + ":\n");
     c.loop_stack = current_scope.parent;
     exit_scope(c);
-    if (must_terminate(c, node)) { c.output_file.write(c.indent + "unreachable\n"); }
+    if (must_terminate(c, node_id)) { c.output_file.write(c.indent + "unreachable\n"); }
     
     return void_result();
 }
 
 func compile_ptr_assign(c: Compiler, node: PtrAssignNode) -> CompileResult {
-    let d_node: DerefNode = node.pointer;
+    let d_node: DerefNode = get_deref_node(c.arena, node.pointer);
     if (reject_const_write(c, d_node.node, node.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
     let ptr_res: CompileResult = compile_node(c, d_node.node);
 
@@ -888,7 +890,7 @@ func compile_print_call(c: Compiler, node: CallNode) -> CompileResult {
     return void_result();
 }
 
-func compile_variadic_pack(c: Compiler, args: Vector(Struct), elem_type: Int, pos: Position) -> CompileResult {
+func compile_variadic_pack(c: Compiler, args: Vector(ArgNode), elem_type: Int, pos: Position) -> CompileResult {
     let sources: Vector(Struct) = [];
     let size_ty: String = get_size_llvm_type();
     let elem_ty: String = get_llvm_type_str(c, elem_type);
@@ -1090,7 +1092,7 @@ func compile_func_def(c: Compiler, node: FunctionDefNode) -> CompileResult {
     c.current_ret_type = ret_type_id;
 
     let params_str: String = "";
-    let params: Vector(Struct) = node.params;
+    let params: Vector(ParamNode) = node.params;
     let p_len: Int = 0;
     if (params is !null) { p_len = params.length(); }
     let arg_idx: Int = 0;
@@ -1191,7 +1193,7 @@ func compile_method_def(c: Compiler, class_name: String, node: MethodDefNode) ->
     if (f_info is null) {
         return void_result();
     }
-    f_info.mutates_self = method_mutates_self(node.body);
+    f_info.mutates_self = method_mutates_self(c, node.body);
     if (f_info.compiler_link_name == "hash_value" || f_info.compiler_link_name == "values_equal" || 
         f_info.compiler_link_name == "zero_value") {
         return void_result();
@@ -1207,7 +1209,7 @@ func compile_method_def(c: Compiler, class_name: String, node: MethodDefNode) ->
 
     let params_str: String = class_ptr_llvm + " %arg0";
     
-    let params: Vector(Struct) = node.params;
+    let params: Vector(ParamNode) = node.params;
     let p_len: Int = 0; if (params is !null) { p_len = params.length(); }
     let arg_idx: Int = 0;
     
@@ -1382,7 +1384,7 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
     if (f_info is !null && (f_info.compiler_link_name == "hash_value" || f_info.compiler_link_name == "values_equal")) {
-        let args: Vector(Struct) = n_call.args;
+        let args: Vector(ArgNode) = n_call.args;
         let expected_count: Int = 1;
         if (f_info.compiler_link_name == "values_equal") {
             expected_count = 2;
@@ -1439,12 +1441,13 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
     let sig: String = "";
     let args_str: String = "";
     let expected_types: Vector(Struct) = null;
+    let interface_params: Vector(ParamNode) = null;
     let ret_type: Int = 0;
     
     if (s_info.is_interface) {
         sig = interface_method_sig(c, s_info, m_node);
         ret_type = interface_method_type(c, s_info, m_node.return_type);
-        expected_types = m_node.params;
+        interface_params = m_node.params;
         
         let obj_box: String = obj_res.reg;
         let obj_ptr: String = next_reg(c);
@@ -1513,12 +1516,16 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
     
-    let args: Vector(Struct) = n_call.args;
+    let args: Vector(ArgNode) = n_call.args;
     let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
     let owned_args: Vector(Struct) = [];
     
     let exp_len: Int = 0;
-    if (expected_types is !null) { exp_len = expected_types.length(); }
+    if (s_info.is_interface) {
+        if (interface_params is !null) { exp_len = interface_params.length(); }
+    } else if (expected_types is !null) {
+        exp_len = expected_types.length();
+    }
     if (!s_info.is_interface && exp_len > 0) { exp_len -= 1; }
     
     let native_args: BoundCallArgs = null;
@@ -1554,7 +1561,7 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
         let expected_type: Int = 0;
         
         if (s_info.is_interface) {
-            let p_node: ParamNode = expected_types[arg_idx];
+            let p_node: ParamNode = interface_params[arg_idx];
             expected_type = interface_method_type(c, s_info, p_node.type_tok);
         } else {
             let expected_type_node: TypeListNode = expected_types[arg_idx + 1];
@@ -1596,7 +1603,7 @@ func compile_class_method_call(c: Compiler, s_info: StructInfo, obj_res: Compile
 }
 
 func compile_dict_intrinsic(c: Compiler, info: FuncInfo, node: CallNode) -> CompileResult {
-    let args: Vector(Struct) = node.args;
+    let args: Vector(ArgNode) = node.args;
     let count: Int = 0;
     if (args is !null) { count = args.length(); }
     let expected: Int = 1;
@@ -1645,13 +1652,13 @@ func compile_dict_intrinsic(c: Compiler, info: FuncInfo, node: CallNode) -> Comp
 
 func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileResult {
     let scope: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
-    let params: Vector(Struct) = func_def.params;
+    let params: Vector(ParamNode) = func_def.params;
     let p_len: Int = 0; if (params is !null) { p_len = params.length(); }
     let local_variadic: Int = variadic_param_index(params);
     let p_i: Int = 0;
     while (p_i < p_len) {
         let p_node: ParamNode = params[p_i];
-        if (p_node.default_val is !null) {
+        if (has_node(p_node.default_val)) {
             throw_type_error(p_node.pos, "A local function value cannot declare default parameters.");
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -1660,7 +1667,7 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
     }
     if (func_def.name_tok.value.length() > 0) { scope.local_vars.put(func_def.name_tok.value, TypeListNode(type=1)); }
 
-    analyze_captures(func_def.body, scope);
+    analyze_captures(c.arena, func_def.body, scope);
     
     let captures: Vector(String) = [];
     let capture_types: Vector(Struct) = [];
@@ -1713,7 +1720,7 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
     }
     let llvm_env_name: String = "{ " + env_body + " }";
 
-    let env_info: StructInfo = StructInfo(name=env_struct_name, type_id=env_id, fields=env_fields, llvm_name=llvm_env_name, init_body=null, is_class=false, vtable_name="", parent_id=0, vtable=null, is_enum=false, is_error=false, is_interface=false, interfaces=null, ann_flags=0, compiler_link_name="");
+    let env_info: StructInfo = StructInfo(name=env_struct_name, type_id=env_id, fields=env_fields, llvm_name=llvm_env_name, init_body=NO_NODE, is_class=false, vtable_name="", parent_id=0, vtable=null, is_enum=false, is_error=false, is_interface=false, interfaces=null, ann_flags=0, compiler_link_name="");
     c.struct_id_map.put("" + env_id, env_info);
     c.type_drop_list.append(TypeListNode(type=env_id));
 
@@ -1920,7 +1927,7 @@ func compile_local_closure(c: Compiler, func_def: FunctionDefNode) -> CompileRes
 }
 
 func compile_return(c: Compiler, node: ReturnNode) -> CompileResult {
-    if (node.value is !null) {
+    if (has_node(node.value)) {
         // return void check
         if (c.current_ret_type == TYPE_VOID) {
             throw_type_error(node.pos, "Void function cannot return a value. ");
@@ -2037,7 +2044,7 @@ func compile_struct_def(c: Compiler, node: StructDefNode) -> CompileResult {
     let llvm_body: String = "";
     let fields_vec: Vector(Struct) = [];
     
-    let fields: Vector(Struct) = node.fields;
+    let fields: Vector(ParamNode) = node.fields;
     let f_len: Int = 0; if (fields is !null) { f_len = fields.length(); }
     let idx: Int = 0;
     let field_names: Dict(String, StringConstant) = Dict();
@@ -2106,7 +2113,7 @@ func compile_struct_init(c: Compiler, s_info: StructInfo, n_call: CallNode) -> C
         f_idx += 1;
     }
 
-    if (s_info.init_body is !null) {
+    if (has_node(s_info.init_body)) {
         let template: GenericTemplate = c.generic_instance_templates.lookup("" + s_info.type_id);
         let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
         let previous: GenericTemplate = null;
@@ -2128,7 +2135,7 @@ func compile_struct_init(c: Compiler, s_info: StructInfo, n_call: CallNode) -> C
         }
     }
 
-    let args: Vector(Struct) = n_call.args;
+    let args: Vector(ArgNode) = n_call.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
     if (a_len > f_len) {
@@ -2251,7 +2258,7 @@ func compile_class_init(c: Compiler, s_info: StructInfo, n_call: CallNode) -> Co
     if (init_func is !null) {
         queue_generic_class_method(c, s_info, "$init");
         let args_str: String = s_info.llvm_name + "* " + obj_ptr;
-        let args: Vector(Struct) = n_call.args;
+        let args: Vector(ArgNode) = n_call.args;
         let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
         let arg_idx: Int = 0;
         let owned_args: Vector(Struct) = [];
@@ -2297,7 +2304,7 @@ func compile_class_init(c: Compiler, s_info: StructInfo, n_call: CallNode) -> Co
         c.output_file.write(c.indent + "call void @" + init_func.name + "(" + args_str + ")\n");
         emit_release_owned_args(c, owned_args);
     } else {
-        let args: Vector(Struct) = n_call.args;
+        let args: Vector(ArgNode) = n_call.args;
         let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
         if (a_len > 0) {
             throw_type_error(n_call.pos, "Class '" + s_info.name + "' has no init method, but arguments were provided.");
@@ -2353,7 +2360,7 @@ func register_class_methods(c: Compiler, class_name: String, class_type_id: Int,
         let key: String = class_name + "_" + method_name;
         if (c.func_table.lookup(key) is !null) { throw_name_error(method_node.pos, "Method '" + key + "' is already defined."); return false; }
         let symbol: String = mangle_wl_name(c, class_name + ".", method_name, arg_types);
-        c.func_table.put(key, FuncInfo(name=symbol, base_name=method_name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(method_node.body), variadic_param=variadic_param_index(method_node.params), default_args=param_defaults(method_node.params)));
+        c.func_table.put(key, FuncInfo(name=symbol, base_name=method_name, ret_type=ret_type, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(c, method_node.body), variadic_param=variadic_param_index(method_node.params), default_args=param_defaults(method_node.params)));
         index += 1;
     }
     return true;
@@ -2381,7 +2388,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
 
     let info: StructInfo = c.struct_table.lookup(class_name);
     let parent_info: StructInfo = null;
-    if (node.parent_tok is !null) {
+    if (has_node(node.parent_tok)) {
         let parent_type: Int = resolve_type(c, node.parent_tok);
         parent_info = c.struct_id_map.lookup("" + parent_type);
         if (parent_info is null || !parent_info.is_class) {
@@ -2402,7 +2409,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
     }
     let declared_idx: Int = 0;
     while (node.interfaces is !null && declared_idx < node.interfaces.length()) {
-        let declared: Struct = node.interfaces[declared_idx];
+        let declared: NodeID = node.interfaces[declared_idx];
         if (!add_interface(c, effective_interfaces, declared, node.pos)) { return void_result(); }
         declared_idx += 1;
     }
@@ -2441,14 +2448,14 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
         current_offset = 1;
     }
 
-    let my_fields: Vector(Struct) = node.fields;
+    let my_fields: Vector(NodeID) = node.fields;
     let mf_len: Int = 0; if (my_fields is !null) { mf_len = my_fields.length(); }
     let mf_idx: Int = 0;
     let class_field_names: Dict(String, StringConstant) = Dict();
     let inherited_field_idx: Int = 0;
     while (inherited_field_idx < fields_vec.length()) { let inherited_field: FieldInfo = fields_vec[inherited_field_idx]; class_field_names.put(inherited_field.name, StringConstant(id=0, value=inherited_field.name)); inherited_field_idx += 1; }
     while (mf_idx < mf_len) {
-        let p: VarDeclareNode = my_fields[mf_idx];
+        let p: VarDeclareNode = get_var_decl_node(c.arena, my_fields[mf_idx]);
         let f_name: String = p.name_tok.value;
         if (class_field_names.contains_key(f_name)) { throw_name_error(p.pos, "field '" + f_name + "' is already defined in class '" + class_name + "'"); return void_result(); }
         if (find_method(vtable_vec, f_name) is !null) {
@@ -2459,7 +2466,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
         let f_type_id: Int = resolve_type(c, p.type_node);
 
         if (f_type_id == TYPE_AUTO) {
-            if (p.value is null) {
+            if (!has_node(p.value)) {
                 throw_type_error(p.pos, "field '" + f_name + "' needs an explicit type when it has no initializer.");
                 return void_result();
             }
@@ -2484,11 +2491,11 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
     if (c.generic_class_type != 0) { c.generic_type_defs += def_str; }
     else { c.output_file.write(def_str); }
 
-    let my_methods: Vector(Struct) = node.methods;
+    let my_methods: Vector(NodeID) = node.methods;
     let mm_len: Int = 0; if (my_methods is !null) { mm_len = my_methods.length(); }
     let mm_idx: Int = 0;
     while (mm_idx < mm_len) {
-        let m_node: MethodDefNode = my_methods[mm_idx];
+        let m_node: MethodDefNode = get_method_def_node(c.arena, my_methods[mm_idx]);
         let raw_m_name: String = method_base_name(c, m_node);
 
         if (!raw_m_name.starts_with("$") && class_field_names.contains_key(raw_m_name)) {
@@ -2509,7 +2516,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
                 throw_name_error(m_node.pos, "Compiler internal error: Method '" + m_name + "' was not properly registered.");
                 return void_result();
             }
-            f_info.mutates_self = method_mutates_self(m_node.body);
+            f_info.mutates_self = method_mutates_self(c, m_node.body);
             
             if (f_info.compiler_link_name is !null && 
                 f_info.compiler_link_name.length() > 0) {
@@ -2608,7 +2615,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
                             if (f.ret_type != req_ret_type) {
                                 match = false;
                             } else {
-                                let req_params: Vector(Struct) = req_m.params;
+                                let req_params: Vector(ParamNode) = req_m.params;
                                 let req_p_len: Int = 0;
                                 if (req_params is !null) { req_p_len = req_params.length(); }
                                 
@@ -2662,7 +2669,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
     if (c.generic_class_type == 0) {
         mm_idx = 0;
         while (mm_idx < mm_len) {
-            let m_node: MethodDefNode = my_methods[mm_idx];
+            let m_node: MethodDefNode = get_method_def_node(c.arena, my_methods[mm_idx]);
             if (m_node.type_params is null || m_node.type_params.length() == 0) {
                 compile_method_def(c, class_name, m_node);
             }
@@ -2674,7 +2681,7 @@ func compile_class_def(c: Compiler, node: ClassDefNode) -> CompileResult {
 }
 
 func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
-    let obj_base: Int = node_kind(node.obj);
+    let obj_base: Int = node_tag(node.obj);
 
     let is_module: Bool = false;
     let full_name: String = "";
@@ -2682,16 +2689,16 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
     let owner_name: String = "";
     
     let path_parts: Vector(String) = [];
-    let curr_obj: Struct = node.obj;
-    let curr_base: Int = node_kind(curr_obj);
+    let curr_obj: NodeID = node.obj;
+    let curr_base: Int = node_tag(curr_obj);
     while (curr_base == NODE_FIELD_ACCESS) {
-        let inner_f: FieldAccessNode = curr_obj;
+        let inner_f: FieldAccessNode = get_field_access_node(c.arena, curr_obj);
         path_parts.append(inner_f.field_name);
         curr_obj = inner_f.obj;
-        curr_base = node_kind(curr_obj);
+        curr_base = node_tag(curr_obj);
     }
     if (curr_base == NODE_VAR_ACCESS) {
-        let inner_v: VarAccessNode = curr_obj;
+        let inner_v: VarAccessNode = get_var_access_node(c.arena, curr_obj);
         let root_name: String = inner_v.name_tok.value;
         if (find_symbol(c, root_name) is null) {
             let module_prefix: String = c.current_file_visible_prefixes.lookup(root_name);
@@ -2775,7 +2782,7 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
                 throw_name_error(node.pos, owner_kind + " '" + owner_name + "' has no member '" + node.field_name + "'.");
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
-            let mod_name: String = format_ast_path(node.obj);
+            let mod_name: String = format_ast_path(c, node.obj);
             throw_name_error(node.pos, "Undefined field, function or enum variant '" + node.field_name + "' in module '" + mod_name + "'.");
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -2840,9 +2847,9 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
 
 
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
-        let base_obj: Int = node_kind(node.obj);
+        let base_obj: Int = node_tag(node.obj);
         if (base_obj == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = node.obj;
+            let v_node: VarAccessNode = get_var_access_node(c.arena, node.obj);
             let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
             if (info is !null && info.origin_type >= 100) {
                 type_id = info.origin_type;
@@ -3020,21 +3027,21 @@ func compile_field_assign(c: Compiler, node: FieldAssignNode) -> CompileResult {
     if (reject_const_write(c, node.obj, node.pos)) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
-    let obj_base: Int = node_kind(node.obj);
+    let obj_base: Int = node_tag(node.obj);
 
     let is_module: Bool = false;
     let full_name: String = "";
     let path_parts: Vector(String) = [];
-    let curr_obj: Struct = node.obj;
-    let curr_base: Int = node_kind(curr_obj);
+    let curr_obj: NodeID = node.obj;
+    let curr_base: Int = node_tag(curr_obj);
     while (curr_base == NODE_FIELD_ACCESS) {
-        let inner_f: FieldAccessNode = curr_obj;
+        let inner_f: FieldAccessNode = get_field_access_node(c.arena, curr_obj);
         path_parts.append(inner_f.field_name);
         curr_obj = inner_f.obj;
-        curr_base = node_kind(curr_obj);
+        curr_base = node_tag(curr_obj);
     }
     if (curr_base == NODE_VAR_ACCESS) {
-        let root_node: VarAccessNode = curr_obj;
+        let root_node: VarAccessNode = get_var_access_node(c.arena, curr_obj);
         let root_name: String = root_node.name_tok.value;
         if (find_symbol(c, root_name) is null) {
             let module_prefix: String = c.current_file_visible_prefixes.lookup(root_name);
@@ -3171,7 +3178,7 @@ func compile_array_literal(c: Compiler, lit_node: VectorLitNode, target_arr_id: 
     
     while (lit_i < lit_node.count) {
         let elem_node: ArgNode = lit_node.elements[lit_i];
-        let elem_base: Int = node_kind(elem_node.val);
+        let elem_base: Int = node_tag(elem_node.val);
         
         let elem_ptr_reg: String = next_reg(c);
         c.output_file.write(c.indent + elem_ptr_reg + " = getelementptr inbounds " + target_arr.llvm_name + ", " + target_arr.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + lit_i + "\n");
@@ -3181,7 +3188,7 @@ func compile_array_literal(c: Compiler, lit_node: VectorLitNode, target_arr_id: 
             let inner_arr_info: ArrayInfo = c.array_info_map.lookup("" + target_arr.base_type);
             if (inner_arr_info is !null) {
                 is_nested = true;
-                let inner_lit: VectorLitNode = elem_node.val;
+                let inner_lit: VectorLitNode = get_vector_lit_node(c.arena, elem_node.val);
                 compile_array_literal(c, inner_lit, target_arr.base_type, elem_ptr_reg);
             }
         }
@@ -3203,9 +3210,9 @@ func compile_array_literal(c: Compiler, lit_node: VectorLitNode, target_arr_id: 
     }
 }
 
-func compile_vector_append(c: Compiler, vec_node: Struct, call_node: CallNode) -> CompileResult {
+func compile_vector_append(c: Compiler, vec_node: NodeID, call_node: CallNode) -> CompileResult {
     if (reject_const_write(c, vec_node, call_node.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    let args: Vector(Struct) = call_node.args;
+    let args: Vector(ArgNode) = call_node.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
     if (a_len != 1) { throw_type_error(call_node.pos, "'append' expects exactly 1 argument."); return void_result(); }
@@ -3327,9 +3334,9 @@ func compile_vector_append(c: Compiler, vec_node: Struct, call_node: CallNode) -
     
     return void_result();
 }
-func compile_vector_drop(c: Compiler, vec_node: Struct, call_node: CallNode) -> CompileResult {
+func compile_vector_drop(c: Compiler, vec_node: NodeID, call_node: CallNode) -> CompileResult {
     if (reject_const_write(c, vec_node, call_node.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    let args: Vector(Struct) = call_node.args;
+    let args: Vector(ArgNode) = call_node.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
     if (a_len > 0) { throw_type_error(call_node.pos, "'drop' expects 0 arguments."); return void_result(); }
@@ -3391,7 +3398,7 @@ func compile_vector_drop(c: Compiler, vec_node: Struct, call_node: CallNode) -> 
 func compile_vector_lit(c: Compiler, node: VectorLitNode) -> CompileResult {
     let count: Int = node.count;
     let elem_type_id: Int = TYPE_INT; 
-    let elements: Vector(Struct) = node.elements;
+    let elements: Vector(ArgNode) = node.elements;
     let e_len: Int = 0;
     if (elements is !null) { e_len = elements.length(); }
     
@@ -3482,8 +3489,8 @@ func compile_vector_lit(c: Compiler, node: VectorLitNode) -> CompileResult {
     return CompileResult(reg=vec_ptr, type=vec_type_id);
 }
 
-func compile_length_method(c: Compiler, obj_node: Struct, call_node: CallNode) -> CompileResult {
-    let args: Vector(Struct) = call_node.args;
+func compile_length_method(c: Compiler, obj_node: NodeID, call_node: CallNode) -> CompileResult {
+    let args: Vector(ArgNode) = call_node.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
     if (a_len > 0) {
@@ -3561,9 +3568,9 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
         }
 
         if has_get {
-            let fake_args: Vector(Struct) = [];
+            let fake_args: Vector(ArgNode) = [];
             fake_args.append(ArgNode(val=node.index_node, name=null));
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=handled);
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=handled);
             return compile_class_method_call(c, s_info, target_res, "get", fake_call);
         }
     }
@@ -3715,10 +3722,10 @@ func compile_index_assign(c: Compiler, node: IndexAssignNode) -> CompileResult {
         }
 
         if has_put {
-            let fake_args: Vector(Struct) = [];
+            let fake_args: Vector(ArgNode) = [];
             fake_args.append(ArgNode(val=node.index_node, name=null));
             fake_args.append(ArgNode(val=node.value, name=null));
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
             compile_class_method_call(c, s_info, target_res, "put", fake_call);
             return void_result();
         }
@@ -3879,8 +3886,8 @@ func compile_index_assign(c: Compiler, node: IndexAssignNode) -> CompileResult {
 }
 
 func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> CompileResult {
-    if ((node.start_idx is null && node.end_idx is !null) ||
-        (node.start_idx is !null && node.end_idx is null)) {
+    if ((!has_node(node.start_idx) && has_node(node.end_idx)) ||
+        (has_node(node.start_idx) && !has_node(node.end_idx))) {
         throw_invalid_syntax(node.pos, "Slice bounds must either both be present or both be omitted.");
         return void_result();
     }
@@ -3894,7 +3901,7 @@ func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> C
     }
     let target_type: Int = get_repr_type(c, target_res.type);
 
-    let omitted: Bool = node.start_idx is null && node.end_idx is null;
+    let omitted: Bool = !has_node(node.start_idx) && !has_node(node.end_idx);
     if (target_type == TYPE_STRING) {
         let len_slot: String = next_reg(c);
         c.output_file.write(c.indent + len_slot + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
@@ -4010,9 +4017,8 @@ func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> C
     return emit_make_slice(c, elem_type, vec_owner, vec_data_slot, vec_size_slot, size_start, size_length);
 }
 
-func compile_map_lit(c: Compiler, lit_node: Struct) -> CompileResult {
-    let node: MapLitNode = lit_node;
-    let pairs: Vector(Struct) = node.pairs;
+func compile_map_lit(c: Compiler, node: MapLitNode) -> CompileResult {
+    let pairs: Vector(MapPairNode) = node.pairs;
     let pair_count: Int = 0;
     if (pairs is !null) { pair_count = pairs.length(); }
 
@@ -4026,13 +4032,13 @@ func compile_map_lit(c: Compiler, lit_node: Struct) -> CompileResult {
     }
     if (dict_info is null) { throw_type_error(node.pos, "Compiler error: 'Dict' class not found in prelude."); }
 
-    let init_args: Vector(Struct) = [];
+    let init_args: Vector(ArgNode) = [];
     if (!is_typed_dict(c, dict_info)) {
         let cap_tok: Token = Token(type=TOK_INT, value="" + cap, line=node.pos.ln, col=node.pos.col);
-        let cap_node: IntNode = IntNode(type=NODE_INT, tok=cap_tok, pos=node.pos);
+        let cap_node: NodeID = add_int_node(c.arena, IntNode(type=NODE_INT, tok=cap_tok, pos=node.pos));
         init_args.append(ArgNode(val=cap_node, name=null));
     }
-    let fake_init_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=init_args, type_args=null, pos=node.pos, preserve_fallible=false);
+    let fake_init_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=init_args, type_args=null, pos=node.pos, preserve_fallible=false);
 
     let dict_res: CompileResult = compile_class_init(c, dict_info, fake_init_call);
 
@@ -4040,10 +4046,10 @@ func compile_map_lit(c: Compiler, lit_node: Struct) -> CompileResult {
     let i: Int = 0;
     while (i < pair_count) {
         let pair: MapPairNode = pairs[i];
-        let put_args: Vector(Struct) = [];
+        let put_args: Vector(ArgNode) = [];
         put_args.append(ArgNode(val=pair.key, name=null));
         put_args.append(ArgNode(val=pair.value, name=null));
-        let fake_put_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=put_args, type_args=null, pos=node.pos, preserve_fallible=false);
+        let fake_put_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=put_args, type_args=null, pos=node.pos, preserve_fallible=false);
         
         compile_class_method_call(c, dict_info, dict_res, "put", fake_put_call);
         i += 1;
@@ -4060,7 +4066,7 @@ func compile_enum_def(c: Compiler, node: EnumDefNode) -> CompileResult {
     let type_id: Int = type_info.type_id;
     let llvm_ty_str: String = "i32";
 
-    let fields: Vector(Struct) = node.fields;
+    let fields: Vector(EnumFieldNode) = node.fields;
     let len: Int = 0; if (fields is !null) { len = fields.length(); }
     let i: Int = 0;
     
@@ -4070,7 +4076,7 @@ func compile_enum_def(c: Compiler, node: EnumDefNode) -> CompileResult {
     while (i < len) {
         let f_node: EnumFieldNode = fields[i];
         
-        if (f_node.value is !null) {
+        if (has_node(f_node.value)) {
             current_val = eval_const_long(c, f_node.value, f_node.pos);
         }
         
@@ -4100,10 +4106,10 @@ func compile_enum_def(c: Compiler, node: EnumDefNode) -> CompileResult {
 }
 
 func compile_try_unwrap(c: Compiler, node: TryUnwrapNode) -> CompileResult {
-    let expr_base: Int = node_kind(node.expr);
+    let expr_base: Int = node_tag(node.expr);
     let expr_res: CompileResult = null;
     if (expr_base == NODE_INDEX_ACCESS) {
-        let access: IndexAccessNode = node.expr;
+        let access: IndexAccessNode = get_index_access_node(c.arena, node.expr);
         expr_res = compile_index_access(c, access, true);
     } else {
         expr_res = compile_node(c, node.expr);
@@ -4112,10 +4118,10 @@ func compile_try_unwrap(c: Compiler, node: TryUnwrapNode) -> CompileResult {
     let fallible_type: Int = expr_res.type;
     if (!is_fallible_type(c, fallible_type)) {
         if (expr_base == NODE_CALL) {
-            let call: CallNode = node.expr;
-            let callee_base: Int = node_kind(call.callee);
+            let call: CallNode = get_call_node(c.arena, node.expr);
+            let callee_base: Int = node_tag(call.callee);
             if (callee_base == NODE_VAR_ACCESS) {
-                let callee: VarAccessNode = call.callee;
+                let callee: VarAccessNode = get_var_access_node(c.arena, call.callee);
                 let target_type: Int = get_cast_target(c, callee.name_tok.value);
                 if (target_type != 0) {
                     throw_invalid_syntax(node.pos, "Conversion to " + get_type_name(c, target_type) + " cannot fail; remove '?'");
@@ -4248,12 +4254,12 @@ func compile_throw(c: Compiler, node: ThrowNode) -> CompileResult {
     return void_result();
 }
 
-func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResult {
-    if (node is null) { return null; }
-    let base: Int = node_kind(node);
+func compile_lvalue_ptr(c: Compiler, node: NodeID, pos: Position) -> CompileResult {
+    if (!has_node(node)) { return null; }
+    let base: Int = node_tag(node);
 
     if (base == NODE_VAR_ACCESS) {
-        let v: VarAccessNode = node;
+        let v: VarAccessNode = get_var_access_node(c.arena, node);
         let name: String = v.name_tok.value;
 
         let info: SymbolInfo = find_symbol(c, name);
@@ -4296,7 +4302,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
     }
 
     if (base == NODE_INDEX_ACCESS) {
-        let ia: IndexAccessNode = node;
+        let ia: IndexAccessNode = get_index_access_node(c.arena, node);
         check_out_index(c, ia.target, ia.index_node, ia.pos);
         let target_res: CompileResult = compile_node(c, ia.target);
         
@@ -4373,7 +4379,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
     }
 
     if (base == NODE_FIELD_ACCESS) {
-        let f_acc: FieldAccessNode = node;
+        let f_acc: FieldAccessNode = get_field_access_node(c.arena, node);
         let obj_res: CompileResult = compile_node(c, f_acc.obj);
         let struct_type_id: Int = get_repr_type(c, obj_res.type);
         let struct_ptr_reg: String = obj_res.reg;
@@ -4488,7 +4494,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
     }
 
     if (base == NODE_DEREF) {
-        let d_node: DerefNode = node;
+        let d_node: DerefNode = get_deref_node(c.arena, node);
         let res: CompileResult = compile_node(c, d_node.node);
         if (res is null || res.type == TYPE_POISON || res.reg == "") {
             return CompileResult(reg="poison", type=TYPE_POISON);
@@ -4936,9 +4942,9 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
         if (is_signed_integer(left.type) && get_type_bitwidth(left.type) > get_type_bitwidth(right.type)) { safe_widening = true; }
         if (is_signed_integer(right.type) && get_type_bitwidth(right.type) > get_type_bitwidth(left.type)) { safe_widening = true; }
         if safe_widening {
-        } else if (is_unsuffix_int_literal(node.left)) {
+        } else if (is_unsuffix_int_literal(c, node.left)) {
             left = compile_type_cast(c, left, right.type, node.pos);
-        } else if (is_unsuffix_int_literal(node.right)) {
+        } else if (is_unsuffix_int_literal(c, node.right)) {
             right = compile_type_cast(c, right, left.type, node.pos);
         } else {
             throw_type_error(node.pos, "Cannot mix signed and unsigned integers without an explicit conversion");
@@ -5063,7 +5069,7 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
 
     if (op_type == TOK_LSHIFT || op_type == TOK_RSHIFT) {
         let shift_bits: Int = get_type_bitwidth(target_type);
-        if (is_unsuffix_int_literal(node.right)) {
+        if (is_unsuffix_int_literal(c, node.right)) {
             let amount: Long = eval_const_long(c, node.right, node.pos);
             if (amount < 0L || amount >= Long(shift_bits)) {
                 throw_overflow_error(node.pos, "Shift count must be between 0 and " + (shift_bits - 1));
@@ -5160,12 +5166,12 @@ func emit_function_value(c: Compiler, info: FuncInfo, pos: Position) -> CompileR
 }
 
 func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> CompileResult {
-    let field_base: Int = node_kind(generic.base_type);
+    let field_base: Int = node_tag(generic.base_type);
     if (field_base != NODE_FIELD_ACCESS) {
         throw_type_error(generic.pos, "A generic method instance must name a class method.");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
-    let field: FieldAccessNode = generic.base_type;
+    let field: FieldAccessNode = get_field_access_node(c.arena, generic.base_type);
     let object: CompileResult = compile_node(c, field.obj);
     if (object is null || object.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON);
@@ -5232,7 +5238,7 @@ func emit_generic_method_value(c: Compiler, generic: GenericTypeNode) -> Compile
 }
 
 func compile_generic_value(c: Compiler, node: GenericTypeNode) -> CompileResult {
-    let base: Int = node_kind(node.base_type);
+    let base: Int = node_tag(node.base_type);
     if (base == NODE_FIELD_ACCESS) {
         return emit_generic_method_value(c, node);
     }
@@ -5257,7 +5263,7 @@ func compile_generic_value(c: Compiler, node: GenericTypeNode) -> CompileResult 
     return emit_function_value(c, instance, node.pos);
 }
 
-func compile_builtin_protocol_call(c: Compiler, receiver: Struct, receiver_type: Int, name: String, call: CallNode) -> CompileResult {
+func compile_builtin_protocol_call(c: Compiler, receiver: NodeID, receiver_type: Int, name: String, call: CallNode) -> CompileResult {
     let available: Bool = false;
     if (name == "equals" && has_builtin_equal(c, receiver_type)) {
         available = c.struct_table.lookup("comparison.Equal") is !null;
@@ -5362,22 +5368,22 @@ func compile_builtin_protocol_call(c: Compiler, receiver: Struct, receiver_type:
     return CompileResult(reg=comparison, type=ordering.type_id);
 }
 
-func compile_node(c: Compiler, node: Struct) -> CompileResult {
-    if (node is null) {
+func compile_node(c: Compiler, node: NodeID) -> CompileResult {
+    if (!has_node(node)) {
         return void_result();
     }
 
-    let base: Int = node_kind(node);
-    if (base == NODE_GENERIC_TYPE) { return compile_generic_value(c, node); }
-    if (base == NODE_TYPE_LAYOUT) { return compile_type_layout(c, node); }
+    let base: Int = node_tag(node);
+    if (base == NODE_GENERIC_TYPE) { return compile_generic_value(c, get_generic_type_node(c.arena, node)); }
+    if (base == NODE_TYPE_LAYOUT) { return compile_type_layout(c, get_type_layout_node(c.arena, node)); }
     if (base == NODE_TYPE_DECL) { return void_result(); }
 
     if (base == NODE_BLOCK) {
-        return compile_block(c, node);
+        return compile_block(c, get_block_node(c.arena, node));
     }
 
     if (base == NODE_STRING) {
-        let n: StringNode = node;
+        let n: StringNode = get_string_node(c.arena, node);
         let val: String = n.tok.value;
         let id: Int = register_string_constant(c, val);
         let len: Int = val.length() + 1;
@@ -5388,30 +5394,30 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg=res_reg, type=TYPE_STRING, origin_type=0);
     }
 
-    if (base == NODE_VAR_DECL) { return compile_var_decl(c, node); }
-    if (base == NODE_IF)       { return compile_if(c, node); }
+    if (base == NODE_VAR_DECL) { return compile_var_decl(c, get_var_decl_node(c.arena, node)); }
+    if (base == NODE_IF)       { return compile_if(c, get_if_node(c.arena, node)); }
     if (base == NODE_WHILE)    { return compile_while(c, node); }
     if (base == NODE_FOR)      { return compile_for(c, node); }
-    if (base == NODE_BINOP)    { return compile_binop(c, node); }
-    if (base == NODE_RETURN)   { return compile_return(c, node); }
-    if (base == NODE_STRUCT_DEF) { return compile_struct_def(c, node); }
-    if (base == NODE_CLASS_DEF)  { return compile_class_def(c, node); }
-    if (base == NODE_FIELD_ACCESS) { return compile_field_access(c, node); }
-    if (base == NODE_FIELD_ASSIGN) { return compile_field_assign(c, node); }
-    if (base == NODE_EXTERN_BLOCK) { return compile_extern_block(c, node); }
-    if (base == NODE_VECTOR_LIT) { return compile_vector_lit(c, node); }
-    if (base == NODE_INDEX_ACCESS) { return compile_index_access(c, node, false); }
-    if (base == NODE_INDEX_ASSIGN) { return compile_index_assign(c, node); }
-    if (base == NODE_SLICE_ACCESS) { return compile_slice_access(c, node, false); }
-    if (base == NODE_MAP_LIT) { return compile_map_lit(c, node); }
-    if (base == NODE_ENUM_DEF) { return compile_enum_def(c, node); }
-    if (base == NODE_TRY_UNWRAP) { return compile_try_unwrap(c, node); }
-    if (base == NODE_CATCH) { return compile_catch(c, node); }
-    if (base == NODE_THROW) { return compile_throw(c, node); }
+    if (base == NODE_BINOP)    { return compile_binop(c, get_binop_node(c.arena, node)); }
+    if (base == NODE_RETURN)   { return compile_return(c, get_return_node(c.arena, node)); }
+    if (base == NODE_STRUCT_DEF) { return compile_struct_def(c, get_struct_def_node(c.arena, node)); }
+    if (base == NODE_CLASS_DEF)  { return compile_class_def(c, get_class_def_node(c.arena, node)); }
+    if (base == NODE_FIELD_ACCESS) { return compile_field_access(c, get_field_access_node(c.arena, node)); }
+    if (base == NODE_FIELD_ASSIGN) { return compile_field_assign(c, get_field_assign_node(c.arena, node)); }
+    if (base == NODE_EXTERN_BLOCK) { return compile_extern_block(c, get_extern_block_node(c.arena, node)); }
+    if (base == NODE_VECTOR_LIT) { return compile_vector_lit(c, get_vector_lit_node(c.arena, node)); }
+    if (base == NODE_INDEX_ACCESS) { return compile_index_access(c, get_index_access_node(c.arena, node), false); }
+    if (base == NODE_INDEX_ASSIGN) { return compile_index_assign(c, get_index_assign_node(c.arena, node)); }
+    if (base == NODE_SLICE_ACCESS) { return compile_slice_access(c, get_slice_access_node(c.arena, node), false); }
+    if (base == NODE_MAP_LIT) { return compile_map_lit(c, get_map_lit_node(c.arena, node)); }
+    if (base == NODE_ENUM_DEF) { return compile_enum_def(c, get_enum_def_node(c.arena, node)); }
+    if (base == NODE_TRY_UNWRAP) { return compile_try_unwrap(c, get_try_unwrap_node(c.arena, node)); }
+    if (base == NODE_CATCH) { return compile_catch(c, get_catch_node(c.arena, node)); }
+    if (base == NODE_THROW) { return compile_throw(c, get_throw_node(c.arena, node)); }
 
     // function and closure
     if (base == NODE_FUNC_DEF) {
-            let func_def: FunctionDefNode = node;
+            let func_def: FunctionDefNode = get_func_def_node(c.arena, node);
             if (c.scope_depth == 0) {
                 compile_func_def(c, func_def);
                 return null;
@@ -5436,16 +5442,16 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
 
     // ptr
-    if (base == NODE_PTR_ASSIGN) {return compile_ptr_assign(c, node);}
+    if (base == NODE_PTR_ASSIGN) { return compile_ptr_assign(c, get_ptr_assign_node(c.arena, node)); }
     // ref
     if (base == NODE_REF) {
-        let r_node: RefNode = node;
+        let r_node: RefNode = get_ref_node(c.arena, node);
 
         if (reject_const_write(c, r_node.node, r_node.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
 
-        let ref_base: Int = node_kind(r_node.node);
+        let ref_base: Int = node_tag(r_node.node);
         if (ref_base == NODE_SLICE_ACCESS) {
-            let slice_node: SliceAccessNode = r_node.node;
+            let slice_node: SliceAccessNode = get_slice_access_node(c.arena, r_node.node);
             return compile_slice_access(c, slice_node, true);
         }
 
@@ -5457,7 +5463,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
     // deref
     if (base == NODE_DEREF) {
-        let d_node: DerefNode = node;
+        let d_node: DerefNode = get_deref_node(c.arena, node);
         let res: CompileResult = compile_node(c, d_node.node);
         if (res is null || res.type == TYPE_POISON || res.reg == "") {
             return CompileResult(reg="poison", type=TYPE_POISON);
@@ -5497,7 +5503,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_IMPORT) { 
-        compile_import(c, node);
+        compile_import(c, get_import_node(c.arena, node));
         return void_result();
     }
     
@@ -5510,7 +5516,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_IS || base == NODE_IS_NOT) {
-        let b_node: BinOpNode = node;
+        let b_node: BinOpNode = get_binop_node(c.arena, node);
         let lhs_res: CompileResult = compile_node(c, b_node.left);
         let rhs_res: CompileResult = compile_node(c, b_node.right);
 
@@ -5576,7 +5582,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_INT) {
-        let n: IntNode = node;
+        let n: IntNode = get_int_node(c.arena, node);
         let raw_val: String = n.tok.value;
         let t_id: Int = c.expected_type;
         
@@ -5690,12 +5696,12 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         return CompileResult(reg="" + parsed_val, type=t_id); 
     }
     if (base == NODE_CHAR) {
-        let cn: CharNode = node;
+        let cn: CharNode = get_char_node(c.arena, node);
         let char_val: Int = string_to_int(cn.tok.value, cn.pos);
         return CompileResult(reg="" + char_val, type=TYPE_CHAR);
     }
     if (base == NODE_FLOAT) {
-        let n: FloatNode = node;
+        let n: FloatNode = get_float_node(c.arena, node);
         let val_str: String = n.tok.value;
         let is_f32: Bool = false;
         
@@ -5713,14 +5719,14 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_BOOL) {
-        let b: BooleanNode = node;
+        let b: BooleanNode = get_bool_node(c.arena, node);
         let val_str: String = "0";
         if (b.value == 1) { val_str = "1"; }
         return CompileResult(reg=val_str, type=TYPE_BOOL);
     }
 
     if (base == NODE_VAR_ACCESS) {
-        let v: VarAccessNode = node;
+        let v: VarAccessNode = get_var_access_node(c.arena, node);
         let var_name: String = v.name_tok.value; 
         
         let info: SymbolInfo = find_symbol(c, var_name);
@@ -5788,17 +5794,17 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_VAR_ASSIGN) {
-        return compile_var_assign(c, node);
+        return compile_var_assign(c, get_var_assign_node(c.arena, node));
     }
 
     if (base == NODE_CALL) {
-        let n_call: CallNode = node;
-        let callee_node: Struct = n_call.callee;
-        let callee: Int = node_kind(callee_node);
+        let n_call: CallNode = get_call_node(c.arena, node);
+        let callee_node: NodeID = n_call.callee;
+        let callee: Int = node_tag(callee_node);
         if (callee == NODE_GENERIC_TYPE) {
-            let generic_callee: GenericTypeNode = callee_node;
+            let generic_callee: GenericTypeNode = get_generic_type_node(c.arena, callee_node);
             callee_node = generic_callee.base_type;
-            callee = node_kind(callee_node);
+            callee = node_tag(callee_node);
         }
 
         let func_name: String = "";
@@ -5806,9 +5812,9 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         let is_package_call: Bool = false;
 
         if (callee == NODE_FIELD_ACCESS) {
-            let f_acc: FieldAccessNode = callee_node;
+            let f_acc: FieldAccessNode = get_field_access_node(c.arena, callee_node);
 
-            let obj_base_pre: Int = node_kind(f_acc.obj);
+            let obj_base_pre: Int = node_tag(f_acc.obj);
             if (obj_base_pre == NODE_SUPER) {
                 let self_info: SymbolInfo = find_symbol(c, "self");
                 if (self_info is null) { throw_invalid_syntax(n_call.pos, "Cannot use 'super' outside of a method."); }
@@ -5843,7 +5849,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 let sig: String = get_func_sig_str(c, f_info);
                 let args_str: String = get_llvm_type_str(c, curr_class.parent_id) + " " + casted_self.reg;
 
-                let args: Vector(Struct) = n_call.args;
+                let args: Vector(ArgNode) = n_call.args;
                 let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
                 let arg_idx: Int = 0;
                 let owned_args: Vector(Struct) = [];
@@ -5899,16 +5905,16 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
             let is_module_path: Bool = true;
             let path_parts: Vector(String) = [];
-            let curr_obj: Struct = f_acc.obj;
-            let curr_base: Int = node_kind(curr_obj);
+            let curr_obj: NodeID = f_acc.obj;
+            let curr_base: Int = node_tag(curr_obj);
             while (curr_base == NODE_FIELD_ACCESS) {
-                let inner_f: FieldAccessNode = curr_obj;
+                let inner_f: FieldAccessNode = get_field_access_node(c.arena, curr_obj);
                 path_parts.append(inner_f.field_name);
                 curr_obj = inner_f.obj;
-                curr_base = node_kind(curr_obj);
+                curr_base = node_tag(curr_obj);
             }
             if (curr_base == NODE_VAR_ACCESS) {
-                let inner_v: VarAccessNode = curr_obj;
+                let inner_v: VarAccessNode = get_var_access_node(c.arena, curr_obj);
                 let root_name: String = inner_v.name_tok.value;
                 if (find_symbol(c, root_name) is null) {
                     let module_prefix: String = c.current_file_visible_prefixes.lookup(root_name);
@@ -5971,7 +5977,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
 
         if (callee == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = callee_node;
+            let v_node: VarAccessNode = get_var_access_node(c.arena, callee_node);
             func_name = v_node.name_tok.value;
         }
 
@@ -5981,7 +5987,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let types: Vector(Struct) = resolve_generic_constructor_args(c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
             if (types is null) { return CompileResult(reg="poison", type=TYPE_POISON); }
 
-            let template_base: Int = node_kind(generic_type_template.node);
+            let template_base: Int = node_tag(generic_type_template.node);
             let instance_type: Int = 0;
             if (template_base == NODE_CLASS_DEF) {
                 instance_type = register_generic_class(c, generic_type_template, types, n_call.pos);
@@ -6023,7 +6029,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let is_cast: Bool = cast_target != 0;
 
             if is_cast {
-                let args: Vector(Struct) = n_call.args;
+                let args: Vector(ArgNode) = n_call.args;
                 let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
                 if (reject_named_args(args, n_call.pos, "a type conversion")) { return CompileResult(reg="poison", type=TYPE_POISON); }
                 if (a_len != 1) {
@@ -6036,7 +6042,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 }
                 let old_exp: Int = c.expected_type;
                 c.expected_type = 0;
-                let arg_base: Int = node_kind(arg_curr.val);
+                let arg_base: Int = node_tag(arg_curr.val);
                 if (arg_base == NODE_INT && is_integer_type(cast_target) &&
                     cast_target != TYPE_CHAR) {
                     c.expected_type = cast_target;
@@ -6047,8 +6053,8 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 let source_info: StructInfo = c.struct_id_map.lookup("" + val_res.type);
                 let conversion: FuncInfo = find_class_conversion(source_info, cast_target);
                 if (conversion is !null) {
-                    let no_args: Vector(Struct) = [];
-                    let conversion_call: CallNode = CallNode(type=NODE_CALL, callee=null, args=no_args, type_args=null, pos=n_call.pos, preserve_fallible=true);
+                    let no_args: Vector(ArgNode) = [];
+                    let conversion_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=no_args, type_args=null, pos=n_call.pos, preserve_fallible=true);
                     let converted: CompileResult = compile_class_method_call(
                         c,
                         source_info,
@@ -6062,7 +6068,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                     return converted;
                 }
 
-                if (is_numeric_literal_expression(arg_curr.val)) {
+                if (is_numeric_literal_expression(c, arg_curr.val)) {
                     return compile_type_cast(c, val_res, cast_target, n_call.pos);
                 }
                 return compile_explicit_type_cast(c, val_res, cast_target, n_call.pos, n_call.preserve_fallible);
@@ -6093,7 +6099,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                 }
             }
             if is_package_call {
-                let f_acc: FieldAccessNode = n_call.callee;
+                let f_acc: FieldAccessNode = get_field_access_node(c.arena, n_call.callee);
                 if (f_acc.field_name.starts_with("__")) {
                     throw_name_error(n_call.pos, "Function '" + func_name + "' is not defined.");
                     return void_result();
@@ -6158,7 +6164,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             }
 
             let args_str: String = "";
-            let args: Vector(Struct) = n_call.args;
+            let args: Vector(ArgNode) = n_call.args;
             let a_len: Int = 0;
             if (args is !null) { a_len = args.length(); }
             let arg_idx: Int = 0;
@@ -6288,7 +6294,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
         else {
             if (callee == NODE_VAR_ACCESS) {
-                let v_node: VarAccessNode = callee_node;
+                let v_node: VarAccessNode = get_var_access_node(c.arena, callee_node);
                 let s_info: StructInfo = c.struct_table.lookup(v_node.name_tok.value);
                 if (s_info is !null) {
                     if (s_info.is_class) {
@@ -6308,7 +6314,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
             if (ptr_type == TYPE_GENERIC_FUNCTION || ptr_type == TYPE_GENERIC_METHOD) {
                 if (callee == NODE_VAR_ACCESS) {
-                    let v_node: VarAccessNode = callee_node;
+                    let v_node: VarAccessNode = get_var_access_node(c.arena, callee_node);
                     let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
                     if (info is !null && info.origin_type >= 100) {
                         let f_ret_info: SymbolInfo = c.func_ret_map.lookup("" + info.origin_type);
@@ -6372,7 +6378,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                     c.output_file.write(c.indent + raw_func_ptr + " = load i8*, i8** " + f_ptr_addr + "\n");
                 }
 
-                let args: Vector(Struct) = n_call.args;
+                let args: Vector(ArgNode) = n_call.args;
                 let a_len: Int = 0; if (args is !null) { a_len = args.length(); }
                 
                 let expected_args: Vector(Struct) = null;
@@ -6518,7 +6524,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_BREAK) {
-        let n_break: BreakNode = node;
+        let n_break: BreakNode = get_break_node(c.arena, node);
         if (c.loop_stack is null) {
             throw_invalid_syntax(n_break.pos, "'break' outside of loop. ");
             return void_result();
@@ -6531,7 +6537,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_CONTINUE) {
-        let n_cont: ContinueNode = node;
+        let n_cont: ContinueNode = get_continue_node(c.arena, node);
         if (c.loop_stack is null) {
             throw_invalid_syntax(n_cont.pos, "'continue' outside of loop. ");
             return void_result();
@@ -6544,17 +6550,17 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_POSTFIX) {
-        let u: PostfixOpNode = node;
+        let u: PostfixOpNode = get_postfix_node(c.arena, node);
         let op_type: Int = u.op_tok.type;
 
-        let var_node: Int = node_kind(u.node);
+        let var_node: Int = node_tag(u.node);
 
         let target_reg: String = "";
         let target_type: Int = 0;
         let type_str: String = "";
 
         if (var_node == NODE_VAR_ACCESS) {
-            let v_acc: VarAccessNode = u.node;
+            let v_acc: VarAccessNode = get_var_access_node(c.arena, u.node);
             let var_name: String = v_acc.name_tok.value;
 
             let info: SymbolInfo = find_symbol(c, var_name);
@@ -6573,7 +6579,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             
         }
         else if (var_node == NODE_FIELD_ACCESS) {
-            let f_acc: FieldAccessNode = u.node;
+            let f_acc: FieldAccessNode = get_field_access_node(c.arena, u.node);
             if (reject_const_write(c, f_acc.obj, u.pos)) { return CompileResult(reg="poison", type=TYPE_POISON); }
             let obj_res: CompileResult = compile_node(c, f_acc.obj);
             if (obj_res is !null && obj_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
@@ -6582,9 +6588,9 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             let obj_reg: String = obj_res.reg;
             
             if (type_id == TYPE_GENERIC_STRUCT) {
-                let base_obj: Int = node_kind(f_acc.obj);
+                let base_obj: Int = node_tag(f_acc.obj);
                 if (base_obj == NODE_VAR_ACCESS) {
-                    let v_node: VarAccessNode = f_acc.obj;
+                    let v_node: VarAccessNode = get_var_access_node(c.arena, f_acc.obj);
                     let info: SymbolInfo = find_symbol(c, v_node.name_tok.value);
                     if (info is !null && info.origin_type >= 100) {
                         type_id = info.origin_type;
@@ -6648,7 +6654,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     }
 
     if (base == NODE_UNARYOP) {
-        let u: UnaryOpNode = node;
+        let u: UnaryOpNode = get_unary_node(c.arena, node);
         let op_type: Int = u.op_tok.type; 
         
         let operand: CompileResult = compile_node(c, u.node);
@@ -6697,7 +6703,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     return null;
 }
 
-func compile_string_method_call(c: Compiler, obj_node: Struct, method_name: String, call_node: CallNode) -> CompileResult {
+func compile_string_method_call(c: Compiler, obj_node: NodeID, method_name: String, call_node: CallNode) -> CompileResult {
     // check if method exists before compiling obj_node to avoid double compile
     let target_func: String = "string_" + method_name;
     let real_func_name: String = c.compiler_link.lookup(target_func);
@@ -6719,7 +6725,7 @@ func compile_string_method_call(c: Compiler, obj_node: Struct, method_name: Stri
 
     // White Language methods receive the string object; native adapters receive its buffer
     let args_str: String = "%struct.$String* " + obj_res.reg;
-    let args: Vector(Struct) = call_node.args;
+    let args: Vector(ArgNode) = call_node.args;
     let a_len: Int = 0;
     if (args is !null) { a_len = args.length(); }
     let native_args: BoundCallArgs = bind_native_args(args, f_info, 1, call_node.pos);
@@ -6801,7 +6807,7 @@ func compile_start(c: Compiler) -> Void {
         type_id=variant_id, 
         fields=v_fields, 
         llvm_name="%struct.$Variant", 
-        init_body=null, 
+        init_body=NO_NODE, 
         is_class=false, 
         vtable_name="", 
         parent_id=0, 
@@ -6821,7 +6827,7 @@ func compile_start(c: Compiler) -> Void {
         type_id=TYPE_STRING, 
         fields=null, 
         llvm_name="%struct.$String", 
-        init_body=null, is_class=false, 
+        init_body=NO_NODE, is_class=false, 
         vtable_name="", 
         parent_id=0, 
         vtable=null, 
@@ -6840,7 +6846,7 @@ func compile_start(c: Compiler) -> Void {
     c.output_file.write("%struct.$String = type { i8*, i32, i32 }\n\n");
 }
 
-func compile(c: Compiler, node: Struct) -> Void {
+func compile(c: Compiler, node: NodeID) -> Void {
     // discover every module before lowering; import order must not change symbol visibility
     compile_start(c);
 
@@ -6848,7 +6854,7 @@ func compile(c: Compiler, node: Struct) -> Void {
     let fake_pos: Position = Position(idx=0, ln=0, col=0, text="", fn="<prelude>");
     let star_tok: Token = Token(type=TOK_MUL, value="*", line=0, col=0);
     let star_sym: ImportSymbolNode = ImportSymbolNode(name_tok=star_tok, alias_tok=null);
-    let fake_syms: Vector(Struct) = [];
+    let fake_syms: Vector(ImportSymbolNode) = [];
     fake_syms.append(star_sym);
 
     // error is a language-level prelude item, not part of the builtin namespace
@@ -6978,7 +6984,7 @@ func emit_pending_generic_funcs(c: Compiler) -> Void {
         index++;
         c.generic_func_emitted = index;
         let template: GenericTemplate = instance.template;
-        let node: FunctionDefNode = template.node;
+        let node: FunctionDefNode = get_func_def_node(c.arena, template.node);
         let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
         let previous: GenericTemplate = use_generic_context(c, template, instance.bindings);
         let previous_key: String = c.generic_func_key;
@@ -7001,7 +7007,7 @@ func emit_pending_generic_classes(c: Compiler) -> Void {
         index++;
         c.generic_class_emitted = index;
         let template: GenericTemplate = instance.template;
-        let node: ClassDefNode = template.node;
+        let node: ClassDefNode = get_class_def_node(c.arena, template.node);
         let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
         let previous: GenericTemplate = use_generic_context(c, template, instance.bindings);
         let previous_type: Int = c.generic_class_type;
@@ -7024,7 +7030,7 @@ func emit_pending_generic_methods(c: Compiler) -> Void {
         index++;
         c.generic_method_emitted = index;
         let template: GenericTemplate = instance.template;
-        let node: MethodDefNode = template.node;
+        let node: MethodDefNode = get_method_def_node(c.arena, template.node);
         let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
         let previous: GenericTemplate = use_generic_context(c, template, instance.bindings);
         let previous_key: String = c.generic_method_key;

@@ -66,9 +66,9 @@ func is_generic_class(c: Compiler, info: StructInfo) -> Bool {
     if (info is null) { return false; }
 
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
-    if (template is null || template.node is null) { return false; }
+    if (template is null || !has_node(template.node)) { return false; }
 
-    let base: Int = node_kind(template.node);
+    let base: Int = node_tag(template.node);
     return base == NODE_CLASS_DEF;
 }
 

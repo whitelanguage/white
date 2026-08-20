@@ -1,5 +1,6 @@
 // compiler/lowering/casts.wl
 import * from "../../frontend/ast.wl"
+import * from "../../frontend/arena.wl"
 import * from "../context.wl"
 import * from "../../frontend/tokens.wl"
 import * from "../../frontend/diagnostics.wl"
@@ -367,7 +368,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
 
     if (ex_info is !null && ex_info.is_interface) {
         if (val_info is !null && val_info.is_class) {
-            if (interface_uses_self(ex_info)) {
+            if (interface_uses_self(c, ex_info)) {
                 throw_type_error(pos, "interface '" + interface_diagnostic_name(c, expected_type) + "' uses Self and can only be used as a static constraint.");
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
@@ -688,26 +689,26 @@ func float_integer_limit(type_id: Int) -> Float {
     return limit;
 }
 
-func is_numeric_literal_expression(node: Struct) -> Bool {
-    if (node is null) { return false; }
-    let base: Int = node_kind(node);
+func is_numeric_literal_expression(c: Compiler, node: NodeID) -> Bool {
+    if (!has_node(node)) { return false; }
+    let base: Int = node_tag(node);
     if (base == NODE_INT || base == NODE_FLOAT ||
         base == NODE_CHAR || base == NODE_BOOL) {
         return true;
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = node;
+        let unary: UnaryOpNode = get_unary_node(c.arena, node);
         if (unary.op_tok.type == TOK_PLUS || unary.op_tok.type == TOK_SUB) {
-            return is_numeric_literal_expression(unary.node);
+            return is_numeric_literal_expression(c, unary.node);
         }
     }
     return false;
 }
 
-func validate_explicit_literal_cast(c: Compiler, node: Struct, target_type: Int, pos: Position) -> Bool {
+func validate_explicit_literal_cast(c: Compiler, node: NodeID, target_type: Int, pos: Position) -> Bool {
     target_type = get_repr_type(c, target_type);
-    if (node is null) { return true; }
-    let base: Int = node_kind(node);
+    if (!has_node(node)) { return true; }
+    let base: Int = node_tag(node);
     let magnitude: UInt128 = UInt128(0);
     let negative: Bool = false;
     let literal_text: String = "";
@@ -715,31 +716,31 @@ func validate_explicit_literal_cast(c: Compiler, node: Struct, target_type: Int,
     let float_value: Float = 0.0;
 
     if (base == NODE_INT) {
-        let integer: IntNode = node;
+        let integer: IntNode = get_int_node(c.arena, node);
         literal_text = integer.tok.value;
         magnitude = parse_const_uint128(integer.tok.value, integer.pos);
     } else if (base == NODE_FLOAT) {
-        let float_node: FloatNode = node;
+        let float_node: FloatNode = get_float_node(c.arena, node);
         literal_text = float_node.tok.value;
         float_value = parse_decimal_float_literal(float_node.tok.value);
         is_float_literal = true;
     } else if (base == NODE_CHAR) {
-        let char_node: CharNode = node;
+        let char_node: CharNode = get_char_node(c.arena, node);
         literal_text = "'" + char_node.tok.value + "'";
         magnitude = UInt128(string_to_int(char_node.tok.value, char_node.pos));
     } else if (base == NODE_BOOL) {
         return true;
     } else if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = node;
-        let inner_base: Int = node_kind(unary.node);
+        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let inner_base: Int = node_tag(unary.node);
         if (unary.op_tok.type != TOK_SUB) { return true; }
         if (inner_base == NODE_INT) {
-            let integer: IntNode = unary.node;
+            let integer: IntNode = get_int_node(c.arena, unary.node);
             literal_text = "-" + integer.tok.value;
             magnitude = parse_const_uint128(integer.tok.value, integer.pos);
             negative = magnitude != UInt128(0);
         } else if (inner_base == NODE_FLOAT) {
-            let float_node: FloatNode = unary.node;
+            let float_node: FloatNode = get_float_node(c.arena, unary.node);
             literal_text = "-" + float_node.tok.value;
             float_value = 0.0 - parse_decimal_float_literal(float_node.tok.value);
             is_float_literal = true;

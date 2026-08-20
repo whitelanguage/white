@@ -1,6 +1,6 @@
 // frontend/ast.wl
 import Token from "tokens.wl"
-import Position from "diagnostics.wl"
+import Position, throw_internal_compiler_error from "diagnostics.wl"
 
 const NODE_INT            : Int = 1;
 const NODE_FLOAT          : Int = 2;
@@ -62,11 +62,34 @@ const NODE_TYPE_LAYOUT    : Int = 58;
 const NODE_GENERIC_TYPE   : Int = 59;
 const NODE_TYPE_DECL      : Int = 60;
 
-func node_kind(node: Struct) -> Int {
-// ast nodes share the integer tag in their first field
-    if (node is null) { return 0; }
-    let ptr fields: Int = AnyPtr(node);
-    return fields[0];
+
+
+type NodeID = UInt32;
+
+const NO_NODE: NodeID = NodeID(0U);
+const NODE_KIND_SHIFT: UInt32 = 24U;
+const NODE_SLOT_MASK: UInt32 = 0x00ffffffU;
+const NODE_SLOT_LIMIT: Int = 16777215;
+
+func node_tag(node: NodeID) -> Int {
+// the upper byte is the tag, zero is reserved for an absent node
+    return Int(UInt32(node) >> NODE_KIND_SHIFT);
+}
+
+func node_slot(node: NodeID) -> Int {
+    return Int((UInt32(node) & NODE_SLOT_MASK) - 1U);
+}
+
+func make_node_id(kind: Int, slot: Int) -> NodeID {
+    if (kind <= 0 || kind > 255 || slot < 0 || slot >= NODE_SLOT_LIMIT) {
+        throw_internal_compiler_error(null, "AST arena node limit exceeded.");
+        return NO_NODE;
+    }
+    return NodeID((UInt32(kind) << NODE_KIND_SHIFT) | UInt32(slot + 1));
+}
+
+func has_node(node: NodeID) -> Bool {
+    return node != NO_NODE;
 }
 
 struct IntNode(
@@ -96,22 +119,22 @@ struct StringNode(
 
 struct BinOpNode(
     type     : Int,
-    left     : Struct,
+    left     : NodeID,
     op_tok   : Token,    // Token object
-    right    : Struct, 
+    right    : NodeID, 
     pos      : Position
 )
 
 struct UnaryOpNode(
     type   : Int,
     op_tok : Token,
-    node   : Struct, 
+    node   : NodeID, 
     pos    : Position
 )
 
 struct PostfixOpNode(
     type   : Int,     // NODE_POSTFIX
-    node   : Struct,  // VarAccessNode
+    node   : NodeID,  // VarAccessNode
     op_tok : Token,   // ++ or --
     pos    : Position
 )
@@ -119,10 +142,10 @@ struct PostfixOpNode(
 struct VarDeclareNode(
     type         : Int,    // NODE_VAR_DECL
     name_tok     : Token,  // Variable Name Token
-    type_node    : Struct,  // Type Name Token
-    value        : Struct, 
+    type_node    : NodeID,  // Type Name Token
+    value        : NodeID, 
     is_const     : Bool, 
-    annotations  : Vector(Struct),
+    annotations  : Vector(AnnotationNode),
     pos          : Position,    // Error position
     alloc_id     : Int
 )
@@ -136,29 +159,29 @@ struct VarAccessNode(
 struct VarAssignNode(
     type      : Int,       // NODE_VAR_ASSIGN
     name_tok  : Token,
-    value     : Struct,
+    value     : NodeID,
     pos       : Position
 )
 
-struct StmtListNode(stmt: Struct)
+struct StmtListNode(stmt: NodeID)
 
 struct BlockNode(
     type  : Int,      // NODE_BLOCK
-    stmts : Vector(Struct)   // StmtListNode head node
+    stmts : Vector(NodeID)   // StmtListNode head node
 )
 
 struct IfNode(
     type      : Int,       // NODE_IF
-    condition : Struct,    // Boolean expression
-    body      : Struct,    // BlockNode
-    else_body : Struct,    // BlockNode or IfNode (else if) or null
+    condition : NodeID,    // Boolean expression
+    body      : NodeID,    // BlockNode
+    else_body : NodeID,    // BlockNode or IfNode (else if) or null
     pos       : Position
 )
 
 struct WhileNode(
     type      : Int,       // NODE_WHILE
-    condition : Struct,    // Boolean expression
-    body      : Struct,    // BlockNode
+    condition : NodeID,    // Boolean expression
+    body      : NodeID,    // BlockNode
     pos       : Position
 )
 
@@ -174,24 +197,24 @@ struct ContinueNode(
 
 struct ForNode(
     type : Int,        // NODE_FOR
-    init : Struct,
-    cond : Struct,
-    step : Struct,
-    body : Struct,
+    init : NodeID,
+    cond : NodeID,
+    step : NodeID,
+    body : NodeID,
     pos  : Position
 )
 
 struct CallNode(
     type   : Int,    // NODE_CALL
-    callee : Struct,
-    args   : Vector(Struct),
-    type_args : Vector(Struct),
+    callee : NodeID,
+    args   : Vector(ArgNode),
+    type_args : Vector(NodeID),
     pos    : Position,
     preserve_fallible : Bool
 )
 
 struct ArgNode(
-    val  : Struct, // expression
+    val  : NodeID, // expression
     name : String,
     is_spread : Bool
 )
@@ -199,7 +222,7 @@ struct ArgNode(
 struct TypeDeclNode(
     type        : Int,
     name_tok    : Token,
-    target_type : Struct,
+    target_type : NodeID,
     is_alias    : Bool,
     pos         : Position
 )
@@ -207,25 +230,25 @@ struct TypeDeclNode(
 struct ParamNode(
     type     : Int,    // NODE_PARAM
     name_tok : Token,
-    type_tok : Struct,
+    type_tok : NodeID,
     pos      : Position,
     is_variadic : Bool,
-    default_val : Struct
+    default_val : NodeID
 )
 
 
 struct ParamListNode(
-    param : Struct // ParamNode
+    param : ParamNode
 )
 
 struct BoundCallArgs(
-    ordered : Vector(Struct),
-    variadic : Vector(Struct)
+    ordered : Vector(ArgNode),
+    variadic : Vector(ArgNode)
 )
 
 struct GenericParamNode(
     name_tok : Token,
-    constraints : Vector(Struct),
+    constraints : Vector(NodeID),
     pos : Position
 )
 
@@ -234,26 +257,26 @@ struct GenericParamNode(
 struct FunctionDefNode(
     type     : Int,    // NODE_FUNC_DEF
     name_tok : Token,
-    type_params : Vector(Struct),
-    params   : Vector(Struct), // ParamListNode
-    ret_type_tok : Struct,
-    body     : Struct,
-    annotations : Vector(Struct),
+    type_params : Vector(GenericParamNode),
+    params   : Vector(ParamNode),
+    ret_type_tok : NodeID,
+    body     : NodeID,
+    annotations : Vector(AnnotationNode),
     pos      : Position
 )
 
 struct ReturnNode(
     type  : Int,       // NODE_RETURN
-    value : Struct,
+    value : NodeID,
     pos   : Position
 )
 
 // function type syntax: Function(Type)
 struct FunctionTypeNode(
     type        : Int,    // NODE_FUNCTION_TYPE
-    arg_types   : Vector(Struct),
+    arg_types   : Vector(NodeID),
     arg_names   : Vector(String),
-    return_type : Struct,
+    return_type : NodeID,
     variadic_param : Int,
     pos         : Position
 )
@@ -261,62 +284,62 @@ struct FunctionTypeNode(
 struct StructDefNode(
     type     : Int,    // NODE_STRUCT_DEF
     name_tok : Token,
-    type_params : Vector(Struct),
-    fields   : Vector(Struct),
-    body     : Struct,
-    annotations : Vector(Struct),
+    type_params : Vector(GenericParamNode),
+    fields   : Vector(ParamNode),
+    body     : NodeID,
+    annotations : Vector(AnnotationNode),
     pos      : Position
 )
 
 struct GenericTypeNode(
     type : Int,
-    base_type : Struct,
-    type_args : Vector(Struct),
+    base_type : NodeID,
+    type_args : Vector(NodeID),
     pos : Position
 )
 
 struct FieldAccessNode(
     type : Int,      // NODE_FIELD_ACCESS
-    obj : Struct,
+    obj : NodeID,
     field_name : String,
     pos : Position
 )
 
 struct FieldAssignNode(type : Int,
-    obj : Struct,      // NODE_FIELD_ASSIGN
+    obj : NodeID,      // NODE_FIELD_ASSIGN
     field_name : String,
-    value : Struct,
+    value : NodeID,
     pos : Position
 )
 
 
 struct PointerTypeNode(
     type      : Int,    // NODE_PTR_TYPE
-    base_type : Struct,
+    base_type : NodeID,
     level     : Int,    // depth
     pos       : Position
 )
 struct RefNode(
     type : Int, // NODE_REF
-    node : Struct,
+    node : NodeID,
     pos  : Position
 )
 struct DerefNode(
     type  : Int, // NODE_DEREF
-    node  : Struct,
+    node  : NodeID,
     level : Int,
     pos   : Position
 )
 
 struct ThrowNode(
     type  : Int, // NODE_THROW
-    value : Struct,
+    value : NodeID,
     pos   : Position
 )
 struct PtrAssignNode(
     type  : Int, // NODE_PTR_ASSIGN
-    pointer   : Struct, // DerefNode
-    value : Struct,
+    pointer   : NodeID, // DerefNode
+    value : NodeID,
     pos   : Position
 )
 struct NullPtrNode(
@@ -331,7 +354,7 @@ struct NullNode(
 
 struct ExternBlockNode(
     type      : Int, // NODE_EXTERN_BLOCK
-    funcs     : Vector(Struct),
+    funcs     : Vector(NodeID),
     abi_name  : String,
     link_name : String,
     pos       : Position
@@ -340,8 +363,8 @@ struct ExternBlockNode(
 struct ExternFuncNode(
     type         : Int, // NODE_EXTERN_FUNC
     name_tok     : Token,
-    params       : Vector(Struct),
-    ret_type_tok : Struct,
+    params       : Vector(ParamNode),
+    ret_type_tok : NodeID,
     is_varargs   : Bool,    // 1 if has '...', else 0
     abi_name     : String,
     link_name    : String,
@@ -350,29 +373,29 @@ struct ExternFuncNode(
 
 struct VectorTypeNode(
     type         : Int, // NODE_VECTOR_TYPE
-    element_type : Struct, // Type Node (e.g. IntNode)
+    element_type : NodeID, // Type Node (e.g. IntNode)
     pos          : Position
 )
 
 struct VectorLitNode(
     type     : Int, // NODE_VECTOR_LIT
-    elements : Vector(Struct),
+    elements : Vector(ArgNode),
     count    : Int,
     pos      : Position
 )
 
 struct IndexAccessNode(
     type       : Int, // NODE_INDEX_ACCESS
-    target     : Struct,
-    index_node : Struct,
+    target     : NodeID,
+    index_node : NodeID,
     pos        : Position
 )
 
 struct IndexAssignNode(
     type       : Int, // NODE_INDEX_ASSIGN
-    target     : Struct,
-    index_node : Struct,
-    value      : Struct,
+    target     : NodeID,
+    index_node : NodeID,
+    value      : NodeID,
     pos        : Position
 )
 
@@ -384,7 +407,7 @@ struct ImportSymbolNode(
 struct ImportNode(
     type       : Int,    // NODE_IMPORT
     path_tok   : Token,
-    symbols    : Vector(Struct),
+    symbols    : Vector(ImportSymbolNode),
     alias_tok  : Token,
     pos        : Position
 )
@@ -393,24 +416,24 @@ struct ClassDefNode(
     type : Int, // NODE_CLASS_DEF
     pos : Position,
     name_tok : Token,
-    type_params : Vector(Struct),
-    parent_tok : Struct,
-    interfaces : Vector(Struct),
-    fields : Vector(Struct),
-    methods : Vector(Struct),
-    annotations : Vector(Struct)
+    type_params : Vector(GenericParamNode),
+    parent_tok : NodeID,
+    interfaces : Vector(NodeID),
+    fields : Vector(NodeID),
+    methods : Vector(NodeID),
+    annotations : Vector(AnnotationNode)
 )
 
 struct MethodDefNode(
     type : Int, // NODE_METHOD_DEF
     pos : Position,
     name_tok : Token,
-    type_params : Vector(Struct),
-    params : Vector(Struct),
-    return_type : Struct,
-    body : Struct,
+    type_params : Vector(GenericParamNode),
+    params : Vector(ParamNode),
+    return_type : NodeID,
+    body : NodeID,
     is_override : Bool,
-    annotations : Vector(Struct)
+    annotations : Vector(AnnotationNode)
 )
 
 struct SuperNode(
@@ -420,48 +443,48 @@ struct SuperNode(
 
 struct MethodTypeNode(
     type        : Int,    // NODE_METHOD_TYPE
-    arg_types   : Vector(Struct),
+    arg_types   : Vector(NodeID),
     arg_names   : Vector(String),
-    return_type : Struct,
+    return_type : NodeID,
     variadic_param : Int,
     pos         : Position
 )
 
 struct ArrayTypeNode(
     type      : Int,    // NODE_ARRAY_TYPE
-    base_type : Struct,
+    base_type : NodeID,
     size_tok  : Token,
     pos       : Position
 )
 
 struct SliceTypeNode(
     type         : Int, // NODE_SLICE_TYPE
-    element_type : Struct,
+    element_type : NodeID,
     pos          : Position
 )
 
 struct SliceAccessNode(
     type : Int, // NODE_SLICE_ACCESS
-    target : Struct, // data
-    start_idx : Struct,
-    end_idx : Struct,
+    target : NodeID, // data
+    start_idx : NodeID,
+    end_idx : NodeID,
     pos : Position
 )
 
 struct MapPairNode(
-    key   : Struct,
-    value : Struct
+    key   : NodeID,
+    value : NodeID
 )
 struct MapLitNode(
     type  : Int, // NODE_MAP_LIT
-    pairs : Vector(Struct), // MapPairNode
+    pairs : Vector(MapPairNode),
     pos   : Position
 )
 
 struct AnnotationNode(
     type : Int, // NODE_ANNOTATION
     name : String,
-    args : Vector(Struct),
+    args : Vector(ArgNode),
     pos  : Position
 )
 
@@ -474,8 +497,8 @@ struct CharNode(
 struct EnumDefNode(
     type     : Int, // NODE_ENUM_DEF
     name_tok : Token,
-    fields   : Vector(Struct),
-    annotations : Vector(Struct),
+    fields   : Vector(EnumFieldNode),
+    annotations : Vector(AnnotationNode),
     is_error : Bool,
     pos      : Position
 )
@@ -483,34 +506,34 @@ struct EnumDefNode(
 struct EnumFieldNode(
     type     : Int, // NODE_ENUM_FIELD
     name_tok : Token,
-    value    : Struct, // optional explicit Int value
+    value    : NodeID, // optional explicit Int value
     pos      : Position
 )
 
 struct TryUnwrapNode(
     type : Int, // NODE_TRY_UNWRAP
-    expr : Struct,
+    expr : NodeID,
     pos  : Position
 )
 
 struct CatchNode(
     type     : Int, // NODE_CATCH
-    stmt     : Struct,
+    stmt     : NodeID,
     err_name : Token, 
-    body     : Struct, // BlockNode
+    body     : NodeID, // BlockNode
     pos      : Position,
     alloc_id : Int
 )
 
 struct FallibleTypeNode(
     type      : Int, // NODE_FALLIBLE_TYPE
-    base_type : Struct,
+    base_type : NodeID,
     pos       : Position
 )
 
 struct TypeLayoutNode(
     type : Int, // NODE_TYPE_LAYOUT
-    type_node : Struct,
+    type_node : NodeID,
     is_align : Bool,
     pos : Position
 )
@@ -518,9 +541,9 @@ struct TypeLayoutNode(
 struct InterfaceDefNode(
     type     : Int, // NODE_INTERFACE_DEF
     name_tok : Token,
-    type_params : Vector(Struct),
-    interfaces : Vector(Struct),
-    methods  : Vector(Struct),
-    annotations : Vector(Struct),
+    type_params : Vector(GenericParamNode),
+    interfaces : Vector(NodeID),
+    methods  : Vector(NodeID),
+    annotations : Vector(AnnotationNode),
     pos      : Position
 )

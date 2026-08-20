@@ -3,17 +3,19 @@ import "tokens.wl" as WhitelangTokens
 import "lexer.wl" as WhitelangLexer
 import * from "tokens.wl"
 import * from "ast.wl"
+import * from "arena.wl"
 import * from "diagnostics.wl"
 
 struct Parser(
     lexer: WhitelangLexer.Lexer,
     current_tok: Token,
-    nesting: Int
+    nesting: Int,
+    arena: AstArena
 )
 
 struct TypedIdent(
     name_tok: Token,
-    type_node: Struct
+    type_node: NodeID
 )
 
 const MAX_PARSE_NESTING: Int = 256;
@@ -45,24 +47,24 @@ func skip_group(p: Parser, open_type: Int, close_type: Int) -> Void {
     }
 }
 
-func nesting_fallback(p: Parser, pos: Position) -> Struct {
+func nesting_fallback(p: Parser, pos: Position) -> NodeID {
     if (p.current_tok.type == TOK_LPAREN) { skip_group(p, TOK_LPAREN, TOK_RPAREN); }
     else if (p.current_tok.type == TOK_LBRACKET) { skip_group(p, TOK_LBRACKET, TOK_RBRACKET); }
     else if (p.current_tok.type == TOK_LBRACE) { skip_group(p, TOK_LBRACE, TOK_RBRACE); }
     else if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=pos.ln, col=pos.col);
-    return IntNode(type=NODE_INT, tok=zero_tok, pos=pos);
+    return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=pos));
 }
 
-func type_nesting_fallback(p: Parser, pos: Position) -> Struct {
+func type_nesting_fallback(p: Parser, pos: Position) -> NodeID {
     if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
     let int_tok: Token = Token(type=TOK_T_INT, value="Int", line=pos.ln, col=pos.col);
-    return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=int_tok, pos=pos);
+    return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=int_tok, pos=pos));
 }
 
-func inferred_type(pos: Position) -> Struct {
+func inferred_type(p: Parser, pos: Position) -> NodeID {
     let auto_tok: Token = Token(type=TOK_IDENTIFIER, value="Auto", line=pos.ln, col=pos.col);
-    return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=auto_tok, pos=pos);
+    return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=auto_tok, pos=pos));
 }
 
 func is_name_token(token_type: Int) -> Bool {
@@ -85,8 +87,8 @@ func synchronize(p: Parser) -> Void {
     }
 }
 
-func parse_annotations(p: Parser) -> Vector(Struct) {
-    let anns: Vector(Struct) = [];
+func parse_annotations(p: Parser) -> Vector(AnnotationNode) {
+    let anns: Vector(AnnotationNode) = [];
     while (p.current_tok.type == TOK_AT) {
         let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         parser_advance(p); // skip '@'
@@ -97,7 +99,7 @@ func parse_annotations(p: Parser) -> Vector(Struct) {
         let name: String = p.current_tok.value;
         parser_advance(p); // skip identifier
         
-        let args: Vector(Struct) = [];
+        let args: Vector(ArgNode) = [];
         if (p.current_tok.type == TOK_LPAREN) {
             parser_advance(p); // skip '('
             args = parse_args(p);
@@ -113,13 +115,13 @@ func parse_annotations(p: Parser) -> Vector(Struct) {
     return anns;
 }
 
-func parse(p: Parser) -> Struct {
-    let stmts: Vector(Struct) = [];
+func parse(p: Parser) -> NodeID {
+    let stmts: Vector(NodeID) = [];
 
     while (p.current_tok.type != TOK_EOF) {
-        let stmt: Struct = null;
+        let stmt: NodeID = NO_NODE;
 
-        let anns: Vector(Struct) = [];
+        let anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
             anns = parse_annotations(p);
         }
@@ -168,20 +170,20 @@ func parse(p: Parser) -> Struct {
             synchronize(p);
             continue;
         }
-        if (stmt is !null) {
+        if (has_node(stmt)) {
             stmts.append(stmt);
         }
     }
     
-    return BlockNode(type=NODE_BLOCK, stmts=stmts);
+    return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
-func parse_type_decl(p: Parser) -> Struct {
+func parse_type_decl(p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip type
 
     let name_tok: Token = null;
-    let target_type: Struct = null;
+    let target_type: NodeID = NO_NODE;
     let is_alias: Bool = false;
 
     if (p.current_tok.type == TOK_IDENTIFIER && peek_type(p) == TOK_ASSIGN) {
@@ -194,13 +196,13 @@ func parse_type_decl(p: Parser) -> Struct {
         if (p.current_tok.type != TOK_AS) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected 'as' in type alias declaration.");
-            return null;
+            return NO_NODE;
         }
         parser_advance(p);
         if (p.current_tok.type != TOK_IDENTIFIER) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected alias name after 'as'.");
-            return null;
+            return NO_NODE;
         }
         name_tok = p.current_tok;
         is_alias = true;
@@ -214,7 +216,7 @@ func parse_type_decl(p: Parser) -> Struct {
         parser_advance(p);
     }
 
-    return TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos);
+    return add_type_decl_node(p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos));
 }
 
 func parser_advance(p: Parser) -> Void {
@@ -252,10 +254,10 @@ func consume_generic_close(p: Parser, open_type: Int, pos: Position) -> Void {
     throw_invalid_syntax(pos, "Expected '" + close_text + "' after type arguments.");
 }
 
-func parse_type_args(p: Parser) -> Vector(Struct) {
+func parse_type_args(p: Parser) -> Vector(NodeID) {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let open_type: Int = p.current_tok.type;
-    let args: Vector(Struct) = [];
+    let args: Vector(NodeID) = [];
     parser_advance(p);
 
     if (is_generic_close(p, open_type)) {
@@ -274,10 +276,10 @@ func parse_type_args(p: Parser) -> Vector(Struct) {
     return args;
 }
 
-func parse_type_params(p: Parser) -> Vector(Struct) {
+func parse_type_params(p: Parser) -> Vector(GenericParamNode) {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let open_type: Int = p.current_tok.type;
-    let params: Vector(Struct) = [];
+    let params: Vector(GenericParamNode) = [];
     let names: Dict(String, String) = Dict();
     parser_advance(p);
 
@@ -303,7 +305,7 @@ func parse_type_params(p: Parser) -> Vector(Struct) {
         }
         parser_advance(p);
 
-        let constraints: Vector(Struct) = [];
+        let constraints: Vector(NodeID) = [];
         if (p.current_tok.type == TOK_COLON) {
             parser_advance(p);
             constraints.append(parse_return_type(p));
@@ -440,24 +442,24 @@ func parse_decimal_int(p: Parser, tok: Token) -> Int {
     return res;
 }
 
-func parse_type_base(p: Parser) -> Struct {
+func parse_type_base(p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     if (!parser_enter(p, pos)) { return type_nesting_fallback(p, pos); }
-    let result: Struct = parse_type_base_inner(p);
+    let result: NodeID = parse_type_base_inner(p);
     parser_leave(p);
     return result;
 }
 
-func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
+func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
     parser_advance(p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     if (p.current_tok.type != TOK_LPAREN) {
-        return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos);
+        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
     }
     parser_advance(p);
 
-    let signature_types: Vector(Struct) = [];
+    let signature_types: Vector(NodeID) = [];
     let signature_names: Vector(String) = [];
     let variadic_param: Int = 0;
     if (p.current_tok.type != TOK_RPAREN) {
@@ -513,8 +515,8 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
     }
     parser_advance(p);
 
-    let return_type: Struct = null;
-    let arg_types: Vector(Struct) = [];
+    let return_type: NodeID = NO_NODE;
+    let arg_types: Vector(NodeID) = [];
     let arg_names: Vector(String) = [];
     if (p.current_tok.type == TOK_TYPE_ARROW) {
         parser_advance(p);
@@ -529,7 +531,7 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
         let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (signature_types.length() == 0) {
             throw_invalid_syntax(err_pos, kind + "() requires a return type after '->'.");
-            return_type = inferred_type(pos);
+            return_type = inferred_type(p, pos);
         } else {
             throw_invalid_syntax(err_pos, "Legacy " + kind + " signatures are no longer supported; write '" + kind + "(Args) -> Return'.");
             return_type = signature_types[signature_types.length() - 1];
@@ -543,12 +545,14 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> Struct {
     }
 
     if is_method {
-        return MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
+        let method_type: MethodTypeNode = MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
+        return add_method_type_node(p.arena, method_type);
     }
-    return FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
+    let function_type: FunctionTypeNode = FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
+    return add_function_type_node(p.arena, function_type);
 }
 
-func parse_type_base_inner(p: Parser) -> Struct {
+func parse_type_base_inner(p: Parser) -> NodeID {
     // parse a pointer in type position
     if (p.current_tok.type == TOK_PTR) {
         let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -566,13 +570,13 @@ func parse_type_base_inner(p: Parser) -> Struct {
             }
         }
 
-        let base: Struct = parse_type_base(p);
-        return PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=start_pos);
+        let base: NodeID = parse_type_base(p);
+        return add_pointer_type_node(p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=start_pos));
     }
 
     let tok: Token = p.current_tok;
     let tt: Int = p.current_tok.type;
-    let type_node: Struct = null;
+    let type_node: NodeID = NO_NODE;
     let start_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     if (tt == TOK_T_INT || tt == TOK_T_FLOAT || tt == TOK_T_STRING || tt == TOK_T_BOOL || tt == TOK_T_VOID || tt == TOK_T_CHAR || is_name_token(tt)) {
@@ -590,7 +594,7 @@ func parse_type_base_inner(p: Parser) -> Struct {
             }
             parser_advance(p); // skip (
             
-            let elem_type: Struct = parse_return_type(p);
+            let elem_type: NodeID = parse_return_type(p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -599,7 +603,7 @@ func parse_type_base_inner(p: Parser) -> Struct {
             parser_advance(p); // skip )
             
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            type_node = VectorTypeNode(type=NODE_VECTOR_TYPE, element_type=elem_type, pos=pos);
+            type_node = add_vector_type_node(p.arena, VectorTypeNode(type=NODE_VECTOR_TYPE, element_type=elem_type, pos=pos));
         }
         else if (tok.value == "Array") {
             parser_advance(p); // skip Array
@@ -609,7 +613,7 @@ func parse_type_base_inner(p: Parser) -> Struct {
             }
             parser_advance(p); // skip (
             
-            let elem_type: Struct = parse_return_type(p);
+            let elem_type: NodeID = parse_return_type(p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -617,12 +621,12 @@ func parse_type_base_inner(p: Parser) -> Struct {
             }
             parser_advance(p); // skip )
             
-            type_node = SliceTypeNode(type=NODE_SLICE_TYPE, element_type=elem_type, pos=start_pos);
+            type_node = add_slice_type_node(p.arena, SliceTypeNode(type=NODE_SLICE_TYPE, element_type=elem_type, pos=start_pos));
         }
         else {
             parser_advance(p);
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            type_node = VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos);
+            type_node = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
 
             while (p.current_tok.type == TOK_DOT) {
                 parser_advance(p); // skip '.'
@@ -632,26 +636,26 @@ func parse_type_base_inner(p: Parser) -> Struct {
                 }
                 let type_name: String = p.current_tok.value;
                 parser_advance(p); // skip type_name
-                type_node = FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos);
+                type_node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos));
             }
         }
         if (p.current_tok.type == TOK_LPAREN) {
-            type_node = GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(p), pos=start_pos);
+            type_node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(p), pos=start_pos));
         }
         return type_node;
     }
     
     let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     throw_invalid_syntax(err_pos, "Expected type name.");
-    return null;
+    return NO_NODE;
 }
 
-func parse_return_type(p: Parser) -> Struct {
-    let type_node: Struct = parse_type_base(p);
-    if (type_node is null) { return null; }
+func parse_return_type(p: Parser) -> NodeID {
+    let type_node: NodeID = parse_type_base(p);
+    if (!has_node(type_node)) { return NO_NODE; }
 
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    let sizes: Vector(Struct) = [];
+    let sizes: Vector(Token) = [];
 
     while (p.current_tok.type == TOK_LBRACKET) {
         parser_advance(p); // skip '['
@@ -675,12 +679,12 @@ func parse_return_type(p: Parser) -> Struct {
     let s_i: Int = s_len - 1;
     while (s_i >= 0) {
         let s_tok: Token = sizes[s_i];
-        type_node = ArrayTypeNode(
+        type_node = add_array_type_node(p.arena, ArrayTypeNode(
             type=NODE_ARRAY_TYPE, 
             base_type=type_node, 
             size_tok=s_tok, 
             pos=start_pos
-        );
+        ));
         s_i -= 1;
     }
 
@@ -688,17 +692,17 @@ func parse_return_type(p: Parser) -> Struct {
         let q_tok: Token = p.current_tok;
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=q_tok.line, col=q_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        type_node = FallibleTypeNode(
+        type_node = add_fallible_type_node(p.arena, FallibleTypeNode(
             type=NODE_FALLIBLE_TYPE,
             base_type=type_node,
             pos=pos
-        );
+        ));
     }
 
     return type_node;
 }
 
-func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
+func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
     // parse a declared name and its optional pointer prefix
     let is_ptr: Bool = false;
     let level: Int = 0;
@@ -729,13 +733,13 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
     parser_advance(p);
 
     let separator: Int = p.current_tok.type;
-    let type_node: Struct = null;
+    let type_node: NodeID = NO_NODE;
     if (separator == TOK_COLON) {
         parser_advance(p);
         let type_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         type_node = parse_return_type(p);
-        if (!is_ptr && type_node is !null) {
-            let declared_type: Int = node_kind(type_node);
+        if (!is_ptr && has_node(type_node)) {
+            let declared_type: Int = node_tag(type_node);
             if (declared_type == NODE_PTR_TYPE) {
                 throw_invalid_syntax(type_pos, "Place 'ptr' before the declared name; write 'ptr " + name_tok.value + ": Type'.");
             }
@@ -750,7 +754,7 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
         parser_advance(p);
         type_node = parse_return_type(p);
     } else if (allow_inference && !is_ptr && separator == TOK_ASSIGN) {
-        type_node = inferred_type(start_pos);
+        type_node = inferred_type(p, start_pos);
     } else {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if allow_inference {
@@ -758,70 +762,70 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> Struct {
         } else {
             throw_invalid_syntax(err_pos, "Expected ':' after '" + name_tok.value + "'.");
         }
-        type_node = inferred_type(start_pos);
+        type_node = inferred_type(p, start_pos);
     }
 
     if is_ptr {
-        type_node = PointerTypeNode(type=NODE_PTR_TYPE, base_type=type_node, level=level, pos=start_pos);
+        type_node = add_pointer_type_node(p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=type_node, level=level, pos=start_pos));
     }
 
     return TypedIdent(name_tok=name_tok, type_node=type_node);
 }
 
-func atom(p: Parser) -> Struct {
+func atom(p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
 
     // Integer literals
     if (tok.type == TOK_INT) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return IntNode(type=NODE_INT, tok=tok, pos=pos);
+        return add_int_node(p.arena, IntNode(type=NODE_INT, tok=tok, pos=pos));
     }
 
     // Floating-point literals
     if (tok.type == TOK_FLOAT) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return FloatNode(type=NODE_FLOAT, tok=tok, pos=pos);
+        return add_float_node(p.arena, FloatNode(type=NODE_FLOAT, tok=tok, pos=pos));
     }
 
     // Boolean
     if (tok.type == TOK_TRUE) { 
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return BooleanNode(type=NODE_BOOL, tok=tok, value=1, pos=pos); 
+        return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=1, pos=pos)); 
     }
     if (tok.type == TOK_FALSE) { 
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return BooleanNode(type=NODE_BOOL, tok=tok, value=0, pos=pos); 
+        return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=0, pos=pos)); 
     }
 
     // Char
     if (tok.type == TOK_CHAR_LIT) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return CharNode(type=NODE_CHAR, tok=tok, pos=pos);
+        return add_char_node(p.arena, CharNode(type=NODE_CHAR, tok=tok, pos=pos));
     }
 
     // String
     if (tok.type == TOK_STR_LIT) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return StringNode(type=NODE_STRING, tok=tok, pos=pos);
+        return add_string_node(p.arena, StringNode(type=NODE_STRING, tok=tok, pos=pos));
     }
 
     // nullptr
     if (tok.type == TOK_NULLPTR) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return NullPtrNode(type=NODE_NULLPTR, pos=pos);
+        return add_nullptr_node(p.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
     }
 
     if (tok.type == TOK_NULL) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return NullNode(type=NODE_NULL, pos=pos);
+        return add_null_node(p.arena, NullNode(type=NODE_NULL, pos=pos));
     }
     
     // Variable access or Built-in Type Cast Call
@@ -838,10 +842,10 @@ func atom(p: Parser) -> Struct {
                 throw_type_error(pos, "Expected 1 arguments, got 0");
                 parser_advance(p);
                 let fallback_tok: Token = Token(type=TOK_T_INT, value="Int", line=tok.line, col=tok.col);
-                let fallback_type: Struct = VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallback_tok, pos=pos);
-                return TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=fallback_type, is_align=tok.value == "align_of", pos=pos);
+                let fallback_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallback_tok, pos=pos));
+                return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=fallback_type, is_align=tok.value == "align_of", pos=pos));
             }
-            let type_node: Struct = parse_return_type(p);
+            let type_node: NodeID = parse_return_type(p);
             let arg_count: Int = 1;
             let count_pos: Position = pos;
             while (p.current_tok.type == TOK_COMMA) {
@@ -857,35 +861,35 @@ func atom(p: Parser) -> Struct {
             } else {
                 parser_advance(p);
             }
-            return TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=type_node, is_align=tok.value == "align_of", pos=pos);
+            return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=type_node, is_align=tok.value == "align_of", pos=pos));
         }
-        return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos);
+        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
     }
 
     if (tok.type == TOK_THIS) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let this_tok: Token = Token(type=TOK_IDENTIFIER, value="this", line=tok.line, col=tok.col);
-        return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=this_tok, pos=pos);
+        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=this_tok, pos=pos));
     }
 
     if (tok.type == TOK_SELF) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let self_tok: Token = Token(type=TOK_IDENTIFIER, value="self", line=tok.line, col=tok.col);
-        return VarAccessNode(type=NODE_VAR_ACCESS, name_tok=self_tok, pos=pos);
+        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=self_tok, pos=pos));
     }
 
     if (tok.type == TOK_SUPER) {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return SuperNode(type=NODE_SUPER, pos=pos);
+        return add_super_node(p.arena, SuperNode(type=NODE_SUPER, pos=pos));
     }
 
     // Parenthesized expressions
     if (tok.type == TOK_LPAREN) {
         parser_advance(p);
-        let node: Struct = expression(p);
+        let node: NodeID = expression(p);
         
         if (p.current_tok.type != TOK_RPAREN) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -899,11 +903,11 @@ func atom(p: Parser) -> Struct {
         parser_advance(p); // skip '{'
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         
-        let pairs: Vector(Struct) = [];
+        let pairs: Vector(MapPairNode) = [];
 
         if (p.current_tok.type != TOK_RBRACE) {
             while (true) {
-                let key_node: Struct = expression(p);
+                let key_node: NodeID = expression(p);
                 
                 if (p.current_tok.type != TOK_COLON) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -911,7 +915,7 @@ func atom(p: Parser) -> Struct {
                 }
                 parser_advance(p); // skip ':'
                 
-                let val_node: Struct = expression(p);
+                let val_node: NodeID = expression(p);
                 
                 pairs.append(MapPairNode(key=key_node, value=val_node));
                 
@@ -932,19 +936,19 @@ func atom(p: Parser) -> Struct {
         }
         parser_advance(p); // skip '}'
         
-        return MapLitNode(type=NODE_MAP_LIT, pairs=pairs, pos=pos);
+        return add_map_lit_node(p.arena, MapLitNode(type=NODE_MAP_LIT, pairs=pairs, pos=pos));
     }
 
     if (tok.type == TOK_LBRACKET) {
         parser_advance(p); // skip [
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         
-        let elements: Vector(Struct) = [];
+        let elements: Vector(ArgNode) = [];
         let count: Int = 0;
         
         if (p.current_tok.type != TOK_RBRACKET) {
             while (true) {
-                let val: Struct = expression(p);
+                let val: NodeID = expression(p);
                 elements.append(ArgNode(val=val, name=null));
                 count += 1;
                 
@@ -962,20 +966,20 @@ func atom(p: Parser) -> Struct {
         }
         parser_advance(p); // skip ]
         
-        return VectorLitNode(type=NODE_VECTOR_LIT, elements=elements, count=count, pos=pos);
+        return add_vector_lit_node(p.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=elements, count=count, pos=pos));
     }
 
     let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     throw_invalid_syntax(err_pos, "Unexpected token '" + WhitelangTokens.get_token_name(tok.type) + "'");
     if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=tok.line, col=tok.col);
-    return IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos);
+    return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos));
 }
 
-func parse_args(p: Parser) -> Vector(Struct) {
+func parse_args(p: Parser) -> Vector(ArgNode) {
     if (p.current_tok.type == TOK_RPAREN) { return null; }
 
-    let args: Vector(Struct) = [];
+    let args: Vector(ArgNode) = [];
     
     while (p.current_tok.type != TOK_RPAREN && p.current_tok.type != TOK_EOF) {
         let arg_name: String = null;
@@ -985,7 +989,7 @@ func parse_args(p: Parser) -> Vector(Struct) {
             parser_advance(p);
         }
         
-        let val: Struct = expression(p);
+        let val: NodeID = expression(p);
         let is_spread: Bool = false;
         if (p.current_tok.type == TOK_ELLIPSIS) {
             if (arg_name is !null) {
@@ -1003,8 +1007,8 @@ func parse_args(p: Parser) -> Vector(Struct) {
     return args;
 }
 
-func postfix_expr(p: Parser) -> Struct {
-    let node: Struct = atom(p);
+func postfix_expr(p: Parser) -> NodeID {
+    let node: NodeID = atom(p);
 
     while (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC || p.current_tok.type == TOK_LPAREN ||
            p.current_tok.type == TOK_DOT || p.current_tok.type == TOK_LBRACKET || p.current_tok.type == TOK_QUESTION ||
@@ -1014,31 +1018,31 @@ func postfix_expr(p: Parser) -> Struct {
             let op_tok: Token = p.current_tok;
             parser_advance(p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos);
+            node = add_postfix_node(p.arena, PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LT && (may_generic_call(p) || may_generic_value(p))) {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(p), pos=pos);
+            node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(p), pos=pos));
         }
 
         else if (p.current_tok.type == TOK_QUESTION) {
             let op_tok: Token = p.current_tok;
             parser_advance(p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            let target_base: Int = node_kind(node);
+            let target_base: Int = node_tag(node);
             if (target_base == NODE_CALL) {
-                let target_call: CallNode = node;
+                let target_call: CallNode = get_call_node(p.arena, node);
                 target_call.preserve_fallible = true;
             }
-            node = TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=node, pos=pos);
+            node = add_try_unwrap_node(p.arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=node, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LPAREN) {
             let paren_tok: Token = p.current_tok; // '('
             parser_advance(p); // skip '('
             
-            let args: Struct = parse_args(p);
+            let args: Vector(ArgNode) = parse_args(p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1048,14 +1052,14 @@ func postfix_expr(p: Parser) -> Struct {
 
             let pos: Position = Position(idx=0, ln=paren_tok.line, col=paren_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-            let type_args: Vector(Struct) = null;
-            let call_base: Int = node_kind(node);
+            let type_args: Vector(NodeID) = null;
+            let call_base: Int = node_tag(node);
             if (call_base == NODE_GENERIC_TYPE) {
-                let generic: GenericTypeNode = node;
+                let generic: GenericTypeNode = get_generic_type_node(p.arena, node);
                 type_args = generic.type_args;
             }
 
-            node = CallNode(type=NODE_CALL, callee=node, args=args, type_args=type_args, pos=pos, preserve_fallible=false);
+            node = add_call_node(p.arena, CallNode(type=NODE_CALL, callee=node, args=args, type_args=type_args, pos=pos, preserve_fallible=false));
         }
 
         else if (p.current_tok.type == TOK_DOT) {
@@ -1068,7 +1072,7 @@ func postfix_expr(p: Parser) -> Struct {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             parser_advance(p);
     
-            node = FieldAccessNode(type=NODE_FIELD_ACCESS, obj=node, field_name=field_name, pos=pos);
+            node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=node, field_name=field_name, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LBRACKET) {
@@ -1084,13 +1088,13 @@ func postfix_expr(p: Parser) -> Struct {
                 }
                 if (p.current_tok.type == TOK_RBRACKET) { parser_advance(p); }
                 let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                node = SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=null, end_idx=null, pos=pos);
+                node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=NO_NODE, end_idx=NO_NODE, pos=pos));
             }
             else {
-                let first_idx: Struct = expression(p);
+                let first_idx: NodeID = expression(p);
                 if (p.current_tok.type == TOK_COLON) {
                     parser_advance(p); // skip ':'
-                    let second_idx: Struct = expression(p);
+                    let second_idx: NodeID = expression(p);
 
                     if (p.current_tok.type != TOK_RBRACKET) {
                         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1099,7 +1103,7 @@ func postfix_expr(p: Parser) -> Struct {
                     parser_advance(p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                    node = SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=first_idx, end_idx=second_idx, pos=pos);
+                    node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=first_idx, end_idx=second_idx, pos=pos));
                 }
                 else {
                     if (p.current_tok.type != TOK_RBRACKET) {
@@ -1109,7 +1113,7 @@ func postfix_expr(p: Parser) -> Struct {
                     parser_advance(p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                    node = IndexAccessNode(type=NODE_INDEX_ACCESS, target=node, index_node=first_idx, pos=pos);
+                    node = add_index_access_node(p.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=node, index_node=first_idx, pos=pos));
                 }
             }
         }
@@ -1117,7 +1121,7 @@ func postfix_expr(p: Parser) -> Struct {
     return node;
 }
 
-func unary_expr(p: Parser) -> Struct {
+func unary_expr(p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
 
     // ref x
@@ -1125,9 +1129,9 @@ func unary_expr(p: Parser) -> Struct {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: Struct = unary_expr(p);
+        let node: NodeID = unary_expr(p);
         parser_leave(p);
-        return RefNode(type=NODE_REF, node=node, pos=pos);
+        return add_ref_node(p.arena, RefNode(type=NODE_REF, node=node, pos=pos));
     }
     
     // deref x or deref*N x
@@ -1146,9 +1150,9 @@ func unary_expr(p: Parser) -> Struct {
         }
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: Struct = unary_expr(p);
+        let node: NodeID = unary_expr(p);
         parser_leave(p);
-        return DerefNode(type=NODE_DEREF, node=node, level=level, pos=pos);
+        return add_deref_node(p.arena, DerefNode(type=NODE_DEREF, node=node, level=level, pos=pos));
     }
     
     // -5, +3.14, !b, ~c
@@ -1156,44 +1160,44 @@ func unary_expr(p: Parser) -> Struct {
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: Struct = unary_expr(p); // recursive
+        let node: NodeID = unary_expr(p); // recursive
         parser_leave(p);
-        return UnaryOpNode(type=NODE_UNARYOP, op_tok=tok, node=node, pos=pos);
+        return add_unary_node(p.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=tok, node=node, pos=pos));
     }
     
     return power(p);
 }
 
-func power(p: Parser) -> Struct {
-    let left: Struct = postfix_expr(p);
+func power(p: Parser) -> NodeID {
+    let left: NodeID = postfix_expr(p);
 
     if (p.current_tok.type == TOK_POW) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let right: Struct = factor(p);
+        let right: NodeID = factor(p);
         parser_leave(p);
-        return BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        return add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
 }
 
-func shift_expr(p: Parser) -> Struct {
-    let left: Struct = arith_expr(p);
+func shift_expr(p: Parser) -> NodeID {
+    let left: NodeID = arith_expr(p);
     while (p.current_tok.type == TOK_LSHIFT || p.current_tok.type == TOK_RSHIFT) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = arith_expr(p);
+        let right: NodeID = arith_expr(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func comp_expr(p: Parser) -> Struct {
-    let left: Struct = shift_expr(p);
+func comp_expr(p: Parser) -> NodeID {
+    let left: NodeID = shift_expr(p);
 
     while (p.current_tok.type == TOK_EE  || p.current_tok.type == TOK_NE  || 
            p.current_tok.type == TOK_LT  || p.current_tok.type == TOK_GT  ||
@@ -1213,108 +1217,107 @@ func comp_expr(p: Parser) -> Struct {
                 node_type = NODE_IS;
             }
             
-            let right: Struct = shift_expr(p);
+            let right: NodeID = shift_expr(p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            left = BinOpNode(type=node_type, left=left, op_tok=op_tok, right=right, pos=pos);
+            left = add_binop_node(p.arena, BinOpNode(type=node_type, left=left, op_tok=op_tok, right=right, pos=pos));
             
             // continue loop
         } else {
             parser_advance(p);
-            let right: Struct = shift_expr(p);
+            let right: NodeID = shift_expr(p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+            left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
         }
     }
     return left;
 }
 
-func bitwise_and(p: Parser) -> Struct {
-    let left: Struct = comp_expr(p);
+func bitwise_and(p: Parser) -> NodeID {
+    let left: NodeID = comp_expr(p);
     while (p.current_tok.type == TOK_BIT_AND) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = comp_expr(p);
+        let right: NodeID = comp_expr(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func bitwise_xor(p: Parser) -> Struct {
-    let left: Struct = bitwise_and(p);
+func bitwise_xor(p: Parser) -> NodeID {
+    let left: NodeID = bitwise_and(p);
     while (p.current_tok.type == TOK_BIT_XOR) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = bitwise_and(p);
+        let right: NodeID = bitwise_and(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func bitwise_or(p: Parser) -> Struct {
-    let left: Struct = bitwise_xor(p);
+func bitwise_or(p: Parser) -> NodeID {
+    let left: NodeID = bitwise_xor(p);
     while (p.current_tok.type == TOK_BIT_OR) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = bitwise_xor(p);
+        let right: NodeID = bitwise_xor(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func logic_and(p: Parser) -> Struct {
-    let left: Struct = bitwise_or(p);
+func logic_and(p: Parser) -> NodeID {
+    let left: NodeID = bitwise_or(p);
     while (p.current_tok.type == TOK_AND) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = bitwise_or(p);
+        let right: NodeID = bitwise_or(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func logic_or(p: Parser) -> Struct {
-    let left: Struct = logic_and(p);
+func logic_or(p: Parser) -> NodeID {
+    let left: NodeID = logic_and(p);
 
     while (p.current_tok.type == TOK_OR) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = logic_and(p);
+        let right: NodeID = logic_and(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func assignment(p: Parser) -> Struct {
-    let left: Struct = logic_or(p);
+func assignment(p: Parser) -> NodeID {
+    let left: NodeID = logic_or(p);
 
     // =
     if (p.current_tok.type == TOK_ASSIGN) {
         let op_tok: Token = p.current_tok;
         parser_advance(p); // skip '='
-        let right: Struct = assignment(p);
+        let right: NodeID = assignment(p);
         
-        let base: Int = node_kind(left);
+        let base: Int = node_tag(left);
         if (base == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = left;
+            let v_node: VarAccessNode = get_var_access_node(p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=right, pos=pos);
+            return add_var_assign_node(p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=right, pos=pos));
         } else if (base == NODE_FIELD_ACCESS) {
-            let f_node: FieldAccessNode = left;
+            let f_node: FieldAccessNode = get_field_access_node(p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=right, pos=pos);
+            return add_field_assign_node(p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=right, pos=pos));
         } else if (base == NODE_DEREF) {
-            let d_node: DerefNode = left;
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=d_node, value=right, pos=pos);
+            return add_ptr_assign_node(p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=right, pos=pos));
         } else if (base == NODE_INDEX_ACCESS) {
-            let idx_node: IndexAccessNode = left;
+            let idx_node: IndexAccessNode = get_index_access_node(p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return IndexAssignNode(type=NODE_INDEX_ASSIGN, target=idx_node.target, index_node=idx_node.index_node, value=right, pos=pos);
+            return add_index_assign_node(p.arena, IndexAssignNode(type=NODE_INDEX_ASSIGN, target=idx_node.target, index_node=idx_node.index_node, value=right, pos=pos));
         } else {
             let err_pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Invalid assignment target.");
@@ -1330,7 +1333,7 @@ func assignment(p: Parser) -> Struct {
         
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = assignment(p);
+        let right: NodeID = assignment(p);
 
         let bin_op_type: Int = 0;
         if (op_type == TOK_PLUS_ASSIGN) { bin_op_type = TOK_PLUS; }
@@ -1348,24 +1351,23 @@ func assignment(p: Parser) -> Struct {
         let bin_tok: Token = Token(type=bin_op_type, value="compound_op", line=op_tok.line, col=op_tok.col);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-        let bin_node: BinOpNode = BinOpNode(type=NODE_BINOP, left=left, op_tok=bin_tok, right=right, pos=pos);
+        let bin_node: NodeID = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=bin_tok, right=right, pos=pos));
 
-        let base: Int = node_kind(left);
+        let base: Int = node_tag(left);
         
         // a += 1
         if (base == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = left;
-            return VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=bin_node, pos=pos);
+            let v_node: VarAccessNode = get_var_access_node(p.arena, left);
+            return add_var_assign_node(p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=bin_node, pos=pos));
         } 
         // s.x += 1
         else if (base == NODE_FIELD_ACCESS) {
-            let f_node: FieldAccessNode = left;
-            return FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=bin_node, pos=pos);
+            let f_node: FieldAccessNode = get_field_access_node(p.arena, left);
+            return add_field_assign_node(p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=bin_node, pos=pos));
         }
         // (deref p) += 1
         else if (base == NODE_DEREF) {
-            let d_node: DerefNode = left;
-            return PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=d_node, value=bin_node, pos=pos);
+            return add_ptr_assign_node(p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=bin_node, pos=pos));
         }
 
         else {
@@ -1377,73 +1379,74 @@ func assignment(p: Parser) -> Struct {
     return left;
 }
 
-func factor(p: Parser) -> Struct {
+func factor(p: Parser) -> NodeID {
     return unary_expr(p);
 }
 
-func expression(p: Parser) -> Struct {
+func expression(p: Parser) -> NodeID {
 // precedence lives in the expression call chain, assignment is the lowest level
 
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-    let result: Struct = assignment(p);
+    let result: NodeID = assignment(p);
     parser_leave(p);
     return result;
 }
 
-func term(p: Parser) -> Struct {
-    let left: Struct = factor(p);
+func term(p: Parser) -> NodeID {
+    let left: NodeID = factor(p);
 
     // left-associative
     while (p.current_tok.type == TOK_MUL || p.current_tok.type == TOK_DIV || p.current_tok.type == TOK_MOD) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = factor(p);
+        let right: NodeID = factor(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
 }
 
-func arith_expr(p: Parser) -> Struct {
-    let left: Struct = term(p);
+func arith_expr(p: Parser) -> NodeID {
+    let left: NodeID = term(p);
 
     // left-associative
     while (p.current_tok.type == TOK_PLUS || p.current_tok.type == TOK_SUB) {
         let op_tok: Token = p.current_tok;
         parser_advance(p);
-        let right: Struct = term(p);
+        let right: NodeID = term(p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos);
+        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
 }
 
-func var_decl_core(p: Parser, is_const: Bool, anns: Vector(Struct), allow_inference: Bool) -> Struct {
+func var_decl_core(p: Parser, is_const: Bool, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     let tid: TypedIdent = parse_typed_name(p, allow_inference);
 
-    if (tid.type_node is !null) {
-        let t_base: Int = node_kind(tid.type_node);
+    if (has_node(tid.type_node)) {
+        let t_base: Int = node_tag(tid.type_node);
         if (t_base == NODE_FALLIBLE_TYPE) {
             let err_pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Variables cannot be declared with fallible types (?). Did you forget to try unwrap '?' or use a catch block?");
         }
     }
 
-    let val_node: Struct = null;
+    let val_node: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_ASSIGN) {
         parser_advance(p);
         val_node = expression(p);
     }
     
-    return VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=val_node, is_const=is_const, annotations=anns, pos=start_pos, alloc_id=0);
+    let declaration: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=val_node, is_const=is_const, annotations=anns, pos=start_pos, alloc_id=0);
+    return add_var_decl_node(p.arena, declaration);
 }
 
-func var_decl(p: Parser, anns: Vector(Struct), allow_inference: Bool) -> Struct {
+func var_decl(p: Parser, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
     let is_const: Bool = false;
     if (p.current_tok.type == TOK_CONST) {
         is_const = true;
@@ -1452,18 +1455,18 @@ func var_decl(p: Parser, anns: Vector(Struct), allow_inference: Bool) -> Struct 
     return var_decl_core(p, is_const, anns, allow_inference);
 }
 
-func parse_block(p: Parser) -> Struct {
+func parse_block(p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     if (!parser_enter(p, pos)) {
         if (p.current_tok.type == TOK_LBRACE) { skip_group(p, TOK_LBRACE, TOK_RBRACE); }
-        return BlockNode(type=NODE_BLOCK, stmts=[]);
+        return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=[]));
     }
-    let result: Struct = parse_block_inner(p);
+    let result: NodeID = parse_block_inner(p);
     parser_leave(p);
     return result;
 }
 
-func parse_block_inner(p: Parser) -> Struct {
+func parse_block_inner(p: Parser) -> NodeID {
     // '{'
     if (p.current_tok.type != TOK_LBRACE) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1471,10 +1474,10 @@ func parse_block_inner(p: Parser) -> Struct {
     }
     parser_advance(p); // skip {
 
-    let stmts: Vector(Struct) = [];
+    let stmts: Vector(NodeID) = [];
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
-        let stmt: Struct = statement(p);
-        let base: Int = node_kind(stmt);
+        let stmt: NodeID = statement(p);
+        let base: Int = node_tag(stmt);
         let is_compound: Bool = false;
         if (base != 0 && (base == NODE_IF || base == NODE_BLOCK || base == NODE_WHILE || base == NODE_FOR || base == NODE_FUNC_DEF || base == NODE_CATCH)) {
             is_compound = true;
@@ -1515,11 +1518,11 @@ func parse_block_inner(p: Parser) -> Struct {
             }
             parser_advance(p);
             
-            let catch_body: Struct = parse_block(p);
-            stmt = CatchNode(type=NODE_CATCH, stmt=stmt, err_name=err_name, body=catch_body, pos=catch_pos, alloc_id=0);
+            let catch_body: NodeID = parse_block(p);
+            stmt = add_catch_node(p.arena, CatchNode(type=NODE_CATCH, stmt=stmt, err_name=err_name, body=catch_body, pos=catch_pos, alloc_id=0));
         }
 
-        if (stmt is !null) {
+        if (has_node(stmt)) {
             stmts.append(stmt);
         }
     }
@@ -1529,17 +1532,17 @@ func parse_block_inner(p: Parser) -> Struct {
     }
     parser_advance(p); // skip }
 
-    return BlockNode(type=NODE_BLOCK, stmts=stmts);
+    return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
-func if_stmt(p: Parser) -> Struct {
+func if_stmt(p: Parser) -> NodeID {
     let if_tok: Token = p.current_tok;
     parser_advance(p); // skip 'if'
     
-    let cond: Struct = atom(p);
-    let body: Struct = parse_block(p);
+    let cond: NodeID = atom(p);
+    let body: NodeID = parse_block(p);
 
-    let else_body: Struct = null;
+    let else_body: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_ELSE) {
         parser_advance(p); // skip 'else'
         
@@ -1551,34 +1554,34 @@ func if_stmt(p: Parser) -> Struct {
     }
     
     let pos: Position = Position(idx=0, ln=if_tok.line, col=if_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return IfNode(type=NODE_IF, condition=cond, body=body, else_body=else_body, pos=pos);
+    return add_if_node(p.arena, IfNode(type=NODE_IF, condition=cond, body=body, else_body=else_body, pos=pos));
 }
 
-func while_stmt(p: Parser) -> Struct {
+func while_stmt(p: Parser) -> NodeID {
     let while_tok: Token = p.current_tok;
     parser_advance(p); // skip 'while'
-    let cond: Struct = atom(p);
-    let body: Struct = parse_block(p);
+    let cond: NodeID = atom(p);
+    let body: NodeID = parse_block(p);
 
     let pos: Position = Position(idx=0, ln=while_tok.line, col=while_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return WhileNode(type=NODE_WHILE, condition=cond, body=body, pos=pos);
+    return add_while_node(p.arena, WhileNode(type=NODE_WHILE, condition=cond, body=body, pos=pos));
 }
 
-func break_stmt(p: Parser) -> Struct {
+func break_stmt(p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
     parser_advance(p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return BreakNode(type=NODE_BREAK, pos=pos);
+    return add_break_node(p.arena, BreakNode(type=NODE_BREAK, pos=pos));
 }
 
-func continue_stmt(p: Parser) -> Struct {
+func continue_stmt(p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
     parser_advance(p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return ContinueNode(type=NODE_CONTINUE, pos=pos);
+    return add_continue_node(p.arena, ContinueNode(type=NODE_CONTINUE, pos=pos));
 }
 
-func for_stmt(p: Parser) -> Struct {
+func for_stmt(p: Parser) -> NodeID {
     let for_tok: Token = p.current_tok;
     parser_advance(p); // skip 'for'
 
@@ -1588,9 +1591,9 @@ func for_stmt(p: Parser) -> Struct {
     }
     parser_advance(p); // skip '('
 
-    let init: Struct = null;
+    let init: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_SEMICOLON) {
-        init = null;
+        init = NO_NODE;
     } else {
         if (p.current_tok.type == TOK_LET) {
             init = var_decl(p, [], true);
@@ -1607,7 +1610,7 @@ func for_stmt(p: Parser) -> Struct {
     }
     parser_advance(p); // skip ';'
 
-    let cond: Struct = null;
+    let cond: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_SEMICOLON) {
         cond = expression(p);
     }
@@ -1618,7 +1621,7 @@ func for_stmt(p: Parser) -> Struct {
     }
     parser_advance(p); // skip ';'
 
-    let step: Struct = null;
+    let step: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_RPAREN) {
         step = expression(p);
     }
@@ -1629,13 +1632,13 @@ func for_stmt(p: Parser) -> Struct {
     }
     parser_advance(p); // skip ')'
 
-    let body: Struct = parse_block(p);
+    let body: NodeID = parse_block(p);
     let pos: Position = Position(idx=0, ln=for_tok.line, col=for_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return ForNode(type=NODE_FOR, init=init, cond=cond, step=step, body=body, pos=pos);
+    return add_for_node(p.arena, ForNode(type=NODE_FOR, init=init, cond=cond, step=step, body=body, pos=pos));
 }
 
-func statement(p: Parser) -> Struct {
-    let anns: Vector(Struct) = [];
+func statement(p: Parser) -> NodeID {
+    let anns: Vector(AnnotationNode) = [];
     if (p.current_tok.type == TOK_AT) {
         anns = parse_annotations(p);
     }
@@ -1665,30 +1668,30 @@ func statement(p: Parser) -> Struct {
 }
 
 
-func is_default_param(node: Struct) -> Bool {
-    if (node is null) { return false; }
-    let base: Int = node_kind(node);
+func is_default_param(arena: AstArena, node: NodeID) -> Bool {
+    if (!has_node(node)) { return false; }
+    let base: Int = node_tag(node);
     if (base == NODE_INT || base == NODE_FLOAT || base == NODE_STRING ||
         base == NODE_CHAR || base == NODE_BOOL || base == NODE_NULL ||
         base == NODE_NULLPTR) {
         return true;
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = node;
-        return is_default_param(unary.node);
+        let unary: UnaryOpNode = get_unary_node(arena, node);
+        return is_default_param(arena, unary.node);
     }
     if (base == NODE_BINOP) {
-        let binary: BinOpNode = node;
-        return is_default_param(binary.left) && is_default_param(binary.right);
+        let binary: BinOpNode = get_binop_node(arena, node);
+        return is_default_param(arena, binary.left) && is_default_param(arena, binary.right);
     }
     return false;
 }
 
-func parse_params(p: Parser, callable: Bool) -> Vector(Struct) {
+func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
     if (p.current_tok.type == TOK_RPAREN) {
         return null;
     }
-    let params: Vector(Struct) = [];
+    let params: Vector(ParamNode) = [];
 
     let saw_variadic: Bool = false;
     let saw_default: Bool = false;
@@ -1707,7 +1710,7 @@ func parse_params(p: Parser, callable: Bool) -> Vector(Struct) {
             parser_advance(p);
         }
 
-        let default_val: Struct = null;
+        let default_val: NodeID = NO_NODE;
         if (p.current_tok.type == TOK_ASSIGN) {
             if (!callable) {
                 throw_invalid_syntax(pos, "Default values are only allowed in functions and methods.");
@@ -1716,7 +1719,7 @@ func parse_params(p: Parser, callable: Bool) -> Vector(Struct) {
             }
             parser_advance(p);
             default_val = expression(p);
-            if (!is_default_param(default_val)) {
+            if (!is_default_param(p.arena, default_val)) {
                 throw_invalid_syntax(pos, "A default parameter value must be a constant expression.");
             }
             saw_default = true;
@@ -1731,7 +1734,7 @@ func parse_params(p: Parser, callable: Bool) -> Vector(Struct) {
     return params;
 }
 
-func func_def(p: Parser, anns: Vector(Struct)) -> Struct {
+func func_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let func_tok: Token = p.current_tok;
     parser_advance(p); // skip 'func'
     
@@ -1742,7 +1745,7 @@ func func_def(p: Parser, anns: Vector(Struct)) -> Struct {
     let name_tok: Token = p.current_tok;
     parser_advance(p);
 
-    let type_params: Vector(Struct) = null;
+    let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
         type_params = parse_type_params(p);
     }
@@ -1753,7 +1756,7 @@ func func_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '('
     
-    let params: Struct = parse_params(p, true);
+    let params: Vector(ParamNode) = parse_params(p, true);
     
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1768,38 +1771,39 @@ func func_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p);
 
-    let ret_type_node: Struct = parse_return_type(p);
+    let ret_type_node: NodeID = parse_return_type(p);
 
-    let body: Struct = parse_block(p);
+    let body: NodeID = parse_block(p);
     
     let pos: Position = Position(idx=0, ln=func_tok.line, col=func_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, type_params=type_params, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
+    let definition: FunctionDefNode = FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, type_params=type_params, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
+    return add_func_def_node(p.arena, definition);
 }
 
-func return_stmt(p: Parser) -> Struct {
+func return_stmt(p: Parser) -> NodeID {
     let ret_tok: Token = p.current_tok;
     parser_advance(p);
     
-    let val: Struct = null;
+    let val: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_SEMICOLON) {
         val = expression(p);
     }
     
     let pos: Position = Position(idx=0, ln=ret_tok.line, col=ret_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return ReturnNode(type=NODE_RETURN, value=val, pos=pos);
+    return add_return_node(p.arena, ReturnNode(type=NODE_RETURN, value=val, pos=pos));
 }
 
-func throw_stmt(p: Parser) -> Struct {
+func throw_stmt(p: Parser) -> NodeID {
     let throw_tok: Token = p.current_tok;
     parser_advance(p);
     
-    let val: Struct = expression(p);
+    let val: NodeID = expression(p);
     
     let pos: Position = Position(idx=0, ln=throw_tok.line, col=throw_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return ThrowNode(type=NODE_THROW, value=val, pos=pos);
+    return add_throw_node(p.arena, ThrowNode(type=NODE_THROW, value=val, pos=pos));
 }
 
-func parse_struct_def(p: Parser, anns: Vector(Struct)) -> Struct {
+func parse_struct_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     parser_advance(p); // skip 'struct'
@@ -1811,7 +1815,7 @@ func parse_struct_def(p: Parser, anns: Vector(Struct)) -> Struct {
     let name_tok: Token = p.current_tok;
     parser_advance(p);
 
-    let type_params: Vector(Struct) = null;
+    let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
         type_params = parse_type_params(p);
     }
@@ -1822,7 +1826,7 @@ func parse_struct_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '('
 
-    let fields: Struct = parse_params(p, false);
+    let fields: Vector(ParamNode) = parse_params(p, false);
 
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1830,14 +1834,14 @@ func parse_struct_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip ')'
 
-    let body: Struct = null;
+    let body: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_LBRACE) {
         body = parse_block(p); // initialization
     }
-    return StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos);
+    return add_struct_def_node(p.arena, StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos));
 }
 
-func parse_extern_func(p: Parser) -> Struct {
+func parse_extern_func(p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip 'func'
     
@@ -1854,7 +1858,7 @@ func parse_extern_func(p: Parser) -> Struct {
     }
     parser_advance(p); // skip '('
 
-    let params: Vector(Struct) = [];
+    let params: Vector(ParamNode) = [];
     let is_varargs: Bool = false;
     
     if (p.current_tok.type != TOK_RPAREN) {
@@ -1891,7 +1895,7 @@ func parse_extern_func(p: Parser) -> Struct {
     }
     parser_advance(p); // skip ')'
     
-    let ret_type: Struct = null;
+    let ret_type: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_TYPE_ARROW) {
         parser_advance(p);
         ret_type = parse_return_type(p);
@@ -1900,10 +1904,11 @@ func parse_extern_func(p: Parser) -> Struct {
         throw_invalid_syntax(err_pos, "Expected return type ('-> Type').");
     }
     
-    return ExternFuncNode(type=NODE_EXTERN_FUNC, name_tok=name_tok, params=params, ret_type_tok=ret_type, is_varargs=is_varargs, abi_name="", link_name="", pos=start_pos);
+    let declaration: ExternFuncNode = ExternFuncNode(type=NODE_EXTERN_FUNC, name_tok=name_tok, params=params, ret_type_tok=ret_type, is_varargs=is_varargs, abi_name="", link_name="", pos=start_pos);
+    return add_extern_func_node(p.arena, declaration);
 }
 
-func parse_extern(p: Parser) -> Struct {
+func parse_extern(p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip 'extern'
 
@@ -1928,7 +1933,7 @@ func parse_extern(p: Parser) -> Struct {
         }
         parser_advance(p); // skip '{'
 
-        let funcs: Vector(Struct) = [];
+        let funcs: Vector(NodeID) = [];
         while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
             if (p.current_tok.type != TOK_FUNC) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1936,8 +1941,8 @@ func parse_extern(p: Parser) -> Struct {
                 break;
             }
 
-            let func_node: Struct = parse_extern_func(p);
-            let f_node: ExternFuncNode = func_node;
+            let func_node: NodeID = parse_extern_func(p);
+            let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
             f_node.abi_name = abi_name;
             f_node.link_name = link_name;
 
@@ -1954,11 +1959,11 @@ func parse_extern(p: Parser) -> Struct {
             throw_invalid_syntax(err_pos, "Expected '}' to end extern block.");
         }
         parser_advance(p); // skip '}'
-        return ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos);
+        return add_extern_block_node(p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
     }
 
     if (p.current_tok.type == TOK_FUNC) {
-        let func_node: Struct = parse_extern_func(p);
+        let func_node: NodeID = parse_extern_func(p);
 
         if (p.current_tok.type != TOK_FROM) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -1990,23 +1995,24 @@ func parse_extern(p: Parser) -> Struct {
         }
         parser_advance(p); // skip ';'
 
-        let f_node: ExternFuncNode = func_node;
+        let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
         f_node.abi_name = abi_name;
         f_node.link_name = link_name;
-        let funcs: Vector(Struct) = [func_node];
-        return ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos);
+        p.arena.extern_func_nodes[node_slot(func_node)] = f_node;
+        let funcs: Vector(NodeID) = [func_node];
+        return add_extern_block_node(p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
     }
 
     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     throw_invalid_syntax(err_pos, "Expected an ABI string or 'func' after 'extern'.");
-    return null;
+    return NO_NODE;
 }
 
-func parse_import(p: Parser) -> Struct {
+func parse_import(p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip 'import'
 
-    let symbols: Vector(Struct) = null;
+    let symbols: Vector(ImportSymbolNode) = null;
     let path_tok: Token = null;
 
     // import * from "..."
@@ -2091,10 +2097,10 @@ func parse_import(p: Parser) -> Struct {
         parser_advance(p);
     }
 
-    return ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=alias_tok, pos=start_pos);
+    return add_import_node(p.arena, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=alias_tok, pos=start_pos));
 }
 
-func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
+func parse_interface_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip 'interface'
 
@@ -2105,12 +2111,12 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
     let name_tok: Token = p.current_tok;
     parser_advance(p);
 
-    let type_params: Vector(Struct) = null;
+    let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
         type_params = parse_type_params(p);
     }
 
-    let interfaces: Vector(Struct) = [];
+    let interfaces: Vector(NodeID) = [];
     if (p.current_tok.type == TOK_WITH) {
         parser_advance(p); // skip 'with'
         interfaces.append(parse_return_type(p));
@@ -2126,10 +2132,10 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '{'
 
-    let methods: Vector(Struct) = [];
+    let methods: Vector(NodeID) = [];
 
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
-        let member_anns: Vector(Struct) = [];
+        let member_anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
             member_anns = parse_annotations(p);
         }
@@ -2145,7 +2151,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
             let m_name: Token = p.current_tok;
             parser_advance(p);
 
-            let type_params: Vector(Struct) = null;
+            let type_params: Vector(GenericParamNode) = null;
             if (p.current_tok.type == TOK_LT) {
                 type_params = parse_type_params(p);
             }
@@ -2156,7 +2162,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2165,7 +2171,7 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
             parser_advance(p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=m_pos.ln, col=m_pos.col);
-            let ret_type: Struct = VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=m_pos);
+            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=m_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(p);
                 ret_type = parse_return_type(p);
@@ -2177,7 +2183,8 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip ';'
 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=null, is_override=false, annotations=member_anns));
+            let declaration: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=NO_NODE, is_override=false, annotations=member_anns);
+            methods.append(add_method_def_node(p.arena, declaration));
 
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2192,10 +2199,11 @@ func parse_interface_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '}'
 
-    return InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, interfaces=interfaces, methods=methods, annotations=anns, pos=pos);
+    let definition: InterfaceDefNode = InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, interfaces=interfaces, methods=methods, annotations=anns, pos=pos);
+    return add_interface_def_node(p.arena, definition);
 }
 
-func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
+func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip 'class'
 
@@ -2206,12 +2214,12 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
     let name_tok: Token = p.current_tok;
     parser_advance(p);
 
-    let type_params: Vector(Struct) = null;
+    let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
         type_params = parse_type_params(p);
     }
 
-    let parent_tok: Struct = null;
+    let parent_tok: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_LPAREN) {
         parser_advance(p); // skip '('
         parent_tok = parse_return_type(p);
@@ -2222,7 +2230,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
         parser_advance(p); // skip ')'
     }
 
-    let interfaces: Vector(Struct) = [];
+    let interfaces: Vector(NodeID) = [];
     if (p.current_tok.type == TOK_WITH) {
         parser_advance(p); // skip 'with'
         interfaces.append(parse_return_type(p));
@@ -2239,11 +2247,11 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '{'
 
-    let fields: Vector(Struct) = [];
-    let methods: Vector(Struct) = [];
+    let fields: Vector(NodeID) = [];
+    let methods: Vector(NodeID) = [];
 
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
-        let member_anns: Vector(Struct) = [];
+        let member_anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
             member_anns = parse_annotations(p);
         }
@@ -2259,7 +2267,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
 
             let tid: TypedIdent = parse_typed_name(p, true);
 
-            let default_val: Struct = null;
+            let default_val: NodeID = NO_NODE;
             if (p.current_tok.type == TOK_ASSIGN) {
                 parser_advance(p); // skip '='
                 default_val = expression(p);
@@ -2271,7 +2279,8 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip ';'
 
-            fields.append(VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=default_val, is_const=false, annotations=member_anns, pos=f_pos, alloc_id=0));
+            let field: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=default_val, is_const=false, annotations=member_anns, pos=f_pos, alloc_id=0);
+            fields.append(add_var_decl_node(p.arena, field));
             
         } else if (p.current_tok.type == TOK_METHOD || p.current_tok.type == TOK_FUNC) {
             let m_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2279,7 +2288,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             let m_name: Token = p.current_tok;
             parser_advance(p);
 
-            let type_params: Vector(Struct) = null;
+            let type_params: Vector(GenericParamNode) = null;
             if (p.current_tok.type == TOK_LT) {
                 type_params = parse_type_params(p);
             }
@@ -2290,7 +2299,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2304,11 +2313,12 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '->'
 
-            let ret_type: Struct = parse_return_type(p);
+            let ret_type: NodeID = parse_return_type(p);
 
-            let body: Struct = parse_block(p); 
+            let body: NodeID = parse_block(p); 
             
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            let method_def: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
+            methods.append(add_method_def_node(p.arena, method_def));
 
         } else if (p.current_tok.type == TOK_TYPE) {
             let type_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2317,11 +2327,12 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip 'type'
 
-            let target_type: Struct = parse_return_type(p);
+            let target_type: NodeID = parse_return_type(p);
             let type_name_tok: Token = Token(type=TOK_IDENTIFIER, value="$type", line=type_pos.ln, col=type_pos.col);
-            let body: Struct = parse_block(p);
+            let body: NodeID = parse_block(p);
 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, type_params=null, params=[], return_type=target_type, body=body, is_override=false, annotations=null));
+            let conversion: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, type_params=null, params=[], return_type=target_type, body=body, is_override=false, annotations=null);
+            methods.append(add_method_def_node(p.arena, conversion));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "init") {
             let init_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2335,7 +2346,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2344,15 +2355,16 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             parser_advance(p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=init_pos.ln, col=init_pos.col);
-            let ret_type: Struct = VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=init_pos);
+            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=init_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(p);
                 parse_return_type(p);
             }
 
-            let body: Struct = parse_block(p); 
+            let body: NodeID = parse_block(p); 
             
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            let initializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
+            methods.append(add_method_def_node(p.arena, initializer));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "deinit") {
             let deinit_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2366,7 +2378,7 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             }
             parser_advance(p); // skip '('
 
-            let params: Vector(Struct) = parse_params(p, true);
+            let params: Vector(ParamNode) = parse_params(p, true);
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2375,14 +2387,15 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             parser_advance(p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=deinit_pos.ln, col=deinit_pos.col);
-            let ret_type: Struct = VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=deinit_pos);
+            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=deinit_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(p);
                 parse_return_type(p);
             }
 
-            let body: Struct = parse_block(p); 
-            methods.append(MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns));
+            let body: NodeID = parse_block(p); 
+            let deinitializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
+            methods.append(add_method_def_node(p.arena, deinitializer));
 
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2396,29 +2409,29 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
     }
     parser_advance(p); // skip '}'
 
-    let field_init_stmts: Vector(Struct) = [];
+    let field_init_stmts: Vector(NodeID) = [];
     let field_idx: Int = 0;
     while (field_idx < fields.length()) {
-        let field: VarDeclareNode = fields[field_idx];
-        if (field.value is !null) {
+        let field: VarDeclareNode = get_var_decl_node(p.arena, fields[field_idx]);
+        if (has_node(field.value)) {
             let self_tok: Token = Token(
                 type=TOK_IDENTIFIER,
                 value="self",
                 line=field.name_tok.line,
                 col=field.name_tok.col
             );
-            let self_node: VarAccessNode = VarAccessNode(
+            let self_node: NodeID = add_var_access_node(p.arena, VarAccessNode(
                 type=NODE_VAR_ACCESS,
                 name_tok=self_tok,
                 pos=field.pos
-            );
-            field_init_stmts.append(FieldAssignNode(
+            ));
+            field_init_stmts.append(add_field_assign_node(p.arena, FieldAssignNode(
                 type=NODE_FIELD_ASSIGN,
                 obj=self_node,
                 field_name=field.name_tok.value,
                 value=field.value,
                 pos=field.pos
-            ));
+            )));
         }
         field_idx += 1;
     }
@@ -2436,28 +2449,29 @@ func parse_class_def(p: Parser, anns: Vector(Struct)) -> Struct {
             line=pos.ln,
             col=pos.col
         );
-        let return_type: Struct = VarAccessNode(
+        let return_type: NodeID = add_var_access_node(p.arena, VarAccessNode(
             type=NODE_VAR_ACCESS,
             name_tok=void_tok,
             pos=pos
-        );
-        methods.append(MethodDefNode(
+        ));
+        methods.append(add_method_def_node(p.arena, MethodDefNode(
             type=NODE_METHOD_DEF,
             pos=pos,
             name_tok=field_init_tok,
             type_params=null,
             params=[],
             return_type=return_type,
-            body=BlockNode(type=NODE_BLOCK, stmts=field_init_stmts),
+            body=add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=field_init_stmts)),
             is_override=false,
             annotations=null
-        ));
+        )));
     }
 
-    return ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=name_tok, type_params=type_params, parent_tok=parent_tok, interfaces=interfaces, fields=fields, methods=methods, annotations=anns);
+    let definition: ClassDefNode = ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=name_tok, type_params=type_params, parent_tok=parent_tok, interfaces=interfaces, fields=fields, methods=methods, annotations=anns);
+    return add_class_def_node(p.arena, definition);
 }
 
-func parse_enum_def(p: Parser, anns: Vector(Struct), is_error: Bool) -> Struct {
+func parse_enum_def(p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let kind: String = "enum";
     if is_error { kind = "error"; }
@@ -2477,7 +2491,7 @@ func parse_enum_def(p: Parser, anns: Vector(Struct), is_error: Bool) -> Struct {
     }
     parser_advance(p); // skip '{'
 
-    let fields: Vector(Struct) = [];
+    let fields: Vector(EnumFieldNode) = [];
 
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
         if (!is_name_token(p.current_tok.type)) {
@@ -2490,7 +2504,7 @@ func parse_enum_def(p: Parser, anns: Vector(Struct), is_error: Bool) -> Struct {
         let field_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         parser_advance(p);
 
-        let value_expr: Struct = null;
+        let value_expr: NodeID = NO_NODE;
         if (p.current_tok.type == TOK_ASSIGN) {
             parser_advance(p); // skip '='
             value_expr = expression(p);
@@ -2514,5 +2528,5 @@ func parse_enum_def(p: Parser, anns: Vector(Struct), is_error: Bool) -> Struct {
         throw_invalid_syntax(err_pos, "expected '}' to close " + kind + " '" + name_tok.value + "'");
     }
 
-    return EnumDefNode(type=NODE_ENUM_DEF, name_tok=name_tok, fields=fields, pos=start_pos, annotations=anns, is_error=is_error);
+    return add_enum_def_node(p.arena, EnumDefNode(type=NODE_ENUM_DEF, name_tok=name_tok, fields=fields, pos=start_pos, annotations=anns, is_error=is_error));
 }

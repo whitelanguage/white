@@ -1,6 +1,7 @@
 // compiler/modules.wl
 import "file"
 import * from "../frontend/ast.wl"
+import * from "../frontend/arena.wl"
 import * from "../frontend/tokens.wl"
 import * from "context.wl"
 import * from "../frontend/diagnostics.wl"
@@ -9,19 +10,19 @@ import Parser, parse from "../frontend/parser.wl"
 import * from "target_eval.wl"
 import * from "registration.wl"
 
-func precompile_ast(c: Compiler, node: Struct, final_path: String, import_prefix: String, old_dir: String) -> Void {
+func precompile_ast(c: Compiler, node: NodeID, final_path: String, import_prefix: String, old_dir: String) -> Void {
 // imports must be bound before this module publishes its declarations
-    let block: BlockNode = node;
-    let stmts: Vector(Struct) = block.stmts;
+    let block: BlockNode = get_block_node(c.arena, node);
+    let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
 
-    let imports: Vector(Struct) = [];
+    let imports: Vector(NodeID) = [];
     let i: Int = 0;
     while (i < len) {
-        let base: Int = node_kind(stmts[i]);
+        let base: Int = node_tag(stmts[i]);
         if (base == NODE_IMPORT) {
-            compile_import(c, stmts[i]);
+            compile_import(c, get_import_node(c.arena, stmts[i]));
             imports.append(stmts[i]);
         }
         i += 1;
@@ -93,7 +94,7 @@ func bind_loaded_prelude(c: Compiler, path: String, pos: Position) -> Void {
     let loaded: StringConstant = c.imported_modules.lookup(final_path);
     if (loaded is null) { return; }
     let star: Token = Token(type=TOK_MUL, value="*", line=pos.ln, col=pos.col);
-    let symbols: Vector(Struct) = [ImportSymbolNode(name_tok=star, alias_tok=null)];
+    let symbols: Vector(ImportSymbolNode) = [ImportSymbolNode(name_tok=star, alias_tok=null)];
     let path_tok: Token = Token(type=TOK_STR_LIT, value=path, line=pos.ln, col=pos.col);
     bind_import_symbols(c, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=null, pos=pos), loaded.value, false, true);
 }
@@ -207,8 +208,8 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
     c.current_file_func_aliases     = Dict();
     c.current_file_global_aliases   = Dict();
     let lexer: Lexer = new_lexer(final_path, source);
-    let parser: Parser = Parser(lexer=lexer, current_tok=get_next_token(lexer), nesting=0);
-    let mod_ast: Struct = parse(parser);
+    let parser: Parser = Parser(lexer=lexer, current_tok=get_next_token(lexer), nesting=0, arena=c.arena);
+    let mod_ast: NodeID = parse(parser);
 
     precompile_ast(c, mod_ast, final_path, import_prefix, c.current_dir);
 

@@ -1,6 +1,7 @@
 // compiler/lowering/ownership.wl
 import Dict from "dict"
 import * from "../../frontend/ast.wl"
+import * from "../../frontend/arena.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../validation.wl"
@@ -238,19 +239,19 @@ func emit_erased_type_check(c: Compiler, value: String, expected: Int, pos: Posi
     c.output_file.write("\n" + success + ":\n");
 }
 
-func hoist_allocas(c: Compiler, node: Struct) -> Void {
+func hoist_allocas(c: Compiler, node: NodeID) -> Void {
 // keep local storage in the entry block so loops do not grow the native stack
-    if (node is null) {
+    if (!has_node(node)) {
         return;
     }
 
-    let base: Int = node_kind(node);
+    let base: Int = node_tag(node);
     if (base == NODE_BLOCK) {
-        let block: BlockNode = node;
+        let block: BlockNode = get_block_node(c.arena, node);
         let old_scope: Scope = c.hoist_scope;
         c.hoist_scope = Scope(parent=old_scope, table=Dict(), gc_vars=[], depth=0);
 
-        let stmts: Vector(Struct) = block.stmts;
+        let stmts: Vector(NodeID) = block.stmts;
         let len: Int = 0;
         if (stmts is !null) { len = stmts.length(); }
         let i: Int = 0;
@@ -261,27 +262,28 @@ func hoist_allocas(c: Compiler, node: Struct) -> Void {
 
         c.hoist_scope = old_scope;
     } else if (base == NODE_IF) {
-        let if_n: IfNode = node;
+        let if_n: IfNode = get_if_node(c.arena, node);
         hoist_allocas(c, if_n.body);
         hoist_allocas(c, if_n.else_body);
     } else if (base == NODE_WHILE) {
-        let w_n: WhileNode = node;
+        let w_n: WhileNode = get_while_node(c.arena, node);
         hoist_allocas(c, w_n.body);
     } else if (base == NODE_FOR) {
-        let f_n: ForNode = node;
+        let f_n: ForNode = get_for_node(c.arena, node);
         hoist_allocas(c, f_n.init);
         hoist_allocas(c, f_n.body);
     } else if (base == NODE_CATCH) {
-        let c_node: CatchNode = node;
+        let c_node: CatchNode = get_catch_node(c.arena, node);
         let err_reg: String = next_reg(c);
         c_node.alloc_id = c.alloc_regs.length();
         c.alloc_regs.append(err_reg);
+        c.arena.catch_nodes[node_slot(node)] = c_node;
         c.output_file.write(c.indent + err_reg + " = alloca { i64, i32 }\n");
         
         hoist_allocas(c, c_node.stmt);
         hoist_allocas(c, c_node.body);
     } else if (base == NODE_VAR_DECL) {
-        let v_node: VarDeclareNode = node;
+        let v_node: VarDeclareNode = get_var_decl_node(c.arena, node);
         if (c.scope_depth > 0) {
             let target_type_id: Int = resolve_type(c, v_node.type_node);
 
@@ -301,6 +303,7 @@ func hoist_allocas(c: Compiler, node: Struct) -> Void {
             let var_reg: String = next_reg(c);
             v_node.alloc_id = c.alloc_regs.length();
             c.alloc_regs.append(var_reg);
+            c.arena.var_decl_nodes[node_slot(node)] = v_node;
             
             let llvm_ty_str: String = get_llvm_type_str(c, target_type_id);
             c.output_file.write(c.indent + var_reg + " = alloca " + llvm_ty_str + "\n");

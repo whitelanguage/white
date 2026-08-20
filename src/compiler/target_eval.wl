@@ -1,22 +1,23 @@
 // compiler/target_eval.wl
 import "sys"
 import * from "../frontend/ast.wl"
+import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "target.wl"
 
-func target_intrinsic(c: Compiler, node: Struct) -> String {
-    if (node is null) { return ""; }
-    let base: Int = node_kind(node);
+func target_intrinsic(c: Compiler, node: NodeID) -> String {
+    if (!has_node(node)) { return ""; }
+    let base: Int = node_tag(node);
     let info: SymbolInfo = null;
     if (base == NODE_FIELD_ACCESS) {
-        let name: String = format_ast_path(node);
+        let name: String = format_ast_path(c, node);
         let mapped: String = c.current_file_global_aliases.lookup(name);
         if (mapped is null) { mapped = c.global_var_aliases.lookup(name); }
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
         if (info is null) { info = c.global_symbol_table.lookup(name); }
     } else if (base == NODE_VAR_ACCESS) {
-        let access: VarAccessNode = node;
+        let access: VarAccessNode = get_var_access_node(c.arena, node);
         info = find_symbol(c, access.name_tok.value);
     }
     if (info is null || !info.reg.starts_with("$intrinsic.")) { return ""; }
@@ -66,13 +67,13 @@ func target_enum_name(name: String) -> String {
     return "";
 }
 
-func fold_target_cond(c: Compiler, node: Struct) -> Int {
+func fold_target_cond(c: Compiler, node: NodeID) -> Int {
 // return 1 or 0 for a known target condition, and -1 when runtime code is still needed
-    if (node is null) { return -1; }
-    let base: Int = node_kind(node);
+    if (!has_node(node)) { return -1; }
+    let base: Int = node_tag(node);
 
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = node;
+        let unary: UnaryOpNode = get_unary_node(c.arena, node);
         if (unary.op_tok.value == "!") {
             let value: Int = fold_target_cond(c, unary.node);
             if (value == 0) { return 1; }
@@ -82,7 +83,7 @@ func fold_target_cond(c: Compiler, node: Struct) -> Int {
     }
 
     if (base != NODE_BINOP) { return -1; }
-    let binary: BinOpNode = node;
+    let binary: BinOpNode = get_binop_node(c.arena, node);
     let op: String = binary.op_tok.value;
 
     if (op == "&&" || op == "||") {
@@ -99,9 +100,9 @@ func fold_target_cond(c: Compiler, node: Struct) -> Int {
 
     if (op != "==" && op != "!=") { return -1; }
 
-    let intrinsic_node: Struct = binary.left;
+    let intrinsic_node: NodeID = binary.left;
     let intrinsic: String = target_intrinsic(c, intrinsic_node);
-    let literal_node: Struct = binary.right;
+    let literal_node: NodeID = binary.right;
     if (intrinsic.length() == 0) {
         intrinsic_node = binary.right;
         intrinsic = target_intrinsic(c, intrinsic_node);
@@ -109,15 +110,15 @@ func fold_target_cond(c: Compiler, node: Struct) -> Int {
     }
     if (intrinsic.length() == 0) { return -1; }
 
-    let literal_base: Int = node_kind(literal_node);
+    let literal_base: Int = node_tag(literal_node);
     let equal: Bool = false;
     if (intrinsic == "target_pointer_bits" && literal_base != 0 && literal_base == NODE_INT) {
-        let literal: IntNode = literal_node;
+        let literal: IntNode = get_int_node(c.arena, literal_node);
         equal = get_target_pointer_bits() == string_to_int(literal.tok.value, literal.pos);
     } else if (literal_base != 0 && literal_base == NODE_FIELD_ACCESS) {
-        let field: FieldAccessNode = literal_node;
+        let field: FieldAccessNode = get_field_access_node(c.arena, literal_node);
         let enum_name: String = target_enum_name(intrinsic);
-        let field_path: String = format_ast_path(literal_node);
+        let field_path: String = format_ast_path(c, literal_node);
         if (!field_path.ends_with(enum_name + "." + field.field_name)) { return -1; }
         let expected: Int = target_member(intrinsic, field.field_name);
         if (expected < 0) { return -1; }

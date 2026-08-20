@@ -6,6 +6,7 @@ import "file"
 import "frontend/tokens.wl" as WhitelangTokens
 import "frontend/lexer.wl" as WhitelangLexer
 import "frontend/ast.wl" as WhitelangNodes
+import "frontend/arena.wl" as WhitelangArena
 import "frontend/parser.wl" as WhitelangParser
 import "frontend/diagnostics.wl" as WhitelangExceptions
 import "compiler/lowering/core.wl" as WhitelangCompiler
@@ -382,16 +383,17 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     f_in.close();
 
+    let arena: WhitelangArena.AstArena = WhitelangArena.new_ast_arena();
     let lexer: WhitelangLexer.Lexer = WhitelangLexer.new_lexer(cfg.source_file, source);
-    let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=WhitelangLexer.get_next_token(lexer), nesting=0);
-    let ast: Struct = WhitelangParser.parse(parser);
+    let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=WhitelangLexer.get_next_token(lexer), nesting=0, arena=arena);
+    let ast: WhitelangNodes.NodeID = WhitelangParser.parse(parser);
 
     WhitelangExceptions.check_errors_and_abort();
     if (cfg.verbose) { print("Parsed source: " + cfg.source_file); }
 
     if (cfg.dump_ast) { print("[Debug] AST Dumped"); }
 
-    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info)?;
+    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info, arena)?;
     catch(err) {
         print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
         return 1;

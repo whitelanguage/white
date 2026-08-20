@@ -1,6 +1,7 @@
 // compiler/lowering/ffi.wl
 import "sys"
 import * from "../../frontend/ast.wl"
+import * from "../../frontend/arena.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
@@ -69,7 +70,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
 
     let arg_types: Vector(Struct) = [];
     let arg_names: Vector(String) = [];
-    let params: Vector(Struct) = node.params;
+    let params: Vector(ParamNode) = node.params;
     if (!check_duplicate_params(params, "extern function '" + func_name + "'", node.pos)) {
         return void_result();
     }
@@ -128,11 +129,11 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
     return void_result();
 }
 func compile_extern_block(c: Compiler, node: ExternBlockNode) -> CompileResult {
-    let funcs: Vector(Struct) = node.funcs;
+    let funcs: Vector(NodeID) = node.funcs;
     let len: Int = 0; if (funcs is !null) { len = funcs.length(); }
     let i: Int = 0;
     while (i < len) {
-        let f_node: ExternFuncNode = funcs[i];
+        let f_node: ExternFuncNode = get_extern_func_node(c.arena, funcs[i]);
         compile_extern_func(c, f_node);
         i += 1;
     }
