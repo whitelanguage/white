@@ -1,6 +1,6 @@
 // frontend/ast.wl
 import Token from "tokens.wl"
-import Position, throw_internal_compiler_error from "diagnostics.wl"
+import Position, no_position, throw_internal_compiler_error from "diagnostics.wl"
 
 const NODE_INT            : Int = 1;
 const NODE_FLOAT          : Int = 2;
@@ -82,7 +82,7 @@ func node_slot(node: NodeID) -> Int {
 
 func make_node_id(kind: Int, slot: Int) -> NodeID {
     if (kind <= 0 || kind > 255 || slot < 0 || slot >= NODE_SLOT_LIMIT) {
-        throw_internal_compiler_error(null, "AST arena node limit exceeded.");
+        throw_internal_compiler_error(no_position(), "AST arena node limit exceeded.");
         return NO_NODE;
     }
     return NodeID((UInt32(kind) << NODE_KIND_SHIFT) | UInt32(slot + 1));

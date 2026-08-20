@@ -60,6 +60,15 @@ struct __SourceUnit(
     valid  : Bool
 )
 
+
+func no_position() -> Position {
+    return Position(idx=0, ln=0, col=0, text=null, fn=null);
+}
+
+func has_position(pos: Position) -> Bool {
+    return pos.text is !null || pos.fn is !null;
+}
+
 func __source_unit(text: String, offset: Int) -> __SourceUnit {
     if (text is null || offset < 0 || offset >= text.length()) {
         return __SourceUnit(scalar=0, width=0, valid=true);
@@ -408,7 +417,7 @@ func throw_import_error(pos: Position, details: String) -> Void {
 }
 
 func throw_internal_compiler_error(pos: Position, details: String) -> Void {
-    if (pos is null) {
+    if (!has_position(pos)) {
         print("InternalCompilerError: " + details);
         abort_and_clean(1);
         return;

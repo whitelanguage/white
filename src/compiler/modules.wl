@@ -71,7 +71,7 @@ func reserve_module_prefix(c: Compiler, canonical_name: String, final_path: Stri
     let stem: String = module_symbol_stem(canonical_name);
     let prefix: String = stem + ".";
     let owner: StringConstant = c.module_prefix_owners.lookup(prefix);
-    if (owner is null || owner.value == final_path) {
+    if (!has_string_constant(owner) || owner.value == final_path) {
         c.module_prefix_owners.put(prefix, StringConstant(id=0, value=final_path));
         return prefix;
     }
@@ -80,7 +80,7 @@ func reserve_module_prefix(c: Compiler, canonical_name: String, final_path: Stri
         prefix = stem + "__m" + c.module_id + ".";
         c.module_id += 1;
         owner = c.module_prefix_owners.lookup(prefix);
-        if (owner is null || owner.value == final_path) {
+        if (!has_string_constant(owner) || owner.value == final_path) {
             c.module_prefix_owners.put(prefix, StringConstant(id=0, value=final_path));
             return prefix;
         }
@@ -92,11 +92,11 @@ func bind_loaded_prelude(c: Compiler, path: String, pos: Position) -> Void {
     let final_path: String = resolve_import_path(c, path, pos);
     if (final_path is null || final_path.length() == 0) { return; }
     let loaded: StringConstant = c.imported_modules.lookup(final_path);
-    if (loaded is null) { return; }
+    if (!has_string_constant(loaded)) { return; }
     let star: Token = Token(type=TOK_MUL, value="*", line=pos.ln, col=pos.col);
-    let symbols: Vector(ImportSymbolNode) = [ImportSymbolNode(name_tok=star, alias_tok=null)];
+    let symbols: Vector(ImportSymbolNode) = [ImportSymbolNode(name_tok=star, alias_tok=Token())];
     let path_tok: Token = Token(type=TOK_STR_LIT, value=path, line=pos.ln, col=pos.col);
-    bind_import_symbols(c, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=null, pos=pos), loaded.value, false, true);
+    bind_import_symbols(c, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=Token(), pos=pos), loaded.value, false, true);
 }
 
 func bind_module_prelude(c: Compiler, pos: Position) -> Void {
@@ -130,13 +130,13 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
     let canonical_name: String = raw_path.slice(start_idx, end_idx);
 
     let module_name: String = canonical_name;
-    if (node.alias_tok is !null) {
+    if (node.alias_tok.value is !null) {
         module_name = node.alias_tok.value;
     }
 
     let loaded_module: StringConstant = c.imported_modules.lookup(final_path);
     let import_prefix: String = "";
-    if (loaded_module is !null) {
+    if (has_string_constant(loaded_module)) {
         import_prefix = loaded_module.value;
     } else {
         import_prefix = reserve_module_prefix(c, canonical_name, final_path);
@@ -151,7 +151,7 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
         c.current_file_visible_prefixes.put(module_name, import_prefix);
     }
 
-    if (loaded_module is !null) {
+    if (has_string_constant(loaded_module)) {
         if (node.symbols is !null) {
             bind_import_symbols(c, node, import_prefix, true, false);
             let s_len: Int = node.symbols.length();

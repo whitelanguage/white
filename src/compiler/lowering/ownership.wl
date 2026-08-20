@@ -10,7 +10,9 @@ import * from "literals.wl"
 import * from "../target.wl"
 
 func enter_scope(c: Compiler) -> Void {
-    let new_scope: Scope = Scope(table=Dict(), parent=c.symbol_table, gc_vars=[], depth=c.scope_depth + 1);
+    let parent: Int = c.scope_stack.length();
+    c.scope_stack.append(c.symbol_table);
+    let new_scope: Scope = Scope(table=Dict(), parent=parent, gc_vars=[], depth=c.scope_depth + 1);
     c.symbol_table = new_scope;
     c.scope_depth += 1;
 }
@@ -26,14 +28,14 @@ func exit_scope(c: Compiler) -> Void {
         gc_idx += 1;
     }
 
-    if (c.symbol_table.parent is !null) {
-        c.symbol_table = c.symbol_table.parent;
+    if (c.symbol_table.parent >= 0) {
+        c.symbol_table = c.scope_stack[c.symbol_table.parent];
     }
     c.scope_depth -= 1;
 }
 func cleanup_all_scopes(c: Compiler) -> Void {
     let curr: Scope = c.symbol_table;
-    while (curr is !null) { 
+    while true {
         let gc_vec: Vector(Struct) = curr.gc_vars;
         let gc_len: Int = 0; if (gc_vec is !null) { gc_len = gc_vec.length(); }
         let gc_idx: Int = 0;
@@ -42,13 +44,14 @@ func cleanup_all_scopes(c: Compiler) -> Void {
             emit_drop_slot(c, gc_node.reg, gc_node.type);
             gc_idx += 1;
         }
-        curr = curr.parent;
+        if (curr.parent < 0) { break; }
+        curr = c.scope_stack[curr.parent];
     }
 }
 
 func cleanup_scopes_until(c: Compiler, target_scope: Scope) -> Void {
     let curr: Scope = c.symbol_table;
-    while (curr is !null && curr.depth > target_scope.depth) { 
+    while (curr.depth > target_scope.depth) {
         let gc_vec: Vector(Struct) = curr.gc_vars;
         let gc_len: Int = 0; if (gc_vec is !null) { gc_len = gc_vec.length(); }
         let gc_idx: Int = 0;
@@ -57,7 +60,8 @@ func cleanup_scopes_until(c: Compiler, target_scope: Scope) -> Void {
             emit_drop_slot(c, gc_node.reg, gc_node.type);
             gc_idx += 1;
         }
-        curr = curr.parent;
+        if (curr.parent < 0) { break; }
+        curr = c.scope_stack[curr.parent];
     }
 }
 
@@ -68,7 +72,7 @@ func emit_retain(c: Compiler, reg: String, type_id: Int) -> Void {
     if (!is_ref_type(c, type_id)) { return; }
     
     let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    if (s_info is !null && s_info.is_interface) {
+    if (has_struct(s_info) && s_info.is_interface) {
         let obj_ptr: String = next_reg(c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_retain(i8* " + obj_ptr + ")\n");
@@ -90,7 +94,7 @@ func emit_release(c: Compiler, reg: String, type_id: Int) -> Void {
     if (!is_ref_type(c, type_id)) { return; }
 
     let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    if (s_info is !null && s_info.is_interface) {
+    if (has_struct(s_info) && s_info.is_interface) {
         let obj_ptr: String = next_reg(c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + obj_ptr + ")\n");
@@ -112,7 +116,7 @@ func emit_retain_value(c: Compiler, reg: String, type_id: Int) -> Void {
         emit_retain(c, reg, type_id);
         return;
     }
-    if (is_fallible_type(c, type_id) && needs_drop(c, type_id)) {
+    if (needs_drop(c, type_id)) {
         let llvm_ty: String = get_llvm_type_str(c, type_id);
         let slot: String = next_reg(c);
         c.output_file.write(c.indent + slot + " = alloca " + llvm_ty + "\n");
@@ -126,7 +130,7 @@ func emit_drop_value(c: Compiler, reg: String, type_id: Int) -> Void {
         emit_release(c, reg, type_id);
         return;
     }
-    if (is_fallible_type(c, type_id) && needs_drop(c, type_id)) {
+    if (needs_drop(c, type_id)) {
         let llvm_ty: String = get_llvm_type_str(c, type_id);
         let slot: String = next_reg(c);
         c.output_file.write(c.indent + slot + " = alloca " + llvm_ty + "\n");
@@ -136,7 +140,7 @@ func emit_drop_value(c: Compiler, reg: String, type_id: Int) -> Void {
 }
 
 func emit_release_owned(c: Compiler, value: CompileResult) -> Void {
-    if (value is null || !value.owns_ref) { return; }
+    if (!has_result(value) || !value.owns_ref) { return; }
     if (is_void_ptr(c, value.type) && is_ref_type(c, value.origin_type)) {
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + value.reg + ")\n");
         return;
@@ -174,7 +178,7 @@ func emit_alloc_obj(c: Compiler, payload_size_reg: String, type_id_str: String, 
     c.output_file.write(c.indent + total_size + " = add " + size_ty + " " + payload_size_reg + ", " + header_size + "\n");
     
     let raw_mem: String = next_reg(c);
-    let alloc_hook: String = get_mangled_symbol(c, "memory_alloc", null);
+    let alloc_hook: String = get_mangled_symbol(c, "memory_alloc", no_position());
     c.output_file.write(c.indent + raw_mem + " = call i8* @" + alloc_hook + "(" + size_ty + " " + total_size + ")\n");
     emit_alloc_check(c, raw_mem);
 
@@ -249,7 +253,7 @@ func hoist_allocas(c: Compiler, node: NodeID) -> Void {
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(c.arena, node);
         let old_scope: Scope = c.hoist_scope;
-        c.hoist_scope = Scope(parent=old_scope, table=Dict(), gc_vars=[], depth=0);
+        c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
 
         let stmts: Vector(NodeID) = block.stmts;
         let len: Int = 0;
@@ -296,7 +300,7 @@ func hoist_allocas(c: Compiler, node: NodeID) -> Void {
                 }
             }
 
-            if (c.hoist_scope is !null) {
+            if (c.hoist_scope.table is !null) {
                 c.hoist_scope.table.put(v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
             }
 
@@ -315,8 +319,8 @@ func hoist_allocas(c: Compiler, node: NodeID) -> Void {
 }
 
 func emit_runtime_error(c: Compiler, pos: Position, msg: String) -> Void {
-    let hook_raw_str: String = get_mangled_symbol(c, "print_bytes", null);
-    let hook_int: String = get_mangled_symbol(c, "print_int", null);
+    let hook_raw_str: String = get_mangled_symbol(c, "print_bytes", no_position());
+    let hook_int: String = get_mangled_symbol(c, "print_int", no_position());
 
     if (hook_raw_str is !null && hook_int is !null) {
         let header_1: String = "RuntimeError: " + msg + "\n    at " + pos.fn + ":";
@@ -606,8 +610,12 @@ func emit_slice_copy(c: Compiler, elem_type: Int, source: String, start_i32: Str
     let alloc_count: String = next_reg(c);
     c.output_file.write(c.indent + alloc_count + " = select i1 " + is_empty + ", " + size_ty + " 1, " + size_ty + " " + length + "\n");
 
-    let elem_size: Int = get_type_size_bytes(c, elem_type);
-    let max_capacity: Long = vector_capacity_limit(elem_size);
+    let elem_size_ptr: String = next_reg(c);
+    c.output_file.write(c.indent + elem_size_ptr + " = getelementptr " + elem_ty + ", " + elem_ty + "* null, " + size_ty + " 1\n");
+    let elem_size: String = next_reg(c);
+    c.output_file.write(c.indent + elem_size + " = ptrtoint " + elem_ty + "* " + elem_size_ptr + " to " + size_ty + "\n");
+    let max_capacity: String = next_reg(c);
+    c.output_file.write(c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
     let overflow: String = next_reg(c);
     c.output_file.write(c.indent + overflow + " = icmp ugt " + size_ty + " " + alloc_count + ", " + max_capacity + "\n");
     let fail_label: String = next_label(c);
@@ -695,12 +703,27 @@ func emit_drop_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     }
 
     let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
-    if (arr_info is !null && arr_info.size >= 0) {
+    if (has_array_info(arr_info) && arr_info.size >= 0) {
         let i: Int = 0;
         while (i < arr_info.size) {
             let elem_ptr: String = next_reg(c);
             c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
             emit_drop_slot(c, elem_ptr, arr_info.base_type);
+            i += 1;
+        }
+        return;
+    }
+
+    if (is_value_struct(c, type_id)) {
+        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(c, type_id));
+        let i: Int = 0;
+        while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
+            let field: FieldInfo = info.fields[i];
+            if (needs_drop(c, field.type)) {
+                let field_ptr: String = next_reg(c);
+                c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + field.offset + "\n");
+                emit_drop_slot(c, field_ptr, field.type);
+            }
             i += 1;
         }
         return;
@@ -736,12 +759,27 @@ func emit_retain_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     }
 
     let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
-    if (arr_info is !null && arr_info.size >= 0) {
+    if (has_array_info(arr_info) && arr_info.size >= 0) {
         let i: Int = 0;
         while (i < arr_info.size) {
             let elem_ptr: String = next_reg(c);
             c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
             emit_retain_slot(c, elem_ptr, arr_info.base_type);
+            i += 1;
+        }
+        return;
+    }
+
+    if (is_value_struct(c, type_id)) {
+        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(c, type_id));
+        let i: Int = 0;
+        while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
+            let field: FieldInfo = info.fields[i];
+            if (needs_drop(c, field.type)) {
+                let field_ptr: String = next_reg(c);
+                c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + field.offset + "\n");
+                emit_retain_slot(c, field_ptr, field.type);
+            }
             i += 1;
         }
         return;
@@ -757,7 +795,7 @@ func emit_retain_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
 func emit_type_drop(c: Compiler, type_id: Int) -> Void {
 // one drop thunk per concrete type lets containers destroy erased elements safely
 
-    let free_hook: String = get_mangled_symbol(c, "memory_free", null);
+    let free_hook: String = get_mangled_symbol(c, "memory_free", no_position());
     c.output_file.write("define internal void @__wl_drop." + type_id + "(i8* %ptr) {\n");
     c.output_file.write("entry:\n");
 
@@ -772,7 +810,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     }
 
     let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
-    if (arr_info is !null && arr_info.size == -1) {
+    if (has_array_info(arr_info) && arr_info.size == -1) {
         let slice_ty: String = arr_info.llvm_name;
         c.output_file.write("  %slice = bitcast i8* %ptr to " + slice_ty + "*\n");
         c.output_file.write("  %owner.slot = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* %slice, i32 0, i32 2\n");
@@ -784,7 +822,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     }
 
     let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (variant_info is !null && type_id == variant_info.type_id) {
+    if (has_struct(variant_info) && type_id == variant_info.type_id) {
         c.output_file.write("  %box = bitcast i8* %ptr to %struct.$Variant*\n");
         c.output_file.write("  %tag.slot = getelementptr inbounds %struct.$Variant, %struct.$Variant* %box, i32 0, i32 0\n");
         c.output_file.write("  %tag = load i64, i64* %tag.slot\n");
@@ -794,7 +832,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
         let seen_refs: Dict(String, StringConstant) = Dict();
         let ref_id: Int = 1;
         while (ref_id < c.type_counter) {
-            if (is_ref_type(c, ref_id) && ref_id != type_id) {
+            if ((is_ref_type(c, ref_id) || is_value_struct(c, ref_id)) && ref_id != type_id) {
                 ref_cases = append_variant_ref_case(c, ref_cases, seen_refs, ref_id);
             }
             ref_id += 1;
@@ -814,7 +852,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     }
 
     let vec_info: SymbolInfo = c.vector_base_map.lookup("" + type_id);
-    if (vec_info is !null) {
+    if (has_symbol(vec_info)) {
         let elem_type: Int = vec_info.type;
         let elem_ty: String = get_llvm_type_str(c, elem_type);
         let vec_ty: String = get_vector_llvm_type(c, elem_type);
@@ -850,12 +888,12 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     }
 
     let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    if (s_info is !null) {
+    if (has_struct(s_info)) {
         if (s_info.is_class) {
             let methods: Vector(Struct) = s_info.vtable;
             let method_len: Int = 0; if (methods is !null) { method_len = methods.length(); }
             let method_i: Int = 0;
-            let deinit: FuncInfo = null;
+            let deinit: FuncInfo = FuncInfo();
             while (method_i < method_len) {
                 let method_info: FuncInfo = methods[method_i];
                 if (method_info.base_name == "$deinit") {
@@ -864,7 +902,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
                 }
                 method_i += 1;
             }
-            if (deinit is !null) {
+            if (has_func(deinit)) {
                 let self_arg: TypeListNode = deinit.arg_types[0];
                 let self_ty: String = get_llvm_type_str(c, self_arg.type);
                 let deinit_ret: String = get_llvm_type_str(c, deinit.ret_type);
@@ -893,8 +931,8 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
 }
 
 func compile_arc_hooks(c: Compiler) -> Void {
-    let free_hook: String = get_mangled_symbol(c, "memory_free", null);
-    let exit_hook: String = get_mangled_symbol(c, "process_exit", null);
+    let free_hook: String = get_mangled_symbol(c, "memory_free", no_position());
+    let exit_hook: String = get_mangled_symbol(c, "process_exit", no_position());
 
     c.output_file.write("define internal void @__wl_oom() noreturn {\n");
     c.output_file.write("entry:\n");
@@ -967,18 +1005,18 @@ func compile_arc_hooks(c: Compiler) -> Void {
     emit_type_drop(c, TYPE_GENERIC_FUNCTION);
 
     let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (variant_info is !null) { emit_type_drop(c, variant_info.type_id); }
+    if (has_struct(variant_info)) { emit_type_drop(c, variant_info.type_id); }
 
     let type_id: Int = 100;
     while (type_id < c.type_counter) {
         let should_emit: Bool = false;
         let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
-        if (arr_info is !null && arr_info.size == -1) { should_emit = true; }
-        if (c.vector_base_map.lookup("" + type_id) is !null) { should_emit = true; }
+        if (has_array_info(arr_info) && arr_info.size == -1) { should_emit = true; }
+        if (has_symbol(c.vector_base_map.lookup("" + type_id))) { should_emit = true; }
 
         let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-        if (s_info is !null && !s_info.is_enum && !s_info.is_interface) {
-            if (variant_info is null || type_id != variant_info.type_id) { should_emit = true; }
+        if (has_struct(s_info) && !s_info.is_enum && !s_info.is_interface) {
+            if (!has_struct(variant_info) || type_id != variant_info.type_id) { should_emit = true; }
         }
 
         if should_emit { emit_type_drop(c, type_id); }
@@ -1010,10 +1048,10 @@ func emit_erased_check_helpers(c: Compiler) -> Void {
                     }
         
                     let expected_info: StructInfo = c.struct_id_map.lookup("" + expected);
-                if (!accepted && expected_info is !null && expected_info.is_class) {
+                if (!accepted && has_struct(expected_info) && expected_info.is_class) {
                     accepted = is_subclass(c, candidate, expected);
                 }
-                if (!accepted && expected_info is !null && !expected_info.is_class) {
+                if (!accepted && has_struct(expected_info) && !expected_info.is_class) {
                     accepted = erased_struct_matches(candidate, expected);
                 }
                 if accepted {

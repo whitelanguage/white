@@ -8,7 +8,17 @@ extern "system" { func GetCurrentProcessId() -> Int; }
 extern "C" { func getpid() -> Int; }
 
 struct Payload(id: Long, tag: String)
-struct Node(val: Int, data: Payload, next: Node)
+class Node {
+    let val: Int;
+    let data: Payload;
+    let next: Node;
+
+    init(val: Int, data: Payload, next: Node) {
+        self.val = val;
+        self.data = data;
+        self.next = next;
+    }
+}
 func compute_sum(a: Int, b: Int) -> Int { return a + b; }
 
 func main() -> Int {

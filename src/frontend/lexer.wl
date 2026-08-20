@@ -6,7 +6,7 @@ import * from "diagnostics.wl"
 struct Lexer(
     text: String,
     length: Int,
-    pos: Position, 
+    pos: Position,
     current_char: Char,
     current_width: Int,
     current_valid: Bool,
@@ -533,7 +533,7 @@ func handle_slash(l: Lexer) -> Token {
                 end_col=l.pos.col
             ));
         }
-        return null;
+        return Token();
     }
 
     // /*  */
@@ -559,7 +559,7 @@ func handle_slash(l: Lexer) -> Token {
                 end_col=l.pos.col
             ));
         }
-        return null;
+        return Token();
     }
 
     return WhitelangTokens.Token(type=TOK_DIV, value="/", line=line, col=col);
@@ -649,7 +649,7 @@ func get_next_token(l: Lexer) -> Token {
         // / /= // /*
         if (char == '/') {
             let tok: Token = handle_slash(l);
-            if (tok is null) { continue; }
+            if (tok.type == 0) { continue; }
             return tok;
         }
 

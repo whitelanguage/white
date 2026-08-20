@@ -291,8 +291,8 @@ func emit_windows_entrypoint(c: Compiler) -> Void {
     let main_info: FuncInfo = c.func_table.lookup("main");
     let exit_key: String = c.compiler_link.lookup("process_exit");
     let exit_info: FuncInfo = c.func_table.lookup(exit_key);
-    if (main_info is null || exit_info is null) {
-        throw_internal_compiler_error(null, "Missing compiler runtime hooks required by the native entry point.");
+    if (!has_func(main_info) || !has_func(exit_info)) {
+        throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the native entry point.");
         return;
     }
 
@@ -307,8 +307,8 @@ func emit_windows_entrypoint(c: Compiler) -> Void {
         let free_key: String = c.compiler_link.lookup("startup_args_free");
         let args_info: FuncInfo = c.func_table.lookup(args_key);
         let free_info: FuncInfo = c.func_table.lookup(free_key);
-        if (args_info is null || free_info is null) {
-            throw_internal_compiler_error(null, "Missing compiler runtime hooks required by the Windows entry point.");
+        if (!has_func(args_info) || !has_func(free_info)) {
+            throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the Windows entry point.");
             return;
         }
         c.output_file.write("  %argc.addr = alloca i32\n");

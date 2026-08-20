@@ -35,7 +35,7 @@ func const_access_root(c: Compiler, node: NodeID) -> String {
     let name: String = expr_root_name(c, node);
     if (name.length() == 0) { return ""; }
     let info: SymbolInfo = find_symbol(c, name);
-    if (info is !null && (info.is_const || info.is_const_access)) { return name; }
+    if (has_symbol(info) && (info.is_const || info.is_const_access)) { return name; }
     return "";
 }
 
@@ -136,7 +136,7 @@ func check_duplicate_params(params: Vector(ParamNode), owner: String, pos: Posit
 }
 
 func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
-    if (parent is null || child is null || parent.ret_type != child.ret_type) { return false; }
+    if (!has_func(parent) || !has_func(child) || parent.ret_type != child.ret_type) { return false; }
     let parent_len: Int = 0; if (parent.arg_types is !null) { parent_len = parent.arg_types.length(); }
     let child_len: Int = 0; if (child.arg_types is !null) { child_len = child.arg_types.length(); }
     if (parent_len != child_len) { return false; }
@@ -148,7 +148,7 @@ func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
 func add_interface_type(c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
     if (type_id == TYPE_POISON) { return false; }
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    if (info is null || !info.is_interface) {
+    if (!has_struct(info) || !info.is_interface) {
         throw_type_error(pos, "Type " + get_type_name(c, type_id) + " is not an interface.");
         return false;
     }
@@ -174,7 +174,7 @@ func add_interface(c: Compiler, list: Vector(Struct), node: NodeID, pos: Positio
 
 func class_has_interface(c: Compiler, class_info: StructInfo, target: StructInfo) -> Bool {
     let current: StructInfo = class_info;
-    while (current is !null) {
+    while (has_struct(current)) {
         let i: Int = 0;
         while (current.interfaces is !null && i < current.interfaces.length()) {
             let item: TypeListNode = current.interfaces[i];
@@ -202,7 +202,10 @@ func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos
     if (count != expected) { throw_type_error(pos, "Expected " + expected + " arguments, got " + count); return null; }
     let ordered: Vector(ArgNode) = [];
     let i: Int = 0;
-    while (i < expected) { ordered.append(null); i += 1; }
+    while (i < expected) {
+        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        i += 1;
+    }
     let next_positional: Int = 0;
     let saw_named: Bool = false;
     i = 0;
@@ -223,16 +226,37 @@ func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos
         } else {
             saw_named = true;
             let name_index: Int = skip;
-            while (name_index < names.length()) { if (names[name_index] == arg.name) { target = name_index - skip; break; } name_index += 1; }
-            if (target < 0) { throw_name_error(pos, "Unknown argument '" + arg.name + "'"); return null; }
+            while (name_index < names.length()) {
+                if (names[name_index] == arg.name) {
+                    target = name_index - skip;
+                    break;
+                }
+                name_index += 1;
+            }
+
+            if (target < 0) {
+                throw_name_error(pos, "Unknown argument '" + arg.name + "'");
+                return null;
+            }
+
         }
         if (target < 0 || target >= expected) { throw_type_error(pos, "Too many arguments"); return null; }
-        if (ordered[target] is !null) { let duplicate: String = names[target + skip]; throw_name_error(pos, "Argument '" + duplicate + "' is specified more than once"); return null; }
+        if (has_node(ordered[target].val)) {
+            let duplicate: String = names[target + skip];
+            throw_name_error(pos, "Argument '" + duplicate + "' is specified more than once"); return null;
+        }
         ordered[target] = arg;
         i += 1;
     }
+
     i = 0;
-    while (i < expected) { if (ordered[i] is null) { throw_type_error(pos, "Missing argument '" + names[i + skip] + "'"); return null; } i += 1; }
+    while (i < expected) {
+        if (!has_node(ordered[i].val)) {
+            throw_type_error(pos, "Missing argument '" + names[i + skip] + "'");
+            return null;
+        }
+        i += 1;
+    }
     return ordered;
 }
 
@@ -242,18 +266,23 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
     let pack_index: Int = info.variadic_param - 1;
     let ordered: Vector(ArgNode) = [];
     let packed: Vector(ArgNode) = [];
+
     let i: Int = 0;
-    while (i < expected) { ordered.append(null); i += 1; }
+    while (i < expected) {
+        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        i += 1;
+    }
 
     let next_positional: Int = 0;
     let saw_named: Bool = false;
+
     i = 0;
     while (args is !null && i < args.length()) {
         let arg: ArgNode = args[i];
         if (arg.name is null || arg.name.length() == 0) {
             if saw_named {
                 throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
-                return null;
+                return BoundCallArgs();
             }
             if (pack_index >= 0 && next_positional >= pack_index) {
                 packed.append(arg);
@@ -261,11 +290,11 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
             } else {
                 if (arg.is_spread) {
                     throw_invalid_syntax(pos, "A spread argument requires a variadic parameter.");
-                    return null;
+                    return BoundCallArgs();
                 }
                 if (next_positional >= expected) {
                     throw_type_error(pos, "Too many arguments.");
-                    return null;
+                    return BoundCallArgs();
                 }
                 ordered[next_positional] = arg;
                 next_positional += 1;
@@ -283,15 +312,15 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
             }
             if (target < 0) {
                 throw_name_error(pos, "Unknown argument '" + arg.name + "'.");
-                return null;
+                return BoundCallArgs();
             }
             if (target == pack_index) {
                 throw_type_error(pos, "Variadic parameter '" + arg.name + "' must be supplied with positional arguments.");
-                return null;
+                return BoundCallArgs();
             }
-            if (ordered[target] is !null) {
+            if (has_node(ordered[target].val)) {
                 throw_name_error(pos, "Argument '" + arg.name + "' is specified more than once.");
-                return null;
+                return BoundCallArgs();
             }
             ordered[target] = arg;
         }
@@ -304,13 +333,13 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
             i += 1;
             continue;
         }
-        if (ordered[i] is null) {
+        if (!has_node(ordered[i].val)) {
             let default_index: Int = i;
             if (info.default_args is !null && default_index < info.default_args.length() && has_node(info.default_args[default_index])) {
                 ordered[i] = ArgNode(val=info.default_args[default_index], name=names[i + skip], is_spread=false);
             } else {
                 throw_type_error(pos, "Missing argument '" + names[i + skip] + "'.");
-                return null;
+                return BoundCallArgs();
             }
         }
         i += 1;
@@ -329,11 +358,11 @@ func validate_callable_value(info: FuncInfo, skip: Int, pos: Position, kind: Str
 func callable_types_compatible(c: Compiler, actual: Int, expected: Int) -> Bool {
     let actual_info: SymbolInfo = c.func_ret_map.lookup("" + actual);
     let expected_info: SymbolInfo = c.func_ret_map.lookup("" + expected);
-    if (actual_info is null || expected_info is null) {
+    if (!has_symbol(actual_info) || !has_symbol(expected_info)) {
         actual_info = c.method_ret_map.lookup("" + actual);
         expected_info = c.method_ret_map.lookup("" + expected);
     }
-    if (actual_info is null || expected_info is null) { return false; }
+    if (!has_symbol(actual_info) || !has_symbol(expected_info)) { return false; }
     if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) { return false; }
     if (actual_info.func_arg_types.length() != expected_info.func_arg_types.length()) { return false; }
 
@@ -355,17 +384,17 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
     let packed: Vector(ArgNode) = [];
 
     if (pack_index < 0) {
-        if (reject_named_args(args, pos, "a Function or Method value")) { return null; }
+        if (reject_named_args(args, pos, "a Function or Method value")) { return BoundCallArgs(); }
         if (count != expected) {
             throw_type_error(pos, "Argument count mismatch in Function or Method call. Expected " + expected + ", got " + count + ".");
-            return null;
+            return BoundCallArgs();
         }
         let i: Int = 0;
         while (i < count) {
             let arg: ArgNode = args[i];
             if (arg.is_spread) {
                 throw_invalid_syntax(pos, "A spread argument requires a variadic callable type.");
-                return null;
+                return BoundCallArgs();
             }
             ordered.append(arg);
             i += 1;
@@ -375,7 +404,8 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
 
     let i: Int = 0;
     while (i < expected) {
-        ordered.append(null); i += 1;
+        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        i += 1;
     }
 
     let next_positional: Int = 0;
@@ -387,12 +417,12 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
         if (arg.name is null || arg.name.length() == 0) {
             if saw_named {
                 throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
-                return null;
+                return BoundCallArgs();
             }
             if (next_positional < pack_index) {
                 if (arg.is_spread) {
                     throw_invalid_syntax(pos, "A spread argument cannot replace a fixed callable argument.");
-                    return null;
+                    return BoundCallArgs();
                 }
                 ordered[next_positional] = arg;
                 next_positional += 1;
@@ -413,11 +443,11 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
             }
             if (target < 0) {
                 throw_name_error(pos, "Unknown callable argument '" + arg.name + "'.");
-                return null;
+                return BoundCallArgs();
             }
-            if (ordered[target] is !null) {
+            if (has_node(ordered[target].val)) {
                 throw_name_error(pos, "Argument '" + arg.name + "' is specified more than once.");
-                return null;
+                return BoundCallArgs();
             }
             ordered[target] = arg;
         }
@@ -426,7 +456,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
 
     i = 0;
     while (i < expected) {
-        if (i != pack_index && ordered[i] is null) {
+        if (i != pack_index && !has_node(ordered[i].val)) {
             let name: String = "";
             if (signature.arg_names is !null && i < signature.arg_names.length()) {
                 name = signature.arg_names[i];
@@ -437,7 +467,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
             else {
                 throw_type_error(pos, "Missing positional argument " + (i + 1) + " in Function or Method call.");
             }
-            return null;
+            return BoundCallArgs();
         }
         i += 1;
     }

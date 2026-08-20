@@ -14,7 +14,7 @@ import * from "errors.wl"
 import * from "ownership.wl"
 
 func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int, pos: Position) -> CompileResult {
-    if (val_res is null || val_res.reg == "") {
+    if (!has_result(val_res) || val_res.reg == "") {
         let dummy_reg: String = "0";
         if (is_nullable_reference_type(c, expected_type) || is_pointer_type(c, expected_type)) {
             dummy_reg = "null";
@@ -25,10 +25,10 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
 
     if (val_res.type == expected_type) { return val_res; }
-    if (val_res is !null && val_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    if (has_result(val_res) && val_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
     if (expected_type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
     let expected_named: NamedTypeInfo = get_named_type(c, expected_type);
-    if (expected_named is !null && c.curr_func is !null &&
+    if (has_named_type(expected_named) && has_func(c.curr_func) &&
         c.curr_func.base_name == conversion_method_name(expected_type) &&
         get_repr_type(c, val_res.type) == get_repr_type(c, expected_type)) {
         val_res.type = expected_type;
@@ -41,14 +41,15 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     let origin: Int = val_res.origin_type;
 
     let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (variant_info is !null && expected_type == variant_info.type_id) {
+    if (has_struct(variant_info) && expected_type == variant_info.type_id) {
         let boxed_type: Int = get_repr_type(c, val_res.type);
         let boxed_info: StructInfo = c.struct_id_map.lookup("" + boxed_type);
-        let boxed_enum: Bool = boxed_info is !null && boxed_info.is_enum;
+        let boxed_enum: Bool = has_struct(boxed_info) && boxed_info.is_enum;
         let boxed_type_supported: Bool = val_res.type == TYPE_NULL ||
                                            is_primitive_type(boxed_type) ||
                                            is_ref_type(c, val_res.type) ||
                                            is_pointer_type(c, val_res.type) ||
+                                           is_value_struct(c, val_res.type) ||
                                            boxed_enum;
         if (!boxed_type_supported) {
             throw_type_error(pos, "Type " + get_type_name(c, val_res.type) + " cannot be stored in Dict.");
@@ -74,7 +75,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
 
         if (val_res.type == TYPE_NULL || val_res.type == TYPE_NULLPTR) {
             payload_low = "0";
-        } else if (boxed_info is !null && boxed_info.is_interface) {
+        } else if (has_struct(boxed_info) && boxed_info.is_interface) {
             let interface_ty: String = get_llvm_type_str(c, val_res.type);
             let object_ptr: String = next_reg(c);
             c.output_file.write(c.indent + object_ptr + " = extractvalue " + interface_ty + " " + val_res.reg + ", 0\n");
@@ -87,6 +88,23 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
             if (!val_res.owns_ref) {
                 emit_retain(c, val_res.reg, val_res.type);
             }
+        } else if (is_value_struct(c, val_res.type)) {
+            let value_ty: String = get_llvm_type_str(c, val_res.type);
+            let size_ty: String = get_size_llvm_type();
+            let size_ptr: String = next_reg(c);
+            c.output_file.write(c.indent + size_ptr + " = getelementptr " + value_ty + ", " + value_ty + "* null, " + size_ty + " 1\n");
+            let value_size: String = next_reg(c);
+            c.output_file.write(c.indent + value_size + " = ptrtoint " + value_ty + "* " + size_ptr + " to " + size_ty + "\n");
+            let value_ptr: String = emit_alloc_obj(c, value_size, "" + val_res.type, value_ty + "*");
+            if (needs_drop(c, val_res.type) && !val_res.owns_ref) {
+                emit_retain_value(c, val_res.reg, val_res.type);
+            }
+            c.output_file.write(c.indent + "store " + value_ty + " " + val_res.reg + ", " + value_ty + "* " + value_ptr + "\n");
+            let erased: String = next_reg(c);
+            c.output_file.write(c.indent + erased + " = bitcast " + value_ty + "* " + value_ptr + " to i8*\n");
+            c.output_file.write(c.indent + "call void @__wl_retain(i8* " + erased + ")\n");
+            payload_low = next_reg(c);
+            c.output_file.write(c.indent + payload_low + " = ptrtoint " + value_ty + "* " + value_ptr + " to i64\n");
         } else if (boxed_type == TYPE_INT128 || boxed_type == TYPE_UINT128) {
             payload_low = next_reg(c);
             c.output_file.write(c.indent + payload_low + " = trunc i128 " + val_res.reg + " to i64\n");
@@ -140,7 +158,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
 
     let variant_info_check: StructInfo = c.struct_table.lookup("$Variant");
-    if (variant_info_check is !null && val_res.type == variant_info_check.type_id) {
+    if (has_struct(variant_info_check) && val_res.type == variant_info_check.type_id) {
         let expected_repr: Int = get_repr_type(c, expected_type);
         let variant_llvm: String = variant_info_check.llvm_name;
         
@@ -188,7 +206,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
                 let candidate_info: StructInfo = c.struct_id_map.lookup("" + candidate);
                 let accepts: Bool = false;
                 if (candidate == TYPE_STRING) { accepts = true; }
-                if (candidate_info is !null && !candidate_info.is_enum && !candidate_info.is_interface) {
+                if (has_struct(candidate_info) && !candidate_info.is_enum && !candidate_info.is_interface) {
                     if (expected_type == TYPE_GENERIC_STRUCT && !candidate_info.is_class) { accepts = true; }
                     if (expected_type == TYPE_GENERIC_CLASS && candidate_info.is_class) { accepts = true; }
                 }
@@ -253,7 +271,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
             c.output_file.write(c.indent + unboxed_reg + " = bitcast i64 " + payload_low + " to double\n");
         } else {
             let exp_s_info: StructInfo = c.struct_id_map.lookup("" + expected_repr);
-            if (exp_s_info is !null && exp_s_info.is_interface) {
+            if (has_struct(exp_s_info) && exp_s_info.is_interface) {
                 let object_ptr: String = next_reg(c);
                 c.output_file.write(c.indent + object_ptr + " = inttoptr i64 " + payload_low + " to i8*\n");
                 let table_ptr: String = next_reg(c);
@@ -263,7 +281,13 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
                 c.output_file.write(c.indent + with_object + " = insertvalue " + interface_ty + " undef, i8* " + object_ptr + ", 0\n");
                 unboxed_reg = next_reg(c);
                 c.output_file.write(c.indent + unboxed_reg + " = insertvalue " + interface_ty + " " + with_object + ", i8* " + table_ptr + ", 1\n");
-            } else if (exp_s_info is !null && exp_s_info.is_enum) {
+            } else if (is_value_struct(c, expected_type)) {
+                let value_ty: String = get_llvm_type_str(c, expected_type);
+                let value_ptr: String = next_reg(c);
+                c.output_file.write(c.indent + value_ptr + " = inttoptr i64 " + payload_low + " to " + value_ty + "*\n");
+                unboxed_reg = next_reg(c);
+                c.output_file.write(c.indent + unboxed_reg + " = load " + value_ty + ", " + value_ty + "* " + value_ptr + "\n");
+            } else if (has_struct(exp_s_info) && exp_s_info.is_enum) {
                 unboxed_reg = next_reg(c);
                 c.output_file.write(c.indent + unboxed_reg + " = trunc i64 " + payload_low + " to i32\n");
             } else {
@@ -291,7 +315,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
                 zero_val = "null";
             }
             let expected_info: StructInfo = c.struct_id_map.lookup("" + expected_repr);
-            if (expected_info is !null && expected_info.is_interface) {
+            if (has_struct(expected_info) && expected_info.is_interface) {
                 zero_val = "zeroinitializer";
             }
             
@@ -304,6 +328,9 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
         if (val_res.owns_ref) {
             if (is_ref_type(c, expected_type)) {
                 emit_retain(c, final_val_reg, expected_type);
+                result_owned = true;
+            } else if (needs_drop(c, expected_type)) {
+                emit_retain_value(c, final_val_reg, expected_type);
                 result_owned = true;
             }
             emit_release_owned(c, val_res);
@@ -321,7 +348,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
     if (val_res.type == TYPE_NULL) {
         let ex_s: StructInfo = c.struct_id_map.lookup("" + expected_type);
-        if (ex_s is !null && ex_s.is_interface) {
+        if (has_struct(ex_s) && ex_s.is_interface) {
             return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type);
         }
         if (is_pointer_type(c, expected_type)) {
@@ -351,14 +378,14 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     if (expected_type == TYPE_GENERIC_ENUM) {
         if (val_res.type >= 100) {
             let s_info: StructInfo = c.struct_id_map.lookup("" + val_res.type);
-            if (s_info is !null && s_info.is_enum) {
+            if (has_struct(s_info) && s_info.is_enum) {
                 return CompileResult(reg=val_res.reg, type=TYPE_GENERIC_ENUM, origin_type=val_res.type);
             }
         }
     }
     if (val_res.type == TYPE_GENERIC_ENUM && expected_type >= 100) {
         let s_info: StructInfo = c.struct_id_map.lookup("" + expected_type);
-        if (s_info is !null && s_info.is_enum) {
+        if (has_struct(s_info) && s_info.is_enum) {
             return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin);
         }
     }
@@ -366,8 +393,8 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     let ex_info: StructInfo = c.struct_id_map.lookup("" + expected_type);
     let val_info: StructInfo = c.struct_id_map.lookup("" + val_res.type);
 
-    if (ex_info is !null && ex_info.is_interface) {
-        if (val_info is !null && val_info.is_class) {
+    if (has_struct(ex_info) && ex_info.is_interface) {
+        if (has_struct(val_info) && val_info.is_class) {
             if (interface_uses_self(c, ex_info)) {
                 throw_type_error(pos, "interface '" + interface_diagnostic_name(c, expected_type) + "' uses Self and can only be used as a static constraint.");
                 return CompileResult(reg="poison", type=TYPE_POISON);
@@ -396,6 +423,22 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
 
     if (expected_type == TYPE_GENERIC_STRUCT || expected_type == TYPE_GENERIC_CLASS) {
         if (val_res.type >= 100) {
+            if (expected_type == TYPE_GENERIC_STRUCT && is_value_struct(c, val_res.type)) {
+                let value_ty: String = get_llvm_type_str(c, val_res.type);
+                let size_ty: String = get_size_llvm_type();
+                let size_ptr: String = next_reg(c);
+                c.output_file.write(c.indent + size_ptr + " = getelementptr " + value_ty + ", " + value_ty + "* null, " + size_ty + " 1\n");
+                let value_size: String = next_reg(c);
+                c.output_file.write(c.indent + value_size + " = ptrtoint " + value_ty + "* " + size_ptr + " to " + size_ty + "\n");
+                let value_ptr: String = emit_alloc_obj(c, value_size, "" + val_res.type, value_ty + "*");
+                if (needs_drop(c, val_res.type) && !val_res.owns_ref) {
+                    emit_retain_value(c, val_res.reg, val_res.type);
+                }
+                c.output_file.write(c.indent + "store " + value_ty + " " + val_res.reg + ", " + value_ty + "* " + value_ptr + "\n");
+                let erased: String = next_reg(c);
+                c.output_file.write(c.indent + erased + " = bitcast " + value_ty + "* " + value_ptr + " to i8*\n");
+                return CompileResult(reg=erased, type=expected_type, origin_type=val_res.type, is_const_access=val_res.is_const_access);
+            }
             let cast_reg: String = next_reg(c);
             let src_ty: String = get_llvm_type_str(c, val_res.type);
             c.output_file.write(c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to i8*\n");
@@ -403,7 +446,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
         }
     }
     if ((val_res.type == TYPE_GENERIC_STRUCT || val_res.type == TYPE_GENERIC_CLASS) && expected_type >= 100) {
-        if (c.struct_id_map.lookup("" + expected_type) is !null || c.vector_base_map.lookup("" + expected_type) is !null) {
+        if (has_struct(c.struct_id_map.lookup("" + expected_type)) || has_symbol(c.vector_base_map.lookup("" + expected_type))) {
             if (origin >= 100) {
                 let compatible: Bool = origin == expected_type;
                 if (val_res.type == TYPE_GENERIC_STRUCT) {
@@ -421,6 +464,20 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
             }
             let cast_reg: String = next_reg(c);
             let dest_ty: String = get_llvm_type_str(c, expected_type);
+            if (is_value_struct(c, expected_type)) {
+                let value_ptr: String = next_reg(c);
+                c.output_file.write(c.indent + value_ptr + " = bitcast i8* " + val_res.reg + " to " + dest_ty + "*\n");
+                c.output_file.write(c.indent + cast_reg + " = load " + dest_ty + ", " + dest_ty + "* " + value_ptr + "\n");
+
+                let owns_value: Bool = false;
+                if (val_res.owns_ref && needs_drop(c, expected_type)) {
+                    emit_retain_value(c, cast_reg, expected_type);
+                    emit_release_owned(c, val_res);
+                    owns_value = true;
+                }
+
+                return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=owns_value, is_const_access=val_res.is_const_access);
+            }
             c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + val_res.reg + " to " + dest_ty + "\n");
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref, is_const_access=val_res.is_const_access);
         }
@@ -460,7 +517,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     if (expected_type == TYPE_GENERIC_FUNCTION) {
         if (val_res.type >= 100) {
             let f_check: SymbolInfo = c.func_ret_map.lookup("" + val_res.type);
-            if (f_check is !null) {
+            if (has_symbol(f_check)) {
                 return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
             }
         }
@@ -468,13 +525,13 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     if (expected_type == TYPE_GENERIC_METHOD) {
         if (val_res.type >= 100) {
             let m_check: SymbolInfo = c.method_ret_map.lookup("" + val_res.type);
-            if (m_check is !null) {
+            if (has_symbol(m_check)) {
                 return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
             }
         }
     }
     if (val_res.type == TYPE_GENERIC_FUNCTION && expected_type >= 100) {
-        if (c.func_ret_map.lookup("" + expected_type) is !null) {
+        if (has_symbol(c.func_ret_map.lookup("" + expected_type))) {
             if (origin != 0 && !callable_types_compatible(c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Function as " + get_type_name(c, expected_type));
                 return CompileResult(reg="poison", type=TYPE_POISON);
@@ -484,7 +541,7 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
         }
     }
     if (val_res.type == TYPE_GENERIC_METHOD && expected_type >= 100) {
-        if (c.method_ret_map.lookup("" + expected_type) is !null) {
+        if (has_symbol(c.method_ret_map.lookup("" + expected_type))) {
             if (origin != 0 && !callable_types_compatible(c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Method as " + get_type_name(c, expected_type));
                 return CompileResult(reg="poison", type=TYPE_POISON);
@@ -505,19 +562,19 @@ func emit_implicit_cast(c: Compiler, val_res: CompileResult, expected_type: Int,
     }
 
     let expected_arr: ArrayInfo = c.array_info_map.lookup("" + expected_type);
-    if (expected_arr is !null && expected_arr.size == -1) {
+    if (has_array_info(expected_arr) && expected_arr.size == -1) {
         let elem_type: Int = expected_arr.base_type;
         let elem_ty_str: String = get_llvm_type_str(c, elem_type);
 
         let val_arr: ArrayInfo = c.array_info_map.lookup("" + val_res.type);
-        if (val_arr is !null && val_arr.size > 0 && val_arr.base_type == elem_type) {
+        if (has_array_info(val_arr) && val_arr.size > 0 && val_arr.base_type == elem_type) {
             let data_ptr: String = next_reg(c);
             c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + val_arr.llvm_name + ", " + val_arr.llvm_name + "* " + val_res.reg + ", i32 0, i32 0\n");
             return emit_slice_copy(c, elem_type, data_ptr, "0", "" + val_arr.size, pos);
         }
 
         let val_vec: SymbolInfo = c.vector_base_map.lookup("" + val_res.type);
-        if (val_vec is !null && val_vec.type == elem_type) {
+        if (has_symbol(val_vec) && val_vec.type == elem_type) {
             let vec_struct_ty: String = get_vector_llvm_type(c, elem_type);
             let size_ty: String = get_size_llvm_type();
             let size_ptr: String = next_reg(c);
@@ -575,14 +632,14 @@ func convert_to_string(c: Compiler, res: CompileResult) -> CompileResult {
         if (res.type == TYPE_UINT128) {
             hook_name = "format_uint128";
         }
-        let format_hook: String = get_mangled_symbol(c, hook_name, null);
+        let format_hook: String = get_mangled_symbol(c, hook_name, no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i128 " + res.reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
     if (res.type == TYPE_UINT64 || res.type == TYPE_UINTSIZE) {
-        let format_hook: String = get_mangled_symbol(c, "format_uint64", null);
+        let format_hook: String = get_mangled_symbol(c, "format_uint64", no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
@@ -595,21 +652,21 @@ func convert_to_string(c: Compiler, res: CompileResult) -> CompileResult {
             c.output_file.write(c.indent + val_reg + " = zext i8 " + res.reg + " to i32\n");
         }
 
-        let format_hook: String = get_mangled_symbol(c, "format_int", null);
+        let format_hook: String = get_mangled_symbol(c, "format_int", no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + val_reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
     if (res.type == TYPE_LONG) {
-        let format_hook: String = get_mangled_symbol(c, "format_long", null);
+        let format_hook: String = get_mangled_symbol(c, "format_long", no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
     if (res.type == TYPE_FLOAT) {
-        let format_hook: String = get_mangled_symbol(c, "format_float", null);
+        let format_hook: String = get_mangled_symbol(c, "format_float", no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(double " + res.reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
@@ -624,7 +681,7 @@ func convert_to_string(c: Compiler, res: CompileResult) -> CompileResult {
     }
 
     if (res.type == TYPE_CHAR) {
-        let format_hook: String = get_mangled_symbol(c, "utf8_encode_char", null);
+        let format_hook: String = get_mangled_symbol(c, "utf8_encode_char", no_position());
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + res.reg + ")\n");
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
@@ -977,7 +1034,7 @@ func standard_overflow_error(c: Compiler, pos: Position) -> CompileResult {
         let info: StructInfo = c.error_types[i];
         if (info.compiler_link_name == "Error") {
             let field: FieldInfo = find_field(info, "Overflow");
-            if (field is !null) {
+            if (has_field(field)) {
                 return emit_error_value(c, CompileResult(reg="" + field.offset, type=info.type_id, origin_type=info.type_id), pos);
             }
         }
@@ -1053,7 +1110,7 @@ func compile_explicit_type_cast(c: Compiler, value: CompileResult, target_type: 
 
     let check_type: Int = value.type;
     let source_info: StructInfo = c.struct_id_map.lookup("" + check_type);
-    if (source_info is !null && source_info.is_enum) { check_type = TYPE_INT; }
+    if (has_struct(source_info) && source_info.is_enum) { check_type = TYPE_INT; }
 
     let valid: String = "";
     if (is_integer_type(check_type)) {
@@ -1111,7 +1168,7 @@ func compile_type_cast(c: Compiler, val_res: CompileResult, target_type: Int, po
     let dst_is_int: Bool = is_integer_type(target_type) || target_type == TYPE_BOOL;
 
     let src_info: StructInfo = c.struct_id_map.lookup("" + val_res.type);
-    let src_is_enum: Bool = src_info is !null && src_info.is_enum;
+    let src_is_enum: Bool = has_struct(src_info) && src_info.is_enum;
     if (src_is_enum && is_integer_type(target_type)) {
         let dst_bits: Int = get_type_bitwidth(target_type);
         if (dst_bits == 32) {

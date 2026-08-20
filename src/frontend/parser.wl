@@ -182,7 +182,7 @@ func parse_type_decl(p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(p); // skip type
 
-    let name_tok: Token = null;
+    let name_tok: Token = Token();
     let target_type: NodeID = NO_NODE;
     let is_alias: Bool = false;
 
@@ -399,30 +399,27 @@ func may_generic_value(p: Parser) -> Bool {
 }
 
 func peek_type(p: Parser) -> Int {
-    let l: WhitelangLexer.Lexer = p.lexer;
-    
+    let lexer: WhitelangLexer.Lexer = p.lexer;
+
     // save current lexer
-    let save_idx: Int = l.pos.idx;
-    let save_ln: Int = l.pos.ln;
-    let save_col: Int = l.pos.col;
-    let save_char: Char = l.current_char;
-    let save_width: Int = l.current_width;
-    let save_valid: Bool = l.current_valid;
-    
-    // get next token
-    let tok: Token = WhitelangLexer.get_next_token(l);
-    let type: Int = tok.type;
-    
+    let save_idx: Int = lexer.pos.idx;
+    let save_ln: Int = lexer.pos.ln;
+    let save_col: Int = lexer.pos.col;
+    let save_char: Char = lexer.current_char;
+    let save_width: Int = lexer.current_width;
+    let save_valid: Bool = lexer.current_valid;
+
+    let tok_type: Int = WhitelangLexer.get_next_token(lexer).type;
+
     // load lexer
-    let p_pos: Position = l.pos;
-    p_pos.idx = save_idx;
-    p_pos.ln  = save_ln;
-    p_pos.col = save_col;
-    l.current_char = save_char;
-    l.current_width = save_width;
-    l.current_valid = save_valid;
-    
-    return type;
+    lexer.pos.idx = save_idx;
+    lexer.pos.ln  = save_ln;
+    lexer.pos.col = save_col;
+    lexer.current_char = save_char;
+    lexer.current_width = save_width;
+    lexer.current_valid = save_valid;
+
+    return tok_type;
 }
 
 func parse_decimal_int(p: Parser, tok: Token) -> Int {
@@ -1034,6 +1031,7 @@ func postfix_expr(p: Parser) -> NodeID {
             if (target_base == NODE_CALL) {
                 let target_call: CallNode = get_call_node(p.arena, node);
                 target_call.preserve_fallible = true;
+                p.arena.call_nodes[node_slot(node)] = target_call;
             }
             node = add_try_unwrap_node(p.arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=node, pos=pos));
         }
@@ -1503,7 +1501,7 @@ func parse_block_inner(p: Parser) -> NodeID {
             }
             parser_advance(p);
             
-            let err_name: Token = null;
+            let err_name: Token = Token();
             if (is_name_token(p.current_tok.type)) {
                 err_name = p.current_tok;
                 parser_advance(p);
@@ -1945,6 +1943,7 @@ func parse_extern(p: Parser) -> NodeID {
             let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
             f_node.abi_name = abi_name;
             f_node.link_name = link_name;
+            p.arena.extern_func_nodes[node_slot(func_node)] = f_node;
 
             if (p.current_tok.type != TOK_SEMICOLON) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2013,7 +2012,7 @@ func parse_import(p: Parser) -> NodeID {
     parser_advance(p); // skip 'import'
 
     let symbols: Vector(ImportSymbolNode) = null;
-    let path_tok: Token = null;
+    let path_tok: Token = Token();
 
     // import * from "..."
     if (p.current_tok.type == TOK_MUL) {
@@ -2021,7 +2020,7 @@ func parse_import(p: Parser) -> NodeID {
         let star_tok: Token = p.current_tok;
         parser_advance(p); // skip '*'
 
-        symbols.append(ImportSymbolNode(name_tok=star_tok, alias_tok=null));
+        symbols.append(ImportSymbolNode(name_tok=star_tok, alias_tok=Token()));
         
         if (p.current_tok.type != TOK_FROM) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2043,7 +2042,7 @@ func parse_import(p: Parser) -> NodeID {
             let name_tok: Token = p.current_tok;
             parser_advance(p); // skip name
 
-            let alias_tok: Token = null;
+            let alias_tok: Token = Token();
             if (p.current_tok.type == TOK_AS) {
                 parser_advance(p); // skip 'as'
                 if (!is_name_token(p.current_tok.type)) {
@@ -2078,7 +2077,7 @@ func parse_import(p: Parser) -> NodeID {
     path_tok = p.current_tok;
     parser_advance(p); // skip string
 
-    let alias_tok: Token = null;
+    let alias_tok: Token = Token();
     if (p.current_tok.type == TOK_AS) {
         if (symbols is !null) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);

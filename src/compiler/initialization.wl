@@ -73,7 +73,7 @@ func lookup_local_init(scope: LocalInitScope, name: String) -> String {
     let current: LocalInitScope = scope;
     while (current is !null) {
         let info: SymbolInfo = current.table.lookup(name);
-        if (info is !null) {
+        if (has_symbol(info)) {
             if (info.type <= 0) { return ""; }
             return "" + (info.type - 1);
         }
@@ -295,7 +295,7 @@ func check_local_init_node(c: Compiler, node: NodeID, scope: LocalInitScope, ini
         let i: Int = 0;
         while (function.params is !null && i < function.params.length()) {
             let param: ParamNode = function.params[i];
-            captures.local_vars.put(param.name_tok.value, TypeListNode(type=1));
+            captures.local_vars.put(param.name_tok.value, true);
             i += 1;
         }
         analyze_captures(c.arena, function.body, captures);
@@ -358,7 +358,7 @@ func init_is_self(c: Compiler, node: NodeID) -> Bool {
 }
 
 func class_requires_initialization(c: Compiler, info: StructInfo) -> Bool {
-    if (info is null || !info.is_class || !has_node(info.init_body)) {
+    if (!has_struct(info) || !info.is_class || !has_node(info.init_body)) {
         return false;
     }
 
@@ -857,19 +857,19 @@ func check_class_initialization(c: Compiler, class_name: String, node: ClassDefN
 
     if (required.length() == 0) { return; }
 
-    let initializer: MethodDefNode = null;
+    let initializer_id: NodeID = NO_NODE;
     let methods: Vector(NodeID) = node.methods;
     i = 0;
     while (methods is !null && i < methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(c.arena, methods[i]);
         if (method_node.name_tok.value == "$init") {
-            initializer = method_node;
+            initializer_id = methods[i];
             break;
         }
         i += 1;
     }
 
-    if (initializer is null) {
+    if (!has_node(initializer_id)) {
         let missing: String = required[0];
         if (missing == "$super") {
             throw_missing_initializer(
@@ -886,6 +886,8 @@ func check_class_initialization(c: Compiler, class_name: String, node: ClassDefN
         }
         return;
     }
+
+    let initializer: MethodDefNode = get_method_def_node(c.arena, initializer_id);
 
     let flow: InitFlow = check_init_node(
         c,
@@ -906,7 +908,7 @@ func check_class_initialization(c: Compiler, class_name: String, node: ClassDefN
 }
 
 func emit_class_field_initializers(c: Compiler, class_info: StructInfo, object_reg: String, object_llvm_type: String) -> Void {
-    if (class_info is null) { return; }
+    if (!has_struct(class_info)) { return; }
 
     if (class_info.parent_id != 0) {
         let parent: StructInfo =
@@ -921,7 +923,7 @@ func emit_class_field_initializers(c: Compiler, class_info: StructInfo, object_r
 
     let initializer: FuncInfo =
         c.func_table.lookup(class_info.name + "_$field_init");
-    if (initializer is null) { return; }
+    if (!has_func(initializer)) { return; }
     queue_generic_class_method(c, class_info, "$field_init");
 
     let target_reg: String = object_reg;

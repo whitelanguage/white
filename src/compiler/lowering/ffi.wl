@@ -21,7 +21,7 @@ func extern_callconv(abi_name: String) -> String {
     return "ccc ";
 }
 func func_callconv(info: FuncInfo) -> String {
-    if (info is null || info.abi_name is null || info.abi_name.length() == 0) { return ""; }
+    if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) { return ""; }
     return extern_callconv(info.abi_name);
 }
 func register_extern_library(c: Compiler, name: String, pos: Position) -> Void {
@@ -102,7 +102,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
     if (c.current_package_prefix.length() > 0) { full_func_name = c.current_package_prefix + func_name; }
 
     let existing_func: FuncInfo = c.func_table.lookup(full_func_name);
-    if (existing_func is !null) {
+    if (has_func(existing_func)) {
         throw_name_error(node.pos, "Function '" + full_func_name + "' is already defined.");
         return void_result();
     }
@@ -116,7 +116,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
         return void_result();
     }
     let existing_decl: StringConstant = c.declared_externs.lookup(func_name);
-    if (existing_decl is null) {
+    if (!has_string_constant(existing_decl)) {
         if (backend_signature.length() == 0) { c.output_file.write("declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n"); }
         c.declared_externs.put(func_name, StringConstant(id=0, value=signature));
     } else if (existing_decl.value.length() > 0 && existing_decl.value != signature) {
