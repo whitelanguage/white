@@ -150,6 +150,12 @@ func parse(p: Parser) -> Struct {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after global variable declaration.");
             }
+        } else if (p.current_tok.type == TOK_TYPE) {
+            if (anns.length() > 0) {
+                let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+                throw_invalid_syntax(err_pos, "Type declarations cannot have annotations.");
+            }
+            stmt = parse_type_decl(p);
         } else if (p.current_tok.type == TOK_EXTERN) {
             if (anns.length() > 0) { 
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -168,6 +174,47 @@ func parse(p: Parser) -> Struct {
     }
     
     return BlockNode(type=NODE_BLOCK, stmts=stmts);
+}
+
+func parse_type_decl(p: Parser) -> Struct {
+    let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+    parser_advance(p); // skip type
+
+    let name_tok: Token = null;
+    let target_type: Struct = null;
+    let is_alias: Bool = false;
+
+    if (p.current_tok.type == TOK_IDENTIFIER && peek_type(p) == TOK_ASSIGN) {
+        name_tok = p.current_tok;
+        parser_advance(p);
+        parser_advance(p); // skip =
+        target_type = parse_return_type(p);
+    } else {
+        target_type = parse_return_type(p);
+        if (p.current_tok.type != TOK_AS) {
+            let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Expected 'as' in type alias declaration.");
+            return null;
+        }
+        parser_advance(p);
+        if (p.current_tok.type != TOK_IDENTIFIER) {
+            let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(err_pos, "Expected alias name after 'as'.");
+            return null;
+        }
+        name_tok = p.current_tok;
+        is_alias = true;
+        parser_advance(p);
+    }
+
+    if (p.current_tok.type != TOK_SEMICOLON) {
+        let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+        throw_invalid_syntax(err_pos, "Expected ';' after type declaration.");
+    } else {
+        parser_advance(p);
+    }
+
+    return TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos);
 }
 
 func parser_advance(p: Parser) -> Void {

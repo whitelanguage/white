@@ -245,9 +245,28 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
 
         if (node.value is !null) {
-            let val_node: Int = node_kind(node.value);
+            let value_node: Struct = node.value;
+            let target_repr: Int = get_repr_type(c, target_type_id);
+            let named_target: NamedTypeInfo = get_named_type(c, target_type_id);
+            let unwrapped_named_cast: Bool = false;
+            if (named_target is !null && node_kind(value_node) == NODE_CALL) {
+                let cast_call: CallNode = value_node;
+                if (node_kind(cast_call.callee) == NODE_VAR_ACCESS && cast_call.args is !null && cast_call.args.length() == 1) {
+                    let cast_name: VarAccessNode = cast_call.callee;
+                    if (get_cast_target(c, cast_name.name_tok.value) == target_type_id) {
+                        let cast_arg: ArgNode = cast_call.args[0];
+                        value_node = cast_arg.val;
+                        unwrapped_named_cast = true;
+                    }
+                }
+            }
+            if (named_target is !null && !unwrapped_named_cast) {
+                throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(c, target_type_id) + ", got " + get_type_name(c, get_expr_type(c, value_node)) + ".");
+                return void_result();
+            }
+            let val_node: Int = node_kind(value_node);
             if (val_node == NODE_STRING) {
-                let s_node: StringNode = node.value;
+                let s_node: StringNode = value_node;
                 let s_val: String = s_node.tok.value;
                 let s_id: Int = register_string_constant(c, s_val);
                 init_val_str = get_string_object_ptr(s_id);
@@ -270,43 +289,43 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                 }
                 init_val_str = "null";
             }
-            else if (is_integer_type(target_type_id)) {
-                let expr_type: Int = get_expr_type(c, node.value);
-                if (get_type_bitwidth(target_type_id) < 64 && expr_type == TYPE_LONG) {
+            else if (is_integer_type(target_repr)) {
+                let expr_type: Int = get_expr_type(c, value_node);
+                if (get_type_bitwidth(target_repr) < 64 && expr_type == TYPE_LONG) {
                     throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(c, target_type_id) + ", got Long.");
                     return void_result();
                 }
 
-                let bits: Int = get_type_bitwidth(target_type_id);
+                let bits: Int = get_type_bitwidth(target_repr);
                 if (bits == 128) {
-                    let folded_wide: UInt128 = eval_const_wide(c, node.value, node.pos, is_unsigned_integer(target_type_id));
-                    if (is_unsigned_integer(target_type_id)) {
+                    let folded_wide: UInt128 = eval_const_wide(c, value_node, node.pos, is_unsigned_integer(target_repr));
+                    if (is_unsigned_integer(target_repr)) {
                         init_val_str = "" + folded_wide;
                     } else {
                         init_val_str = "" + Int128(folded_wide);
                     }
                     if (node.is_const) { c.constant_wide_integers.put(global_name, folded_wide); }
                 } else {
-                    let folded_val: Long = eval_const_long(c, node.value, node.pos);
+                    let folded_val: Long = eval_const_long(c, value_node, node.pos);
                     const_num = Float(folded_val);
                     has_const_num = true;
                     if (node.is_const) { c.constant_integers.put(global_name, folded_val); }
                     let is_overflow: Bool = false;
                     
                     if (bits == 8) {
-                        if (is_unsigned_integer(target_type_id)) {
+                        if (is_unsigned_integer(target_repr)) {
                             if (folded_val < 0L || folded_val > 255L) { is_overflow = true; }
                         } else {
                             if (folded_val < -128L || folded_val > 127L) { is_overflow = true; }
                         }
                     } else if (bits == 16) {
-                        if (is_unsigned_integer(target_type_id)) {
+                        if (is_unsigned_integer(target_repr)) {
                             if (folded_val < 0L || folded_val > 65535L) { is_overflow = true; }
                         } else {
                             if (folded_val < -32768L || folded_val > 32767L) { is_overflow = true; }
                         }
                     } else if (bits == 32) {
-                        if (is_unsigned_integer(target_type_id)) {
+                        if (is_unsigned_integer(target_repr)) {
                             if (folded_val < 0L || folded_val > 4294967295L) { is_overflow = true; }
                         } else {
                             if (folded_val < -2147483648L || folded_val > 2147483647L) { is_overflow = true; }
@@ -321,27 +340,27 @@ func compile_var_decl(c: Compiler, node: VarDeclareNode) -> CompileResult {
                     init_val_str = "" + folded_val;
                 }
             }
-            else if (target_type_id == TYPE_CHAR) {
+            else if (target_repr == TYPE_CHAR) {
                 if (val_node != NODE_CHAR) {
                     throw_type_error(node.pos, "Type mismatch. Expected Char literal for Char type.");
                     return void_result();
                 }
-                let cn: CharNode = node.value;
+                let cn: CharNode = value_node;
                 init_val_str = "" + string_to_int(cn.tok.value, cn.pos);
                 const_num = Float(string_to_int(cn.tok.value, cn.pos));
                 has_const_num = true;
                 if (node.is_const) { c.constant_integers.put(global_name, Long(string_to_int(cn.tok.value, cn.pos))); }
             }
-            else if (target_type_id == TYPE_BOOL) {
-                let folded_val: Int = eval_const_bool(c, node.value, node.pos);
+            else if (target_repr == TYPE_BOOL) {
+                let folded_val: Int = eval_const_bool(c, value_node, node.pos);
                 if (folded_val == 1) { init_val_str = "1"; } else { init_val_str = "0"; }
                 const_num = Float(folded_val);
                 has_const_num = true;
                 if (node.is_const) { c.constant_integers.put(global_name, Long(folded_val)); }
             }
-            else if (target_type_id == TYPE_FLOAT || target_type_id == TYPE_FLOAT32) {
-                const_num = eval_const_float(c, node.value, node.pos);
-                if (target_type_id == TYPE_FLOAT32) { const_num = Float(Float32(const_num)); }
+            else if (target_repr == TYPE_FLOAT || target_repr == TYPE_FLOAT32) {
+                const_num = eval_const_float(c, value_node, node.pos);
+                if (target_repr == TYPE_FLOAT32) { const_num = Float(Float32(const_num)); }
                 init_val_str = llvm_float_literal(const_num);
                 has_const_num = true;
             } else {
@@ -2305,7 +2324,7 @@ func register_class_methods(c: Compiler, class_name: String, class_type_id: Int,
             if (is_fallible_type(c, target)) {
                 target = get_inner_fallible_type(c, target);
             }
-            if (!is_conversion_target(target)) {
+            if (!is_conversion_target(c, target)) {
                 throw_type_error(method_node.pos, "Conversion target " + get_type_name(c, target) + " is not a built-in value type");
                 return false;
             }
@@ -2694,8 +2713,17 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
                     } else {
                         mapped_root = c.current_file_type_aliases.lookup(root_name);
                     }
+                    if (mapped_root is null) {
+                        let alias_info: NamedTypeInfo = find_named_decl(c, root_name);
+                        if (alias_info is !null && alias_info.is_alias) {
+                            owner_type = c.struct_id_map.lookup("" + resolve_named_type(c, alias_info));
+                            if (owner_type is !null) { mapped_root = owner_type.name; }
+                        }
+                    }
                     if (mapped_root is !null) {
-                        owner_type = c.struct_table.lookup(mapped_root);
+                        if (owner_type is null) {
+                            owner_type = c.struct_table.lookup(mapped_root);
+                        }
                         owner_name = root_name;
                         full_name = module_member_name(mapped_root + ".", path_parts, node.field_name);
                         if (owner_type is !null || c.global_symbol_table.lookup(full_name) is !null) { is_module = true; }
@@ -2785,7 +2813,7 @@ func compile_field_access(c: Compiler, node: FieldAccessNode) -> CompileResult {
         }
     }
 
-    let type_id: Int = obj_res.type;
+    let type_id: Int = get_repr_type(c, obj_res.type);
     let obj_reg: String = obj_res.reg;
 
 
@@ -3067,7 +3095,7 @@ func compile_field_assign(c: Compiler, node: FieldAssignNode) -> CompileResult {
     
     let obj_res: CompileResult = compile_node(c, node.obj);
     if (obj_res is !null && obj_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    let struct_type_id: Int = obj_res.type;
+    let struct_type_id: Int = get_repr_type(c, obj_res.type);
     let struct_ptr_reg: String = obj_res.reg;
 
     if ((struct_type_id == TYPE_GENERIC_STRUCT || struct_type_id == TYPE_GENERIC_CLASS) && obj_res.origin_type >= 100) {
@@ -3465,7 +3493,7 @@ func compile_length_method(c: Compiler, obj_node: Struct, call_node: CallNode) -
 
     let obj_res: CompileResult = compile_node(c, obj_node);
     if (obj_res is !null && obj_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    let type_id: Int = obj_res.type;
+    let type_id: Int = get_repr_type(c, obj_res.type);
 
     // String.length() is the stored UTF-8 byte count
     if (type_id == TYPE_STRING) {
@@ -3519,8 +3547,9 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
     check_out_index(c, node.target, node.index_node, node.pos);
     let target_res: CompileResult = compile_node(c, node.target);
     if (target_res is !null && target_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    let target_type: Int = get_repr_type(c, target_res.type);
 
-    let s_info: StructInfo = c.struct_id_map.lookup("" + target_res.type);
+    let s_info: StructInfo = c.struct_id_map.lookup("" + target_type);
     if (s_info is !null && s_info.is_class) {
         let has_get: Bool = false;
         let v_len: Int = 0; if (s_info.vtable is !null) { v_len = s_info.vtable.length(); }
@@ -3551,7 +3580,7 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
     }
 
     // string index access
-    if (target_res.type == TYPE_STRING) {
+    if (target_type == TYPE_STRING) {
         let src_buf: String = next_reg(c);
         let src_struct_buf: String = next_reg(c);
         c.output_file.write(c.indent + src_struct_buf + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 0\n");
@@ -3574,8 +3603,8 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
         return CompileResult(reg=load_reg, type=TYPE_BYTE, origin_type=0);
     }
 
-    if (is_pointer_type(c, target_res.type)) {
-        let base_info: SymbolInfo = c.ptr_base_map.lookup("" + target_res.type);
+    if (is_pointer_type(c, target_type)) {
+        let base_info: SymbolInfo = c.ptr_base_map.lookup("" + target_type);
         if (base_info is !null) {
             let elem_type: Int = base_info.type;
             
@@ -3583,7 +3612,7 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
                 throw_type_error(node.pos, "Cannot index 'ptr Void'. Cast it to a specific pointer type first.");
                 return void_result();
             }
-            emit_pointer_null_check(c, target_res.reg, target_res.type, node.pos);
+            emit_pointer_null_check(c, target_res.reg, target_type, node.pos);
             
             let elem_ty_str: String = get_llvm_type_str(c, elem_type);
             
@@ -3598,7 +3627,7 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
     }
 
     // array / slice access
-    let arr_info: ArrayInfo = c.array_info_map.lookup("" + target_res.type);
+    let arr_info: ArrayInfo = c.array_info_map.lookup("" + target_type);
     if (arr_info is !null) {
         let elem_type: Int = arr_info.base_type;
         let elem_ty_str: String = get_llvm_type_str(c, elem_type);
@@ -3608,7 +3637,7 @@ func compile_index_access(c: Compiler, node: IndexAccessNode, handled: Bool) -> 
         let curr_len: String = "";
         let data_ptr: String = "";
         if (arr_info.size == -1) {
-            let parts: SliceParts = emit_slice_parts(c, target_res.reg, target_res.type, node.pos);
+            let parts: SliceParts = emit_slice_parts(c, target_res.reg, target_type, node.pos);
             curr_len = emit_size_to_int(c, parts.length);
             data_ptr = next_reg(c);
             c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
@@ -3863,9 +3892,10 @@ func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> C
     if (target_res is !null && target_res.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
+    let target_type: Int = get_repr_type(c, target_res.type);
 
     let omitted: Bool = node.start_idx is null && node.end_idx is null;
-    if (target_res.type == TYPE_STRING) {
+    if (target_type == TYPE_STRING) {
         let len_slot: String = next_reg(c);
         c.output_file.write(c.indent + len_slot + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
         let source_len: String = next_reg(c);
@@ -3894,7 +3924,9 @@ func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> C
         let result: String = next_reg(c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + slice_hook + "(%struct.$String* " + target_res.reg + ", i32 " + start + ", i32 " + end + ")\n");
         emit_release_owned(c, target_res);
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        let result_type: Int = TYPE_STRING;
+        if (get_named_type(c, target_res.type) is !null) { result_type = target_res.type; }
+        return CompileResult(reg=result, type=result_type, owns_ref=true);
     }
 
     let elem_type: Int = 0;
@@ -3906,14 +3938,14 @@ func compile_slice_access(c: Compiler, node: SliceAccessNode, shared: Bool) -> C
     let vec_size_slot: String = "";
     let vec_owner: String = "";
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup("" + target_res.type);
-    let vec_info: SymbolInfo = c.vector_base_map.lookup("" + target_res.type);
+    let arr_info: ArrayInfo = c.array_info_map.lookup("" + target_type);
+    let vec_info: SymbolInfo = c.vector_base_map.lookup("" + target_type);
     if (arr_info is !null) {
         elem_type = arr_info.base_type;
         let elem_ty: String = get_llvm_type_str(c, elem_type);
         if (arr_info.size == -1) {
             source_kind = 2;
-            source_parts = emit_slice_parts(c, target_res.reg, target_res.type, node.pos);
+            source_parts = emit_slice_parts(c, target_res.reg, target_type, node.pos);
             current_len = emit_size_to_int(c, source_parts.length);
             source_data = next_reg(c);
             c.output_file.write(c.indent + source_data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source_parts.data + ", " + get_size_llvm_type() + " " + source_parts.start + "\n");
@@ -4084,7 +4116,7 @@ func compile_try_unwrap(c: Compiler, node: TryUnwrapNode) -> CompileResult {
             let callee_base: Int = node_kind(call.callee);
             if (callee_base == NODE_VAR_ACCESS) {
                 let callee: VarAccessNode = call.callee;
-                let target_type: Int = get_builtin_cast_target(callee.name_tok.value);
+                let target_type: Int = get_cast_target(c, callee.name_tok.value);
                 if (target_type != 0) {
                     throw_invalid_syntax(node.pos, "Conversion to " + get_type_name(c, target_type) + " cannot fail; remove '?'");
                     return void_result();
@@ -4343,7 +4375,7 @@ func compile_lvalue_ptr(c: Compiler, node: Struct, pos: Position) -> CompileResu
     if (base == NODE_FIELD_ACCESS) {
         let f_acc: FieldAccessNode = node;
         let obj_res: CompileResult = compile_node(c, f_acc.obj);
-        let struct_type_id: Int = obj_res.type;
+        let struct_type_id: Int = get_repr_type(c, obj_res.type);
         let struct_ptr_reg: String = obj_res.reg;
 
         if (is_pointer_type(c, struct_type_id)) {
@@ -4616,10 +4648,13 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
     let op_type: Int = node.op_tok.type; 
 
     if (op_type == TOK_AND || op_type == TOK_OR) {
-        if (left.type != TYPE_BOOL) {
+        let logic_type: Int = left.type;
+        let logic_repr: Int = get_repr_type(c, logic_type);
+        if (logic_repr != TYPE_BOOL) {
             throw_type_error(node.pos, "Logic operators '&&' and '||' require Bool operands. ");
             return void_result();
         }
+        left.type = logic_repr;
         let label_rhs: String = "logic_rhs_" + c.type_counter;
         let label_merge: String = "logic_merge_" + c.type_counter;
         let label_left: String = "logic_left_" + c.type_counter;
@@ -4636,7 +4671,8 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
 
         c.output_file.write("\n" + label_rhs + ":\n");
         let right_res: CompileResult = compile_node(c, node.right);
-        if (right_res.type != TYPE_BOOL) { throw_type_error(node.pos, "Right operand must be Bool."); }
+        if (right_res.type != logic_type) { throw_type_error(node.pos, "Both logic operands must have type " + get_type_name(c, logic_type) + "."); }
+        right_res.type = get_repr_type(c, right_res.type);
         
         let label_rhs_end: String = "logic_rhs_end_" + c.type_counter;
         c.type_counter += 1;
@@ -4648,11 +4684,23 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
         let final_reg: String = next_reg(c);
         c.output_file.write(c.indent + final_reg + " = phi i1 [ " + left.reg + ", %" + label_left + " ], [ " + right_res.reg + ", %" + label_rhs_end + " ]\n");
         
-        return CompileResult(reg=final_reg, type=TYPE_BOOL);
+        return CompileResult(reg=final_reg, type=logic_type);
     }
 
     let right: CompileResult = compile_node(c, node.right);
     if (right is !null && right.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    let named_result: Int = 0;
+    let left_named: NamedTypeInfo = get_named_type(c, left.type);
+    let right_named: NamedTypeInfo = get_named_type(c, right.type);
+    if (left_named is !null || right_named is !null) {
+        if (left.type != right.type) {
+            throw_type_error(node.pos, "Cannot mix " + get_type_name(c, left.type) + " and " + get_type_name(c, right.type) + " without an explicit conversion.");
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+        named_result = left.type;
+        left.type = get_repr_type(c, left.type);
+        right.type = get_repr_type(c, right.type);
+    }
     if (op_type == TOK_EE || op_type == TOK_NE) {
         if (left.type == TYPE_NULL || left.type == TYPE_NULLPTR ||
             right.type == TYPE_NULL || right.type == TYPE_NULLPTR) {
@@ -4730,7 +4778,9 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
             c.output_file.write(c.indent + new_str_ptr + " = call %struct.$String* @" + concat_hook + "(%struct.$String* " + left.reg + ", %struct.$String* " + right.reg + ")\n");
             emit_release_owned(c, left);
             emit_release_owned(c, right);
-            return CompileResult(reg=new_str_ptr, type=TYPE_STRING, owns_ref=true);
+            let result_type: Int = TYPE_STRING;
+            if (named_result != 0) { result_type = named_result; }
+            return CompileResult(reg=new_str_ptr, type=result_type, owns_ref=true);
         }
 
         if (left.type != right.type) {
@@ -5049,7 +5099,9 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
         }
         let arithmetic_hook: String = get_mangled_symbol(c, hook_name, node.pos);
         c.output_file.write(c.indent + res_reg + " = call i128 @" + arithmetic_hook + "(i128 " + left.reg + ", i128 " + right.reg + ")\n");
-        return CompileResult(reg=res_reg, type=target_type);
+        let result_type: Int = target_type;
+        if (named_result != 0) { result_type = named_result; }
+        return CompileResult(reg=res_reg, type=result_type);
     }
 
     if ((target_type == TYPE_FLOAT || target_type == TYPE_FLOAT32) && op_type == TOK_MOD) {
@@ -5068,11 +5120,15 @@ func compile_binop(c: Compiler, node: BinOpNode) -> CompileResult {
         if (target_type == TYPE_FLOAT32) { mod_result = next_reg(c); }
         c.output_file.write(c.indent + mod_result + " = call double @" + mod_hook + "(double " + left_reg + ", double " + right_reg + ")\n");
         if (target_type == TYPE_FLOAT32) { c.output_file.write(c.indent + res_reg + " = fptrunc double " + mod_result + " to float\n"); }
-        return CompileResult(reg=res_reg, type=target_type);
+        let result_type: Int = target_type;
+        if (named_result != 0) { result_type = named_result; }
+        return CompileResult(reg=res_reg, type=result_type);
     }
 
     c.output_file.write(c.indent + res_reg + " = " + op_code + " " + type_str + " " + left.reg + ", " + right.reg + "\n");
-    return CompileResult(reg=res_reg, type=target_type);
+    let result_type: Int = target_type;
+    if (named_result != 0) { result_type = named_result; }
+    return CompileResult(reg=res_reg, type=result_type);
 }
 
 func emit_function_value(c: Compiler, info: FuncInfo, pos: Position) -> CompileResult {
@@ -5314,6 +5370,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
     let base: Int = node_kind(node);
     if (base == NODE_GENERIC_TYPE) { return compile_generic_value(c, node); }
     if (base == NODE_TYPE_LAYOUT) { return compile_type_layout(c, node); }
+    if (base == NODE_TYPE_DECL) { return void_result(); }
 
     if (base == NODE_BLOCK) {
         return compile_block(c, node);
@@ -5870,7 +5927,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             }
 
             let try_string_method: Bool = false;
-            let guessed_type: Int = get_expr_type(c, f_acc.obj);
+            let guessed_type: Int = get_repr_type(c, get_expr_type(c, f_acc.obj));
             if (!is_package_call) {
                 let protocol_call: CompileResult = compile_builtin_protocol_call(c, f_acc.obj, guessed_type, f_acc.field_name, n_call);
                 if (protocol_call is !null) { return protocol_call; }
@@ -5901,12 +5958,13 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             if (!is_package_call && !try_string_method) {
                 let obj_res: CompileResult = compile_node(c, f_acc.obj);
                 if (obj_res is !null && obj_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
-                let struct_type_id: Int = obj_res.type;
+                let struct_type_id: Int = get_repr_type(c, obj_res.type);
                 if (struct_type_id == TYPE_GENERIC_STRUCT && obj_res.origin_type >= 100) {
                     struct_type_id = obj_res.origin_type;
                 }
                 let s_info: StructInfo = c.struct_id_map.lookup("" + struct_type_id);
                 if (s_info is !null && (s_info.is_class || s_info.is_interface)) {
+                    obj_res.type = struct_type_id;
                     return compile_class_method_call(c, s_info, obj_res, f_acc.field_name, n_call);
                 }
             }
@@ -5954,7 +6012,14 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         }
 
         if (func_name != "") {
-            let cast_target: Int = get_builtin_cast_target(func_name);
+            let type_alias: NamedTypeInfo = find_named_decl(c, func_name);
+            if (type_alias is !null && type_alias.is_alias) {
+                let aliased_info: StructInfo = c.struct_id_map.lookup("" + resolve_named_type(c, type_alias));
+                if (aliased_info is !null) {
+                    func_name = aliased_info.name;
+                }
+            }
+            let cast_target: Int = get_cast_target(c, func_name);
             let is_cast: Bool = cast_target != 0;
 
             if is_cast {
@@ -5966,7 +6031,7 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
                     return void_result();
                 }
                 let arg_curr: ArgNode = args[0];
-                if (!validate_explicit_literal_cast(arg_curr.val, cast_target, n_call.pos)) {
+                if (!validate_explicit_literal_cast(c, arg_curr.val, cast_target, n_call.pos)) {
                     return void_result();
                 }
                 let old_exp: Int = c.expected_type;
@@ -6552,7 +6617,8 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
             return void_result();
         }
         
-        if (target_type == TYPE_BOOL) {
+        let operation_type: Int = get_repr_type(c, target_type);
+        if (operation_type == TYPE_BOOL) {
             throw_type_error(u.pos, "Cannot increment/decrement Bool type. ");
             return void_result();
         }
@@ -6562,12 +6628,12 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
 
         let new_val_reg: String = next_reg(c);
 
-        if (is_integer_type(target_type)) {
+        if (is_integer_type(operation_type)) {
             let op_code: String = "add";
             if (op_type == TOK_DEC) { op_code = "sub"; }
             c.output_file.write(c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1\n");
         }
-        else if (target_type == TYPE_FLOAT || target_type == TYPE_FLOAT32) {
+        else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
             let op_code: String = "fadd";
             if (op_type == TOK_DEC) { op_code = "fsub"; }
             c.output_file.write(c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1.0\n");
@@ -6587,35 +6653,37 @@ func compile_node(c: Compiler, node: Struct) -> CompileResult {
         
         let operand: CompileResult = compile_node(c, u.node);
         if (operand is !null && operand.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+        let operand_type: Int = operand.type;
+        let operation_type: Int = get_repr_type(c, operand_type);
         let res_reg: String = next_reg(c);
 
         if (op_type == TOK_SUB) {
-            if (is_integer_type(operand.type)) {
+            if (is_integer_type(operation_type)) {
                 let ty_str: String = get_llvm_type_str(c, operand.type);
                 c.output_file.write(c.indent + res_reg + " = sub " + ty_str + " 0, " + operand.reg + "\n");
-                return CompileResult(reg=res_reg, type=operand.type);
-            } else if (operand.type == TYPE_FLOAT || operand.type == TYPE_FLOAT32) {
+                return CompileResult(reg=res_reg, type=operand_type);
+            } else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
                 let ty_str: String = get_llvm_type_str(c, operand.type);
                 c.output_file.write(c.indent + res_reg + " = fneg " + ty_str + " " + operand.reg + "\n");
-                return CompileResult(reg=res_reg, type=operand.type);
+                return CompileResult(reg=res_reg, type=operand_type);
             } else {
                 throw_type_error(u.pos, "Cannot negate non-numeric type. ");
                 return void_result();
             }
         }
         else if (op_type == TOK_NOT) {
-            if (operand.type != TYPE_BOOL) {
+            if (operation_type != TYPE_BOOL) {
                 throw_type_error(u.pos, "Operator '!' requires Bool type. ");
                 return void_result();
             }
             c.output_file.write(c.indent + res_reg + " = xor i1 " + operand.reg + ", 1\n");
-            return CompileResult(reg=res_reg, type=TYPE_BOOL);
+            return CompileResult(reg=res_reg, type=operand_type);
         } 
         else if (op_type == TOK_BIT_NOT) {
-            if (is_integer_type(operand.type)) {
+            if (is_integer_type(operation_type)) {
                 let ty_str: String = get_llvm_type_str(c, operand.type);
                 c.output_file.write(c.indent + res_reg + " = xor " + ty_str + " " + operand.reg + ", -1\n");
-                return CompileResult(reg=res_reg, type=operand.type);
+                return CompileResult(reg=res_reg, type=operand_type);
             } else {
                 throw_type_error(u.pos, "Operator '~' requires an integer type.");
                 return void_result();

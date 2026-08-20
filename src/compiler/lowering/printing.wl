@@ -9,6 +9,7 @@ import * from "literals.wl"
 import * from "ownership.wl"
 
 func is_printable_type(c: Compiler, type_id: Int) -> Bool {
+    type_id = get_repr_type(c, type_id);
     if (type_id == TYPE_POISON || is_fallible_type(c, type_id)) { return false; }
     if (type_id == TYPE_STRING || type_id == TYPE_CHAR || type_id == TYPE_ANY_ERROR ||
         type_id == TYPE_NULL || type_id == TYPE_NULLPTR || is_primitive_type(type_id) ||
@@ -173,6 +174,7 @@ func compile_display(c: Compiler, reg: String, info: StructInfo, pos: Position) 
 }
 
 func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin_id: Int) -> Void {
+    type_id = get_repr_type(c, type_id);
     if (type_id == TYPE_POISON) { return; }
     if (is_fallible_type(c, type_id)) {
         throw_type_error(pos, "Fallible value must be handled with '?' before printing");

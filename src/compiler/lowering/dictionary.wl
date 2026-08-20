@@ -411,11 +411,12 @@ func emit_hash_helpers(c: Compiler) -> Void {
         if (c.hash_types.hashes[slot] >= 2) {
             let entry: StringConstant = c.hash_types.values[slot];
             let type_id: Int = entry.id;
+            let repr_type: Int = get_repr_type(c, type_id);
             let llvm_type: String = get_llvm_type_str(c, type_id);
             let hash_name: String = "@__wl_hash_value_" + type_id;
             let equal_name: String = "@__wl_values_equal_" + type_id;
-            let key_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-            if (type_id == TYPE_STRING) {
+            let key_info: StructInfo = c.struct_id_map.lookup("" + repr_type);
+            if (repr_type == TYPE_STRING) {
                 c.output_file.write("define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
                 c.output_file.write("entry:\n");
                 c.output_file.write("  %is.null = icmp eq %struct.$String* %key, null\n");
@@ -452,27 +453,27 @@ func emit_hash_helpers(c: Compiler) -> Void {
             } else {
                 c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
                 let bits: String = "%bits";
-                if (is_pointer_type(c, type_id) || type_id == TYPE_ANYPTR || 
-                    c.func_ret_map.lookup("" + type_id) is !null || 
-                    c.method_ret_map.lookup("" + type_id) is !null) {
+                if (is_pointer_type(c, repr_type) || repr_type == TYPE_ANYPTR || 
+                    c.func_ret_map.lookup("" + repr_type) is !null || 
+                    c.method_ret_map.lookup("" + repr_type) is !null) {
 
                     c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
-                else if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) {
+                else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {
                     c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
                     bits = "";
                 }
-                else if (type_id == TYPE_FLOAT) {
+                else if (repr_type == TYPE_FLOAT) {
                     c.output_file.write("  %is.nan = fcmp uno double %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq double %key, 0.0\n  %raw = bitcast double %key to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %raw\n");
                 }
-                else if (type_id == TYPE_FLOAT32) {
+                else if (repr_type == TYPE_FLOAT32) {
                     c.output_file.write("  %is.nan = fcmp uno float %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq float %key, 0.0\n  %raw = bitcast float %key to i32\n  %wide = zext i32 %raw to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %wide\n");
                 }
                 else if (key_info is !null && key_info.is_enum) {
                     c.output_file.write("  " + bits + " = zext i32 %key to i64\n");
                 }
                 else {
-                    let width: Int = get_type_bitwidth(type_id);
+                    let width: Int = get_type_bitwidth(repr_type);
                     if (width < 64) {
                         c.output_file.write("  " + bits + " = zext " + llvm_type + " %key to i64\n");
                     } else {
@@ -483,14 +484,14 @@ func emit_hash_helpers(c: Compiler) -> Void {
                 if (bits.length() > 0) {
                     c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
                 }
-                if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
+                if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
                     c.output_file.write("invalid:\n  ret i32 0\n");
                 }
                 if (bits.length() > 0) {
                     c.output_file.write("}\n\n");
                 }
                 c.output_file.write("define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\nentry:\n");
-                if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
+                if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
                     c.output_file.write("  %result = fcmp oeq " + llvm_type + " %left, %right\n");
                 } else {
                     c.output_file.write("  %result = icmp eq " + llvm_type + " %left, %right\n");

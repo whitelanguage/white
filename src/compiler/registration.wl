@@ -5,6 +5,57 @@ import * from "../frontend/diagnostics.wl"
 import * from "lowering/dictionary.wl"
 import * from "validation.wl"
 
+func is_builtin_type_name(name: String) -> Bool {
+    return get_builtin_cast_target(name) != 0 || name == "Void" || name == "Auto" ||
+           name == "Struct" || name == "Class" || name == "Function" ||
+           name == "Method" || name == "Enum";
+}
+
+func reserve_named_types(c: Compiler, node: Struct) -> Void {
+    let block: BlockNode = node;
+    let stmts: Vector(Struct) = block.stmts;
+    let i: Int = 0;
+    while (stmts is !null && i < stmts.length()) {
+        if (node_kind(stmts[i]) == NODE_TYPE_DECL) {
+            let decl: TypeDeclNode = stmts[i];
+            let raw_name: String = decl.name_tok.value;
+            let name: String = c.current_package_prefix + raw_name;
+            if (is_builtin_type_name(raw_name) || c.named_types.lookup(name) is !null ||
+                c.struct_table.lookup(name) is !null || c.generic_structs.lookup(name) is !null) {
+                throw_name_error(decl.pos, "Type '" + name + "' is already defined.");
+                i += 1;
+                continue;
+            }
+
+            let type_id: Int = TYPE_POISON;
+            if (!decl.is_alias) {
+                type_id = c.type_counter;
+                c.type_counter += 1;
+            }
+            let info: NamedTypeInfo = NamedTypeInfo(name=name, type_id=type_id, underlying_type=TYPE_POISON, is_alias=decl.is_alias, target_node=decl.target_type, pos=decl.pos, resolving=false, resolved=false);
+            c.named_types.put(name, info);
+            if (!decl.is_alias) {
+                c.named_type_ids.put("" + type_id, info);
+            }
+        }
+        i += 1;
+    }
+}
+
+func resolve_named_types(c: Compiler, node: Struct) -> Void {
+    let block: BlockNode = node;
+    let stmts: Vector(Struct) = block.stmts;
+    let i: Int = 0;
+    while (stmts is !null && i < stmts.length()) {
+        if (node_kind(stmts[i]) == NODE_TYPE_DECL) {
+            let decl: TypeDeclNode = stmts[i];
+            let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
+            resolve_named_type(c, info);
+        }
+        i += 1;
+    }
+}
+
 func append_interface_method(methods: Vector(Struct), names: Dict(String, StringConstant), method_node: MethodDefNode, owner: String) -> Bool {
     let name: String = method_node.name_tok.value;
     if (names.contains_key(name)) {
@@ -102,7 +153,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             let s_name: String = c.current_package_prefix + raw_name;
 
             if (n.type_params is !null && n.type_params.length() > 0) {
-                if (c.generic_structs.lookup(s_name) is !null || c.struct_table.lookup(s_name) is !null) {
+                if (c.generic_structs.lookup(s_name) is !null || c.struct_table.lookup(s_name) is !null || c.named_types.lookup(s_name) is !null) {
                     throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
                     i += 1;
                     continue;
@@ -130,7 +181,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                     return;
                 }
             }
-            if (c.struct_table.lookup(s_name) is !null || c.generic_structs.lookup(s_name) is !null) {
+            if (c.struct_table.lookup(s_name) is !null || c.generic_structs.lookup(s_name) is !null || c.named_types.lookup(s_name) is !null) {
                 throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
                 i += 1;
                 continue;
@@ -162,7 +213,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
-                if (c.generic_structs.lookup(c_name) is !null || (c.struct_table.lookup(c_name) is !null && c_name != "dict.Dict")) {
+                if (c.generic_structs.lookup(c_name) is !null || c.named_types.lookup(c_name) is !null || (c.struct_table.lookup(c_name) is !null && c_name != "dict.Dict")) {
                     throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
                     i += 1;
                     continue;
@@ -172,7 +223,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
                 i++;
                 continue;
             }
-            if (c.struct_table.lookup(c_name) is !null || (c.generic_structs.lookup(c_name) is !null && c_name != "dict.Dict")) {
+            if (c.struct_table.lookup(c_name) is !null || c.named_types.lookup(c_name) is !null || (c.generic_structs.lookup(c_name) is !null && c_name != "dict.Dict")) {
                 throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
                 i += 1;
                 continue;
@@ -203,7 +254,7 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             let i_node: InterfaceDefNode = stmts[i];
             let raw_name: String = i_node.name_tok.value;
             let i_name: String = c.current_package_prefix + raw_name;
-            if (c.struct_table.lookup(i_name) is !null || c.generic_structs.lookup(i_name) is !null) {
+            if (c.struct_table.lookup(i_name) is !null || c.generic_structs.lookup(i_name) is !null || c.named_types.lookup(i_name) is !null) {
                 throw_name_error(i_node.pos, "Type '" + i_name + "' is already defined");
                 i += 1;
                 continue;
@@ -263,7 +314,12 @@ func pre_register_structs(c: Compiler, node: Struct) -> Void {
             let e_node: EnumDefNode = stmts[i];
             let raw_name: String = e_node.name_tok.value;
             let e_name: String = c.current_package_prefix + raw_name;
-            if (c.struct_table.lookup(e_name) is !null) { throw_name_error(e_node.pos, "Type '" + e_name + "' is already defined"); i += 1; continue; }
+            if (c.struct_table.lookup(e_name) is !null || 
+                c.named_types.lookup(e_name) is !null) {
+                throw_name_error(e_node.pos, "Type '" + e_name + "' is already defined");
+                i += 1;
+                continue;
+            }
             let sys_anns: SystemAnnResult = consume_annotations(e_node.annotations, raw_name);
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
@@ -482,7 +538,7 @@ func pre_register_funcs(c: Compiler, node: Struct) -> Void {
                     if (is_fallible_type(c, target_id)) {
                         target_id = get_inner_fallible_type(c, target_id);
                     }
-                    if (!is_conversion_target(target_id)) {
+                    if (!is_conversion_target(c, target_id)) {
                         throw_type_error(m_node.pos, "Conversion target " + get_type_name(c, target_id) + " is not a built-in value type");
                     }
                 }

@@ -28,7 +28,9 @@ func precompile_ast(c: Compiler, node: Struct, final_path: String, import_prefix
     }
 
     bind_module_prelude(c, Position(idx=0, ln=0, col=0, text="", fn=final_path));
+    reserve_named_types(c, node);
     pre_register_structs(c, node);
+    resolve_named_types(c, node);
     pre_register_funcs(c, node);
     pre_register_globals(c, node);
 
