@@ -54,3 +54,12 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     if (linkage == WirLinkage.External && abi == WirABI.White) { return NO_WIR_FUNC; }
     return wir_add_function(ref program, info.name, parameters, result, info.is_varargs, linkage, abi);
 }
+
+func wir_find_function(program: WirModule, name: String) -> WirFuncID {
+    let i: Int = 0;
+    while (i < program.arena.functions.length()) {
+        if (program.arena.functions[i].name == name) { return WirFuncID(UInt32(i + 1)); }
+        i++;
+    }
+    return NO_WIR_FUNC;
+}

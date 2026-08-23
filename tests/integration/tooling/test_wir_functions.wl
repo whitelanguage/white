@@ -29,9 +29,13 @@ func main() -> Int {
     let right: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "b"), pos=pos));
     let sum_value: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=test_token(TOK_PLUS, "+"), right=right, pos=pos));
     let sum: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=test_token(TOK_IDENTIFIER, "sum"), type_node=NO_NODE, value=sum_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let current_sum: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
+    let add_again: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
+    let updated_value: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=current_sum, op_tok=test_token(TOK_PLUS, "+"), right=add_again, pos=pos));
+    let update_sum: NodeID = add_var_assign_node(source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=test_token(TOK_IDENTIFIER, "sum"), value=updated_value, pos=pos));
     let sum_access: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
     let return_sum: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum_access, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[sum, return_sum]));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[sum, update_sum, return_sum]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
@@ -54,7 +58,7 @@ func main() -> Int {
         print("FAIL: lowered function body could not be printed");
         return 1;
     }
-    let expected: String = "internal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %a.addr:ptr<i32> = alloca i32\n    store %a, %a.addr\n    %b.addr:ptr<i32> = alloca i32\n    store %b, %b.addr\n    %5:i32 = load %a.addr\n    %6:i32 = load %b.addr\n    %7:i32 = add %5, %6\n    %sum.addr:ptr<i32> = alloca i32\n    store %7, %sum.addr\n    %9:i32 = load %sum.addr\n    ret %9\n}\n";
+    let expected: String = "internal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %a.addr:ptr<i32> = alloca i32\n    store %a, %a.addr\n    %b.addr:ptr<i32> = alloca i32\n    store %b, %b.addr\n    %5:i32 = load %a.addr\n    %6:i32 = load %b.addr\n    %7:i32 = add %5, %6\n    %sum.addr:ptr<i32> = alloca i32\n    store %7, %sum.addr\n    %9:i32 = load %sum.addr\n    %10:i32 = load %a.addr\n    %11:i32 = add %9, %10\n    store %11, %sum.addr\n    %12:i32 = load %sum.addr\n    ret %12\n}\n";
     if (text != expected) {
         print("FAIL: lowered function text is not stable");
         print(text);

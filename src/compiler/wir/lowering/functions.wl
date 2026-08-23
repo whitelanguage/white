@@ -21,10 +21,16 @@ struct WirExpr(
     source_type: Int
 )
 
+struct WirLoop(
+    continue_block: WirBlockID,
+    break_block: WirBlockID
+)
+
 struct WirFunctionLowering(
     function: WirFuncID,
     block: WirBlockID,
     bindings: Vector(WirBinding),
+    loops: Vector(WirLoop),
     errors: Vector(String),
     terminated: Bool,
     next_block: Int
@@ -137,6 +143,50 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let value: WirValueID = wir_binary(ref program, state.block, opcode, type_id, left.value, right.value, "", no_wir_location());
         return WirExpr(value=value, source_type=left.source_type);
     }
+    if (kind == NODE_CALL) {
+        let call: CallNode = get_call_node(source.arena, node);
+        if (node_tag(call.callee) != NODE_VAR_ACCESS) {
+            state.errors.append("indirect calls are not lowered to WIR yet");
+            return wir_no_expr();
+        }
+        if (call.preserve_fallible) {
+            state.errors.append("fallible calls are not lowered to WIR yet");
+            return wir_no_expr();
+        }
+
+        let callee: VarAccessNode = get_var_access_node(source.arena, call.callee);
+        let info: FuncInfo = source.func_table.lookup(callee.name_tok.value);
+        if (!has_func(info) && source.current_package_prefix.length() != 0) { info = source.func_table.lookup(source.current_package_prefix + callee.name_tok.value); }
+        if (!has_func(info)) {
+            state.errors.append("unknown function '" + callee.name_tok.value + "' in WIR lowering");
+            return wir_no_expr();
+        }
+
+        let function_id: WirFuncID = wir_find_function(program, info.name);
+        if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, info); }
+        if (function_id == NO_WIR_FUNC) { return wir_no_expr(); }
+        let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+        let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
+        let arguments: Vector(WirValueID) = [];
+        let i: Int = 0;
+        while (i < call.args.length()) {
+            let argument: ArgNode = call.args[i];
+            if (argument.name.length() != 0 || argument.is_spread) {
+                state.errors.append("named and spread arguments must be bound before WIR lowering");
+                return wir_no_expr();
+            }
+            let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
+            if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            if (i < signature.parameters.length() && wir_value_type(program, value.value) != signature.parameters[i]) {
+                state.errors.append("argument " + i + " to '" + info.name + "' requires a conversion before WIR lowering");
+                return wir_no_expr();
+            }
+            arguments.append(value.value);
+            i++;
+        }
+        let result: WirValueID = wir_call(ref program, state.block, function.address, arguments, "", no_wir_location());
+        return WirExpr(value=result, source_type=info.ret_type);
+    }
 
     state.errors.append("AST node kind " + kind + " is not lowered to WIR yet");
     return wir_no_expr();
@@ -167,6 +217,26 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     let kind: Int = node_tag(node);
     if (kind == NODE_VAR_DECL) {
         wir_lower_var(ref state, ref types, ref source, ref program, get_var_decl_node(source.arena, node));
+        return;
+    }
+    if (kind == NODE_VAR_ASSIGN) {
+        let statement: VarAssignNode = get_var_assign_node(source.arena, node);
+        let binding: WirBinding = wir_find_binding(state, statement.name_tok.value)?;
+        catch(err) {
+            state.errors.append("unknown local '" + statement.name_tok.value + "' in WIR lowering");
+            return;
+        }
+        if (binding.is_const) {
+            state.errors.append("const local '" + statement.name_tok.value + "' reached WIR lowering with an assignment");
+            return;
+        }
+        let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
+        if (value.value == NO_WIR_VALUE) { return; }
+        if (value.source_type != binding.source_type) {
+            state.errors.append("assignment to '" + statement.name_tok.value + "' requires a conversion before WIR lowering");
+            return;
+        }
+        wir_store(ref program, state.block, value.value, binding.address, no_wir_location());
         return;
     }
     if (kind == NODE_RETURN) {
@@ -247,6 +317,51 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         state.terminated = false;
         return;
     }
+    if (kind == NODE_WHILE) {
+        let statement: WhileNode = get_while_node(source.arena, node);
+        let condition_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "while.cond."), []);
+        let body_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "while.body."), []);
+        let end_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "while.end."), []);
+        wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(condition_block, [])], no_wir_location());
+
+        state.block = condition_block;
+        state.terminated = false;
+        let condition: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.condition);
+        if (condition.value == NO_WIR_VALUE) { return; }
+        if (condition.source_type != TYPE_BOOL) {
+            state.errors.append("while condition reached WIR lowering with a non-Bool type");
+            return;
+        }
+        wir_append(ref program, condition_block, WirOpcode.Branch, program.void_type, [condition.value], [wir_edge(body_block, []), wir_edge(end_block, [])], no_wir_location());
+
+        state.loops.append(WirLoop(continue_block=condition_block, break_block=end_block));
+        state.block = body_block;
+        state.terminated = false;
+        wir_lower_block(ref state, ref types, ref source, ref program, statement.body);
+        if (!state.terminated) { wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(condition_block, [])], no_wir_location()); }
+        let loops: Vector(WirLoop) = [];
+        let loop_index: Int = 0;
+        while (loop_index + 1 < state.loops.length()) {
+            loops.append(state.loops[loop_index]);
+            loop_index++;
+        }
+        state.loops = loops;
+        state.block = end_block;
+        state.terminated = false;
+        return;
+    }
+    if (kind == NODE_BREAK || kind == NODE_CONTINUE) {
+        if (state.loops.length() == 0) {
+            state.errors.append("loop control reached WIR lowering outside a loop");
+            return;
+        }
+        let loop: WirLoop = state.loops[state.loops.length() - 1];
+        let target: WirBlockID = loop.break_block;
+        if (kind == NODE_CONTINUE) { target = loop.continue_block; }
+        wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(target, [])], no_wir_location());
+        state.terminated = true;
+        return;
+    }
     state.errors.append("statement kind " + kind + " is not lowered to WIR yet");
 }
 
@@ -275,7 +390,7 @@ func wir_lower_function_body(ref types: WirTypeMap, ref source: Compiler, ref pr
     }
 
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
-    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, block=entry, bindings=[], errors=[], terminated=false, next_block=0);
+    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, block=entry, bindings=[], loops=[], errors=[], terminated=false, next_block=0);
     let i: Int = 0;
     while (i < function.parameters.length()) {
         let parameter: WirValueID = function.parameters[i];
