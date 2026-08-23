@@ -153,6 +153,29 @@ func wir_cast_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     return WirExpr(value=wir_cast(ref program, state.block, value.value, target, "", no_wir_location()), source_type=target_type);
 }
 
+func wir_lower_address(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> WirExpr {
+    if (!has_node(node) || node_tag(node) != NODE_REF) {
+        state.errors.append("reference parameter reached WIR lowering without 'ref'");
+        return wir_no_expr();
+    }
+    let reference: RefNode = get_ref_node(source.arena, node);
+    if (!has_node(reference.node) || node_tag(reference.node) != NODE_VAR_ACCESS) {
+        state.errors.append("reference expression is not an addressable local in WIR lowering");
+        return wir_no_expr();
+    }
+    let access: VarAccessNode = get_var_access_node(source.arena, reference.node);
+    let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
+    catch(err) {
+        state.errors.append("unknown local '" + access.name_tok.value + "' in WIR reference lowering");
+        return wir_no_expr();
+    }
+    if (binding.is_const) {
+        state.errors.append("const local '" + access.name_tok.value + "' reached WIR lowering as a mutable reference");
+        return wir_no_expr();
+    }
+    return WirExpr(value=binding.address, source_type=binding.source_type);
+}
+
 func wir_binary_type(ref state: WirFunctionLowering, ref source: Compiler, left: WirExpr, right: WirExpr, left_node: NodeID, right_node: NodeID) -> Int {
     if (left.source_type == right.source_type) { return left.source_type; }
     if (!wir_source_numeric(left.source_type) || !wir_source_numeric(right.source_type)) { return TYPE_POISON; }
@@ -213,6 +236,36 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     }
     if (kind == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(source.arena, node);
+        if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR) {
+            let left: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.left);
+            if (left.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            if (left.source_type != TYPE_BOOL) {
+                state.errors.append("logical operator reached WIR lowering with a non-Bool left operand");
+                return wir_no_expr();
+            }
+
+            let right_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "logic.rhs."), []);
+            let merge_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "logic.end."), [wir_param("value", program.bool_type)]);
+            let short_value: WirValueID = wir_const_bool(ref program, binary.op_tok.type == TOK_OR);
+            if (binary.op_tok.type == TOK_AND) {
+                wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [left.value], [wir_edge(right_block, []), wir_edge(merge_block, [short_value])], no_wir_location());
+            } else {
+                wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [left.value], [wir_edge(merge_block, [short_value]), wir_edge(right_block, [])], no_wir_location());
+            }
+
+            state.block = right_block;
+            let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.right);
+            if (right.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            if (right.source_type != TYPE_BOOL) {
+                state.errors.append("logical operator reached WIR lowering with a non-Bool right operand");
+                return wir_no_expr();
+            }
+            wir_append(ref program, right_block, WirOpcode.Jump, program.void_type, [], [wir_edge(merge_block, [right.value])], no_wir_location());
+            state.block = merge_block;
+            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(merge_block))];
+            return WirExpr(value=block.parameters[0], source_type=TYPE_BOOL);
+        }
+
         let left: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.left);
         let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.right);
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) { return wir_no_expr(); }
@@ -272,15 +325,24 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 state.errors.append("named and spread arguments must be bound before WIR lowering");
                 return wir_no_expr();
             }
-            let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
-            if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            let value: WirExpr = wir_no_expr();
             if (i < signature.parameters.length()) {
                 let parameter: TypeListNode = info.arg_types[i];
-                if (parameter.pass_mode != PARAM_VALUE) {
-                    state.errors.append("reference arguments are not lowered to WIR calls yet");
-                    return wir_no_expr();
+                if (parameter.pass_mode == PARAM_REF) {
+                    value = wir_lower_address(ref state, ref source, argument.val);
+                    if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
+                    if (value.source_type != parameter.type) {
+                        state.errors.append("reference argument to '" + info.name + "' has the wrong type in WIR lowering");
+                        return wir_no_expr();
+                    }
+                } else {
+                    value = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
+                    if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
+                    value = wir_cast_expr(ref state, ref types, ref source, ref program, value, parameter.type, true);
+                    if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
                 }
-                value = wir_cast_expr(ref state, ref types, ref source, ref program, value, parameter.type, true);
+            } else {
+                value = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
                 if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
             }
             arguments.append(value.value);
