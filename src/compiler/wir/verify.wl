@@ -1,5 +1,6 @@
 // compiler/wir/verify.wl
 import * from "model.wl"
+import wir_value_type from "builder.wl"
 
 func wir_type_valid(program: WirModule, id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(id));
@@ -79,13 +80,25 @@ func wir_check_types(program: WirModule, errors: Vector(String)) -> Void {
 
         let j: Int = 0;
         while (j < value.fields.length()) {
-            if (!wir_type_valid(program, value.fields[j])) { wir_report(errors, "struct type contains an unknown field type"); }
+            if (!wir_type_valid(program, value.fields[j])) {
+                wir_report(errors, "struct type contains an unknown field type");
+            } else if (program.arena.types[wir_id_index(UInt32(value.fields[j]))].kind == WirTypeKind.VoidType) {
+                wir_report(errors, "struct type contains a Void field");
+            }
             j++;
         }
         j = 0;
         while (j < value.parameters.length()) {
-            if (!wir_type_valid(program, value.parameters[j])) { wir_report(errors, "function type contains an unknown parameter type"); }
+            if (!wir_type_valid(program, value.parameters[j])) {
+                wir_report(errors, "function type contains an unknown parameter type");
+            } else if (program.arena.types[wir_id_index(UInt32(value.parameters[j]))].kind == WirTypeKind.VoidType) {
+                wir_report(errors, "function type contains a Void parameter");
+            }
             j++;
+        }
+        if (value.kind == WirTypeKind.Array && wir_type_valid(program, value.element)) {
+            let element: WirType = program.arena.types[wir_id_index(UInt32(value.element))];
+            if (element.kind == WirTypeKind.VoidType) { wir_report(errors, "array type has a Void element"); }
         }
         if (value.kind == WirTypeKind.Function && !wir_type_valid(program, value.result)) {
             wir_report(errors, "function type has an unknown return type");
@@ -156,10 +169,6 @@ func wir_check_binary(program: WirModule, instruction: WirInstruction, errors: V
     let integer: Bool = wir_is_integer_type(program, instruction.type_id);
     let floating: Bool = wir_is_float_type(program, instruction.type_id);
     if (!integer && !floating) { wir_report(errors, "binary instruction requires a numeric type"); }
-}
-
-func wir_value_type(program: WirModule, value_id: WirValueID) -> WirTypeID {
-    return program.arena.values[wir_id_index(UInt32(value_id))].type_id;
 }
 
 func wir_numeric_kind(kind: WirTypeKind) -> Bool {
@@ -406,6 +415,9 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
             if (address.kind != WirValueKind.Function || address.owner != UInt32(function_id) || address.type_id != function.type_id) { wir_report(errors, "function address has invalid ownership metadata"); }
         }
         if (function.parameters.length() != function_type.parameters.length()) { wir_report(errors, "function parameter count does not match its type"); }
+        if (function.linkage == WirLinkage.External && function.abi == WirABI.White) { wir_report(errors, "external function uses the White ABI"); }
+        if (function.linkage != WirLinkage.External && function.abi != WirABI.White) { wir_report(errors, "defined function uses a foreign ABI"); }
+        if (function_type.variadic && function.abi != WirABI.C) { wir_report(errors, "variadic function does not use the C ABI"); }
         let j: Int = 0;
         while (j < function.parameters.length()) {
             if (!wir_value_valid(program, function.parameters[j])) {
@@ -561,6 +573,7 @@ func wir_check_symbols(program: WirModule, errors: Vector(String)) -> Void {
 
 func verify_wir(program: WirModule) -> Vector(String) {
     let errors: Vector(String) = [];
+    if (program.pointer_bits != 32 && program.pointer_bits != 64) { wir_report(errors, "module has an unsupported pointer width"); }
     if (!wir_type_valid(program, program.void_type) || program.arena.types[wir_id_index(UInt32(program.void_type))].kind != WirTypeKind.VoidType) { wir_report(errors, "module has no canonical Void type"); }
     if (!wir_type_valid(program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) { wir_report(errors, "module has no canonical Bool type"); }
     wir_check_types(program, errors);

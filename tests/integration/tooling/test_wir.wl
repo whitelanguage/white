@@ -17,7 +17,7 @@ func has_wir_error(errors: Vector(String), message: String) -> Bool {
 }
 
 func main() -> Int {
-    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
     if (wir_signed_int_type(ref program, 32) != int_type) {
         print("FAIL: scalar types were not interned");
@@ -41,9 +41,10 @@ func main() -> Int {
     let byte_type: WirTypeID = wir_unsigned_int_type(ref program, 8);
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let byte_pointer: WirTypeID = wir_pointer_type(ref program, byte_type);
-    wir_add_function(ref program, "write", [wir_param("", int_type), wir_param("", byte_pointer), wir_param("", size_type)], wir_signed_int_type(ref program, 64), false, WirLinkage.External);
-    wir_add_function(ref program, "printf", [wir_param("", byte_pointer)], int_type, true, WirLinkage.External);
-    let function_id: WirFuncID = wir_add_function(ref program, "add", [wir_param("a", int_type), wir_param("b", int_type)], int_type, false, WirLinkage.Internal);
+    wir_add_function(ref program, "write", [wir_param("", int_type), wir_param("", byte_pointer), wir_param("", size_type)], wir_signed_int_type(ref program, 64), false, WirLinkage.External, WirABI.C);
+    wir_add_function(ref program, "printf", [wir_param("", byte_pointer)], int_type, true, WirLinkage.External, WirABI.C);
+    wir_add_function(ref program, "GetStdHandle", [wir_param("", int_type)], wir_pointer_type(ref program, program.void_type), false, WirLinkage.External, WirABI.System);
+    let function_id: WirFuncID = wir_add_function(ref program, "add", [wir_param("a", int_type), wir_param("b", int_type)], int_type, false, WirLinkage.Internal, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let exit: WirBlockID = wir_add_block(ref program, function_id, "exit", [wir_param("value", int_type)]);
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
@@ -63,14 +64,14 @@ func main() -> Int {
         print("FAIL: f64 constant did not preserve its IEEE representation");
         return 1;
     }
-    let float_function: WirFuncID = wir_add_function(ref program, "one", [], float_type, false, WirLinkage.Exported);
+    let float_function: WirFuncID = wir_add_function(ref program, "one", [], float_type, false, WirLinkage.Exported, WirABI.White);
     let float_entry: WirBlockID = wir_add_block(ref program, float_function, "entry", []);
     let one: WirValueID = wir_const_float_bits(ref program, float_type, UInt64(4607182418800017408));
     wir_append(ref program, float_entry, WirOpcode.Return, program.void_type, [one], [], no_wir_location());
 
     let long_type: WirTypeID = wir_signed_int_type(ref program, 64);
     let int_pointer: WirTypeID = wir_pointer_type(ref program, int_type);
-    let exercise: WirFuncID = wir_add_function(ref program, "exercise", [wir_param("value", int_type), wir_param("address", int_pointer)], long_type, false, WirLinkage.Private);
+    let exercise: WirFuncID = wir_add_function(ref program, "exercise", [wir_param("value", int_type), wir_param("address", int_pointer)], long_type, false, WirLinkage.Private, WirABI.White);
     let exercise_entry: WirBlockID = wir_add_block(ref program, exercise, "entry", []);
     let exercise_then: WirBlockID = wir_add_block(ref program, exercise, "then", []);
     let exercise_trap: WirBlockID = wir_add_block(ref program, exercise, "trap", []);
@@ -111,16 +112,16 @@ func main() -> Int {
         print("FAIL: valid WIR could not be printed");
         return 1;
     }
-    let expected: String = "type !Node = {i32, ptr<!Node>}\n\nprivate global @scratch:i32 = 0\ninternal global @count:i32 = 0\nexport const @answer:i32 = 42\nextern global @errno:i32\n\nextern func @write(i32, ptr<u8>, u64) -> i64\n\nextern func @printf(ptr<u8>, ...) -> i32\n\ninternal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %sum:i32 = add %a, %b\n    jmp ^exit(%sum)\n\n^exit(%value:i32):\n    ret %value\n}\n\nexport func @one() -> f64 {\n^entry:\n    ret f64(0x3FF0000000000000)\n}\n\nprivate func @exercise(%value:i32, %address:ptr<i32>) -> i64 {\n^entry:\n    %slot:ptr<i32> = alloca i32\n    store %value, %slot\n    %loaded:i32 = load %slot\n    %less:bool = slt %loaded, 10\n    check.null %address\n    check.bounds %loaded, 10\n    br %less, ^then(), ^trap()\n\n^then:\n    %increment:i32 = call @add(%loaded, 1)\n    %wide:i64 = cast %increment\n    retain %address\n    release %address\n    jmp ^exit(%wide)\n\n^trap:\n    unreachable\n\n^exit(%result:i64):\n    ret %result\n}\n";
+    let expected: String = "type !Node = {i32, ptr<!Node>}\n\nprivate global @scratch:i32 = 0\ninternal global @count:i32 = 0\nexport const @answer:i32 = 42\nextern global @errno:i32\n\nextern func @write(i32, ptr<u8>, u64) -> i64\n\nextern func @printf(ptr<u8>, ...) -> i32\n\nextern \"system\" func @GetStdHandle(i32) -> ptr<void>\n\ninternal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %sum:i32 = add %a, %b\n    jmp ^exit(%sum)\n\n^exit(%value:i32):\n    ret %value\n}\n\nexport func @one() -> f64 {\n^entry:\n    ret f64(0x3FF0000000000000)\n}\n\nprivate func @exercise(%value:i32, %address:ptr<i32>) -> i64 {\n^entry:\n    %slot:ptr<i32> = alloca i32\n    store %value, %slot\n    %loaded:i32 = load %slot\n    %less:bool = slt %loaded, 10\n    check.null %address\n    check.bounds %loaded, 10\n    br %less, ^then(), ^trap()\n\n^then:\n    %increment:i32 = call @add(%loaded, 1)\n    %wide:i64 = cast %increment\n    retain %address\n    release %address\n    jmp ^exit(%wide)\n\n^trap:\n    unreachable\n\n^exit(%result:i64):\n    ret %result\n}\n";
     if (text != expected) {
         print("FAIL: WIR text is not stable");
         print(text);
         return 1;
     }
 
-    let invalid: WirModule = new_wir_module("x86_64-pc-windows-msvc");
+    let invalid: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let invalid_int: WirTypeID = wir_signed_int_type(ref invalid, 32);
-    let invalid_function: WirFuncID = wir_add_function(ref invalid, "broken", [], invalid_int, false, WirLinkage.Internal);
+    let invalid_function: WirFuncID = wir_add_function(ref invalid, "broken", [], invalid_int, false, WirLinkage.Internal, WirABI.White);
     wir_add_block(ref invalid, invalid_function, "entry", []);
     let invalid_errors: Vector(String) = verify_wir(invalid);
     if (invalid_errors.length() == 0) {
@@ -128,7 +129,7 @@ func main() -> Int {
         return 1;
     }
 
-    let invalid_global: WirModule = new_wir_module("x86_64-pc-windows-msvc");
+    let invalid_global: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let invalid_global_type: WirTypeID = wir_signed_int_type(ref invalid_global, 32);
     let invalid_initializer: WirValueID = wir_const_int(ref invalid_global, invalid_global_type, UInt128(1U));
     wir_add_global(ref invalid_global, "foreign", invalid_global_type, invalid_initializer, WirLinkage.External, false);
@@ -138,11 +139,11 @@ func main() -> Int {
         return 1;
     }
 
-    let duplicate: WirModule = new_wir_module("x86_64-pc-windows-msvc");
+    let duplicate: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let duplicate_type: WirTypeID = wir_signed_int_type(ref duplicate, 32);
     let duplicate_value: WirValueID = wir_const_int(ref duplicate, duplicate_type, UInt128(0U));
     wir_add_global(ref duplicate, "same", duplicate_type, duplicate_value, WirLinkage.Internal, false);
-    wir_add_function(ref duplicate, "same", [], duplicate_type, false, WirLinkage.External);
+    wir_add_function(ref duplicate, "same", [], duplicate_type, false, WirLinkage.External, WirABI.C);
     let duplicate_errors: Vector(String) = verify_wir(duplicate);
     if (!has_wir_error(duplicate_errors, "symbol is defined more than once")) {
         print("FAIL: duplicate WIR symbol was accepted");

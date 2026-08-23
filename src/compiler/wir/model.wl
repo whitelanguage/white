@@ -86,6 +86,12 @@ enum WirLinkage {
     External
 }
 
+enum WirABI {
+    White,
+    C,
+    System
+}
+
 struct WirLocation(
     file: WirFileID,
     start: UInt32,
@@ -148,7 +154,8 @@ struct WirFunction(
     parameters: Vector(WirValueID),
     blocks: Vector(WirBlockID),
     entry: WirBlockID,
-    linkage: WirLinkage
+    linkage: WirLinkage,
+    abi: WirABI
 )
 
 struct WirGlobal(
@@ -173,6 +180,7 @@ struct WirArena(
 
 struct WirModule(
     target: String,
+    pointer_bits: Int,
     files: Vector(WirSourceFile),
     arena: WirArena,
     void_type: WirTypeID,

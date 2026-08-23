@@ -268,6 +268,7 @@ func wir_write_global(output: strings.Builder, program: WirModule, item: WirGlob
 func wir_write_function(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     output.write(wir_linkage_name(function.linkage)?)?;
+    if (function.linkage == WirLinkage.External && function.abi == WirABI.System) { output.write(" \"system\"")?; }
     output.write(" func @")?;
     output.write(function.name)?;
     output.write("(")?;
