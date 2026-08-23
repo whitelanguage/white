@@ -112,6 +112,40 @@ func wir_write_edge(output: strings.Builder, program: WirModule, edge: WirEdge) 
     return;
 }
 
+func wir_binary_name(opcode: WirOpcode) -> String {
+    if (opcode == WirOpcode.Add) { return "add"; }
+    if (opcode == WirOpcode.Subtract) { return "sub"; }
+    if (opcode == WirOpcode.Multiply) { return "mul"; }
+    if (opcode == WirOpcode.SignedDivide) { return "sdiv"; }
+    if (opcode == WirOpcode.UnsignedDivide) { return "udiv"; }
+    if (opcode == WirOpcode.FloatDivide) { return "fdiv"; }
+    if (opcode == WirOpcode.SignedRemainder) { return "srem"; }
+    if (opcode == WirOpcode.UnsignedRemainder) { return "urem"; }
+    if (opcode == WirOpcode.FloatRemainder) { return "frem"; }
+    if (opcode == WirOpcode.BitAnd) { return "and"; }
+    if (opcode == WirOpcode.BitOr) { return "or"; }
+    if (opcode == WirOpcode.BitXor) { return "xor"; }
+    if (opcode == WirOpcode.ShiftLeft) { return "shl"; }
+    if (opcode == WirOpcode.SignedShiftRight) { return "ashr"; }
+    if (opcode == WirOpcode.UnsignedShiftRight) { return "lshr"; }
+    if (opcode == WirOpcode.Equal) { return "eq"; }
+    if (opcode == WirOpcode.NotEqual) { return "ne"; }
+    if (opcode == WirOpcode.SignedLess) { return "slt"; }
+    if (opcode == WirOpcode.UnsignedLess) { return "ult"; }
+    if (opcode == WirOpcode.FloatLess) { return "flt"; }
+    return "";
+}
+
+func wir_write_operands(output: strings.Builder, program: WirModule, operands: Vector(WirValueID), start: Int) -> Void? {
+    let i: Int = start;
+    while (i < operands.length()) {
+        if (i != start) { output.write(", ")?; }
+        wir_write_value(output, program, operands[i])?;
+        i++;
+    }
+    return;
+}
+
 func wir_write_instruction(output: strings.Builder, program: WirModule, instruction: WirInstruction) -> Void? {
     if (instruction.result != NO_WIR_VALUE) {
         wir_write_value(output, program, instruction.result)?;
@@ -120,20 +154,60 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
         output.write(" = ")?;
     }
 
-    if (instruction.opcode == WirOpcode.Add) {
-        output.write("add ")?;
+    let binary: String = wir_binary_name(instruction.opcode);
+    if (binary.length() != 0) {
+        output.write(binary)?;
+        output.write(" ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.StackAlloc) {
+        output.write("alloca ")?;
+        let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        wir_write_type(output, program, pointer.element)?;
+    } else if (instruction.opcode == WirOpcode.Load) {
+        output.write("load ")?;
         wir_write_value(output, program, instruction.operands[0])?;
-        output.write(", ")?;
-        wir_write_value(output, program, instruction.operands[1])?;
+    } else if (instruction.opcode == WirOpcode.Store) {
+        output.write("store ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.Cast) {
+        output.write("cast ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+    } else if (instruction.opcode == WirOpcode.Call) {
+        output.write("call ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+        output.write("(")?;
+        wir_write_operands(output, program, instruction.operands, 1)?;
+        output.write(")")?;
+    } else if (instruction.opcode == WirOpcode.Retain) {
+        output.write("retain ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+    } else if (instruction.opcode == WirOpcode.Release) {
+        output.write("release ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+    } else if (instruction.opcode == WirOpcode.NullCheck) {
+        output.write("check.null ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+    } else if (instruction.opcode == WirOpcode.BoundsCheck) {
+        output.write("check.bounds ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
     } else if (instruction.opcode == WirOpcode.Jump) {
         output.write("jmp ")?;
         wir_write_edge(output, program, instruction.edges[0])?;
+    } else if (instruction.opcode == WirOpcode.Branch) {
+        output.write("br ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+        output.write(", ")?;
+        wir_write_edge(output, program, instruction.edges[0])?;
+        output.write(", ")?;
+        wir_write_edge(output, program, instruction.edges[1])?;
     } else if (instruction.opcode == WirOpcode.Return) {
         output.write("ret")?;
         if (instruction.operands.length() != 0) {
             output.write(" ")?;
             wir_write_value(output, program, instruction.operands[0])?;
         }
+    } else if (instruction.opcode == WirOpcode.Unreachable) {
+        output.write("unreachable")?;
     } else {
         throw Error.Unsupported;
     }
@@ -164,22 +238,59 @@ func wir_write_structs(output: strings.Builder, program: WirModule) -> Bool? {
     return wrote;
 }
 
+func wir_linkage_name(linkage: WirLinkage) -> String? {
+    if (linkage == WirLinkage.Private) { return "private"; }
+    if (linkage == WirLinkage.Internal) { return "internal"; }
+    if (linkage == WirLinkage.Exported) { return "export"; }
+    if (linkage == WirLinkage.External) { return "extern"; }
+    throw Error.InvalidData;
+}
+
+func wir_write_global(output: strings.Builder, program: WirModule, item: WirGlobal) -> Void? {
+    output.write(wir_linkage_name(item.linkage)?)?;
+    output.write(" ")?;
+    if (item.is_const) {
+        output.write("const @")?;
+    } else {
+        output.write("global @")?;
+    }
+    output.write(item.name)?;
+    output.write(":")?;
+    wir_write_type(output, program, item.type_id)?;
+    if (item.initializer != NO_WIR_VALUE) {
+        output.write(" = ")?;
+        wir_write_value(output, program, item.initializer)?;
+    }
+    output.write("\n")?;
+    return;
+}
+
 func wir_write_function(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
-    if (function.linkage == WirLinkage.External || program.arena.types[wir_id_index(UInt32(function.type_id))].variadic) { throw Error.Unsupported; }
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
-    output.write("func @")?;
+    output.write(wir_linkage_name(function.linkage)?)?;
+    output.write(" func @")?;
     output.write(function.name)?;
     output.write("(")?;
     let i: Int = 0;
     while (i < function.parameters.length()) {
         if (i != 0) { output.write(", ")?; }
-        wir_write_value(output, program, function.parameters[i])?;
-        output.write(":")?;
+        if (function.linkage != WirLinkage.External) {
+            wir_write_value(output, program, function.parameters[i])?;
+            output.write(":")?;
+        }
         wir_write_type(output, program, signature.parameters[i])?;
         i++;
     }
+    if (signature.variadic) {
+        if (function.parameters.length() != 0) { output.write(", ")?; }
+        output.write("...")?;
+    }
     output.write(") -> ")?;
     wir_write_type(output, program, signature.result)?;
+    if (function.linkage == WirLinkage.External) {
+        output.write("\n")?;
+        return;
+    }
     output.write(" {\n")?;
 
     i = 0;
@@ -222,9 +333,16 @@ func print_wir(program: WirModule) -> String? {
 
     let output: strings.Builder = strings.Builder(1024);
     let wrote_types: Bool = wir_write_structs(output, program)?;
-    if (wrote_types && program.arena.functions.length() != 0) { output.write("\n")?; }
+    if (wrote_types && (program.arena.globals.length() != 0 || program.arena.functions.length() != 0)) { output.write("\n")?; }
 
     let i: Int = 0;
+    while (i < program.arena.globals.length()) {
+        wir_write_global(output, program, program.arena.globals[i])?;
+        i++;
+    }
+    if (program.arena.globals.length() != 0 && program.arena.functions.length() != 0) { output.write("\n")?; }
+
+    i = 0;
     while (i < program.arena.functions.length()) {
         if (i != 0) { output.write("\n")?; }
         wir_write_function(output, program, program.arena.functions[i])?;

@@ -158,6 +158,34 @@ func wir_check_binary(program: WirModule, instruction: WirInstruction, errors: V
     if (!integer && !floating) { wir_report(errors, "binary instruction requires a numeric type"); }
 }
 
+func wir_value_type(program: WirModule, value_id: WirValueID) -> WirTypeID {
+    return program.arena.values[wir_id_index(UInt32(value_id))].type_id;
+}
+
+func wir_numeric_kind(kind: WirTypeKind) -> Bool {
+    return kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt || kind == WirTypeKind.FloatType;
+}
+
+func wir_type_is(program: WirModule, type_id: WirTypeID, kind: WirTypeKind) -> Bool {
+    if (!wir_type_valid(program, type_id)) { return false; }
+    return program.arena.types[wir_id_index(UInt32(type_id))].kind == kind;
+}
+
+func wir_cast_allowed(program: WirModule, source: WirTypeID, target: WirTypeID) -> Bool {
+    if (!wir_type_valid(program, source) || !wir_type_valid(program, target)) { return false; }
+    let source_type: WirType = program.arena.types[wir_id_index(UInt32(source))];
+    let target_type: WirType = program.arena.types[wir_id_index(UInt32(target))];
+    if (wir_numeric_kind(source_type.kind) && wir_numeric_kind(target_type.kind)) { return true; }
+    return source_type.kind == WirTypeKind.Pointer && target_type.kind == WirTypeKind.Pointer;
+}
+
+func wir_equality_type(program: WirModule, type_id: WirTypeID) -> Bool {
+    if (!wir_type_valid(program, type_id)) { return false; }
+    let kind: WirTypeKind = program.arena.types[wir_id_index(UInt32(type_id))].kind;
+    if (kind == WirTypeKind.BoolType || kind == WirTypeKind.Pointer) { return true; }
+    return wir_numeric_kind(kind);
+}
+
 func wir_check_no_result(program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
     if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) { wir_report(errors, "side-effect instruction produces a value"); }
 }
@@ -235,6 +263,18 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             let right: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
             if (left != right) { wir_report(errors, "comparison operands have different types"); }
             if (instruction.type_id != program.bool_type) { wir_report(errors, "comparison result is not Bool"); }
+            if (left == right && (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual) && !wir_equality_type(program, left)) {
+                wir_report(errors, "equality comparison requires a scalar or pointer type");
+            }
+            if (left == right && opcode == WirOpcode.SignedLess && !wir_type_is(program, left, WirTypeKind.SignedInt)) {
+                wir_report(errors, "signed comparison requires a signed integer type");
+            }
+            if (left == right && opcode == WirOpcode.UnsignedLess && !wir_type_is(program, left, WirTypeKind.UnsignedInt)) {
+                wir_report(errors, "unsigned comparison requires an unsigned integer type");
+            }
+            if (left == right && opcode == WirOpcode.FloatLess && !wir_type_is(program, left, WirTypeKind.FloatType)) {
+                wir_report(errors, "floating-point comparison requires a floating-point type");
+            }
         }
     } else if (opcode == WirOpcode.StackAlloc) {
         if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || !wir_is_pointer_type(program, instruction.type_id)) { wir_report(errors, "stack allocation must produce a pointer"); }
@@ -252,16 +292,20 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     } else if (opcode == WirOpcode.Store) {
         wir_check_no_result(program, instruction, errors);
         if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) {
-            wir_report(errors, "store requires a pointer and a value and cannot produce a result");
+            wir_report(errors, "store requires a value and a pointer and cannot produce a result");
         } else if (wir_value_valid(program, instruction.operands[0]) && wir_value_valid(program, instruction.operands[1])) {
-            let pointer_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
-            let value_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
+            let value_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+            let pointer_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
             if (!wir_is_pointer_type(program, pointer_type_id) || program.arena.types[wir_id_index(UInt32(pointer_type_id))].element != value_type_id) {
                 wir_report(errors, "stored value does not match the pointer element type");
             }
         }
     } else if (opcode == WirOpcode.Cast) {
-        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || instruction.result == NO_WIR_VALUE) { wir_report(errors, "cast requires one operand and one result"); }
+        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || instruction.result == NO_WIR_VALUE) {
+            wir_report(errors, "cast requires one operand and one result");
+        } else if (!wir_cast_allowed(program, wir_value_type(program, instruction.operands[0]), instruction.type_id)) {
+            wir_report(errors, "cast uses incompatible source and target types");
+        }
     } else if (opcode == WirOpcode.Call) {
         if (instruction.edges.length() != 0) { wir_report(errors, "call cannot contain control-flow edges"); }
         if (instruction.operands.length() == 0 || !wir_value_valid(program, instruction.operands[0])) {
@@ -288,7 +332,11 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
         }
     } else if (opcode == WirOpcode.Retain || opcode == WirOpcode.Release) {
         wir_check_no_result(program, instruction, errors);
-        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0])) { wir_report(errors, "ownership instruction requires one valid operand"); }
+        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0])) {
+            wir_report(errors, "ownership instruction requires one valid operand");
+        } else if (!wir_is_pointer_type(program, wir_value_type(program, instruction.operands[0]))) {
+            wir_report(errors, "ownership instruction requires a pointer operand");
+        }
     } else if (opcode == WirOpcode.Jump) {
         wir_check_no_result(program, instruction, errors);
         if (instruction.operands.length() != 0 || instruction.edges.length() != 1 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "jump has an invalid shape"); }
@@ -328,6 +376,8 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
         wir_check_no_result(program, instruction, errors);
         if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || !wir_value_valid(program, instruction.operands[1]) || !wir_is_integer_type(program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id) || !wir_is_integer_type(program, program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id)) {
             wir_report(errors, "bounds check requires integer index and length operands");
+        } else if (wir_value_type(program, instruction.operands[0]) != wir_value_type(program, instruction.operands[1])) {
+            wir_report(errors, "bounds check operands have different types");
         }
     }
 }
@@ -457,6 +507,54 @@ func wir_check_globals(program: WirModule, errors: Vector(String)) -> Void {
                 if (initializer.kind == WirValueKind.Instruction || initializer.kind == WirValueKind.FunctionParameter || initializer.kind == WirValueKind.BlockParameter) { wir_report(errors, "global initializer is not a constant value"); }
             }
         }
+        if (global.linkage == WirLinkage.External && global.initializer != NO_WIR_VALUE) {
+            wir_report(errors, "external global has an initializer");
+        } else if (global.linkage != WirLinkage.External && global.initializer == NO_WIR_VALUE) {
+            wir_report(errors, "defined global has no initializer");
+        }
+        i++;
+    }
+}
+
+func wir_check_symbols(program: WirModule, errors: Vector(String)) -> Void {
+    let values: Dict(String, Bool) = Dict();
+    let types: Dict(String, Bool) = Dict();
+    let i: Int = 0;
+    while (i < program.arena.types.length()) {
+        let type: WirType = program.arena.types[i];
+        if (type.kind == WirTypeKind.Struct && type.name.length() != 0) {
+            if (types.contains_key(type.name)) {
+                wir_report(errors, "named struct is declared more than once");
+            } else {
+                types.put(type.name, true);
+            }
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < program.arena.globals.length()) {
+        let name: String = program.arena.globals[i].name;
+        if (name.length() != 0) {
+            if (values.contains_key(name)) {
+                wir_report(errors, "symbol is defined more than once");
+            } else {
+                values.put(name, true);
+            }
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < program.arena.functions.length()) {
+        let name: String = program.arena.functions[i].name;
+        if (name.length() != 0) {
+            if (values.contains_key(name)) {
+                wir_report(errors, "symbol is defined more than once");
+            } else {
+                values.put(name, true);
+            }
+        }
         i++;
     }
 }
@@ -467,6 +565,7 @@ func verify_wir(program: WirModule) -> Vector(String) {
     if (!wir_type_valid(program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) { wir_report(errors, "module has no canonical Bool type"); }
     wir_check_types(program, errors);
     wir_check_values(program, errors);
+    wir_check_symbols(program, errors);
     wir_check_globals(program, errors);
     wir_check_functions(program, errors);
     return errors;
