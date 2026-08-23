@@ -9,18 +9,18 @@ import * from "target.wl"
 func target_intrinsic(c: Compiler, node: NodeID) -> String {
     if (!has_node(node)) { return ""; }
     let base: Int = node_tag(node);
-    let info: SymbolInfo = null;
+    let info: SymbolInfo = SymbolInfo();
     if (base == NODE_FIELD_ACCESS) {
         let name: String = format_ast_path(c, node);
         let mapped: String = c.current_file_global_aliases.lookup(name);
         if (mapped is null) { mapped = c.global_var_aliases.lookup(name); }
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
-        if (info is null) { info = c.global_symbol_table.lookup(name); }
+        if (!has_symbol(info)) { info = c.global_symbol_table.lookup(name); }
     } else if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(c.arena, node);
         info = find_symbol(c, access.name_tok.value);
     }
-    if (info is null || !info.reg.starts_with("$intrinsic.")) { return ""; }
+    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return ""; }
     return info.reg.slice(11, info.reg.length());
 }
 

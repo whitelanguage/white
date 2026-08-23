@@ -385,7 +385,8 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let arena: WhitelangArena.AstArena = WhitelangArena.new_ast_arena();
     let lexer: WhitelangLexer.Lexer = WhitelangLexer.new_lexer(cfg.source_file, source);
-    let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=WhitelangLexer.get_next_token(lexer), nesting=0, arena=arena);
+    let first_token: WhitelangTokens.Token = WhitelangLexer.get_next_token(lexer);
+    let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=first_token, nesting=0, arena=arena);
     let ast: WhitelangNodes.NodeID = WhitelangParser.parse(parser);
 
     WhitelangExceptions.check_errors_and_abort();

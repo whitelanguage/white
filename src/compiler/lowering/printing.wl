@@ -17,19 +17,19 @@ func is_printable_type(c: Compiler, type_id: Int) -> Bool {
         return true;
     }
     if (type_id < 100) { return false; }
-    return c.struct_id_map.lookup("" + type_id) is !null ||
-           c.vector_base_map.lookup("" + type_id) is !null ||
-           c.array_info_map.lookup("" + type_id) is !null;
+    return has_struct(c.struct_id_map.lookup("" + type_id)) ||
+           has_symbol(c.vector_base_map.lookup("" + type_id)) ||
+           has_array_info(c.array_info_map.lookup("" + type_id));
 }
 
 func class_has_named_interface(c: Compiler, info: StructInfo, name: String) -> Bool {
     let current: StructInfo = info;
-    while (current is !null) {
+    while (has_struct(current)) {
         let i: Int = 0;
         while (current.interfaces is !null && i < current.interfaces.length()) {
             let item: TypeListNode = current.interfaces[i];
             let interface_info: StructInfo = c.struct_id_map.lookup("" + item.type);
-            if (interface_info is !null && interface_info.name == name) { return true; }
+            if (has_struct(interface_info) && interface_info.name == name) { return true; }
             i += 1;
         }
 
@@ -40,14 +40,14 @@ func class_has_named_interface(c: Compiler, info: StructInfo, name: String) -> B
 }
 
 func interface_has_name(c: Compiler, info: StructInfo, name: String) -> Bool {
-    if (info is null || !info.is_interface) { return false; }
+    if (!has_struct(info) || !info.is_interface) { return false; }
     if (info.name == name) { return true; }
 
     let i: Int = 0;
     while (info.interfaces is !null && i < info.interfaces.length()) {
         let item: TypeListNode = info.interfaces[i];
         let parent: StructInfo = c.struct_id_map.lookup("" + item.type);
-        if (parent is !null && parent.name == name) { return true; }
+        if (has_struct(parent) && parent.name == name) { return true; }
         i += 1;
     }
     return false;
@@ -57,17 +57,18 @@ func compile_interface_display(c: Compiler, reg: String, info: StructInfo, pos: 
     if (!interface_has_name(c, info, "formatting.Display")) { return false; }
 
     let method_index: Int = 0;
-    let method_node: MethodDefNode = null;
     while (info.vtable is !null && method_index < info.vtable.length()) {
         let candidate: MethodDefNode = info.vtable[method_index];
-        if (candidate.name_tok.value == "display") { method_node = candidate; break; }
+        if (candidate.name_tok.value == "display") { break; }
         method_index += 1;
     }
 
-    if (method_node is null) {
+    if (info.vtable is null || method_index >= info.vtable.length()) {
         throw_internal_compiler_error(pos, "Display method is missing from interface '" + info.name + "'.");
         return true;
     }
+
+    let method_node: MethodDefNode = info.vtable[method_index];
 
     let object: String = next_reg(c);
     let table: String = next_reg(c);
@@ -116,7 +117,7 @@ func compile_display(c: Compiler, reg: String, info: StructInfo, pos: Position) 
     if (!info.is_class || !class_has_named_interface(c, info, "formatting.Display")) { return false; }
 
     let method_index: Int = 0;
-    let method_info: FuncInfo = null;
+    let method_info: FuncInfo = FuncInfo();
     while (info.vtable is !null && method_index < info.vtable.length()) {
         let candidate: FuncInfo = info.vtable[method_index];
         if (candidate.base_name == "display") {
@@ -126,7 +127,7 @@ func compile_display(c: Compiler, reg: String, info: StructInfo, pos: Position) 
         method_index += 1;
     }
 
-    if (method_info is null || method_info.ret_type != TYPE_STRING || method_info.arg_types.length() != 1) {
+    if (!has_func(method_info) || method_info.ret_type != TYPE_STRING || method_info.arg_types.length() != 1) {
         throw_internal_compiler_error(pos, "Display implementation for '" + info.name + "' has an invalid signature.");
         return true;
     }
@@ -275,7 +276,7 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
 
     if (is_pointer_type(c, type_id)) {
         let base_info: SymbolInfo = c.ptr_base_map.lookup("" + type_id);
-        if (base_info is !null && base_info.type == TYPE_BYTE) {
+        if (has_symbol(base_info) && base_info.type == TYPE_BYTE) {
             let hook_raw_str: String = get_mangled_symbol(c, "print_raw_string", pos);
             c.output_file.write(c.indent + "call void @" + hook_raw_str + "(i8* " + reg + ")\n");
         } else {
@@ -290,7 +291,7 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
         if (origin_id >= 100) {
             let s_info_real: StructInfo = c.struct_id_map.lookup("" + origin_id);
-            if (s_info_real is !null) {
+            if (has_struct(s_info_real)) {
                 let cast_reg: String = next_reg(c);
                 c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + reg + " to " + s_info_real.llvm_name + "*\n");
                 if (compile_display(c, cast_reg, s_info_real, pos)) { return; }
@@ -307,7 +308,7 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
     
     if (type_id >= 100) {
         let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-        if (s_info is !null) {
+        if (has_struct(s_info)) {
             if (compile_interface_display(c, reg, s_info, pos)) { return; }
             if (compile_display(c, reg, s_info, pos)) { return; }
             if (s_info.name == "$Variant") {
@@ -323,13 +324,13 @@ func compile_print(c: Compiler, reg: String, type_id: Int, pos: Position, origin
         }
         
         let v_info: SymbolInfo = c.vector_base_map.lookup("" + type_id);
-        if (v_info is !null) {
+        if (has_symbol(v_info)) {
             compile_print_vector_internal(c, reg, v_info, pos);
             return;
         }
 
         let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
-        if (arr_info is !null) {
+        if (has_array_info(arr_info)) {
             compile_print_array_internal(c, reg, type_id, arr_info, pos);
             return;
         }
@@ -421,6 +422,12 @@ func compile_print_enum_internal(c: Compiler, enum_reg: String, s_info: StructIn
 
 func compile_print_struct_internal(c: Compiler, obj_reg: String, s_info: StructInfo, pos: Position) -> Void {
     let hook_raw_str: String = get_mangled_symbol(c, "print_bytes", pos);
+    let object_ptr: String = obj_reg;
+    if (!s_info.is_class) {
+        object_ptr = next_reg(c);
+        c.output_file.write(c.indent + object_ptr + " = alloca " + s_info.llvm_name + "\n");
+        c.output_file.write(c.indent + "store " + s_info.llvm_name + " " + obj_reg + ", " + s_info.llvm_name + "* " + object_ptr + "\n");
+    }
     let header: String = s_info.name + "(";
     let header_id: Int = register_string_constant(c, header);
     let header_ptr: String = get_string_ptr(header_id, header);
@@ -445,7 +452,7 @@ func compile_print_struct_internal(c: Compiler, obj_reg: String, s_info: StructI
         c.output_file.write(c.indent + "call void @" + hook_raw_str + "(i8* " + fn_ptr + ", i32 " + f_name_eq.length() + ")\n");
         
         let f_ptr: String = next_reg(c);
-        c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_reg + ", i32 0, i32 " + f_curr.offset + "\n");
+        c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + object_ptr + ", i32 0, i32 " + f_curr.offset + "\n");
         let f_val_reg: String = next_reg(c);
         c.output_file.write(c.indent + f_val_reg + " = load " + f_curr.llvm_type + ", " + f_curr.llvm_type + "* " + f_ptr + "\n");
         compile_print(c, f_val_reg, f_curr.type, pos, f_curr.type); 
@@ -526,7 +533,7 @@ func compile_print_array_internal(c: Compiler, arr_reg: String, type_id: Int, ar
     c.output_file.write(c.indent + "call void @" + hook_raw_str + "(i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str_open_bracket, i32 0, i32 0), i32 1)\n");
 
     let size_val: String = next_reg(c);
-    let slice_parts: SliceParts = null;
+    let slice_parts: SliceParts = SliceParts();
     if (arr_info.size == -1) {
         slice_parts = emit_slice_parts(c, arr_reg, type_id, pos);
         let slice_length: String = emit_size_to_int(c, slice_parts.length);
@@ -568,7 +575,7 @@ func compile_print_array_internal(c: Compiler, arr_reg: String, type_id: Int, ar
     c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + curr_idx + "\n");
     
     let val_reg: String = "";
-    if (c.array_info_map.lookup("" + elem_type) is !null) {
+    if (has_array_info(c.array_info_map.lookup("" + elem_type))) {
         val_reg = slot_ptr;
     } else {
         val_reg = next_reg(c);

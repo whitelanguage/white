@@ -1,6 +1,6 @@
 // frontend/ast.wl
 import Token from "tokens.wl"
-import Position, throw_internal_compiler_error from "diagnostics.wl"
+import Position, no_position, throw_internal_compiler_error from "diagnostics.wl"
 
 const NODE_INT            : Int = 1;
 const NODE_FLOAT          : Int = 2;
@@ -62,6 +62,9 @@ const NODE_TYPE_LAYOUT    : Int = 58;
 const NODE_GENERIC_TYPE   : Int = 59;
 const NODE_TYPE_DECL      : Int = 60;
 
+const PARAM_VALUE : Int = 0;
+const PARAM_REF   : Int = 1;
+
 
 
 type NodeID = UInt32;
@@ -82,7 +85,7 @@ func node_slot(node: NodeID) -> Int {
 
 func make_node_id(kind: Int, slot: Int) -> NodeID {
     if (kind <= 0 || kind > 255 || slot < 0 || slot >= NODE_SLOT_LIMIT) {
-        throw_internal_compiler_error(null, "AST arena node limit exceeded.");
+        throw_internal_compiler_error(no_position(), "AST arena node limit exceeded.");
         return NO_NODE;
     }
     return NodeID((UInt32(kind) << NODE_KIND_SHIFT) | UInt32(slot + 1));
@@ -232,6 +235,7 @@ struct ParamNode(
     name_tok : Token,
     type_tok : NodeID,
     pos      : Position,
+    pass_mode : Int,
     is_variadic : Bool,
     default_val : NodeID
 )
@@ -275,6 +279,7 @@ struct ReturnNode(
 struct FunctionTypeNode(
     type        : Int,    // NODE_FUNCTION_TYPE
     arg_types   : Vector(NodeID),
+    arg_modes   : Vector(Int),
     arg_names   : Vector(String),
     return_type : NodeID,
     variadic_param : Int,
@@ -444,6 +449,7 @@ struct SuperNode(
 struct MethodTypeNode(
     type        : Int,    // NODE_METHOD_TYPE
     arg_types   : Vector(NodeID),
+    arg_modes   : Vector(Int),
     arg_names   : Vector(String),
     return_type : NodeID,
     variadic_param : Int,

@@ -3,7 +3,7 @@ import * from "../context.wl"
 
 func register_string_constant(c: Compiler, val: String) -> Int {
     let exist: StringConstant = c.string_pool.lookup(val);
-    if (exist is !null) {
+    if (has_string_constant(exist)) {
         return exist.id;
     }
     let s_id: Int = c.str_count;

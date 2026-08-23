@@ -3,7 +3,7 @@
 // Focus: 'null' for reference types, 'nullptr' for raw pointers, and 'is' operator checks.
 
 
-struct Box(val: Int)
+class Box {}
 
 func main() -> Int {
     let s: String = null;

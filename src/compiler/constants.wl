@@ -88,24 +88,24 @@ func eval_const_long(c: Compiler, node: NodeID, pos: Position) -> Long {
 
 func get_const_symbol(c: Compiler, node: VarAccessNode, pos: Position) -> SymbolInfo {
     let info: SymbolInfo = find_symbol(c, node.name_tok.value);
-    if (info is null) {
+    if (!has_symbol(info)) {
         throw_name_error(pos, "Unknown constant '" + node.name_tok.value + "'.");
-        return null;
+        return SymbolInfo();
     }
     if (!info.is_const) {
         throw_type_error(pos, "Global initializer cannot use non-constant variable '" + node.name_tok.value + "'.");
-        return null;
+        return SymbolInfo();
     }
     if (info.reg == "poison") {
         throw_invalid_syntax(pos, "Constant '" + node.name_tok.value + "' is used before its declaration.");
-        return null;
+        return SymbolInfo();
     }
     return info;
 }
 
 func get_const_num(c: Compiler, node: VarAccessNode, pos: Position) -> Float {
     let info: SymbolInfo = get_const_symbol(c, node, pos);
-    if (info is null) { return 0.0; }
+    if (!has_symbol(info)) { return 0.0; }
     if (!c.constant_nums.contains_key(info.reg)) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not numeric.");
         return 0.0;
@@ -115,7 +115,7 @@ func get_const_num(c: Compiler, node: VarAccessNode, pos: Position) -> Float {
 
 func get_const_integer(c: Compiler, node: VarAccessNode, pos: Position) -> Long {
     let info: SymbolInfo = get_const_symbol(c, node, pos);
-    if (info is null) { return 0L; }
+    if (!has_symbol(info)) { return 0L; }
     if (!c.constant_integers.contains_key(info.reg)) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");
         return 0L;
@@ -125,7 +125,7 @@ func get_const_integer(c: Compiler, node: VarAccessNode, pos: Position) -> Long 
 
 func get_const_wide_integer(c: Compiler, node: VarAccessNode, pos: Position) -> UInt128 {
     let info: SymbolInfo = get_const_symbol(c, node, pos);
-    if (info is null) { return UInt128(0); }
+    if (!has_symbol(info)) { return UInt128(0); }
     if (c.constant_wide_integers.contains_key(info.reg)) { return c.constant_wide_integers.lookup(info.reg); }
     if (c.constant_integers.contains_key(info.reg)) { let integer: Long = c.constant_integers.lookup(info.reg); return UInt128(integer); }
     throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");

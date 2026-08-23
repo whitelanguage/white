@@ -1,9 +1,19 @@
 // Test: MEMORY_POINTER_STRESS
 // File: tests/e2e/projects/test_memory_heavy.wl
-// Focus: Recursive struct linking, nested member offsets, and raw pointer memory mutation.
+// Focus: Recursive class linking, nested value layouts, and raw pointer memory mutation.
 
 
-struct Node(id: Int, data: Int, next: Node)
+class Node {
+    let id: Int;
+    let data: Int;
+    let next: Node;
+
+    init(id: Int, data: Int, next: Node) {
+        self.id = id;
+        self.data = data;
+        self.next = next;
+    }
+}
 struct Point(x: Int, y: Int)
 struct Rect(top_left: Point, width: Int, height: Int)
 
