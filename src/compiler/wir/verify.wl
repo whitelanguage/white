@@ -69,8 +69,10 @@ func wir_check_types(program: WirModule, errors: Vector(String)) -> Void {
             wir_report(errors, "struct type was declared but never defined");
         } else if (value.kind == WirTypeKind.BoolType && value.bits != 1) {
             wir_report(errors, "Bool type must have a width of one bit");
-        } else if ((value.kind == WirTypeKind.SignedInt || value.kind == WirTypeKind.UnsignedInt || value.kind == WirTypeKind.FloatType) && value.bits <= 0) {
+        } else if ((value.kind == WirTypeKind.SignedInt || value.kind == WirTypeKind.UnsignedInt) && value.bits <= 0) {
             wir_report(errors, "numeric type has an invalid bit width");
+        } else if (value.kind == WirTypeKind.FloatType && value.bits != 32 && value.bits != 64) {
+            wir_report(errors, "floating-point type must be 32 or 64 bits wide");
         } else if ((value.kind == WirTypeKind.Pointer || value.kind == WirTypeKind.Array) && !wir_type_valid(program, value.element)) {
             wir_report(errors, "aggregate type refers to an unknown element type");
         }
@@ -109,6 +111,8 @@ func wir_check_values(program: WirModule, errors: Vector(String)) -> Void {
             wir_report(errors, "integer constant does not have an integer type");
         } else if (value.kind == WirValueKind.FloatValue && !wir_is_float_type(program, value.type_id)) {
             wir_report(errors, "floating-point constant does not have a floating-point type");
+        } else if (value.kind == WirValueKind.FloatValue && type.bits == 32 && value.float_bits > UInt64(4294967295)) {
+            wir_report(errors, "f32 constant contains bits outside its representation");
         } else if (value.kind == WirValueKind.BoolValue && value.type_id != program.bool_type) {
             wir_report(errors, "Bool constant does not use the program Bool type");
         } else if (value.kind == WirValueKind.Null && type.kind != WirTypeKind.Pointer) {

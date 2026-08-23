@@ -105,13 +105,19 @@ struct WirType(
     variadic: Bool
 )
 
+struct WirParam(
+    name: String,
+    type_id: WirTypeID
+)
+
 struct WirValue(
+    name: String,
     type_id: WirTypeID,
     kind: WirValueKind,
     owner: UInt32,
     index: Int,
     integer: UInt128,
-    floating: Float
+    float_bits: UInt64
 )
 
 struct WirEdge(
