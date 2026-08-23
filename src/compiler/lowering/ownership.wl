@@ -9,14 +9,14 @@ import * from "dictionary.wl"
 import * from "literals.wl"
 import * from "../target.wl"
 
-func enter_scope(c: Compiler) -> Void {
+func enter_scope(ref c: Compiler) -> Void {
     let parent: Int = c.scope_stack.length();
     c.scope_stack.append(c.symbol_table);
     let new_scope: Scope = Scope(table=Dict(), parent=parent, gc_vars=[], depth=c.scope_depth + 1);
     c.symbol_table = new_scope;
     c.scope_depth += 1;
 }
-func exit_scope(c: Compiler) -> Void {
+func exit_scope(ref c: Compiler) -> Void {
     let curr_scope: Scope = c.symbol_table;
 
     let gc_vec: Vector(Struct) = curr_scope.gc_vars;
@@ -24,7 +24,7 @@ func exit_scope(c: Compiler) -> Void {
     let gc_idx: Int = 0;
     while (gc_idx < gc_len) {
         let curr_gc: GCTracker = gc_vec[gc_idx];
-        emit_drop_slot(c, curr_gc.reg, curr_gc.type);
+        emit_drop_slot(ref c, curr_gc.reg, curr_gc.type);
         gc_idx += 1;
     }
 
@@ -33,7 +33,7 @@ func exit_scope(c: Compiler) -> Void {
     }
     c.scope_depth -= 1;
 }
-func cleanup_all_scopes(c: Compiler) -> Void {
+func cleanup_all_scopes(ref c: Compiler) -> Void {
     let curr: Scope = c.symbol_table;
     while true {
         let gc_vec: Vector(Struct) = curr.gc_vars;
@@ -41,7 +41,7 @@ func cleanup_all_scopes(c: Compiler) -> Void {
         let gc_idx: Int = 0;
         while (gc_idx < gc_len) {
             let gc_node: GCTracker = gc_vec[gc_idx];
-            emit_drop_slot(c, gc_node.reg, gc_node.type);
+            emit_drop_slot(ref c, gc_node.reg, gc_node.type);
             gc_idx += 1;
         }
         if (curr.parent < 0) { break; }
@@ -49,7 +49,7 @@ func cleanup_all_scopes(c: Compiler) -> Void {
     }
 }
 
-func cleanup_scopes_until(c: Compiler, target_scope: Scope) -> Void {
+func cleanup_scopes_until(ref c: Compiler, target_scope: Scope) -> Void {
     let curr: Scope = c.symbol_table;
     while (curr.depth > target_scope.depth) {
         let gc_vec: Vector(Struct) = curr.gc_vars;
@@ -57,7 +57,7 @@ func cleanup_scopes_until(c: Compiler, target_scope: Scope) -> Void {
         let gc_idx: Int = 0;
         while (gc_idx < gc_len) {
             let gc_node: GCTracker = gc_vec[gc_idx];
-            emit_drop_slot(c, gc_node.reg, gc_node.type);
+            emit_drop_slot(ref c, gc_node.reg, gc_node.type);
             gc_idx += 1;
         }
         if (curr.parent < 0) { break; }
@@ -66,22 +66,22 @@ func cleanup_scopes_until(c: Compiler, target_scope: Scope) -> Void {
 }
 
 
-func emit_retain(c: Compiler, reg: String, type_id: Int) -> Void {
+func emit_retain(ref c: Compiler, reg: String, type_id: Int) -> Void {
 // strong cycles remain the caller's responsibility until weak references are added
 
-    if (!is_ref_type(c, type_id)) { return; }
+    if (!is_ref_type(ref c, type_id)) { return; }
     
     let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (has_struct(s_info) && s_info.is_interface) {
-        let obj_ptr: String = next_reg(c);
+        let obj_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_retain(i8* " + obj_ptr + ")\n");
         return;
     }
 
     // arc hooks use an erased pointer; interface values keep the object in field zero
-    let cast_reg: String = next_reg(c);
-    let src_ty: String = get_llvm_type_str(c, type_id);
+    let cast_reg: String = next_reg(ref c);
+    let src_ty: String = get_llvm_type_str(ref c, type_id);
     if (src_ty == "i8*") {
         c.output_file.write(c.indent + "call void @__wl_retain(i8* " + reg + ")\n");
         return;
@@ -90,19 +90,19 @@ func emit_retain(c: Compiler, reg: String, type_id: Int) -> Void {
     c.output_file.write(c.indent + "call void @__wl_retain(i8* " + cast_reg + ")\n");
 }
 
-func emit_release(c: Compiler, reg: String, type_id: Int) -> Void {
-    if (!is_ref_type(c, type_id)) { return; }
+func emit_release(ref c: Compiler, reg: String, type_id: Int) -> Void {
+    if (!is_ref_type(ref c, type_id)) { return; }
 
     let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (has_struct(s_info) && s_info.is_interface) {
-        let obj_ptr: String = next_reg(c);
+        let obj_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + obj_ptr + ")\n");
         return;
     }
 
-    let cast_reg: String = next_reg(c);
-    let src_ty: String = get_llvm_type_str(c, type_id);
+    let cast_reg: String = next_reg(ref c);
+    let src_ty: String = get_llvm_type_str(ref c, type_id);
     if (src_ty == "i8*") {
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + reg + ")\n");
         return;
@@ -111,57 +111,57 @@ func emit_release(c: Compiler, reg: String, type_id: Int) -> Void {
     c.output_file.write(c.indent + "call void @__wl_release(i8* " + cast_reg + ")\n");
 }
 
-func emit_retain_value(c: Compiler, reg: String, type_id: Int) -> Void {
-    if (is_ref_type(c, type_id)) {
-        emit_retain(c, reg, type_id);
+func emit_retain_value(ref c: Compiler, reg: String, type_id: Int) -> Void {
+    if (is_ref_type(ref c, type_id)) {
+        emit_retain(ref c, reg, type_id);
         return;
     }
-    if (needs_drop(c, type_id)) {
-        let llvm_ty: String = get_llvm_type_str(c, type_id);
-        let slot: String = next_reg(c);
+    if (needs_drop(ref c, type_id)) {
+        let llvm_ty: String = get_llvm_type_str(ref c, type_id);
+        let slot: String = next_reg(ref c);
         c.output_file.write(c.indent + slot + " = alloca " + llvm_ty + "\n");
         c.output_file.write(c.indent + "store " + llvm_ty + " " + reg + ", " + llvm_ty + "* " + slot + "\n");
-        emit_retain_slot(c, slot, type_id);
+        emit_retain_slot(ref c, slot, type_id);
     }
 }
 
-func emit_drop_value(c: Compiler, reg: String, type_id: Int) -> Void {
-    if (is_ref_type(c, type_id)) {
-        emit_release(c, reg, type_id);
+func emit_drop_value(ref c: Compiler, reg: String, type_id: Int) -> Void {
+    if (is_ref_type(ref c, type_id)) {
+        emit_release(ref c, reg, type_id);
         return;
     }
-    if (needs_drop(c, type_id)) {
-        let llvm_ty: String = get_llvm_type_str(c, type_id);
-        let slot: String = next_reg(c);
+    if (needs_drop(ref c, type_id)) {
+        let llvm_ty: String = get_llvm_type_str(ref c, type_id);
+        let slot: String = next_reg(ref c);
         c.output_file.write(c.indent + slot + " = alloca " + llvm_ty + "\n");
         c.output_file.write(c.indent + "store " + llvm_ty + " " + reg + ", " + llvm_ty + "* " + slot + "\n");
-        emit_drop_slot(c, slot, type_id);
+        emit_drop_slot(ref c, slot, type_id);
     }
 }
 
-func emit_release_owned(c: Compiler, value: CompileResult) -> Void {
+func emit_release_owned(ref c: Compiler, value: CompileResult) -> Void {
     if (!has_result(value) || !value.owns_ref) { return; }
-    if (is_void_ptr(c, value.type) && is_ref_type(c, value.origin_type)) {
+    if (is_void_ptr(ref c, value.type) && is_ref_type(ref c, value.origin_type)) {
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + value.reg + ")\n");
         return;
     }
-    emit_drop_value(c, value.reg, value.type);
+    emit_drop_value(ref c, value.reg, value.type);
 }
 
-func emit_release_owned_args(c: Compiler, values: Vector(Struct)) -> Void {
+func emit_release_owned_args(ref c: Compiler, values: Vector(Struct)) -> Void {
     let i: Int = 0;
     while (i < values.length()) {
         let value: CompileResult = values[i];
-        emit_release_owned(c, value);
+        emit_release_owned(ref c, value);
         i += 1;
     }
 }
 
-func emit_alloc_check(c: Compiler, ptr_reg: String) -> Void {
-    let failed: String = next_reg(c);
+func emit_alloc_check(ref c: Compiler, ptr_reg: String) -> Void {
+    let failed: String = next_reg(ref c);
     c.output_file.write(c.indent + failed + " = icmp eq i8* " + ptr_reg + ", null\n");
-    let fail_label: String = next_label(c);
-    let ok_label: String = next_label(c);
+    let fail_label: String = next_label(ref c);
+    let ok_label: String = next_label(ref c);
     c.output_file.write(c.indent + "br i1 " + failed + ", label %" + fail_label + ", label %" + ok_label + "\n");
     c.output_file.write("\n" + fail_label + ":\n");
     c.output_file.write(c.indent + "call void @__wl_oom()\n");
@@ -169,57 +169,57 @@ func emit_alloc_check(c: Compiler, ptr_reg: String) -> Void {
     c.output_file.write("\n" + ok_label + ":\n");
 }
 
-func emit_alloc_obj(c: Compiler, payload_size_reg: String, type_id_str: String, dest_llvm_type: String) -> String {
+func emit_alloc_obj(ref c: Compiler, payload_size_reg: String, type_id_str: String, dest_llvm_type: String) -> String {
     let header_size: Int = 16;
     if (type_id_str == "" + TYPE_STRING) { header_size = 8; }
     let size_ty: String = get_size_llvm_type();
 
-    let total_size: String = next_reg(c);
+    let total_size: String = next_reg(ref c);
     c.output_file.write(c.indent + total_size + " = add " + size_ty + " " + payload_size_reg + ", " + header_size + "\n");
     
-    let raw_mem: String = next_reg(c);
-    let alloc_hook: String = get_mangled_symbol(c, "memory_alloc", no_position());
+    let raw_mem: String = next_reg(ref c);
+    let alloc_hook: String = get_mangled_symbol(ref c, "memory_alloc", no_position());
     c.output_file.write(c.indent + raw_mem + " = call i8* @" + alloc_hook + "(" + size_ty + " " + total_size + ")\n");
-    emit_alloc_check(c, raw_mem);
+    emit_alloc_check(ref c, raw_mem);
 
     let header_mem: String = raw_mem;
     if (header_size == 16) {
-        let drop_slot: String = next_reg(c);
+        let drop_slot: String = next_reg(ref c);
         c.output_file.write(c.indent + drop_slot + " = bitcast i8* " + raw_mem + " to i8**\n");
-        let drop_fn: String = next_reg(c);
+        let drop_fn: String = next_reg(ref c);
         c.output_file.write(c.indent + drop_fn + " = bitcast void (i8*)* @__wl_drop." + type_id_str + " to i8*\n");
         c.output_file.write(c.indent + "store i8* " + drop_fn + ", i8** " + drop_slot + "\n");
 
-        header_mem = next_reg(c);
+        header_mem = next_reg(ref c);
         c.output_file.write(c.indent + header_mem + " = getelementptr inbounds i8, i8* " + raw_mem + ", i32 8\n");
     }
     
-    let rc_ptr: String = next_reg(c);
+    let rc_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + rc_ptr + " = bitcast i8* " + header_mem + " to i32*\n");
     c.output_file.write(c.indent + "store i32 0, i32* " + rc_ptr + "\n");
     
-    let type_ptr_i8: String = next_reg(c);
+    let type_ptr_i8: String = next_reg(ref c);
     c.output_file.write(c.indent + type_ptr_i8 + " = getelementptr inbounds i8, i8* " + header_mem + ", i32 4\n");
-    let type_ptr: String = next_reg(c);
+    let type_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + type_ptr + " = bitcast i8* " + type_ptr_i8 + " to i32*\n");
     c.output_file.write(c.indent + "store i32 " + type_id_str + ", i32* " + type_ptr + "\n");
     
-    let payload_i8: String = next_reg(c);
+    let payload_i8: String = next_reg(ref c);
     c.output_file.write(c.indent + payload_i8 + " = getelementptr inbounds i8, i8* " + header_mem + ", i32 8\n");
     
     if (dest_llvm_type == "i8*") {
         return payload_i8; 
     }
     
-    let final_ptr: String = next_reg(c);
+    let final_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + final_ptr + " = bitcast i8* " + payload_i8 + " to " + dest_llvm_type + "\n");
     return final_ptr;
 }
 
-func emit_alloc_closure(c: Compiler, type_id: Int) -> String {
-    let closure: String = emit_alloc_obj(c, "" + closure_payload_size(), "" + TYPE_GENERIC_FUNCTION, "i8*");
-    let tag_bytes: String = next_reg(c);
-    let tag_slot: String = next_reg(c);
+func emit_alloc_closure(ref c: Compiler, type_id: Int) -> String {
+    let closure: String = emit_alloc_obj(ref c, "" + closure_payload_size(), "" + TYPE_GENERIC_FUNCTION, "i8*");
+    let tag_bytes: String = next_reg(ref c);
+    let tag_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + tag_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 -4\n");
     c.output_file.write(c.indent + tag_slot + " = bitcast i8* " + tag_bytes + " to i32*\n");
     c.output_file.write(c.indent + "store i32 " + type_id + ", i32* " + tag_slot + "\n");
@@ -230,20 +230,20 @@ func erased_struct_matches(actual: Int, expected: Int) -> Bool {
     return actual == expected;
 }
 
-func emit_erased_type_check(c: Compiler, value: String, expected: Int, pos: Position) -> Void {
-    let matches: String = next_reg(c);
-    let success: String = next_label(c);
-    let failure: String = next_label(c);
+func emit_erased_type_check(ref c: Compiler, value: String, expected: Int, pos: Position) -> Void {
+    let matches: String = next_reg(ref c);
+    let success: String = next_label(ref c);
+    let failure: String = next_label(ref c);
     let helper: String = "@__wl_erased_accept_" + expected;
     c.erased_checks.put("" + expected, StringConstant(id=expected, value=helper));
     c.output_file.write(c.indent + matches + " = call i1 " + helper + "(i8* " + value + ")\n");
     c.output_file.write(c.indent + "br i1 " + matches + ", label %" + success + ", label %" + failure + "\n");
     c.output_file.write("\n" + failure + ":\n");
-    emit_runtime_error(c, pos, "Erased value has the wrong concrete type");
+    emit_runtime_error(ref c, pos, "Erased value has the wrong concrete type");
     c.output_file.write("\n" + success + ":\n");
 }
 
-func hoist_allocas(c: Compiler, node: NodeID) -> Void {
+func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
 // keep local storage in the entry block so loops do not grow the native stack
     if (!has_node(node)) {
         return;
@@ -260,39 +260,39 @@ func hoist_allocas(c: Compiler, node: NodeID) -> Void {
         if (stmts is !null) { len = stmts.length(); }
         let i: Int = 0;
         while (i < len) {
-            hoist_allocas(c, stmts[i]);
+            hoist_allocas(ref c, stmts[i]);
             i += 1;
         }
 
         c.hoist_scope = old_scope;
     } else if (base == NODE_IF) {
         let if_n: IfNode = get_if_node(c.arena, node);
-        hoist_allocas(c, if_n.body);
-        hoist_allocas(c, if_n.else_body);
+        hoist_allocas(ref c, if_n.body);
+        hoist_allocas(ref c, if_n.else_body);
     } else if (base == NODE_WHILE) {
         let w_n: WhileNode = get_while_node(c.arena, node);
-        hoist_allocas(c, w_n.body);
+        hoist_allocas(ref c, w_n.body);
     } else if (base == NODE_FOR) {
         let f_n: ForNode = get_for_node(c.arena, node);
-        hoist_allocas(c, f_n.init);
-        hoist_allocas(c, f_n.body);
+        hoist_allocas(ref c, f_n.init);
+        hoist_allocas(ref c, f_n.body);
     } else if (base == NODE_CATCH) {
         let c_node: CatchNode = get_catch_node(c.arena, node);
-        let err_reg: String = next_reg(c);
+        let err_reg: String = next_reg(ref c);
         c_node.alloc_id = c.alloc_regs.length();
         c.alloc_regs.append(err_reg);
         c.arena.catch_nodes[node_slot(node)] = c_node;
         c.output_file.write(c.indent + err_reg + " = alloca { i64, i32 }\n");
         
-        hoist_allocas(c, c_node.stmt);
-        hoist_allocas(c, c_node.body);
+        hoist_allocas(ref c, c_node.stmt);
+        hoist_allocas(ref c, c_node.body);
     } else if (base == NODE_VAR_DECL) {
         let v_node: VarDeclareNode = get_var_decl_node(c.arena, node);
         if (c.scope_depth > 0) {
-            let target_type_id: Int = resolve_type(c, v_node.type_node);
+            let target_type_id: Int = resolve_type(ref c, v_node.type_node);
 
             if (target_type_id == TYPE_AUTO) {
-                target_type_id = get_expr_type(c, v_node.value);
+                target_type_id = get_expr_type(ref c, v_node.value);
                 if (target_type_id == TYPE_POISON) { return; }
                 if (target_type_id == 0 || target_type_id == TYPE_AUTO) {
                     throw_type_error(v_node.pos, "Failed to statically infer type for 'Auto'. Please specify type explicitly.");
@@ -304,35 +304,35 @@ func hoist_allocas(c: Compiler, node: NodeID) -> Void {
                 c.hoist_scope.table.put(v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
             }
 
-            let var_reg: String = next_reg(c);
+            let var_reg: String = next_reg(ref c);
             v_node.alloc_id = c.alloc_regs.length();
             c.alloc_regs.append(var_reg);
             c.arena.var_decl_nodes[node_slot(node)] = v_node;
             
-            let llvm_ty_str: String = get_llvm_type_str(c, target_type_id);
+            let llvm_ty_str: String = get_llvm_type_str(ref c, target_type_id);
             c.output_file.write(c.indent + var_reg + " = alloca " + llvm_ty_str + "\n");
-            if (needs_drop(c, target_type_id)) {
+            if (needs_drop(ref c, target_type_id)) {
                 c.output_file.write(c.indent + "store " + llvm_ty_str + " zeroinitializer, " + llvm_ty_str + "* " + var_reg + "\n");
             }
         }
     }
 }
 
-func emit_runtime_error(c: Compiler, pos: Position, msg: String) -> Void {
-    let hook_raw_str: String = get_mangled_symbol(c, "print_bytes", no_position());
-    let hook_int: String = get_mangled_symbol(c, "print_int", no_position());
+func emit_runtime_error(ref c: Compiler, pos: Position, msg: String) -> Void {
+    let hook_raw_str: String = get_mangled_symbol(ref c, "print_bytes", no_position());
+    let hook_int: String = get_mangled_symbol(ref c, "print_int", no_position());
 
     if (hook_raw_str is !null && hook_int is !null) {
         let header_1: String = "RuntimeError: " + msg + "\n    at " + pos.fn + ":";
-        let header_1_id: Int = register_string_constant(c, header_1);
+        let header_1_id: Int = register_string_constant(ref c, header_1);
         let header_1_ptr: String = get_string_ptr(header_1_id, header_1);
 
         let header_2: String = ":";
-        let header_2_id: Int = register_string_constant(c, header_2);
+        let header_2_id: Int = register_string_constant(ref c, header_2);
         let header_2_ptr: String = get_string_ptr(header_2_id, header_2);
 
         let header_3: String = "\n\n";
-        let header_3_id: Int = register_string_constant(c, header_3);
+        let header_3_id: Int = register_string_constant(ref c, header_3);
         let header_3_ptr: String = get_string_ptr(header_3_id, header_3);
 
         let ln: Int = pos.ln + 1;
@@ -367,7 +367,7 @@ func emit_runtime_error(c: Compiler, pos: Position, msg: String) -> Void {
             let raw_line: String = full_text.slice(line_start_idx, line_end_idx);
             let code_content: String = "    " + raw_line + "\n";
         
-            let code_id: Int = register_string_constant(c, code_content);
+            let code_id: Int = register_string_constant(ref c, code_content);
             let code_ptr: String = get_string_ptr(code_id, code_content);
             c.output_file.write(c.indent + "call void @" + hook_raw_str + "(i8* " + code_ptr + ", i32 " + code_content.length() + ")\n");
 
@@ -401,41 +401,41 @@ func emit_runtime_error(c: Compiler, pos: Position, msg: String) -> Void {
                 j += 1;
             }
             arrow_str += "\n";
-            let arrow_id: Int = register_string_constant(c, arrow_str);
+            let arrow_id: Int = register_string_constant(ref c, arrow_str);
             let arrow_ptr: String = get_string_ptr(arrow_id, arrow_str);
             c.output_file.write(c.indent + "call void @" + hook_raw_str + "(i8* " + arrow_ptr + ", i32 " + arrow_str.length() + ")\n");
         }
     }
 
-    let exit_hook: String = get_mangled_symbol(c, "process_exit", pos);
+    let exit_hook: String = get_mangled_symbol(ref c, "process_exit", pos);
     c.output_file.write(c.indent + "call void @" + exit_hook + "(i32 1)\n");
     c.output_file.write(c.indent + "unreachable\n");
 }
 
-func emit_pointer_null_check(c: Compiler, ptr_reg: String, type_id: Int, pos: Position) -> Void {
-    let ptr_ty: String = get_llvm_type_str(c, type_id);
-    let is_null: String = next_reg(c);
+func emit_pointer_null_check(ref c: Compiler, ptr_reg: String, type_id: Int, pos: Position) -> Void {
+    let ptr_ty: String = get_llvm_type_str(ref c, type_id);
+    let is_null: String = next_reg(ref c);
     c.output_file.write(c.indent + is_null + " = icmp eq " + ptr_ty + " " + ptr_reg + ", null\n");
-    let fail_label: String = next_label(c);
-    let ok_label: String = next_label(c);
+    let fail_label: String = next_label(ref c);
+    let ok_label: String = next_label(ref c);
     c.output_file.write(c.indent + "br i1 " + is_null + ", label %" + fail_label + ", label %" + ok_label + "\n");
     c.output_file.write("\n" + fail_label + ":\n");
-    emit_runtime_error(c, pos, "Null pointer dereference");
+    emit_runtime_error(ref c, pos, "Null pointer dereference");
     c.output_file.write("\n" + ok_label + ":\n");
 }
 
-func emit_size_to_int(c: Compiler, value: String) -> String {
+func emit_size_to_int(ref c: Compiler, value: String) -> String {
     let size_ty: String = get_size_llvm_type();
     if (size_ty == "i32") { return value; }
-    let result: String = next_reg(c);
+    let result: String = next_reg(ref c);
     c.output_file.write(c.indent + result + " = trunc " + size_ty + " " + value + " to i32\n");
     return result;
 }
 
-func emit_int_to_size(c: Compiler, value: String, signed: Bool) -> String {
+func emit_int_to_size(ref c: Compiler, value: String, signed: Bool) -> String {
     let size_ty: String = get_size_llvm_type();
     if (size_ty == "i32") { return value; }
-    let result: String = next_reg(c);
+    let result: String = next_reg(ref c);
     let op: String = "zext";
     if signed { op = "sext"; }
     c.output_file.write(c.indent + result + " = " + op + " i32 " + value + " to " + size_ty + "\n");
@@ -443,16 +443,16 @@ func emit_int_to_size(c: Compiler, value: String, signed: Bool) -> String {
 }
 
 
-func emit_vector_bounds_check(c: Compiler, vec_reg: String, idx_reg: String, struct_ty: String, pos: Position) -> Void {
+func emit_vector_bounds_check(ref c: Compiler, vec_reg: String, idx_reg: String, struct_ty: String, pos: Position) -> Void {
     let size_ty: String = get_size_llvm_type();
-    let size_ptr: String = next_reg(c);
+    let size_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_reg + ", i32 0, i32 0\n");
-    let size_val: String = next_reg(c);
+    let size_val: String = next_reg(ref c);
     c.output_file.write(c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
 
-    let size_index: String = emit_int_to_size(c, idx_reg, true);
+    let size_index: String = emit_int_to_size(ref c, idx_reg, true);
 
-    let cmp_reg: String = next_reg(c);
+    let cmp_reg: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp_reg + " = icmp uge " + size_ty + " " + size_index + ", " + size_val + "\n");
 
     let fail_label: String = "bounds_fail_" + c.type_counter;
@@ -462,18 +462,18 @@ func emit_vector_bounds_check(c: Compiler, vec_reg: String, idx_reg: String, str
     c.output_file.write(c.indent + "br i1 " + cmp_reg + ", label %" + fail_label + ", label %" + ok_label + "\n");
 
     c.output_file.write("\n" + fail_label + ":\n");
-    emit_runtime_error(c, pos, "Index out of bounds");
+    emit_runtime_error(ref c, pos, "Index out of bounds");
 
     c.output_file.write("\n" + ok_label + ":\n");
 }
 
-func emit_array_bounds_check(c: Compiler, idx_reg: String, len_val: String, pos: Position) -> Void {
-    let cmp1: String = next_reg(c);
+func emit_array_bounds_check(ref c: Compiler, idx_reg: String, len_val: String, pos: Position) -> Void {
+    let cmp1: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp1 + " = icmp slt i32 " + idx_reg + ", 0\n");
-    let cmp2: String = next_reg(c);
+    let cmp2: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp2 + " = icmp sge i32 " + idx_reg + ", " + len_val + "\n");
     
-    let or1: String = next_reg(c);
+    let or1: String = next_reg(ref c);
     c.output_file.write(c.indent + or1 + " = or i1 " + cmp1 + ", " + cmp2 + "\n");
     
     let fail_lbl: String = "arr_fail_" + c.type_counter;
@@ -482,21 +482,21 @@ func emit_array_bounds_check(c: Compiler, idx_reg: String, len_val: String, pos:
 
     c.output_file.write(c.indent + "br i1 " + or1 + ", label %" + fail_lbl + ", label %" + ok_lbl + "\n");
     c.output_file.write("\n" + fail_lbl + ":\n");
-    emit_runtime_error(c, pos, "Index out of bounds.");
+    emit_runtime_error(ref c, pos, "Index out of bounds.");
     c.output_file.write("\n" + ok_lbl + ":\n");
 }
 
-func emit_slice_bounds_check(c: Compiler, start_reg: String, end_reg: String, len_val: String, pos: Position) -> Void {
-    let cmp1: String = next_reg(c);
+func emit_slice_bounds_check(ref c: Compiler, start_reg: String, end_reg: String, len_val: String, pos: Position) -> Void {
+    let cmp1: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp1 + " = icmp slt i32 " + start_reg + ", 0\n");
-    let cmp2: String = next_reg(c);
+    let cmp2: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp2 + " = icmp sgt i32 " + start_reg + ", " + end_reg + "\n");
-    let cmp3: String = next_reg(c);
+    let cmp3: String = next_reg(ref c);
     c.output_file.write(c.indent + cmp3 + " = icmp sgt i32 " + end_reg + ", " + len_val + "\n");
     
-    let or1: String = next_reg(c);
+    let or1: String = next_reg(ref c);
     c.output_file.write(c.indent + or1 + " = or i1 " + cmp1 + ", " + cmp2 + "\n");
-    let or2: String = next_reg(c);
+    let or2: String = next_reg(ref c);
     c.output_file.write(c.indent + or2 + " = or i1 " + or1 + ", " + cmp3 + "\n");
     
     let fail_lbl: String = "slice_fail_" + c.type_counter;
@@ -505,198 +505,198 @@ func emit_slice_bounds_check(c: Compiler, start_reg: String, end_reg: String, le
     
     c.output_file.write(c.indent + "br i1 " + or2 + ", label %" + fail_lbl + ", label %" + ok_lbl + "\n");
     c.output_file.write("\n" + fail_lbl + ":\n");
-    emit_runtime_error(c, pos, "Slice boundaries out of range.");
+    emit_runtime_error(ref c, pos, "Slice boundaries out of range.");
     c.output_file.write("\n" + ok_lbl + ":\n");
 }
 
-func emit_slice_parts(c: Compiler, slice_reg: String, slice_type: Int, pos: Position) -> SliceParts {
+func emit_slice_parts(ref c: Compiler, slice_reg: String, slice_type: Int, pos: Position) -> SliceParts {
     let arr_info: ArrayInfo = c.array_info_map.lookup("" + slice_type);
-    let elem_ty: String = get_llvm_type_str(c, arr_info.base_type);
+    let elem_ty: String = get_llvm_type_str(ref c, arr_info.base_type);
     let slice_ty: String = arr_info.llvm_name;
     let size_ty: String = get_size_llvm_type();
-    emit_pointer_null_check(c, slice_reg, slice_type, pos);
+    emit_pointer_null_check(ref c, slice_reg, slice_type, pos);
 
-    let start_slot: String = next_reg(c);
+    let start_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + start_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + slice_reg + ", i32 0, i32 0\n");
-    let start: String = next_reg(c);
+    let start: String = next_reg(ref c);
     c.output_file.write(c.indent + start + " = load " + size_ty + ", " + size_ty + "* " + start_slot + "\n");
 
-    let len_slot: String = next_reg(c);
+    let len_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + len_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + slice_reg + ", i32 0, i32 1\n");
-    let length: String = next_reg(c);
+    let length: String = next_reg(ref c);
     c.output_file.write(c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + len_slot + "\n");
 
-    let owner_slot: String = next_reg(c);
+    let owner_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + owner_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + slice_reg + ", i32 0, i32 2\n");
-    let owner: String = next_reg(c);
+    let owner: String = next_reg(ref c);
     c.output_file.write(c.indent + owner + " = load i8*, i8** " + owner_slot + "\n");
 
-    let data_slot_slot: String = next_reg(c);
+    let data_slot_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + data_slot_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + slice_reg + ", i32 0, i32 3\n");
-    let data_slot: String = next_reg(c);
+    let data_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + data_slot + " = load " + elem_ty + "**, " + elem_ty + "*** " + data_slot_slot + "\n");
 
-    let size_slot_slot: String = next_reg(c);
+    let size_slot_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + size_slot_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + slice_reg + ", i32 0, i32 4\n");
-    let size_slot: String = next_reg(c);
+    let size_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + size_slot + " = load " + size_ty + "*, " + size_ty + "** " + size_slot_slot + "\n");
-    let owner_size: String = next_reg(c);
+    let owner_size: String = next_reg(ref c);
     c.output_file.write(c.indent + owner_size + " = load " + size_ty + ", " + size_ty + "* " + size_slot + "\n");
 
-    let slice_end: String = next_reg(c);
+    let slice_end: String = next_reg(ref c);
     c.output_file.write(c.indent + slice_end + " = add " + size_ty + " " + start + ", " + length + "\n");
-    let invalid: String = next_reg(c);
+    let invalid: String = next_reg(ref c);
     c.output_file.write(c.indent + invalid + " = icmp ugt " + size_ty + " " + slice_end + ", " + owner_size + "\n");
-    let fail_label: String = next_label(c);
-    let ok_label: String = next_label(c);
+    let fail_label: String = next_label(ref c);
+    let ok_label: String = next_label(ref c);
     c.output_file.write(c.indent + "br i1 " + invalid + ", label %" + fail_label + ", label %" + ok_label + "\n");
     c.output_file.write("\n" + fail_label + ":\n");
-    emit_runtime_error(c, pos, "Slice backing storage was shortened");
+    emit_runtime_error(ref c, pos, "Slice backing storage was shortened");
     c.output_file.write("\n" + ok_label + ":\n");
 
-    let data: String = next_reg(c);
+    let data: String = next_reg(ref c);
     c.output_file.write(c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
     return SliceParts(start=start, length=length, owner=owner, data_slot=data_slot, size_slot=size_slot, data=data);
 }
 
-func emit_make_slice(c: Compiler, elem_type: Int, owner: String, data_slot: String, size_slot: String, start: String, length: String) -> CompileResult {
-    let slice_type: Int = get_slice_type_id(c, elem_type);
+func emit_make_slice(ref c: Compiler, elem_type: Int, owner: String, data_slot: String, size_slot: String, start: String, length: String) -> CompileResult {
+    let slice_type: Int = get_slice_type_id(ref c, elem_type);
     let arr_info: ArrayInfo = c.array_info_map.lookup("" + slice_type);
-    let elem_ty: String = get_llvm_type_str(c, elem_type);
+    let elem_ty: String = get_llvm_type_str(ref c, elem_type);
     let slice_ty: String = arr_info.llvm_name;
     let size_ty: String = get_size_llvm_type();
 
-    let size_ptr: String = next_reg(c);
+    let size_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + size_ptr + " = getelementptr " + slice_ty + ", " + slice_ty + "* null, i32 1\n");
-    let size: String = next_reg(c);
+    let size: String = next_reg(ref c);
     c.output_file.write(c.indent + size + " = ptrtoint " + slice_ty + "* " + size_ptr + " to " + size_ty + "\n");
-    let result: String = emit_alloc_obj(c, size, "" + slice_type, slice_ty + "*");
+    let result: String = emit_alloc_obj(ref c, size, "" + slice_type, slice_ty + "*");
 
-    let start_slot: String = next_reg(c);
+    let start_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + start_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + result + ", i32 0, i32 0\n");
     c.output_file.write(c.indent + "store " + size_ty + " " + start + ", " + size_ty + "* " + start_slot + "\n");
-    let len_slot: String = next_reg(c);
+    let len_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + len_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + result + ", i32 0, i32 1\n");
     c.output_file.write(c.indent + "store " + size_ty + " " + length + ", " + size_ty + "* " + len_slot + "\n");
-    let owner_slot: String = next_reg(c);
+    let owner_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + owner_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + result + ", i32 0, i32 2\n");
     c.output_file.write(c.indent + "store i8* " + owner + ", i8** " + owner_slot + "\n");
-    let data_slot_slot: String = next_reg(c);
+    let data_slot_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + data_slot_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + result + ", i32 0, i32 3\n");
     c.output_file.write(c.indent + "store " + elem_ty + "** " + data_slot + ", " + elem_ty + "*** " + data_slot_slot + "\n");
-    let size_slot_slot: String = next_reg(c);
+    let size_slot_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + size_slot_slot + " = getelementptr inbounds " + slice_ty + ", " + slice_ty + "* " + result + ", i32 0, i32 4\n");
     c.output_file.write(c.indent + "store " + size_ty + "* " + size_slot + ", " + size_ty + "** " + size_slot_slot + "\n");
     c.output_file.write(c.indent + "call void @__wl_retain(i8* " + owner + ")\n");
     return CompileResult(reg=result, type=slice_type);
 }
 
-func emit_slice_copy(c: Compiler, elem_type: Int, source: String, start_i32: String, length_i32: String, pos: Position) -> CompileResult {
-    let elem_ty: String = get_llvm_type_str(c, elem_type);
-    let vec_type: Int = get_vector_type_id(c, elem_type);
-    let vec_ty: String = get_vector_llvm_type(c, elem_type);
+func emit_slice_copy(ref c: Compiler, elem_type: Int, source: String, start_i32: String, length_i32: String, pos: Position) -> CompileResult {
+    let elem_ty: String = get_llvm_type_str(ref c, elem_type);
+    let vec_type: Int = get_vector_type_id(ref c, elem_type);
+    let vec_ty: String = get_vector_llvm_type(ref c, elem_type);
     let size_ty: String = get_size_llvm_type();
 
-    let vec_size_ptr: String = next_reg(c);
+    let vec_size_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + vec_size_ptr + " = getelementptr " + vec_ty + ", " + vec_ty + "* null, i32 1\n");
-    let vec_size: String = next_reg(c);
+    let vec_size: String = next_reg(ref c);
     c.output_file.write(c.indent + vec_size + " = ptrtoint " + vec_ty + "* " + vec_size_ptr + " to " + size_ty + "\n");
-    let owner_ptr: String = emit_alloc_obj(c, vec_size, "" + vec_type, vec_ty + "*");
+    let owner_ptr: String = emit_alloc_obj(ref c, vec_size, "" + vec_type, vec_ty + "*");
 
-    let length: String = emit_int_to_size(c, length_i32, false);
-    let start: String = emit_int_to_size(c, start_i32, false);
-    let is_empty: String = next_reg(c);
+    let length: String = emit_int_to_size(ref c, length_i32, false);
+    let start: String = emit_int_to_size(ref c, start_i32, false);
+    let is_empty: String = next_reg(ref c);
     c.output_file.write(c.indent + is_empty + " = icmp eq " + size_ty + " " + length + ", 0\n");
-    let alloc_count: String = next_reg(c);
+    let alloc_count: String = next_reg(ref c);
     c.output_file.write(c.indent + alloc_count + " = select i1 " + is_empty + ", " + size_ty + " 1, " + size_ty + " " + length + "\n");
 
-    let elem_size_ptr: String = next_reg(c);
+    let elem_size_ptr: String = next_reg(ref c);
     c.output_file.write(c.indent + elem_size_ptr + " = getelementptr " + elem_ty + ", " + elem_ty + "* null, " + size_ty + " 1\n");
-    let elem_size: String = next_reg(c);
+    let elem_size: String = next_reg(ref c);
     c.output_file.write(c.indent + elem_size + " = ptrtoint " + elem_ty + "* " + elem_size_ptr + " to " + size_ty + "\n");
-    let max_capacity: String = next_reg(c);
+    let max_capacity: String = next_reg(ref c);
     c.output_file.write(c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
-    let overflow: String = next_reg(c);
+    let overflow: String = next_reg(ref c);
     c.output_file.write(c.indent + overflow + " = icmp ugt " + size_ty + " " + alloc_count + ", " + max_capacity + "\n");
-    let fail_label: String = next_label(c);
-    let alloc_label: String = next_label(c);
+    let fail_label: String = next_label(ref c);
+    let alloc_label: String = next_label(ref c);
     c.output_file.write(c.indent + "br i1 " + overflow + ", label %" + fail_label + ", label %" + alloc_label + "\n");
     c.output_file.write("\n" + fail_label + ":\n");
     c.output_file.write(c.indent + "call void @__wl_oom()\n");
     c.output_file.write(c.indent + "unreachable\n");
     c.output_file.write("\n" + alloc_label + ":\n");
 
-    let bytes: String = next_reg(c);
+    let bytes: String = next_reg(ref c);
     c.output_file.write(c.indent + bytes + " = mul " + size_ty + " " + alloc_count + ", " + elem_size + "\n");
-    let alloc_hook: String = get_mangled_symbol(c, "memory_alloc", pos);
-    let raw_data: String = next_reg(c);
+    let alloc_hook: String = get_mangled_symbol(ref c, "memory_alloc", pos);
+    let raw_data: String = next_reg(ref c);
     c.output_file.write(c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + bytes + ")\n");
-    emit_alloc_check(c, raw_data);
-    let data: String = next_reg(c);
+    emit_alloc_check(ref c, raw_data);
+    let data: String = next_reg(ref c);
     c.output_file.write(c.indent + data + " = bitcast i8* " + raw_data + " to " + elem_ty + "*\n");
 
-    let size_slot: String = next_reg(c);
+    let size_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + size_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + owner_ptr + ", i32 0, i32 0\n");
     c.output_file.write(c.indent + "store " + size_ty + " " + length + ", " + size_ty + "* " + size_slot + "\n");
-    let cap_slot: String = next_reg(c);
+    let cap_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + cap_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + owner_ptr + ", i32 0, i32 1\n");
     c.output_file.write(c.indent + "store " + size_ty + " " + length + ", " + size_ty + "* " + cap_slot + "\n");
-    let data_slot: String = next_reg(c);
+    let data_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + owner_ptr + ", i32 0, i32 2\n");
     c.output_file.write(c.indent + "store " + elem_ty + "* " + data + ", " + elem_ty + "** " + data_slot + "\n");
 
-    let index: String = next_reg(c);
+    let index: String = next_reg(ref c);
     c.output_file.write(c.indent + index + " = alloca " + size_ty + "\n");
     c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + index + "\n");
-    let loop_cond: String = next_label(c);
-    let loop_body: String = next_label(c);
-    let loop_end: String = next_label(c);
+    let loop_cond: String = next_label(ref c);
+    let loop_body: String = next_label(ref c);
+    let loop_end: String = next_label(ref c);
     c.output_file.write(c.indent + "br label %" + loop_cond + "\n");
     c.output_file.write("\n" + loop_cond + ":\n");
-    let i: String = next_reg(c);
+    let i: String = next_reg(ref c);
     c.output_file.write(c.indent + i + " = load " + size_ty + ", " + size_ty + "* " + index + "\n");
-    let more: String = next_reg(c);
+    let more: String = next_reg(ref c);
     c.output_file.write(c.indent + more + " = icmp ult " + size_ty + " " + i + ", " + length + "\n");
     c.output_file.write(c.indent + "br i1 " + more + ", label %" + loop_body + ", label %" + loop_end + "\n");
     c.output_file.write("\n" + loop_body + ":\n");
-    let source_index: String = next_reg(c);
+    let source_index: String = next_reg(ref c);
     c.output_file.write(c.indent + source_index + " = add " + size_ty + " " + start + ", " + i + "\n");
-    let source_slot: String = next_reg(c);
+    let source_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + source_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source + ", " + size_ty + " " + source_index + "\n");
-    let value: String = next_reg(c);
+    let value: String = next_reg(ref c);
     c.output_file.write(c.indent + value + " = load " + elem_ty + ", " + elem_ty + "* " + source_slot + "\n");
-    let dest_slot: String = next_reg(c);
+    let dest_slot: String = next_reg(ref c);
     c.output_file.write(c.indent + dest_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + data + ", " + size_ty + " " + i + "\n");
     c.output_file.write(c.indent + "store " + elem_ty + " " + value + ", " + elem_ty + "* " + dest_slot + "\n");
-    if (needs_drop(c, elem_type)) { emit_retain_slot(c, dest_slot, elem_type); }
-    let next: String = next_reg(c);
+    if (needs_drop(ref c, elem_type)) { emit_retain_slot(ref c, dest_slot, elem_type); }
+    let next: String = next_reg(ref c);
     c.output_file.write(c.indent + next + " = add " + size_ty + " " + i + ", 1\n");
     c.output_file.write(c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + index + "\n");
     c.output_file.write(c.indent + "br label %" + loop_cond + "\n");
     c.output_file.write("\n" + loop_end + ":\n");
 
-    let owner: String = next_reg(c);
+    let owner: String = next_reg(ref c);
     c.output_file.write(c.indent + owner + " = bitcast " + vec_ty + "* " + owner_ptr + " to i8*\n");
-    return emit_make_slice(c, elem_type, owner, data_slot, size_slot, "0", length);
+    return emit_make_slice(ref c, elem_type, owner, data_slot, size_slot, "0", length);
 }
 
-func emit_drop_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
-    if (is_fallible_type(c, type_id)) {
-        let inner_type: Int = get_inner_fallible_type(c, type_id);
-        if (!needs_drop(c, inner_type)) { return; }
+func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
+    if (is_fallible_type(ref c, type_id)) {
+        let inner_type: Int = get_inner_fallible_type(ref c, type_id);
+        if (!needs_drop(ref c, inner_type)) { return; }
 
-        let fallible_ty: String = get_llvm_type_str(c, type_id);
-        let err_ptr: String = next_reg(c);
+        let fallible_ty: String = get_llvm_type_str(ref c, type_id);
+        let err_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + err_ptr + " = getelementptr inbounds " + fallible_ty + ", " + fallible_ty + "* " + ptr_reg + ", i32 0, i32 0\n");
-        let is_err: String = next_reg(c);
+        let is_err: String = next_reg(ref c);
         c.output_file.write(c.indent + is_err + " = load i1, i1* " + err_ptr + "\n");
-        let drop_label: String = next_label(c);
-        let done_label: String = next_label(c);
+        let drop_label: String = next_label(ref c);
+        let done_label: String = next_label(ref c);
         c.output_file.write(c.indent + "br i1 " + is_err + ", label %" + done_label + ", label %" + drop_label + "\n");
         c.output_file.write("\n" + drop_label + ":\n");
-        let value_ptr: String = next_reg(c);
+        let value_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + value_ptr + " = getelementptr inbounds " + fallible_ty + ", " + fallible_ty + "* " + ptr_reg + ", i32 0, i32 2\n");
-        emit_drop_slot(c, value_ptr, inner_type);
+        emit_drop_slot(ref c, value_ptr, inner_type);
         c.output_file.write(c.indent + "br label %" + done_label + "\n");
         c.output_file.write("\n" + done_label + ":\n");
         return;
@@ -706,53 +706,53 @@ func emit_drop_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     if (has_array_info(arr_info) && arr_info.size >= 0) {
         let i: Int = 0;
         while (i < arr_info.size) {
-            let elem_ptr: String = next_reg(c);
+            let elem_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
-            emit_drop_slot(c, elem_ptr, arr_info.base_type);
+            emit_drop_slot(ref c, elem_ptr, arr_info.base_type);
             i += 1;
         }
         return;
     }
 
-    if (is_value_struct(c, type_id)) {
-        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(c, type_id));
+    if (is_value_struct(ref c, type_id)) {
+        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(ref c, type_id));
         let i: Int = 0;
         while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
-            if (needs_drop(c, field.type)) {
-                let field_ptr: String = next_reg(c);
+            if (needs_drop(ref c, field.type)) {
+                let field_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + field.offset + "\n");
-                emit_drop_slot(c, field_ptr, field.type);
+                emit_drop_slot(ref c, field_ptr, field.type);
             }
             i += 1;
         }
         return;
     }
 
-    if (!is_ref_type(c, type_id)) { return; }
-    let llvm_ty: String = get_llvm_type_str(c, type_id);
-    let value: String = next_reg(c);
+    if (!is_ref_type(ref c, type_id)) { return; }
+    let llvm_ty: String = get_llvm_type_str(ref c, type_id);
+    let value: String = next_reg(ref c);
     c.output_file.write(c.indent + value + " = load " + llvm_ty + ", " + llvm_ty + "* " + ptr_reg + "\n");
-    emit_release(c, value, type_id);
+    emit_release(ref c, value, type_id);
 }
 
-func emit_retain_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
-    if (is_fallible_type(c, type_id)) {
-        let inner_type: Int = get_inner_fallible_type(c, type_id);
-        if (!needs_drop(c, inner_type)) { return; }
+func emit_retain_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
+    if (is_fallible_type(ref c, type_id)) {
+        let inner_type: Int = get_inner_fallible_type(ref c, type_id);
+        if (!needs_drop(ref c, inner_type)) { return; }
 
-        let fallible_ty: String = get_llvm_type_str(c, type_id);
-        let err_ptr: String = next_reg(c);
+        let fallible_ty: String = get_llvm_type_str(ref c, type_id);
+        let err_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + err_ptr + " = getelementptr inbounds " + fallible_ty + ", " + fallible_ty + "* " + ptr_reg + ", i32 0, i32 0\n");
-        let is_err: String = next_reg(c);
+        let is_err: String = next_reg(ref c);
         c.output_file.write(c.indent + is_err + " = load i1, i1* " + err_ptr + "\n");
-        let retain_label: String = next_label(c);
-        let done_label: String = next_label(c);
+        let retain_label: String = next_label(ref c);
+        let done_label: String = next_label(ref c);
         c.output_file.write(c.indent + "br i1 " + is_err + ", label %" + done_label + ", label %" + retain_label + "\n");
         c.output_file.write("\n" + retain_label + ":\n");
-        let value_ptr: String = next_reg(c);
+        let value_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + value_ptr + " = getelementptr inbounds " + fallible_ty + ", " + fallible_ty + "* " + ptr_reg + ", i32 0, i32 2\n");
-        emit_retain_slot(c, value_ptr, inner_type);
+        emit_retain_slot(ref c, value_ptr, inner_type);
         c.output_file.write(c.indent + "br label %" + done_label + "\n");
         c.output_file.write("\n" + done_label + ":\n");
         return;
@@ -762,40 +762,40 @@ func emit_retain_slot(c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     if (has_array_info(arr_info) && arr_info.size >= 0) {
         let i: Int = 0;
         while (i < arr_info.size) {
-            let elem_ptr: String = next_reg(c);
+            let elem_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
-            emit_retain_slot(c, elem_ptr, arr_info.base_type);
+            emit_retain_slot(ref c, elem_ptr, arr_info.base_type);
             i += 1;
         }
         return;
     }
 
-    if (is_value_struct(c, type_id)) {
-        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(c, type_id));
+    if (is_value_struct(ref c, type_id)) {
+        let info: StructInfo = c.struct_id_map.lookup("" + get_repr_type(ref c, type_id));
         let i: Int = 0;
         while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
-            if (needs_drop(c, field.type)) {
-                let field_ptr: String = next_reg(c);
+            if (needs_drop(ref c, field.type)) {
+                let field_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + info.llvm_name + ", " + info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + field.offset + "\n");
-                emit_retain_slot(c, field_ptr, field.type);
+                emit_retain_slot(ref c, field_ptr, field.type);
             }
             i += 1;
         }
         return;
     }
 
-    if (!is_ref_type(c, type_id)) { return; }
-    let llvm_ty: String = get_llvm_type_str(c, type_id);
-    let value: String = next_reg(c);
+    if (!is_ref_type(ref c, type_id)) { return; }
+    let llvm_ty: String = get_llvm_type_str(ref c, type_id);
+    let value: String = next_reg(ref c);
     c.output_file.write(c.indent + value + " = load " + llvm_ty + ", " + llvm_ty + "* " + ptr_reg + "\n");
-    emit_retain(c, value, type_id);
+    emit_retain(ref c, value, type_id);
 }
 
-func emit_type_drop(c: Compiler, type_id: Int) -> Void {
+func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
 // one drop thunk per concrete type lets containers destroy erased elements safely
 
-    let free_hook: String = get_mangled_symbol(c, "memory_free", no_position());
+    let free_hook: String = get_mangled_symbol(ref c, "memory_free", no_position());
     c.output_file.write("define internal void @__wl_drop." + type_id + "(i8* %ptr) {\n");
     c.output_file.write("entry:\n");
 
@@ -832,8 +832,8 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
         let seen_refs: Dict(String, StringConstant) = Dict();
         let ref_id: Int = 1;
         while (ref_id < c.type_counter) {
-            if ((is_ref_type(c, ref_id) || is_value_struct(c, ref_id)) && ref_id != type_id) {
-                ref_cases = append_variant_ref_case(c, ref_cases, seen_refs, ref_id);
+            if ((is_ref_type(ref c, ref_id) || is_value_struct(ref c, ref_id)) && ref_id != type_id) {
+                ref_cases = append_variant_ref_case(ref c, ref_cases, seen_refs, ref_id);
             }
             ref_id += 1;
         }
@@ -854,8 +854,8 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     let vec_info: SymbolInfo = c.vector_base_map.lookup("" + type_id);
     if (has_symbol(vec_info)) {
         let elem_type: Int = vec_info.type;
-        let elem_ty: String = get_llvm_type_str(c, elem_type);
-        let vec_ty: String = get_vector_llvm_type(c, elem_type);
+        let elem_ty: String = get_llvm_type_str(ref c, elem_type);
+        let vec_ty: String = get_vector_llvm_type(ref c, elem_type);
         let size_ty: String = get_size_llvm_type();
         c.output_file.write("  %vec = bitcast i8* %ptr to " + vec_ty + "*\n");
         c.output_file.write("  %size.slot = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* %vec, i32 0, i32 0\n");
@@ -863,7 +863,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
         c.output_file.write("  %data.slot = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* %vec, i32 0, i32 2\n");
         c.output_file.write("  %data = load " + elem_ty + "*, " + elem_ty + "** %data.slot\n");
 
-        if (needs_drop(c, elem_type)) {
+        if (needs_drop(ref c, elem_type)) {
             c.output_file.write("  %index = alloca " + size_ty + "\n");
             c.output_file.write("  store " + size_ty + " 0, " + size_ty + "* %index\n");
             c.output_file.write("  br label %loop.cond\n");
@@ -873,7 +873,7 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
             c.output_file.write("  br i1 %more, label %loop.body, label %loop.end\n");
             c.output_file.write("loop.body:\n");
             c.output_file.write("  %slot = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* %data, " + size_ty + " %i\n");
-            emit_drop_slot(c, "%slot", elem_type);
+            emit_drop_slot(ref c, "%slot", elem_type);
             c.output_file.write("  %next = add " + size_ty + " %i, 1\n");
             c.output_file.write("  store " + size_ty + " %next, " + size_ty + "* %index\n");
             c.output_file.write("  br label %loop.cond\n");
@@ -904,8 +904,8 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
             }
             if (has_func(deinit)) {
                 let self_arg: TypeListNode = deinit.arg_types[0];
-                let self_ty: String = get_llvm_type_str(c, self_arg.type);
-                let deinit_ret: String = get_llvm_type_str(c, deinit.ret_type);
+                let self_ty: String = get_llvm_type_str(ref c, self_arg.type);
+                let deinit_ret: String = get_llvm_type_str(ref c, deinit.ret_type);
                 c.output_file.write("  %self = bitcast i8* %ptr to " + self_ty + "\n");
                 c.output_file.write("  call " + deinit_ret + " @" + deinit.name + "(" + self_ty + " %self)\n");
             }
@@ -917,10 +917,10 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
         let field_i: Int = 0;
         while (field_i < field_len) {
             let field: FieldInfo = fields[field_i];
-            if (field.name != "_vptr" && needs_drop(c, field.type)) {
-                let field_ptr: String = next_reg(c);
+            if (field.name != "_vptr" && needs_drop(ref c, field.type)) {
+                let field_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* %object, i32 0, i32 " + field.offset + "\n");
-                emit_drop_slot(c, field_ptr, field.type);
+                emit_drop_slot(ref c, field_ptr, field.type);
             }
             field_i += 1;
         }
@@ -930,9 +930,9 @@ func emit_type_drop(c: Compiler, type_id: Int) -> Void {
     c.output_file.write("}\n\n");
 }
 
-func compile_arc_hooks(c: Compiler) -> Void {
-    let free_hook: String = get_mangled_symbol(c, "memory_free", no_position());
-    let exit_hook: String = get_mangled_symbol(c, "process_exit", no_position());
+func compile_arc_hooks(ref c: Compiler) -> Void {
+    let free_hook: String = get_mangled_symbol(ref c, "memory_free", no_position());
+    let exit_hook: String = get_mangled_symbol(ref c, "process_exit", no_position());
 
     c.output_file.write("define internal void @__wl_oom() noreturn {\n");
     c.output_file.write("entry:\n");
@@ -1002,10 +1002,10 @@ func compile_arc_hooks(c: Compiler) -> Void {
     c.output_file.write("  ret void\n");
     c.output_file.write("}\n\n");
 
-    emit_type_drop(c, TYPE_GENERIC_FUNCTION);
+    emit_type_drop(ref c, TYPE_GENERIC_FUNCTION);
 
     let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (has_struct(variant_info)) { emit_type_drop(c, variant_info.type_id); }
+    if (has_struct(variant_info)) { emit_type_drop(ref c, variant_info.type_id); }
 
     let type_id: Int = 100;
     while (type_id < c.type_counter) {
@@ -1019,12 +1019,12 @@ func compile_arc_hooks(c: Compiler) -> Void {
             if (!has_struct(variant_info) || type_id != variant_info.type_id) { should_emit = true; }
         }
 
-        if should_emit { emit_type_drop(c, type_id); }
+        if should_emit { emit_type_drop(ref c, type_id); }
         type_id += 1;
     }
 }
 
-func emit_erased_check_helpers(c: Compiler) -> Void {
+func emit_erased_check_helpers(ref c: Compiler) -> Void {
     let slot: Int = 0;
     while (slot < c.erased_checks.capacity) {
         if (c.erased_checks.hashes[slot] >= 2) {
@@ -1044,12 +1044,12 @@ func emit_erased_check_helpers(c: Compiler) -> Void {
                 while (candidate < c.type_counter) {
                     let accepted: Bool = candidate == expected;
                     if (!accepted) {
-                        accepted = callable_types_compatible(c, candidate, expected);
+                        accepted = callable_types_compatible(ref c, candidate, expected);
                     }
         
                     let expected_info: StructInfo = c.struct_id_map.lookup("" + expected);
                 if (!accepted && has_struct(expected_info) && expected_info.is_class) {
-                    accepted = is_subclass(c, candidate, expected);
+                    accepted = is_subclass(ref c, candidate, expected);
                 }
                 if (!accepted && has_struct(expected_info) && !expected_info.is_class) {
                     accepted = erased_struct_matches(candidate, expected);

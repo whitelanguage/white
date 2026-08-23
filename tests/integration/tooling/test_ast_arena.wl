@@ -10,8 +10,8 @@ import Parser, parse from "../../../src/frontend/parser.wl"
 func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let lexer: Lexer = new_lexer("memory.wl", "func main() -> Int { let same = 1 is 1; return 0; }");
-    let parser: Parser = Parser(lexer=lexer, current_tok=get_next_token(lexer), nesting=0, arena=arena);
-    let root: NodeID = parse(parser);
+    let parser: Parser = Parser(lexer=lexer, current_tok=get_next_token(ref lexer), nesting=0, arena=arena);
+    let root: NodeID = parse(ref parser);
 
     if (node_tag(root) != NODE_BLOCK) {
         print("FAIL: Parser did not return a block handle");

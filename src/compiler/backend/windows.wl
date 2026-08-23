@@ -4,7 +4,7 @@ import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
 
-func emit_freestanding_memops(c: Compiler) -> Void {
+func emit_freestanding_memops(ref c: Compiler) -> Void {
 // volatile loops stop LLVM from turning these definitions back into CRT calls
     let size_ty: String = get_size_llvm_type();
     c.output_file.write("define i8* @memcpy(i8* %dest, i8* %src, " + size_ty + " %count) noinline optnone {\n");
@@ -83,7 +83,7 @@ func emit_freestanding_memops(c: Compiler) -> Void {
     c.output_file.write("}\n\n");
 }
 
-func emit_windows_x86_division_builtins(c: Compiler) -> Void {
+func emit_windows_x86_division_builtins(ref c: Compiler) -> Void {
 // llvm lowers 64-bit division to these msvc helper symbols on x86
 
     /*
@@ -207,7 +207,7 @@ func emit_windows_x86_division_builtins(c: Compiler) -> Void {
     c.output_file.write("}\n\n");
 }
 
-func emit_windows_x86_stack_probe(c: Compiler) -> Void {
+func emit_windows_x86_stack_probe(ref c: Compiler) -> Void {
     // x86 __chkstk probes the guard pages and returns on the allocated stack
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
@@ -234,7 +234,7 @@ func emit_windows_x86_stack_probe(c: Compiler) -> Void {
     c.output_file.write("module asm \"retl\"\n\n");
 }
 
-func emit_windows_x64_stack_probe(c: Compiler) -> Void {
+func emit_windows_x64_stack_probe(ref c: Compiler) -> Void {
     // x64 callers adjust rsp after the probe returns
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
@@ -261,22 +261,22 @@ func emit_windows_x64_stack_probe(c: Compiler) -> Void {
     c.output_file.write("module asm \"retq\"\n\n");
 }
 
-func emit_windows_stack_probe(c: Compiler) -> Void {
+func emit_windows_stack_probe(ref c: Compiler) -> Void {
     // keep target assembly private to the Windows backend until structured asm is available
-    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_stack_probe(c); }
-    else if (get_target_arch() == sys.Arch.X86_64) { emit_windows_x64_stack_probe(c); }
+    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_stack_probe(ref c); }
+    else if (get_target_arch() == sys.Arch.X86_64) { emit_windows_x64_stack_probe(ref c); }
 }
 
-func emit_windows_abi(c: Compiler) -> Void {
+func emit_windows_abi(ref c: Compiler) -> Void {
     if (get_target_os() != sys.Os.Windows) { return; }
     c.output_file.write("@_fltused = global i32 39029\n\n");
     c.output_file.write("define void @__main() {\nentry:\n  ret void\n}\n\n");
-    emit_freestanding_memops(c);
-    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_division_builtins(c); }
-    emit_windows_stack_probe(c);
+    emit_freestanding_memops(ref c);
+    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_division_builtins(ref c); }
+    emit_windows_stack_probe(ref c);
 }
 
-func emit_windows_entrypoint(c: Compiler) -> Void {
+func emit_windows_entrypoint(ref c: Compiler) -> Void {
     if (get_target_os() != sys.Os.Windows) { return; }
     if (c.is_shared) {
         let callconv: String = "";

@@ -12,7 +12,7 @@ func is_builtin_type_name(name: String) -> Bool {
            name == "Method" || name == "Enum";
 }
 
-func reserve_named_types(c: Compiler, node: NodeID) -> Void {
+func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
@@ -43,7 +43,7 @@ func reserve_named_types(c: Compiler, node: NodeID) -> Void {
     }
 }
 
-func resolve_named_types(c: Compiler, node: NodeID) -> Void {
+func resolve_named_types(ref c: Compiler, node: NodeID) -> Void {
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
@@ -51,7 +51,7 @@ func resolve_named_types(c: Compiler, node: NodeID) -> Void {
         if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
             let decl: TypeDeclNode = get_type_decl_node(c.arena, stmts[i]);
             let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
-            resolve_named_type(c, info);
+            resolve_named_type(ref c, info);
         }
         i += 1;
     }
@@ -77,7 +77,7 @@ func append_interface_method(methods: Vector(Struct), names: Dict(String, String
     return true;
 }
 
-func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct), pos: Position) -> Bool {
+func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Struct), pos: Position) -> Bool {
     let i: Int = 0;
     while (i < stack.length()) {
         let item: TypeListNode = stack[i];
@@ -98,19 +98,19 @@ func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct)
 
     i = 0;
     while (node.interfaces is !null && i < node.interfaces.length()) {
-        let parent_id: Int = resolve_type(c, node.interfaces[i]);
+        let parent_id: Int = resolve_type(ref c, node.interfaces[i]);
         let parent: StructInfo = c.struct_id_map.lookup("" + parent_id);
         if (!has_struct(parent) || !parent.is_interface) {
             throw_type_error(pos, "Interface '" + info.name + "' can only inherit from another interface.");
             stack.drop();
             return false;
         }
-        if (!resolve_interface_info(c, parent, stack, pos)) {
+        if (!resolve_interface_info(ref c, parent, stack, pos)) {
             stack.drop();
             return false;
         }
         parent = c.struct_id_map.lookup("" + parent_id);
-        if (!add_interface_type(c, info.interfaces, parent_id, pos)) {
+        if (!add_interface_type(ref c, info.interfaces, parent_id, pos)) {
             stack.drop();
             return false;
         }
@@ -136,12 +136,12 @@ func resolve_interface_info(c: Compiler, info: StructInfo, stack: Vector(Struct)
         i += 1;
     }
     info.vtable = methods;
-    store_struct(c, info);
+    store_struct(ref c, info);
     stack.drop();
     return true;
 }
 
-func pre_register_structs(c: Compiler, node: NodeID) -> Void {
+func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
@@ -167,7 +167,7 @@ func pre_register_structs(c: Compiler, node: NodeID) -> Void {
             }
 
             // for dict.wl
-            let sys_anns: SystemAnnResult = consume_annotations(c, n.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(ref c, n.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 if (c.current_package_prefix != "dict." && c.current_package_prefix != "") {
                     throw_internal_compiler_error(n.pos, "@CompilerIntrinsic is restricted to compiler internal libraries.");
@@ -231,7 +231,7 @@ func pre_register_structs(c: Compiler, node: NodeID) -> Void {
                 i += 1;
                 continue;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(c, c_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(ref c, c_node.annotations, raw_name);
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
             let info: StructInfo = StructInfo(
@@ -285,7 +285,7 @@ func pre_register_structs(c: Compiler, node: NodeID) -> Void {
                 }
                 method_index += 1;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(c, i_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(ref c, i_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 if (raw_name != "__Printable") {
                     throw_internal_compiler_error(i_node.pos, "Unknown intrinsic interface '" + raw_name + "'.");
@@ -323,7 +323,7 @@ func pre_register_structs(c: Compiler, node: NodeID) -> Void {
                 i += 1;
                 continue;
             }
-            let sys_anns: SystemAnnResult = consume_annotations(c, e_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(ref c, e_node.annotations, raw_name);
             let new_id: Int = c.type_counter;
             c.type_counter += 1;
             
@@ -360,13 +360,13 @@ func pre_register_structs(c: Compiler, node: NodeID) -> Void {
             let node: InterfaceDefNode = get_interface_def_node(c.arena, stmts[i]);
             if (node.type_params is null || node.type_params.length() == 0) {
                 let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
-                if (has_struct(info) && !resolve_interface_info(c, info, [], node.pos)) { return; }
+                if (has_struct(info) && !resolve_interface_info(ref c, info, [], node.pos)) { return; }
             }
         }
         i += 1;
     }
 }
-func pre_register_globals(c: Compiler, node: NodeID) -> Void {
+func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
@@ -388,13 +388,13 @@ func pre_register_globals(c: Compiler, node: NodeID) -> Void {
                 continue;
             }
             // keep the declared type visible while module imports are bound
-            let declared_type: Int = resolve_type(c, var_decl.type_node);
+            let declared_type: Int = resolve_type(ref c, var_decl.type_node);
             c.global_symbol_table.put(full_var_name, SymbolInfo(reg="poison", type=declared_type, origin_type=declared_type, is_const=var_decl.is_const));
         }
         i += 1;
     }
 }
-func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
+func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
@@ -418,7 +418,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                 continue;
             }
             
-            let ret_type_id: Int = resolve_type(c, f_node.ret_type_tok);
+            let ret_type_id: Int = resolve_type(ref c, f_node.ret_type_tok);
             if (ret_type_id == TYPE_POISON) {
                 i++;
                 continue;
@@ -437,7 +437,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
             
             while (p_idx < p_len) {
                 let p: ParamNode = params[p_idx];
-                let p_id: Int = callable_param_type(c, p);
+                let p_id: Int = callable_param_type(ref c, p);
                 if (p_id == TYPE_POISON) {
                     break;
                 }
@@ -468,7 +468,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                 if (!valid_main) { throw_type_error(f_node.pos, "function 'main' must be 'func main() -> Int' or 'func main(argc: Int, ptr argv: String) -> Int'"); return; }
             }
 
-            let sys_anns: SystemAnnResult = consume_annotations(c, f_node.annotations, raw_name);
+            let sys_anns: SystemAnnResult = consume_annotations(ref c, f_node.annotations, raw_name);
             if ((sys_anns.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 let layout_intrinsic: Bool = (raw_name == "size_of" || raw_name == "align_of") && sys_anns.intrinsic_name == raw_name;
                 let print_intrinsic: Bool = raw_name == "print" &&
@@ -495,7 +495,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
             if ((sys_anns.ann_flags & FLAG_ANN_EXPORT) != 0 || raw_name == "main") {
                 llvm_func_name = raw_name;
             } else {
-                llvm_func_name = mangle_wl_name(c, c.current_package_prefix, raw_name, arg_types);
+                llvm_func_name = mangle_wl_name(ref c, c.current_package_prefix, raw_name, arg_types);
             }
 
             if (has_func(c.func_table.lookup(func_key)) || has_template(c.generic_funcs.lookup(func_key))) {
@@ -532,7 +532,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
             let m_idx: Int = 0;
             while (m_idx < m_len) {
                 let m_node: MethodDefNode = get_method_def_node(c.arena, m_vec[m_idx]);
-                let m_raw_name: String = method_base_name(c, m_node);
+                let m_raw_name: String = method_base_name(ref c, m_node);
 
                 if (m_node.type_params is !null && m_node.type_params.length() > 0) {
                     let method_key: String = c_name + "_" + m_raw_name;
@@ -545,7 +545,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                     continue;
                 }
 
-                let ret_id: Int = resolve_type(c, m_node.return_type);
+                let ret_id: Int = resolve_type(ref c, m_node.return_type);
                 if (ret_id == TYPE_POISON) {
                     m_idx++;
                     continue;
@@ -556,11 +556,11 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                 }
                 if (m_node.name_tok.value == "$type") {
                     let target_id: Int = ret_id;
-                    if (is_fallible_type(c, target_id)) {
-                        target_id = get_inner_fallible_type(c, target_id);
+                    if (is_fallible_type(ref c, target_id)) {
+                        target_id = get_inner_fallible_type(ref c, target_id);
                     }
-                    if (!is_conversion_target(c, target_id)) {
-                        throw_type_error(m_node.pos, "Conversion target " + get_type_name(c, target_id) + " is not a built-in value type");
+                    if (!is_conversion_target(ref c, target_id)) {
+                        throw_type_error(m_node.pos, "Conversion target " + get_type_name(ref c, target_id) + " is not a built-in value type");
                     }
                 }
                 let arg_types: Vector(Struct) = [];
@@ -574,7 +574,7 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                 let p_idx: Int = 0;
                 while (p_idx < p_len) {
                     let p: ParamNode = p_vec[p_idx];
-                    let p_type: Int = callable_param_type(c, p);
+                    let p_type: Int = callable_param_type(ref c, p);
                     if (p_type == TYPE_POISON) {
                         break;
                     }
@@ -592,22 +592,22 @@ func pre_register_funcs(c: Compiler, node: NodeID) -> Void {
                 }
 
                 let m_key: String = c_name + "_" + m_raw_name;
-                let m_llvm_name: String = mangle_wl_name(c, c_name + ".", m_raw_name, arg_types);
+                let m_llvm_name: String = mangle_wl_name(ref c, c_name + ".", m_raw_name, arg_types);
                 
                 if (has_func(c.func_table.lookup(m_key)) || has_template(c.generic_methods.lookup(m_key))) {
                     if (m_node.name_tok.value == "$type") {
                         let target_id: Int = ret_id;
-                        if (is_fallible_type(c, target_id)) {
-                            target_id = get_inner_fallible_type(c, target_id);
+                        if (is_fallible_type(ref c, target_id)) {
+                            target_id = get_inner_fallible_type(ref c, target_id);
                         }
-                        throw_name_error(m_node.pos, "class '" + c_name + "' already defines a conversion to " + get_type_name(c, target_id));
+                        throw_name_error(m_node.pos, "class '" + c_name + "' already defines a conversion to " + get_type_name(ref c, target_id));
                     } else {
                         throw_name_error(m_node.pos, "method '" + m_key + "' is already defined.");
                     }
                     return;
                 }
 
-                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(c, m_node.body), variadic_param=variadic_param_index(p_vec), default_args=param_defaults(p_vec));
+                let f_info: FuncInfo = FuncInfo(name=m_llvm_name, base_name=m_raw_name, ret_type=ret_id, arg_types=arg_types, arg_names=arg_names, is_varargs=false, mutates_self=method_mutates_self(ref c, m_node.body), variadic_param=variadic_param_index(p_vec), default_args=param_defaults(p_vec));
                 c.func_table.put(m_key, f_info);
                 m_idx += 1;
             }

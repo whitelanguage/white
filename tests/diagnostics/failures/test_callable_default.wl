@@ -1,7 +1,7 @@
 // Test: CALLABLE_DEFAULT
 // File: tests/diagnostics/failures/test_callable_default.wl
 // Focus: Function values do not retain declaration defaults.
-// Expected Error: " TypeError: Missing callable argument 'sep'. "
+// Expected Error: "TypeError: Missing callable argument 'sep'."
 
 func join(values: String..., sep: String = ",") -> String {
     return "";

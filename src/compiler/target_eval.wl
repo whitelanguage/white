@@ -6,19 +6,19 @@ import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "target.wl"
 
-func target_intrinsic(c: Compiler, node: NodeID) -> String {
+func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
     if (!has_node(node)) { return ""; }
     let base: Int = node_tag(node);
     let info: SymbolInfo = SymbolInfo();
     if (base == NODE_FIELD_ACCESS) {
-        let name: String = format_ast_path(c, node);
+        let name: String = format_ast_path(ref c, node);
         let mapped: String = c.current_file_global_aliases.lookup(name);
         if (mapped is null) { mapped = c.global_var_aliases.lookup(name); }
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
         if (!has_symbol(info)) { info = c.global_symbol_table.lookup(name); }
     } else if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(c.arena, node);
-        info = find_symbol(c, access.name_tok.value);
+        info = find_symbol(ref c, access.name_tok.value);
     }
     if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return ""; }
     return info.reg.slice(11, info.reg.length());
@@ -67,7 +67,7 @@ func target_enum_name(name: String) -> String {
     return "";
 }
 
-func fold_target_cond(c: Compiler, node: NodeID) -> Int {
+func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
 // return 1 or 0 for a known target condition, and -1 when runtime code is still needed
     if (!has_node(node)) { return -1; }
     let base: Int = node_tag(node);
@@ -75,7 +75,7 @@ func fold_target_cond(c: Compiler, node: NodeID) -> Int {
     if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(c.arena, node);
         if (unary.op_tok.value == "!") {
-            let value: Int = fold_target_cond(c, unary.node);
+            let value: Int = fold_target_cond(ref c, unary.node);
             if (value == 0) { return 1; }
             if (value == 1) { return 0; }
         }
@@ -87,8 +87,8 @@ func fold_target_cond(c: Compiler, node: NodeID) -> Int {
     let op: String = binary.op_tok.value;
 
     if (op == "&&" || op == "||") {
-        let left_value: Int = fold_target_cond(c, binary.left);
-        let right_value: Int = fold_target_cond(c, binary.right);
+        let left_value: Int = fold_target_cond(ref c, binary.left);
+        let right_value: Int = fold_target_cond(ref c, binary.right);
         if (left_value == -1 || right_value == -1) { return -1; }
         if (op == "&&") {
             if (left_value == 1 && right_value == 1) { return 1; }
@@ -101,11 +101,11 @@ func fold_target_cond(c: Compiler, node: NodeID) -> Int {
     if (op != "==" && op != "!=") { return -1; }
 
     let intrinsic_node: NodeID = binary.left;
-    let intrinsic: String = target_intrinsic(c, intrinsic_node);
+    let intrinsic: String = target_intrinsic(ref c, intrinsic_node);
     let literal_node: NodeID = binary.right;
     if (intrinsic.length() == 0) {
         intrinsic_node = binary.right;
-        intrinsic = target_intrinsic(c, intrinsic_node);
+        intrinsic = target_intrinsic(ref c, intrinsic_node);
         literal_node = binary.left;
     }
     if (intrinsic.length() == 0) { return -1; }
@@ -118,7 +118,7 @@ func fold_target_cond(c: Compiler, node: NodeID) -> Int {
     } else if (literal_base != 0 && literal_base == NODE_FIELD_ACCESS) {
         let field: FieldAccessNode = get_field_access_node(c.arena, literal_node);
         let enum_name: String = target_enum_name(intrinsic);
-        let field_path: String = format_ast_path(c, literal_node);
+        let field_path: String = format_ast_path(ref c, literal_node);
         if (!field_path.ends_with(enum_name + "." + field.field_name)) { return -1; }
         let expected: Int = target_member(intrinsic, field.field_name);
         if (expected < 0) { return -1; }
@@ -136,7 +136,7 @@ func fold_target_cond(c: Compiler, node: NodeID) -> Int {
 }
 
 
-func emit_target_intrinsic(c: Compiler, info: SymbolInfo) -> CompileResult {
+func emit_target_intrinsic(ref c: Compiler, info: SymbolInfo) -> CompileResult {
     let name: String = info.reg.slice(11, info.reg.length());
     return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type);
 }

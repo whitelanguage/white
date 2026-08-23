@@ -1,7 +1,7 @@
 // compiler/lowering/literals.wl
 import * from "../context.wl"
 
-func register_string_constant(c: Compiler, val: String) -> Int {
+func register_string_constant(ref c: Compiler, val: String) -> Int {
     let exist: StringConstant = c.string_pool.lookup(val);
     if (has_string_constant(exist)) {
         return exist.id;

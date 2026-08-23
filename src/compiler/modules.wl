@@ -10,7 +10,7 @@ import Parser, parse from "../frontend/parser.wl"
 import * from "target_eval.wl"
 import * from "registration.wl"
 
-func precompile_ast(c: Compiler, node: NodeID, final_path: String, import_prefix: String, old_dir: String) -> Void {
+func precompile_ast(ref c: Compiler, node: NodeID, final_path: String, import_prefix: String, old_dir: String) -> Void {
 // imports must be bound before this module publishes its declarations
     let block: BlockNode = get_block_node(c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
@@ -22,18 +22,18 @@ func precompile_ast(c: Compiler, node: NodeID, final_path: String, import_prefix
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_IMPORT) {
-            compile_import(c, get_import_node(c.arena, stmts[i]));
+            compile_import(ref c, get_import_node(c.arena, stmts[i]));
             imports.append(stmts[i]);
         }
         i += 1;
     }
 
-    bind_module_prelude(c, Position(idx=0, ln=0, col=0, text="", fn=final_path));
-    reserve_named_types(c, node);
-    pre_register_structs(c, node);
-    resolve_named_types(c, node);
-    pre_register_funcs(c, node);
-    pre_register_globals(c, node);
+    bind_module_prelude(ref c, Position(idx=0, ln=0, col=0, text="", fn=final_path));
+    reserve_named_types(ref c, node);
+    pre_register_structs(ref c, node);
+    resolve_named_types(ref c, node);
+    pre_register_funcs(ref c, node);
+    pre_register_globals(ref c, node);
 
     let p_mod: ParsedModule = ParsedModule(
         path = final_path,
@@ -66,7 +66,7 @@ func module_symbol_stem(name: String) -> String {
     return stem;
 }
 
-func reserve_module_prefix(c: Compiler, canonical_name: String, final_path: String) -> String {
+func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: String) -> String {
 // readable prefixes are kept when possible, colliding file stems get a stable module id
     let stem: String = module_symbol_stem(canonical_name);
     let prefix: String = stem + ".";
@@ -88,26 +88,26 @@ func reserve_module_prefix(c: Compiler, canonical_name: String, final_path: Stri
     return "";
 }
 
-func bind_loaded_prelude(c: Compiler, path: String, pos: Position) -> Void {
-    let final_path: String = resolve_import_path(c, path, pos);
+func bind_loaded_prelude(ref c: Compiler, path: String, pos: Position) -> Void {
+    let final_path: String = resolve_import_path(ref c, path, pos);
     if (final_path is null || final_path.length() == 0) { return; }
     let loaded: StringConstant = c.imported_modules.lookup(final_path);
     if (!has_string_constant(loaded)) { return; }
     let star: Token = Token(type=TOK_MUL, value="*", line=pos.ln, col=pos.col);
     let symbols: Vector(ImportSymbolNode) = [ImportSymbolNode(name_tok=star, alias_tok=Token())];
     let path_tok: Token = Token(type=TOK_STR_LIT, value=path, line=pos.ln, col=pos.col);
-    bind_import_symbols(c, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=Token(), pos=pos), loaded.value, false, true);
+    bind_import_symbols(ref c, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=Token(), pos=pos), loaded.value, false, true);
 }
 
-func bind_module_prelude(c: Compiler, pos: Position) -> Void {
-    bind_loaded_prelude(c, "errors", pos);
-    bind_loaded_prelude(c, "builtin", pos);
-    bind_loaded_prelude(c, "dict", pos);
+func bind_module_prelude(ref c: Compiler, pos: Position) -> Void {
+    bind_loaded_prelude(ref c, "errors", pos);
+    bind_loaded_prelude(ref c, "builtin", pos);
+    bind_loaded_prelude(ref c, "dict", pos);
 }
 
-func compile_import(c: Compiler, node: ImportNode) -> Void {
+func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let raw_path: String = node.path_tok.value;
-    let final_path: String = resolve_import_path(c, raw_path, node.pos);
+    let final_path: String = resolve_import_path(ref c, raw_path, node.pos);
     if (final_path is null || final_path.length() == 0) { return; }
 
     let is_pkg: Bool = final_path.ends_with("/_pkg.wl") || final_path.ends_with("\\_pkg.wl");
@@ -139,10 +139,10 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
     if (has_string_constant(loaded_module)) {
         import_prefix = loaded_module.value;
     } else {
-        import_prefix = reserve_module_prefix(c, canonical_name, final_path);
+        import_prefix = reserve_module_prefix(ref c, canonical_name, final_path);
     }
     if (node.symbols is null) {
-        if (c.current_file_namespaces.contains_key(module_name)) { unbind_namespace(c, module_name); }
+        if (c.current_file_namespaces.contains_key(module_name)) { unbind_namespace(ref c, module_name); }
         let existing_prefix: String = c.current_file_visible_prefixes.lookup(module_name);
         if (existing_prefix is !null && existing_prefix != import_prefix) {
             throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
@@ -153,7 +153,7 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
 
     if (has_string_constant(loaded_module)) {
         if (node.symbols is !null) {
-            bind_import_symbols(c, node, import_prefix, true, false);
+            bind_import_symbols(ref c, node, import_prefix, true, false);
             let s_len: Int = node.symbols.length();
             let i: Int = 0;
             let is_star: Bool = false;
@@ -163,12 +163,12 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
                 i += 1;
             }
             if is_star {
-                export_module_symbols(c, import_prefix, false, "");
+                export_module_symbols(ref c, import_prefix, false, "");
             } else {
-                export_named_imports(c, node);
+                export_named_imports(ref c, node);
             }
         } else {
-            export_module_symbols(c, import_prefix, true, module_name);
+            export_module_symbols(ref c, import_prefix, true, module_name);
         }
         return; 
     }
@@ -208,11 +208,11 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
     c.current_file_func_aliases     = Dict();
     c.current_file_global_aliases   = Dict();
     let lexer: Lexer = new_lexer(final_path, source);
-    let first_token: Token = get_next_token(lexer);
+    let first_token: Token = get_next_token(ref lexer);
     let parser: Parser = Parser(lexer=lexer, current_tok=first_token, nesting=0, arena=c.arena);
-    let mod_ast: NodeID = parse(parser);
+    let mod_ast: NodeID = parse(ref parser);
 
-    precompile_ast(c, mod_ast, final_path, import_prefix, c.current_dir);
+    precompile_ast(ref c, mod_ast, final_path, import_prefix, c.current_dir);
 
     c.current_file_visible_prefixes = backup_visible;
     c.current_file_namespaces       = backup_namespaces;
@@ -225,7 +225,7 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
     c.current_dir = old_dir;
 
     if (node.symbols is !null) {
-        bind_import_symbols(c, node, import_prefix, true, false);
+        bind_import_symbols(ref c, node, import_prefix, true, false);
         let s_len: Int = node.symbols.length();
         let i: Int = 0;
         let is_star: Bool = false;
@@ -235,12 +235,12 @@ func compile_import(c: Compiler, node: ImportNode) -> Void {
             i += 1;
         }
         if is_star {
-            export_module_symbols(c, import_prefix, false, "");
+            export_module_symbols(ref c, import_prefix, false, "");
         } else {
-            export_named_imports(c, node);
+            export_named_imports(ref c, node);
         }
     } else {
-        export_module_symbols(c, import_prefix, true, module_name);
+        export_module_symbols(ref c, import_prefix, true, module_name);
     }
 }
 

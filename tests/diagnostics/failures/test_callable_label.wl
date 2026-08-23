@@ -1,7 +1,7 @@
 // Test: CALLABLE_LABEL
 // File: tests/diagnostics/failures/test_callable_label.wl
 // Focus: Calls through a relabeled Function use the label written in its static type.
-// Expected Error: " NameError: Unknown callable argument 'sep'. "
+// Expected Error: "NameError: Unknown callable argument 'sep'."
 
 func join(values: String..., sep: String = ",") -> String {
     return "";

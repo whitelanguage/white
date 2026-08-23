@@ -24,7 +24,7 @@ func func_callconv(info: FuncInfo) -> String {
     if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) { return ""; }
     return extern_callconv(info.abi_name);
 }
-func register_extern_library(c: Compiler, name: String, pos: Position) -> Void {
+func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
     if (name is null || name.length() == 0) { return; }
 
     let i: Int = 0;
@@ -55,10 +55,10 @@ func backend_symbol_signature(name: String) -> String {
     if (name == "memset") { return "ccc i8* (i8*, i32, " + size_ty + ")"; }
     return "";
 }
-func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
+func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult {
     let func_name: String = node.name_tok.value;
     let abi_name: String = normalize_extern_abi(node.abi_name, node.pos);
-    let ret_type_id: Int = resolve_type(c, node.ret_type_tok);
+    let ret_type_id: Int = resolve_type(ref c, node.ret_type_tok);
     if (ret_type_id == TYPE_AUTO) {
         throw_extern_error(node.pos, "Extern functions cannot use Auto as a return type.");
         return void_result();
@@ -84,7 +84,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
             throw_extern_error(p.pos, "Extern functions cannot use reference parameters; declare a pointer parameter instead.");
             return void_result();
         }
-        let p_id: Int = resolve_type(c, p.type_tok);
+        let p_id: Int = resolve_type(ref c, p.type_tok);
         if (p_id == TYPE_AUTO) {
             throw_type_error(p.pos, "Extern functions cannot use Auto parameters.");
             return void_result();
@@ -93,7 +93,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
         arg_types.append(TypeListNode(type=p_id));
         arg_names.append(p.name_tok.value);
         if (p_idx > 0) { params_str += ", "; }
-        params_str += get_llvm_type_str(c, p_id);
+        params_str += get_llvm_type_str(ref c, p_id);
         p_idx += 1;
     }
 
@@ -112,7 +112,7 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
     }
 
     let callconv: String = extern_callconv(abi_name);
-    let ret_llvm: String = get_llvm_type_str(c, ret_type_id);
+    let ret_llvm: String = get_llvm_type_str(ref c, ret_type_id);
     let signature: String = callconv + ret_llvm + " (" + params_str + ")";
     let backend_signature: String = backend_symbol_signature(func_name);
     if (backend_signature.length() > 0 && signature != backend_signature) {
@@ -129,16 +129,16 @@ func compile_extern_func(c: Compiler, node: ExternFuncNode) -> CompileResult {
     }
 
     c.func_table.put(full_func_name, FuncInfo(name=func_name, base_name=func_name, ret_type=ret_type_id, arg_types=arg_types, arg_names=arg_names, is_varargs=node.is_varargs, abi_name=abi_name, mutates_self=false));
-    register_extern_library(c, node.link_name, node.pos);
+    register_extern_library(ref c, node.link_name, node.pos);
     return void_result();
 }
-func compile_extern_block(c: Compiler, node: ExternBlockNode) -> CompileResult {
+func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResult {
     let funcs: Vector(NodeID) = node.funcs;
     let len: Int = 0; if (funcs is !null) { len = funcs.length(); }
     let i: Int = 0;
     while (i < len) {
         let f_node: ExternFuncNode = get_extern_func_node(c.arena, funcs[i]);
-        compile_extern_func(c, f_node);
+        compile_extern_func(ref c, f_node);
         i += 1;
     }
     return void_result();

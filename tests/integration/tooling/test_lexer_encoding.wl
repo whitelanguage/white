@@ -4,15 +4,15 @@
 
 import "../../../src/frontend/diagnostics.wl" as WhitelangExceptions
 import Lexer, new_lexer, get_next_token from "../../../src/frontend/lexer.wl"
-import TOK_EOF from "../../../src/frontend/tokens.wl"
+import Token, TOK_EOF from "../../../src/frontend/tokens.wl"
 
 func rejects(text: String) -> Bool {
     WhitelangExceptions.begin_error_collection();
     let lexer: Lexer = new_lexer("memory.wl", text);
     let done: Bool = false;
     while (!done) {
-        let token: Struct = get_next_token(lexer);
-        if (token is !null && token.type == TOK_EOF) { done = true; }
+        let token: Token = get_next_token(ref lexer);
+        if (token.type == TOK_EOF) { done = true; }
     }
     let rejected: Bool = WhitelangExceptions.GLOBAL_ERROR_COUNT > 0;
     WhitelangExceptions.end_error_collection();

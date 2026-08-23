@@ -20,8 +20,8 @@ struct Record(value: Int, probe: Probe)
 struct Box<T>(value: T)
 struct Link(ptr next: Link)
 
-func replace(ptr target: Record, probe: Probe) -> Void {
-    deref target = Record(30, probe);
+func replace(ref target: Record, probe: Probe) -> Void {
+    target = Record(30, probe);
 }
 
 func change_copy(value: Record) -> Void {

@@ -5,7 +5,7 @@ import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
-func expr_root_name(c: Compiler, node: NodeID) -> String {
+func expr_root_name(ref c: Compiler, node: NodeID) -> String {
     if (!has_node(node)) { return ""; }
     let base: Int = node_tag(node);
     if (base == NODE_VAR_ACCESS) {
@@ -14,110 +14,110 @@ func expr_root_name(c: Compiler, node: NodeID) -> String {
     }
     if (base == NODE_FIELD_ACCESS) {
         let value: FieldAccessNode = get_field_access_node(c.arena, node);
-        return expr_root_name(c, value.obj);
+        return expr_root_name(ref c, value.obj);
     }
     if (base == NODE_INDEX_ACCESS) {
         let value: IndexAccessNode = get_index_access_node(c.arena, node);
-        return expr_root_name(c, value.target);
+        return expr_root_name(ref c, value.target);
     }
     if (base == NODE_SLICE_ACCESS) {
         let value: SliceAccessNode = get_slice_access_node(c.arena, node);
-        return expr_root_name(c, value.target);
+        return expr_root_name(ref c, value.target);
     }
     if (base == NODE_DEREF) {
         let value: DerefNode = get_deref_node(c.arena, node);
-        return expr_root_name(c, value.node);
+        return expr_root_name(ref c, value.node);
     }
     return "";
 }
 
-func const_access_root(c: Compiler, node: NodeID) -> String {
-    let name: String = expr_root_name(c, node);
+func const_access_root(ref c: Compiler, node: NodeID) -> String {
+    let name: String = expr_root_name(ref c, node);
     if (name.length() == 0) { return ""; }
-    let info: SymbolInfo = find_symbol(c, name);
+    let info: SymbolInfo = find_symbol(ref c, name);
     if (has_symbol(info) && (info.is_const || info.is_const_access)) { return name; }
     return "";
 }
 
-func reject_const_write(c: Compiler, node: NodeID, pos: Position) -> Bool {
-    let name: String = const_access_root(c, node);
+func reject_const_write(ref c: Compiler, node: NodeID, pos: Position) -> Bool {
+    let name: String = const_access_root(ref c, node);
     if (name.length() == 0) { return false; }
     throw_type_error(pos, "Cannot modify value through const access '" + name + "'");
     return true;
 }
 
-func method_mutates_self(c: Compiler, node: NodeID) -> Bool {
+func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let base: Int = node_tag(node);
     if (base == NODE_FIELD_ASSIGN) {
         let value: FieldAssignNode = get_field_assign_node(c.arena, node);
-        return expr_root_name(c, value.obj) == "self" || expr_root_name(c, value.value) == "self";
+        return expr_root_name(ref c, value.obj) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_INDEX_ASSIGN) {
         let value: IndexAssignNode = get_index_assign_node(c.arena, node);
-        return expr_root_name(c, value.target) == "self" || expr_root_name(c, value.value) == "self";
+        return expr_root_name(ref c, value.target) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_PTR_ASSIGN) {
         let value: PtrAssignNode = get_ptr_assign_node(c.arena, node);
-        return expr_root_name(c, value.pointer) == "self" || expr_root_name(c, value.value) == "self";
+        return expr_root_name(ref c, value.pointer) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_POSTFIX) {
         let value: PostfixOpNode = get_postfix_node(c.arena, node);
-        return expr_root_name(c, value.node) == "self";
+        return expr_root_name(ref c, value.node) == "self";
     }
     if (base == NODE_REF) {
         let value: RefNode = get_ref_node(c.arena, node);
-        return expr_root_name(c, value.node) == "self";
+        return expr_root_name(ref c, value.node) == "self";
     }
     if (base == NODE_VAR_DECL) {
         let value: VarDeclareNode = get_var_decl_node(c.arena, node);
-        return expr_root_name(c, value.value) == "self";
+        return expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_VAR_ASSIGN) {
         let value: VarAssignNode = get_var_assign_node(c.arena, node);
-        return expr_root_name(c, value.value) == "self";
+        return expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_CALL) {
         let call: CallNode = get_call_node(c.arena, node);
         let callee: Int = node_tag(call.callee);
         if (callee == NODE_FIELD_ACCESS) {
             let field: FieldAccessNode = get_field_access_node(c.arena, call.callee);
-            if (expr_root_name(c, field.obj) == "self") { return true; }
+            if (expr_root_name(ref c, field.obj) == "self") { return true; }
         }
         let i: Int = 0;
         while (call.args is !null && i < call.args.length()) {
             let arg: ArgNode = call.args[i];
-            if (expr_root_name(c, arg.val) == "self") { return true; }
+            if (expr_root_name(ref c, arg.val) == "self") { return true; }
             i += 1;
         }
     }
     if (base == NODE_FUNC_DEF) {
         let value: FunctionDefNode = get_func_def_node(c.arena, node);
-        return method_mutates_self(c, value.body);
+        return method_mutates_self(ref c, value.body);
     }
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(c.arena, node);
         let i: Int = 0;
         while (block.stmts is !null && i < block.stmts.length()) {
-            if (method_mutates_self(c, block.stmts[i])) { return true; }
+            if (method_mutates_self(ref c, block.stmts[i])) { return true; }
             i += 1;
         }
     }
     if (base == NODE_IF) {
         let value: IfNode = get_if_node(c.arena, node);
-        return method_mutates_self(c, value.body) || method_mutates_self(c, value.else_body);
+        return method_mutates_self(ref c, value.body) || method_mutates_self(ref c, value.else_body);
     }
     if (base == NODE_WHILE) {
         let value: WhileNode = get_while_node(c.arena, node);
-        return method_mutates_self(c, value.body);
+        return method_mutates_self(ref c, value.body);
     }
     if (base == NODE_FOR) {
         let value: ForNode = get_for_node(c.arena, node);
-        return method_mutates_self(c, value.init) || method_mutates_self(c, value.step) || method_mutates_self(c, value.body);
+        return method_mutates_self(ref c, value.init) || method_mutates_self(ref c, value.step) || method_mutates_self(ref c, value.body);
     }
     if (base == NODE_CATCH) {
         let value: CatchNode = get_catch_node(c.arena, node);
-        return method_mutates_self(c, value.stmt) || method_mutates_self(c, value.body);
+        return method_mutates_self(ref c, value.stmt) || method_mutates_self(ref c, value.body);
     }
     return false;
 }
@@ -144,26 +144,23 @@ func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
     while (i < parent_len) {
         let a: TypeListNode = parent.arg_types[i];
         let b: TypeListNode = child.arg_types[i];
-        if (a.type != b.type || a.pass_mode != b.pass_mode) {
-            return false;
-        }
-
+        if (a.type != b.type || a.pass_mode != b.pass_mode) { return false; }
         i += 1;
     }
     return true;
 }
 
-func add_interface_type(c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
+func add_interface_type(ref c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
     if (type_id == TYPE_POISON) { return false; }
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (!has_struct(info) || !info.is_interface) {
-        throw_type_error(pos, "Type " + get_type_name(c, type_id) + " is not an interface.");
+        throw_type_error(pos, "Type " + get_type_name(ref c, type_id) + " is not an interface.");
         return false;
     }
     let parent_index: Int = 0;
     while (info.interfaces is !null && parent_index < info.interfaces.length()) {
         let parent: TypeListNode = info.interfaces[parent_index];
-        if (!add_interface_type(c, list, parent.type, pos)) { return false; }
+        if (!add_interface_type(ref c, list, parent.type, pos)) { return false; }
         parent_index += 1;
     }
     let i: Int = 0;
@@ -176,11 +173,11 @@ func add_interface_type(c: Compiler, list: Vector(Struct), type_id: Int, pos: Po
     return true;
 }
 
-func add_interface(c: Compiler, list: Vector(Struct), node: NodeID, pos: Position) -> Bool {
-    return add_interface_type(c, list, resolve_type(c, node), pos);
+func add_interface(ref c: Compiler, list: Vector(Struct), node: NodeID, pos: Position) -> Bool {
+    return add_interface_type(ref c, list, resolve_type(ref c, node), pos);
 }
 
-func class_has_interface(c: Compiler, class_info: StructInfo, target: StructInfo) -> Bool {
+func class_has_interface(ref c: Compiler, class_info: StructInfo, target: StructInfo) -> Bool {
     let current: StructInfo = class_info;
     while (has_struct(current)) {
         let i: Int = 0;
@@ -195,7 +192,7 @@ func class_has_interface(c: Compiler, class_info: StructInfo, target: StructInfo
     return false;
 }
 
-func is_unsuffix_int_literal(c: Compiler, node: NodeID) -> Bool {
+func is_unsuffix_int_literal(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let base: Int = node_tag(node);
     if (base != NODE_INT) { return false; }
@@ -363,7 +360,7 @@ func validate_callable_value(info: FuncInfo, skip: Int, pos: Position, kind: Str
     return true;
 }
 
-func callable_types_compatible(c: Compiler, actual: Int, expected: Int) -> Bool {
+func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> Bool {
     let actual_info: SymbolInfo = c.func_ret_map.lookup("" + actual);
     let expected_info: SymbolInfo = c.func_ret_map.lookup("" + expected);
     if (!has_symbol(actual_info) || !has_symbol(expected_info)) {
@@ -378,10 +375,7 @@ func callable_types_compatible(c: Compiler, actual: Int, expected: Int) -> Bool 
     while (i < actual_info.func_arg_types.length()) {
         let actual_arg: TypeListNode = actual_info.func_arg_types[i];
         let expected_arg: TypeListNode = expected_info.func_arg_types[i];
-        if (actual_arg.type != expected_arg.type || 
-            actual_arg.pass_mode != expected_arg.pass_mode) {
-            return false;
-        }
+        if (actual_arg.type != expected_arg.type || actual_arg.pass_mode != expected_arg.pass_mode) { return false; }
         i += 1;
     }
     return true;

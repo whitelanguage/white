@@ -20,7 +20,7 @@ struct TypedIdent(
 
 const MAX_PARSE_NESTING: Int = 64;
 
-func parser_enter(p: Parser, pos: Position) -> Bool {
+func parser_enter(ref p: Parser, pos: Position) -> Bool {
     if (p.nesting >= MAX_PARSE_NESTING) {
         throw_invalid_syntax(pos, "Syntax nesting exceeds the limit of 64.");
         return false;
@@ -29,40 +29,40 @@ func parser_enter(p: Parser, pos: Position) -> Bool {
     return true;
 }
 
-func parser_leave(p: Parser) -> Void {
+func parser_leave(ref p: Parser) -> Void {
     if (p.nesting > 0) { p.nesting -= 1; }
 }
 
-func skip_group(p: Parser, open_type: Int, close_type: Int) -> Void {
+func skip_group(ref p: Parser, open_type: Int, close_type: Int) -> Void {
     let depth: Int = 0;
     while (p.current_tok.type != TOK_EOF) {
         if (p.current_tok.type == open_type) { depth += 1; }
         else if (p.current_tok.type == close_type) {
             depth -= 1;
-            parser_advance(p);
+            parser_advance(ref p);
             if (depth == 0) { return; }
             continue;
         }
-        parser_advance(p);
+        parser_advance(ref p);
     }
 }
 
-func nesting_fallback(p: Parser, pos: Position) -> NodeID {
-    if (p.current_tok.type == TOK_LPAREN) { skip_group(p, TOK_LPAREN, TOK_RPAREN); }
-    else if (p.current_tok.type == TOK_LBRACKET) { skip_group(p, TOK_LBRACKET, TOK_RBRACKET); }
-    else if (p.current_tok.type == TOK_LBRACE) { skip_group(p, TOK_LBRACE, TOK_RBRACE); }
-    else if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
+func nesting_fallback(ref p: Parser, pos: Position) -> NodeID {
+    if (p.current_tok.type == TOK_LPAREN) { skip_group(ref p, TOK_LPAREN, TOK_RPAREN); }
+    else if (p.current_tok.type == TOK_LBRACKET) { skip_group(ref p, TOK_LBRACKET, TOK_RBRACKET); }
+    else if (p.current_tok.type == TOK_LBRACE) { skip_group(ref p, TOK_LBRACE, TOK_RBRACE); }
+    else if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=pos.ln, col=pos.col);
     return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=pos));
 }
 
-func type_nesting_fallback(p: Parser, pos: Position) -> NodeID {
-    if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
+func type_nesting_fallback(ref p: Parser, pos: Position) -> NodeID {
+    if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let int_tok: Token = Token(type=TOK_T_INT, value="Int", line=pos.ln, col=pos.col);
     return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=int_tok, pos=pos));
 }
 
-func inferred_type(p: Parser, pos: Position) -> NodeID {
+func inferred_type(ref p: Parser, pos: Position) -> NodeID {
     let auto_tok: Token = Token(type=TOK_IDENTIFIER, value="Auto", line=pos.ln, col=pos.col);
     return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=auto_tok, pos=pos));
 }
@@ -72,42 +72,42 @@ func is_name_token(token_type: Int) -> Bool {
            token_type == TOK_TYPE;
 }
 
-func synchronize(p: Parser) -> Void {
-    parser_advance(p);
+func synchronize(ref p: Parser) -> Void {
+    parser_advance(ref p);
     while (p.current_tok.type != TOK_EOF) {
         if (p.current_tok.type == TOK_SEMICOLON) {
-            parser_advance(p);
+            parser_advance(ref p);
             return;
         }
         let type: Int = p.current_tok.type;
         if (type == TOK_FUNC || type == TOK_LET || type == TOK_CONST || type == TOK_IF || type == TOK_WHILE || type == TOK_FOR || type == TOK_RETURN || type == TOK_CLASS || type == TOK_STRUCT || type == TOK_ENUM || type == TOK_ERROR) {
             return;
         }
-        parser_advance(p);
+        parser_advance(ref p);
     }
 }
 
-func parse_annotations(p: Parser) -> Vector(AnnotationNode) {
+func parse_annotations(ref p: Parser) -> Vector(AnnotationNode) {
     let anns: Vector(AnnotationNode) = [];
     while (p.current_tok.type == TOK_AT) {
         let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        parser_advance(p); // skip '@'
+        parser_advance(ref p); // skip '@'
         
         if (!is_name_token(p.current_tok.type)) {
             throw_invalid_syntax(start_pos, "Expected identifier after '@'.");
         }
         let name: String = p.current_tok.value;
-        parser_advance(p); // skip identifier
+        parser_advance(ref p); // skip identifier
         
         let args: Vector(ArgNode) = [];
         if (p.current_tok.type == TOK_LPAREN) {
-            parser_advance(p); // skip '('
-            args = parse_args(p);
+            parser_advance(ref p); // skip '('
+            args = parse_args(ref p);
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after annotation arguments.");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
         }
         
         anns.append(AnnotationNode(type=NODE_ANNOTATION, name=name, args=args, pos=start_pos));
@@ -115,7 +115,7 @@ func parse_annotations(p: Parser) -> Vector(AnnotationNode) {
     return anns;
 }
 
-func parse(p: Parser) -> NodeID {
+func parse(ref p: Parser) -> NodeID {
     let stmts: Vector(NodeID) = [];
 
     while (p.current_tok.type != TOK_EOF) {
@@ -123,31 +123,31 @@ func parse(p: Parser) -> NodeID {
 
         let anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
-            anns = parse_annotations(p);
+            anns = parse_annotations(ref p);
         }
 
         if (p.current_tok.type == TOK_FUNC) {
-            stmt = func_def(p, anns);
+            stmt = func_def(ref p, anns);
         } else if (p.current_tok.type == TOK_STRUCT) {
-            stmt = parse_struct_def(p, anns);
+            stmt = parse_struct_def(ref p, anns);
         } else if (p.current_tok.type == TOK_CLASS) {
-            stmt = parse_class_def(p, anns);
+            stmt = parse_class_def(ref p, anns);
         } else if (p.current_tok.type == TOK_ENUM) {
-            stmt = parse_enum_def(p, anns, false);
+            stmt = parse_enum_def(ref p, anns, false);
         } else if (p.current_tok.type == TOK_ERROR) {
-            stmt = parse_enum_def(p, anns, true);
+            stmt = parse_enum_def(ref p, anns, true);
         } else if (p.current_tok.type == TOK_INTERFACE) {
-            stmt = parse_interface_def(p, anns);
+            stmt = parse_interface_def(ref p, anns);
         } else if (p.current_tok.type == TOK_IMPORT) { 
             if (anns.length() > 0) { 
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Annotations not allowed on imports."); 
             }
-            stmt = parse_import(p);
+            stmt = parse_import(ref p);
         } else if (p.current_tok.type == TOK_LET || p.current_tok.type == TOK_CONST) {
-            stmt = var_decl(p, anns, true);
+            stmt = var_decl(ref p, anns, true);
             if (p.current_tok.type == TOK_SEMICOLON) {
-                parser_advance(p);
+                parser_advance(ref p);
             } else {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after global variable declaration.");
@@ -157,17 +157,17 @@ func parse(p: Parser) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Type declarations cannot have annotations.");
             }
-            stmt = parse_type_decl(p);
+            stmt = parse_type_decl(ref p);
         } else if (p.current_tok.type == TOK_EXTERN) {
             if (anns.length() > 0) { 
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Annotations not allowed on extern block."); 
             }
-            stmt = parse_extern(p);
+            stmt = parse_extern(ref p);
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Top level code must be function definitions or global variables. Found: " + WhitelangTokens.get_token_name(p.current_tok.type));
-            synchronize(p);
+            synchronize(ref p);
             continue;
         }
         if (has_node(stmt)) {
@@ -178,27 +178,27 @@ func parse(p: Parser) -> NodeID {
     return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
-func parse_type_decl(p: Parser) -> NodeID {
+func parse_type_decl(ref p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip type
+    parser_advance(ref p); // skip type
 
     let name_tok: Token = Token();
     let target_type: NodeID = NO_NODE;
     let is_alias: Bool = false;
 
-    if (p.current_tok.type == TOK_IDENTIFIER && peek_type(p) == TOK_ASSIGN) {
+    if (p.current_tok.type == TOK_IDENTIFIER && peek_type(ref p) == TOK_ASSIGN) {
         name_tok = p.current_tok;
-        parser_advance(p);
-        parser_advance(p); // skip =
-        target_type = parse_return_type(p);
+        parser_advance(ref p);
+        parser_advance(ref p); // skip =
+        target_type = parse_return_type(ref p);
     } else {
-        target_type = parse_return_type(p);
+        target_type = parse_return_type(ref p);
         if (p.current_tok.type != TOK_AS) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected 'as' in type alias declaration.");
             return NO_NODE;
         }
-        parser_advance(p);
+        parser_advance(ref p);
         if (p.current_tok.type != TOK_IDENTIFIER) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected alias name after 'as'.");
@@ -206,34 +206,34 @@ func parse_type_decl(p: Parser) -> NodeID {
         }
         name_tok = p.current_tok;
         is_alias = true;
-        parser_advance(p);
+        parser_advance(ref p);
     }
 
     if (p.current_tok.type != TOK_SEMICOLON) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ';' after type declaration.");
     } else {
-        parser_advance(p);
+        parser_advance(ref p);
     }
 
     return add_type_decl_node(p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos));
 }
 
-func parser_advance(p: Parser) -> Void {
-    p.current_tok = WhitelangLexer.get_next_token(p.lexer);
+func parser_advance(ref p: Parser) -> Void {
+    p.current_tok = WhitelangLexer.get_next_token(ref p.lexer);
 }
 
-func is_generic_close(p: Parser, open_type: Int) -> Bool {
+func is_generic_close(ref p: Parser, open_type: Int) -> Bool {
     if (open_type == TOK_LT) {
         return p.current_tok.type == TOK_GT || p.current_tok.type == TOK_RSHIFT;
     }
     return p.current_tok.type == TOK_RPAREN;
 }
 
-func consume_generic_close(p: Parser, open_type: Int, pos: Position) -> Void {
+func consume_generic_close(ref p: Parser, open_type: Int, pos: Position) -> Void {
     if (open_type == TOK_LT) {
         if (p.current_tok.type == TOK_GT) {
-            parser_advance(p);
+            parser_advance(ref p);
             return;
         }
         if (p.current_tok.type == TOK_RSHIFT) {
@@ -247,45 +247,45 @@ func consume_generic_close(p: Parser, open_type: Int, pos: Position) -> Void {
     let close_type: Int = TOK_RPAREN;
     let close_text: String = ")";
     if (p.current_tok.type == close_type) {
-        parser_advance(p);
+        parser_advance(ref p);
         return;
     }
 
     throw_invalid_syntax(pos, "Expected '" + close_text + "' after type arguments.");
 }
 
-func parse_type_args(p: Parser) -> Vector(NodeID) {
+func parse_type_args(ref p: Parser) -> Vector(NodeID) {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let open_type: Int = p.current_tok.type;
     let args: Vector(NodeID) = [];
-    parser_advance(p);
+    parser_advance(ref p);
 
-    if (is_generic_close(p, open_type)) {
+    if (is_generic_close(ref p, open_type)) {
         throw_invalid_syntax(pos, "Generic argument lists cannot be empty.");
-        consume_generic_close(p, open_type, pos);
+        consume_generic_close(ref p, open_type, pos);
         return args;
     }
     while true {
-        args.append(parse_return_type(p));
+        args.append(parse_return_type(ref p));
         if (p.current_tok.type != TOK_COMMA) {
             break;
         }
-        parser_advance(p);
+        parser_advance(ref p);
     }
-    consume_generic_close(p, open_type, pos);
+    consume_generic_close(ref p, open_type, pos);
     return args;
 }
 
-func parse_type_params(p: Parser) -> Vector(GenericParamNode) {
+func parse_type_params(ref p: Parser) -> Vector(GenericParamNode) {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let open_type: Int = p.current_tok.type;
     let params: Vector(GenericParamNode) = [];
     let names: Dict(String, String) = Dict();
-    parser_advance(p);
+    parser_advance(ref p);
 
-    if (is_generic_close(p, open_type)) {
+    if (is_generic_close(ref p, open_type)) {
         throw_invalid_syntax(pos, "Generic parameter lists cannot be empty.");
-        consume_generic_close(p, open_type, pos);
+        consume_generic_close(ref p, open_type, pos);
         return params;
     }
 
@@ -303,29 +303,29 @@ func parse_type_params(p: Parser) -> Vector(GenericParamNode) {
         } else {
             names.put(name_tok.value, name_tok.value);
         }
-        parser_advance(p);
+        parser_advance(ref p);
 
         let constraints: Vector(NodeID) = [];
         if (p.current_tok.type == TOK_COLON) {
-            parser_advance(p);
-            constraints.append(parse_return_type(p));
+            parser_advance(ref p);
+            constraints.append(parse_return_type(ref p));
             while (p.current_tok.type == TOK_PLUS) {
-                parser_advance(p);
-                constraints.append(parse_return_type(p));
+                parser_advance(ref p);
+                constraints.append(parse_return_type(ref p));
             }
         }
         params.append(GenericParamNode(name_tok=name_tok, constraints=constraints, pos=param_pos));
         if (p.current_tok.type != TOK_COMMA) {
             break;
         }
-        parser_advance(p);
+        parser_advance(ref p);
     }
 
-    consume_generic_close(p, open_type, pos);
+    consume_generic_close(ref p, open_type, pos);
     return params;
 }
 
-func may_generic_call(p: Parser) -> Bool {
+func may_generic_call(ref p: Parser) -> Bool {
     if (p.current_tok.type != TOK_LT) { return false; }
     let lexer: WhitelangLexer.Lexer = p.lexer;
     let save_idx: Int = lexer.pos.idx;
@@ -338,18 +338,18 @@ func may_generic_call(p: Parser) -> Bool {
     lexer.collect_trivia = false;
 
     let depth: Int = 1;
-    let next: Token = WhitelangLexer.get_next_token(lexer);
+    let next: Token = WhitelangLexer.get_next_token(ref lexer);
     while (next.type != TOK_EOF && depth > 0) {
         if (next.type == TOK_LT) { depth++; }
         else if (next.type == TOK_GT) { depth--; }
         else if (next.type == TOK_RSHIFT) { depth -= 2; }
         if (depth > 0) {
-            next = WhitelangLexer.get_next_token(lexer);
+            next = WhitelangLexer.get_next_token(ref lexer);
         }
     }
 
     let follows_call: Bool = false;
-    if (depth == 0) { follows_call = WhitelangLexer.get_next_token(lexer).type == TOK_LPAREN; }
+    if (depth == 0) { follows_call = WhitelangLexer.get_next_token(ref lexer).type == TOK_LPAREN; }
 
     lexer.pos.idx = save_idx;
     lexer.pos.ln = save_ln;
@@ -361,7 +361,7 @@ func may_generic_call(p: Parser) -> Bool {
     return follows_call;
 }
 
-func may_generic_value(p: Parser) -> Bool {
+func may_generic_value(ref p: Parser) -> Bool {
     if (p.current_tok.type != TOK_LT) { return false; }
     let lexer: WhitelangLexer.Lexer = p.lexer;
     let save_idx: Int = lexer.pos.idx;
@@ -374,17 +374,17 @@ func may_generic_value(p: Parser) -> Bool {
     lexer.collect_trivia = false;
 
     let depth: Int = 1;
-    let next: Token = WhitelangLexer.get_next_token(lexer);
+    let next: Token = WhitelangLexer.get_next_token(ref lexer);
     while (next.type != TOK_EOF && depth > 0) {
         if (next.type == TOK_LT) { depth++; }
         else if (next.type == TOK_GT) { depth--; }
         else if (next.type == TOK_RSHIFT) { depth -= 2; }
-        if (depth > 0) { next = WhitelangLexer.get_next_token(lexer); }
+        if (depth > 0) { next = WhitelangLexer.get_next_token(ref lexer); }
     }
 
     let follows_value: Bool = false;
     if (depth == 0) {
-        let after: Int = WhitelangLexer.get_next_token(lexer).type;
+        let after: Int = WhitelangLexer.get_next_token(ref lexer).type;
         follows_value = after == TOK_SEMICOLON || after == TOK_COMMA || after == TOK_RPAREN || after == TOK_RBRACKET;
     }
 
@@ -398,7 +398,7 @@ func may_generic_value(p: Parser) -> Bool {
     return follows_value;
 }
 
-func peek_type(p: Parser) -> Int {
+func peek_type(ref p: Parser) -> Int {
     let lexer: WhitelangLexer.Lexer = p.lexer;
 
     // save current lexer
@@ -409,7 +409,7 @@ func peek_type(p: Parser) -> Int {
     let save_width: Int = lexer.current_width;
     let save_valid: Bool = lexer.current_valid;
 
-    let tok_type: Int = WhitelangLexer.get_next_token(lexer).type;
+    let tok_type: Int = WhitelangLexer.get_next_token(ref lexer).type;
 
     // load lexer
     lexer.pos.idx = save_idx;
@@ -422,7 +422,7 @@ func peek_type(p: Parser) -> Int {
     return tok_type;
 }
 
-func parse_decimal_int(p: Parser, tok: Token) -> Int {
+func parse_decimal_int(ref p: Parser, tok: Token) -> Int {
     let s: String = tok.value;
     let res: Int = 0;
     let i: Int = 0;
@@ -439,22 +439,22 @@ func parse_decimal_int(p: Parser, tok: Token) -> Int {
     return res;
 }
 
-func parse_type_base(p: Parser) -> NodeID {
+func parse_type_base(ref p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    if (!parser_enter(p, pos)) { return type_nesting_fallback(p, pos); }
-    let result: NodeID = parse_type_base_inner(p);
-    parser_leave(p);
+    if (!parser_enter(ref p, pos)) { return type_nesting_fallback(ref p, pos); }
+    let result: NodeID = parse_type_base_inner(ref p);
+    parser_leave(ref p);
     return result;
 }
 
-func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
-    parser_advance(p);
+func parse_callable_type(ref p: Parser, tok: Token, is_method: Bool) -> NodeID {
+    parser_advance(ref p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     if (p.current_tok.type != TOK_LPAREN) {
         return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
     }
-    parser_advance(p);
+    parser_advance(ref p);
 
     let signature_types: Vector(NodeID) = [];
     let signature_modes: Vector(Int) = [];
@@ -465,16 +465,16 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
             let pass_mode: Int = PARAM_VALUE;
             if (p.current_tok.type == TOK_REF) {
                 pass_mode = PARAM_REF;
-                parser_advance(p);
+                parser_advance(ref p);
             }
             let label: String = "";
-            if (is_name_token(p.current_tok.type) && peek_type(p) == TOK_COLON) {
+            if (is_name_token(p.current_tok.type) && peek_type(ref p) == TOK_COLON) {
                 label = p.current_tok.value;
-                parser_advance(p);
-                parser_advance(p);
+                parser_advance(ref p);
+                parser_advance(ref p);
             }
 
-            signature_types.append(parse_return_type(p));
+            signature_types.append(parse_return_type(ref p));
             signature_modes.append(pass_mode);
             signature_names.append(label);
             if (p.current_tok.type == TOK_ELLIPSIS) {
@@ -491,11 +491,11 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
                     throw_invalid_syntax(err_pos, "The variadic parameter in a callable type cannot have a label.");
                 }
                 variadic_param = signature_types.length();
-                parser_advance(p);
+                parser_advance(ref p);
             }
 
             if (p.current_tok.type != TOK_COMMA) { break; }
-            parser_advance(p);
+            parser_advance(ref p);
         }
     }
 
@@ -521,15 +521,15 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after " + kind + " signature.");
     }
-    parser_advance(p);
+    parser_advance(ref p);
 
     let return_type: NodeID = NO_NODE;
     let arg_types: Vector(NodeID) = [];
     let arg_modes: Vector(Int) = [];
     let arg_names: Vector(String) = [];
     if (p.current_tok.type == TOK_TYPE_ARROW) {
-        parser_advance(p);
-        return_type = parse_return_type(p);
+        parser_advance(ref p);
+        return_type = parse_return_type(ref p);
         let i: Int = 0;
         while (i < signature_types.length()) {
             arg_types.append(signature_types[i]);
@@ -541,7 +541,7 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if (signature_types.length() == 0) {
             throw_invalid_syntax(err_pos, kind + "() requires a return type after '->'.");
-            return_type = inferred_type(p, pos);
+            return_type = inferred_type(ref p, pos);
         } else {
             throw_invalid_syntax(err_pos, "Legacy " + kind + " signatures are no longer supported; write '" + kind + "(Args) -> Return'.");
             return_type = signature_types[signature_types.length() - 1];
@@ -563,25 +563,25 @@ func parse_callable_type(p: Parser, tok: Token, is_method: Bool) -> NodeID {
     return add_function_type_node(p.arena, function_type);
 }
 
-func parse_type_base_inner(p: Parser) -> NodeID {
+func parse_type_base_inner(ref p: Parser) -> NodeID {
     // parse a pointer in type position
     if (p.current_tok.type == TOK_PTR) {
         let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        parser_advance(p); // skip ptr
+        parser_advance(ref p); // skip ptr
 
         let level: Int = 1;
         if (p.current_tok.type == TOK_MUL) {
-            parser_advance(p);
+            parser_advance(ref p);
             if (p.current_tok.type == TOK_INT) {
-                level = parse_decimal_int(p, p.current_tok);
-                parser_advance(p);
+                level = parse_decimal_int(ref p, p.current_tok);
+                parser_advance(ref p);
             } else {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected pointer level.");
             }
         }
 
-        let base: NodeID = parse_type_base(p);
+        let base: NodeID = parse_type_base(ref p);
         return add_pointer_type_node(p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=start_pos));
     }
 
@@ -592,66 +592,66 @@ func parse_type_base_inner(p: Parser) -> NodeID {
 
     if (tt == TOK_T_INT || tt == TOK_T_FLOAT || tt == TOK_T_STRING || tt == TOK_T_BOOL || tt == TOK_T_VOID || tt == TOK_T_CHAR || is_name_token(tt)) {
         if (tok.value == "Function") {
-            type_node = parse_callable_type(p, tok, false);
+            type_node = parse_callable_type(ref p, tok, false);
         }
         else if (tok.value == "Method") {
-            type_node = parse_callable_type(p, tok, true);
+            type_node = parse_callable_type(ref p, tok, true);
         }
         else if (tok.value == "Vector") {
-            parser_advance(p); // skip Vector
+            parser_advance(ref p); // skip Vector
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after Vector.");
             }
-            parser_advance(p); // skip (
+            parser_advance(ref p); // skip (
             
-            let elem_type: NodeID = parse_return_type(p);
+            let elem_type: NodeID = parse_return_type(ref p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after Vector type.");
             }
-            parser_advance(p); // skip )
+            parser_advance(ref p); // skip )
             
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             type_node = add_vector_type_node(p.arena, VectorTypeNode(type=NODE_VECTOR_TYPE, element_type=elem_type, pos=pos));
         }
         else if (tok.value == "Array") {
-            parser_advance(p); // skip Array
+            parser_advance(ref p); // skip Array
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after Array.");
             }
-            parser_advance(p); // skip (
+            parser_advance(ref p); // skip (
             
-            let elem_type: NodeID = parse_return_type(p);
+            let elem_type: NodeID = parse_return_type(ref p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after Array type.");
             }
-            parser_advance(p); // skip )
+            parser_advance(ref p); // skip )
             
             type_node = add_slice_type_node(p.arena, SliceTypeNode(type=NODE_SLICE_TYPE, element_type=elem_type, pos=start_pos));
         }
         else {
-            parser_advance(p);
+            parser_advance(ref p);
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             type_node = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
 
             while (p.current_tok.type == TOK_DOT) {
-                parser_advance(p); // skip '.'
+                parser_advance(ref p); // skip '.'
                 if (!is_name_token(p.current_tok.type)) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     throw_invalid_syntax(err_pos, "Expected type name after '.'.");
                 }
                 let type_name: String = p.current_tok.value;
-                parser_advance(p); // skip type_name
+                parser_advance(ref p); // skip type_name
                 type_node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos));
             }
         }
         if (p.current_tok.type == TOK_LPAREN) {
-            type_node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(p), pos=start_pos));
+            type_node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(ref p), pos=start_pos));
         }
         return type_node;
     }
@@ -661,28 +661,28 @@ func parse_type_base_inner(p: Parser) -> NodeID {
     return NO_NODE;
 }
 
-func parse_return_type(p: Parser) -> NodeID {
-    let type_node: NodeID = parse_type_base(p);
+func parse_return_type(ref p: Parser) -> NodeID {
+    let type_node: NodeID = parse_type_base(ref p);
     if (!has_node(type_node)) { return NO_NODE; }
 
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let sizes: Vector(Token) = [];
 
     while (p.current_tok.type == TOK_LBRACKET) {
-        parser_advance(p); // skip '['
+        parser_advance(ref p); // skip '['
 
         if (p.current_tok.type != TOK_INT) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected integer literal for array size.");
         }
         sizes.append(p.current_tok);
-        parser_advance(p);
+        parser_advance(ref p);
         
         if (p.current_tok.type != TOK_RBRACKET) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ']' after array size.");
         }
-        parser_advance(p); // skip ']'
+        parser_advance(ref p); // skip ']'
     }
 
     let s_len: Int = 0;
@@ -701,7 +701,7 @@ func parse_return_type(p: Parser) -> NodeID {
 
     if (p.current_tok.type == TOK_QUESTION) {
         let q_tok: Token = p.current_tok;
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=q_tok.line, col=q_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         type_node = add_fallible_type_node(p.arena, FallibleTypeNode(
             type=NODE_FALLIBLE_TYPE,
@@ -713,7 +713,7 @@ func parse_return_type(p: Parser) -> NodeID {
     return type_node;
 }
 
-func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
+func parse_typed_name(ref p: Parser, allow_inference: Bool) -> TypedIdent {
     // parse a declared name and its optional pointer prefix
     let is_ptr: Bool = false;
     let level: Int = 0;
@@ -722,13 +722,13 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
     if (p.current_tok.type == TOK_PTR) {
         is_ptr = true;
         level = 1;
-        parser_advance(p); // skip ptr
+        parser_advance(ref p); // skip ptr
 
         if (p.current_tok.type == TOK_MUL) {
-            parser_advance(p);
+            parser_advance(ref p);
             if (p.current_tok.type == TOK_INT) {
-                level = parse_decimal_int(p, p.current_tok);
-                parser_advance(p);
+                level = parse_decimal_int(ref p, p.current_tok);
+                parser_advance(ref p);
             } else {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected pointer level.");
@@ -741,14 +741,14 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
         throw_invalid_syntax(err_pos, "Expected identifier.");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     let separator: Int = p.current_tok.type;
     let type_node: NodeID = NO_NODE;
     if (separator == TOK_COLON) {
-        parser_advance(p);
+        parser_advance(ref p);
         let type_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        type_node = parse_return_type(p);
+        type_node = parse_return_type(ref p);
         if (!is_ptr && has_node(type_node)) {
             let declared_type: Int = node_tag(type_node);
             if (declared_type == NODE_PTR_TYPE) {
@@ -762,10 +762,10 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
         } else {
             throw_invalid_syntax(err_pos, "Type annotations use ':'; write '" + name_tok.value + ": Type'.");
         }
-        parser_advance(p);
-        type_node = parse_return_type(p);
+        parser_advance(ref p);
+        type_node = parse_return_type(ref p);
     } else if (allow_inference && !is_ptr && separator == TOK_ASSIGN) {
-        type_node = inferred_type(p, start_pos);
+        type_node = inferred_type(ref p, start_pos);
     } else {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if allow_inference {
@@ -773,7 +773,7 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
         } else {
             throw_invalid_syntax(err_pos, "Expected ':' after '" + name_tok.value + "'.");
         }
-        type_node = inferred_type(p, start_pos);
+        type_node = inferred_type(ref p, start_pos);
     }
 
     if is_ptr {
@@ -783,58 +783,58 @@ func parse_typed_name(p: Parser, allow_inference: Bool) -> TypedIdent {
     return TypedIdent(name_tok=name_tok, type_node=type_node);
 }
 
-func atom(p: Parser) -> NodeID {
+func atom(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
 
     // Integer literals
     if (tok.type == TOK_INT) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_int_node(p.arena, IntNode(type=NODE_INT, tok=tok, pos=pos));
     }
 
     // Floating-point literals
     if (tok.type == TOK_FLOAT) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_float_node(p.arena, FloatNode(type=NODE_FLOAT, tok=tok, pos=pos));
     }
 
     // Boolean
     if (tok.type == TOK_TRUE) { 
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=1, pos=pos)); 
     }
     if (tok.type == TOK_FALSE) { 
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=0, pos=pos)); 
     }
 
     // Char
     if (tok.type == TOK_CHAR_LIT) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_char_node(p.arena, CharNode(type=NODE_CHAR, tok=tok, pos=pos));
     }
 
     // String
     if (tok.type == TOK_STR_LIT) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_string_node(p.arena, StringNode(type=NODE_STRING, tok=tok, pos=pos));
     }
 
     // nullptr
     if (tok.type == TOK_NULLPTR) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_nullptr_node(p.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
     }
 
     if (tok.type == TOK_NULL) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_null_node(p.arena, NullNode(type=NODE_NULL, pos=pos));
     }
@@ -845,24 +845,24 @@ func atom(p: Parser) -> NodeID {
         tt == TOK_T_INT || tt == TOK_T_FLOAT || tt == TOK_T_STRING || 
         tt == TOK_T_BOOL || tt == TOK_T_CHAR || tt == TOK_T_VOID) {
 
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         if ((tok.value == "size_of" || tok.value == "align_of") && p.current_tok.type == TOK_LPAREN) {
-            parser_advance(p);
+            parser_advance(ref p);
             if (p.current_tok.type == TOK_RPAREN) {
                 throw_type_error(pos, "Expected 1 arguments, got 0");
-                parser_advance(p);
+                parser_advance(ref p);
                 let fallback_tok: Token = Token(type=TOK_T_INT, value="Int", line=tok.line, col=tok.col);
                 let fallback_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallback_tok, pos=pos));
                 return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=fallback_type, is_align=tok.value == "align_of", pos=pos));
             }
-            let type_node: NodeID = parse_return_type(p);
+            let type_node: NodeID = parse_return_type(ref p);
             let arg_count: Int = 1;
             let count_pos: Position = pos;
             while (p.current_tok.type == TOK_COMMA) {
                 if (arg_count == 1) { count_pos = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn); }
-                parser_advance(p);
-                parse_return_type(p);
+                parser_advance(ref p);
+                parse_return_type(ref p);
                 arg_count += 1;
             }
             if (arg_count != 1) { throw_type_error(count_pos, "Expected 1 arguments, got " + arg_count); }
@@ -870,7 +870,7 @@ func atom(p: Parser) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after type in '" + tok.value + "'.");
             } else {
-                parser_advance(p);
+                parser_advance(ref p);
             }
             return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=type_node, is_align=tok.value == "align_of", pos=pos));
         }
@@ -878,60 +878,60 @@ func atom(p: Parser) -> NodeID {
     }
 
     if (tok.type == TOK_THIS) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let this_tok: Token = Token(type=TOK_IDENTIFIER, value="this", line=tok.line, col=tok.col);
         return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=this_tok, pos=pos));
     }
 
     if (tok.type == TOK_SELF) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let self_tok: Token = Token(type=TOK_IDENTIFIER, value="self", line=tok.line, col=tok.col);
         return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=self_tok, pos=pos));
     }
 
     if (tok.type == TOK_SUPER) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         return add_super_node(p.arena, SuperNode(type=NODE_SUPER, pos=pos));
     }
 
     // Parenthesized expressions
     if (tok.type == TOK_LPAREN) {
-        parser_advance(p);
-        let node: NodeID = expression(p);
+        parser_advance(ref p);
+        let node: NodeID = expression(ref p);
         
         if (p.current_tok.type != TOK_RPAREN) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ')'. ");
         }
-        parser_advance(p);
+        parser_advance(ref p);
         return node;
     }
 
     if (tok.type == TOK_LBRACE) {
-        parser_advance(p); // skip '{'
+        parser_advance(ref p); // skip '{'
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         
         let pairs: Vector(MapPairNode) = [];
 
         if (p.current_tok.type != TOK_RBRACE) {
             while (true) {
-                let key_node: NodeID = expression(p);
+                let key_node: NodeID = expression(ref p);
                 
                 if (p.current_tok.type != TOK_COLON) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     throw_invalid_syntax(err_pos, "Expected ':' after dictionary key.");
                 }
-                parser_advance(p); // skip ':'
+                parser_advance(ref p); // skip ':'
                 
-                let val_node: NodeID = expression(p);
+                let val_node: NodeID = expression(ref p);
                 
                 pairs.append(MapPairNode(key=key_node, value=val_node));
                 
                 if (p.current_tok.type == TOK_COMMA) {
-                    parser_advance(p); // skip ','
+                    parser_advance(ref p); // skip ','
                     if (p.current_tok.type == TOK_RBRACE) {
                         break;
                     }
@@ -945,13 +945,13 @@ func atom(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected '}' to close dictionary literal.");
         }
-        parser_advance(p); // skip '}'
+        parser_advance(ref p); // skip '}'
         
         return add_map_lit_node(p.arena, MapLitNode(type=NODE_MAP_LIT, pairs=pairs, pos=pos));
     }
 
     if (tok.type == TOK_LBRACKET) {
-        parser_advance(p); // skip [
+        parser_advance(ref p); // skip [
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         
         let elements: Vector(ArgNode) = [];
@@ -959,12 +959,12 @@ func atom(p: Parser) -> NodeID {
         
         if (p.current_tok.type != TOK_RBRACKET) {
             while (true) {
-                let val: NodeID = expression(p);
+                let val: NodeID = expression(ref p);
                 elements.append(ArgNode(val=val, name=null));
                 count += 1;
                 
                 if (p.current_tok.type == TOK_COMMA) {
-                    parser_advance(p);
+                    parser_advance(ref p);
                 } else {
                     break;
                 }
@@ -975,32 +975,32 @@ func atom(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ']' after vector elements.");
         }
-        parser_advance(p); // skip ]
+        parser_advance(ref p); // skip ]
         
         return add_vector_lit_node(p.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=elements, count=count, pos=pos));
     }
 
     let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     throw_invalid_syntax(err_pos, "Unexpected token '" + WhitelangTokens.get_token_name(tok.type) + "'");
-    if (p.current_tok.type != TOK_EOF) { parser_advance(p); }
+    if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=tok.line, col=tok.col);
     return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos));
 }
 
-func parse_args(p: Parser) -> Vector(ArgNode) {
+func parse_args(ref p: Parser) -> Vector(ArgNode) {
     if (p.current_tok.type == TOK_RPAREN) { return null; }
 
     let args: Vector(ArgNode) = [];
     
     while (p.current_tok.type != TOK_RPAREN && p.current_tok.type != TOK_EOF) {
         let arg_name: String = null;
-        if (is_name_token(p.current_tok.type) && peek_type(p) == TOK_ASSIGN) {
+        if (is_name_token(p.current_tok.type) && peek_type(ref p) == TOK_ASSIGN) {
             arg_name = p.current_tok.value;
-            parser_advance(p);
-            parser_advance(p);
+            parser_advance(ref p);
+            parser_advance(ref p);
         }
         
-        let val: NodeID = expression(p);
+        let val: NodeID = expression(ref p);
         let is_spread: Bool = false;
         if (p.current_tok.type == TOK_ELLIPSIS) {
             if (arg_name is !null) {
@@ -1008,38 +1008,38 @@ func parse_args(p: Parser) -> Vector(ArgNode) {
                 throw_invalid_syntax(err_pos, "A spread argument cannot be named.");
             }
             is_spread = true;
-            parser_advance(p);
+            parser_advance(ref p);
         }
         args.append(ArgNode(val=val, name=arg_name, is_spread=is_spread));
 
-        if (p.current_tok.type == TOK_COMMA) { parser_advance(p); }
+        if (p.current_tok.type == TOK_COMMA) { parser_advance(ref p); }
         else { break; }
     }
     return args;
 }
 
-func postfix_expr(p: Parser) -> NodeID {
-    let node: NodeID = atom(p);
+func postfix_expr(ref p: Parser) -> NodeID {
+    let node: NodeID = atom(ref p);
 
     while (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC || p.current_tok.type == TOK_LPAREN ||
            p.current_tok.type == TOK_DOT || p.current_tok.type == TOK_LBRACKET || p.current_tok.type == TOK_QUESTION ||
-           (p.current_tok.type == TOK_LT && (may_generic_call(p) || may_generic_value(p)))) {
+           (p.current_tok.type == TOK_LT && (may_generic_call(ref p) || may_generic_value(ref p)))) {
         // ++ / --
         if (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC) {
             let op_tok: Token = p.current_tok;
-            parser_advance(p);
+            parser_advance(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             node = add_postfix_node(p.arena, PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos));
         }
 
-        else if (p.current_tok.type == TOK_LT && (may_generic_call(p) || may_generic_value(p))) {
+        else if (p.current_tok.type == TOK_LT && (may_generic_call(ref p) || may_generic_value(ref p))) {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(p), pos=pos));
+            node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(ref p), pos=pos));
         }
 
         else if (p.current_tok.type == TOK_QUESTION) {
             let op_tok: Token = p.current_tok;
-            parser_advance(p);
+            parser_advance(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             let target_base: Int = node_tag(node);
             if (target_base == NODE_CALL) {
@@ -1052,15 +1052,15 @@ func postfix_expr(p: Parser) -> NodeID {
 
         else if (p.current_tok.type == TOK_LPAREN) {
             let paren_tok: Token = p.current_tok; // '('
-            parser_advance(p); // skip '('
+            parser_advance(ref p); // skip '('
             
-            let args: Vector(ArgNode) = parse_args(p);
+            let args: Vector(ArgNode) = parse_args(ref p);
             
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after arguments. ");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
 
             let pos: Position = Position(idx=0, ln=paren_tok.line, col=paren_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
@@ -1075,44 +1075,44 @@ func postfix_expr(p: Parser) -> NodeID {
         }
 
         else if (p.current_tok.type == TOK_DOT) {
-            parser_advance(p); // skip .
+            parser_advance(ref p); // skip .
             if (!is_name_token(p.current_tok.type)) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected field name after '.'.");
             }
             let field_name: String = p.current_tok.value;
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p);
+            parser_advance(ref p);
     
             node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=node, field_name=field_name, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LBRACKET) {
             let bracket_tok: Token = p.current_tok;
-            parser_advance(p); // skip [
+            parser_advance(ref p); // skip [
 
             if (p.current_tok.type == TOK_COLON) {
-                parser_advance(p); // skip ':'
+                parser_advance(ref p); // skip ':'
                 if (p.current_tok.type != TOK_RBRACKET) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     throw_invalid_syntax(err_pos, "Expected ']' after ':' in complete slice. Partial slice bounds are not supported. ");
-                    expression(p);
+                    expression(ref p);
                 }
-                if (p.current_tok.type == TOK_RBRACKET) { parser_advance(p); }
+                if (p.current_tok.type == TOK_RBRACKET) { parser_advance(ref p); }
                 let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=NO_NODE, end_idx=NO_NODE, pos=pos));
             }
             else {
-                let first_idx: NodeID = expression(p);
+                let first_idx: NodeID = expression(ref p);
                 if (p.current_tok.type == TOK_COLON) {
-                    parser_advance(p); // skip ':'
-                    let second_idx: NodeID = expression(p);
+                    parser_advance(ref p); // skip ':'
+                    let second_idx: NodeID = expression(ref p);
 
                     if (p.current_tok.type != TOK_RBRACKET) {
                         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                         throw_invalid_syntax(err_pos, "Expected ']' after slice end index.");
                     }
-                    parser_advance(p); // skip ']'
+                    parser_advance(ref p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=first_idx, end_idx=second_idx, pos=pos));
@@ -1122,7 +1122,7 @@ func postfix_expr(p: Parser) -> NodeID {
                         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                         throw_invalid_syntax(err_pos, "Expected ']' after index.");
                     }
-                    parser_advance(p); // skip ']'
+                    parser_advance(ref p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     node = add_index_access_node(p.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=node, index_node=first_idx, pos=pos));
@@ -1133,83 +1133,83 @@ func postfix_expr(p: Parser) -> NodeID {
     return node;
 }
 
-func unary_expr(p: Parser) -> NodeID {
+func unary_expr(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
 
     // ref x
     if (tok.type == TOK_REF) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: NodeID = unary_expr(p);
-        parser_leave(p);
+        if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
+        let node: NodeID = unary_expr(ref p);
+        parser_leave(ref p);
         return add_ref_node(p.arena, RefNode(type=NODE_REF, node=node, pos=pos));
     }
     
     // deref x or deref*N x
     if (tok.type == TOK_DEREF) {
-        parser_advance(p);
+        parser_advance(ref p);
         let level: Int = 1;
         if (p.current_tok.type == TOK_MUL) {
-            parser_advance(p);
+            parser_advance(ref p);
             if (p.current_tok.type == TOK_INT) {
-                level = parse_decimal_int(p, p.current_tok);
-                parser_advance(p);
+                level = parse_decimal_int(ref p, p.current_tok);
+                parser_advance(ref p);
             } else {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected dereference level.");
             }
         }
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: NodeID = unary_expr(p);
-        parser_leave(p);
+        if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
+        let node: NodeID = unary_expr(ref p);
+        parser_leave(ref p);
         return add_deref_node(p.arena, DerefNode(type=NODE_DEREF, node=node, level=level, pos=pos));
     }
     
     // -5, +3.14, !b, ~c
     if (tok.type == TOK_PLUS || tok.type == TOK_SUB || tok.type == TOK_NOT || tok.type == TOK_BIT_NOT) {
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let node: NodeID = unary_expr(p); // recursive
-        parser_leave(p);
+        if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
+        let node: NodeID = unary_expr(ref p); // recursive
+        parser_leave(ref p);
         return add_unary_node(p.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=tok, node=node, pos=pos));
     }
     
-    return power(p);
+    return power(ref p);
 }
 
-func power(p: Parser) -> NodeID {
-    let left: NodeID = postfix_expr(p);
+func power(ref p: Parser) -> NodeID {
+    let left: NodeID = postfix_expr(ref p);
 
     if (p.current_tok.type == TOK_POW) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
+        parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-        let right: NodeID = factor(p);
-        parser_leave(p);
+        if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
+        let right: NodeID = factor(ref p);
+        parser_leave(ref p);
         return add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
 }
 
-func shift_expr(p: Parser) -> NodeID {
-    let left: NodeID = arith_expr(p);
+func shift_expr(ref p: Parser) -> NodeID {
+    let left: NodeID = arith_expr(ref p);
     while (p.current_tok.type == TOK_LSHIFT || p.current_tok.type == TOK_RSHIFT) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = arith_expr(p);
+        parser_advance(ref p);
+        let right: NodeID = arith_expr(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func comp_expr(p: Parser) -> NodeID {
-    let left: NodeID = shift_expr(p);
+func comp_expr(ref p: Parser) -> NodeID {
+    let left: NodeID = shift_expr(ref p);
 
     while (p.current_tok.type == TOK_EE  || p.current_tok.type == TOK_NE  || 
            p.current_tok.type == TOK_LT  || p.current_tok.type == TOK_GT  ||
@@ -1219,24 +1219,24 @@ func comp_expr(p: Parser) -> NodeID {
         let node_type: Int = NODE_BINOP;
 
         if (op_tok.type == TOK_IS) {
-            parser_advance(p); // skip 'is'
+            parser_advance(ref p); // skip 'is'
             if (p.current_tok.type == TOK_NOT) {
                 let not_tok: Token = p.current_tok;
-                parser_advance(p); // skip '!'
+                parser_advance(ref p); // skip '!'
                 op_tok = Token(type=TOK_IS, value="is !", line=op_tok.line, col=op_tok.col);
                 node_type = NODE_IS_NOT;
             } else {
                 node_type = NODE_IS;
             }
             
-            let right: NodeID = shift_expr(p);
+            let right: NodeID = shift_expr(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             left = add_binop_node(p.arena, BinOpNode(type=node_type, left=left, op_tok=op_tok, right=right, pos=pos));
             
             // continue loop
         } else {
-            parser_advance(p);
-            let right: NodeID = shift_expr(p);
+            parser_advance(ref p);
+            let right: NodeID = shift_expr(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
         }
@@ -1244,75 +1244,75 @@ func comp_expr(p: Parser) -> NodeID {
     return left;
 }
 
-func bitwise_and(p: Parser) -> NodeID {
-    let left: NodeID = comp_expr(p);
+func bitwise_and(ref p: Parser) -> NodeID {
+    let left: NodeID = comp_expr(ref p);
     while (p.current_tok.type == TOK_BIT_AND) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = comp_expr(p);
+        parser_advance(ref p);
+        let right: NodeID = comp_expr(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func bitwise_xor(p: Parser) -> NodeID {
-    let left: NodeID = bitwise_and(p);
+func bitwise_xor(ref p: Parser) -> NodeID {
+    let left: NodeID = bitwise_and(ref p);
     while (p.current_tok.type == TOK_BIT_XOR) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = bitwise_and(p);
+        parser_advance(ref p);
+        let right: NodeID = bitwise_and(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func bitwise_or(p: Parser) -> NodeID {
-    let left: NodeID = bitwise_xor(p);
+func bitwise_or(ref p: Parser) -> NodeID {
+    let left: NodeID = bitwise_xor(ref p);
     while (p.current_tok.type == TOK_BIT_OR) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = bitwise_xor(p);
+        parser_advance(ref p);
+        let right: NodeID = bitwise_xor(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func logic_and(p: Parser) -> NodeID {
-    let left: NodeID = bitwise_or(p);
+func logic_and(ref p: Parser) -> NodeID {
+    let left: NodeID = bitwise_or(ref p);
     while (p.current_tok.type == TOK_AND) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = bitwise_or(p);
+        parser_advance(ref p);
+        let right: NodeID = bitwise_or(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func logic_or(p: Parser) -> NodeID {
-    let left: NodeID = logic_and(p);
+func logic_or(ref p: Parser) -> NodeID {
+    let left: NodeID = logic_and(ref p);
 
     while (p.current_tok.type == TOK_OR) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = logic_and(p);
+        parser_advance(ref p);
+        let right: NodeID = logic_and(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
 
-func assignment(p: Parser) -> NodeID {
-    let left: NodeID = logic_or(p);
+func assignment(ref p: Parser) -> NodeID {
+    let left: NodeID = logic_or(ref p);
 
     // =
     if (p.current_tok.type == TOK_ASSIGN) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p); // skip '='
-        let right: NodeID = assignment(p);
+        parser_advance(ref p); // skip '='
+        let right: NodeID = assignment(ref p);
         
         let base: Int = node_tag(left);
         if (base == NODE_VAR_ACCESS) {
@@ -1344,8 +1344,8 @@ func assignment(p: Parser) -> NodeID {
         op_type == TOK_BIT_XOR_ASSIGN || op_type == TOK_LSHIFT_ASSIGN || op_type == TOK_RSHIFT_ASSIGN) {
         
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = assignment(p);
+        parser_advance(ref p);
+        let right: NodeID = assignment(ref p);
 
         let bin_op_type: Int = 0;
         if (op_type == TOK_PLUS_ASSIGN) { bin_op_type = TOK_PLUS; }
@@ -1391,28 +1391,28 @@ func assignment(p: Parser) -> NodeID {
     return left;
 }
 
-func factor(p: Parser) -> NodeID {
-    return unary_expr(p);
+func factor(ref p: Parser) -> NodeID {
+    return unary_expr(ref p);
 }
 
-func expression(p: Parser) -> NodeID {
+func expression(ref p: Parser) -> NodeID {
 // precedence lives in the expression call chain, assignment is the lowest level
 
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    if (!parser_enter(p, pos)) { return nesting_fallback(p, pos); }
-    let result: NodeID = assignment(p);
-    parser_leave(p);
+    if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
+    let result: NodeID = assignment(ref p);
+    parser_leave(ref p);
     return result;
 }
 
-func term(p: Parser) -> NodeID {
-    let left: NodeID = factor(p);
+func term(ref p: Parser) -> NodeID {
+    let left: NodeID = factor(ref p);
 
     // left-associative
     while (p.current_tok.type == TOK_MUL || p.current_tok.type == TOK_DIV || p.current_tok.type == TOK_MOD) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = factor(p);
+        parser_advance(ref p);
+        let right: NodeID = factor(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
@@ -1420,14 +1420,14 @@ func term(p: Parser) -> NodeID {
     return left;
 }
 
-func arith_expr(p: Parser) -> NodeID {
-    let left: NodeID = term(p);
+func arith_expr(ref p: Parser) -> NodeID {
+    let left: NodeID = term(ref p);
 
     // left-associative
     while (p.current_tok.type == TOK_PLUS || p.current_tok.type == TOK_SUB) {
         let op_tok: Token = p.current_tok;
-        parser_advance(p);
-        let right: NodeID = term(p);
+        parser_advance(ref p);
+        let right: NodeID = term(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
@@ -1435,10 +1435,10 @@ func arith_expr(p: Parser) -> NodeID {
     return left;
 }
 
-func var_decl_core(p: Parser, is_const: Bool, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
+func var_decl_core(ref p: Parser, is_const: Bool, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-    let tid: TypedIdent = parse_typed_name(p, allow_inference);
+    let tid: TypedIdent = parse_typed_name(ref p, allow_inference);
 
     if (has_node(tid.type_node)) {
         let t_base: Int = node_tag(tid.type_node);
@@ -1450,45 +1450,45 @@ func var_decl_core(p: Parser, is_const: Bool, anns: Vector(AnnotationNode), allo
 
     let val_node: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_ASSIGN) {
-        parser_advance(p);
-        val_node = expression(p);
+        parser_advance(ref p);
+        val_node = expression(ref p);
     }
     
     let declaration: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=val_node, is_const=is_const, annotations=anns, pos=start_pos, alloc_id=0);
     return add_var_decl_node(p.arena, declaration);
 }
 
-func var_decl(p: Parser, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
+func var_decl(ref p: Parser, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
     let is_const: Bool = false;
     if (p.current_tok.type == TOK_CONST) {
         is_const = true;
     }
-    parser_advance(p); // skip 'let' or 'const'
-    return var_decl_core(p, is_const, anns, allow_inference);
+    parser_advance(ref p); // skip 'let' or 'const'
+    return var_decl_core(ref p, is_const, anns, allow_inference);
 }
 
-func parse_block(p: Parser) -> NodeID {
+func parse_block(ref p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    if (!parser_enter(p, pos)) {
-        if (p.current_tok.type == TOK_LBRACE) { skip_group(p, TOK_LBRACE, TOK_RBRACE); }
+    if (!parser_enter(ref p, pos)) {
+        if (p.current_tok.type == TOK_LBRACE) { skip_group(ref p, TOK_LBRACE, TOK_RBRACE); }
         return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=[]));
     }
-    let result: NodeID = parse_block_inner(p);
-    parser_leave(p);
+    let result: NodeID = parse_block_inner(ref p);
+    parser_leave(ref p);
     return result;
 }
 
-func parse_block_inner(p: Parser) -> NodeID {
+func parse_block_inner(ref p: Parser) -> NodeID {
     // '{'
     if (p.current_tok.type != TOK_LBRACE) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '{' to start a block. ");
     }
-    parser_advance(p); // skip {
+    parser_advance(ref p); // skip {
 
     let stmts: Vector(NodeID) = [];
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
-        let stmt: NodeID = statement(p);
+        let stmt: NodeID = statement(ref p);
         let base: Int = node_tag(stmt);
         let is_compound: Bool = false;
         if (base != 0 && (base == NODE_IF || base == NODE_BLOCK || base == NODE_WHILE || base == NODE_FOR || base == NODE_FUNC_DEF || base == NODE_CATCH)) {
@@ -1496,29 +1496,29 @@ func parse_block_inner(p: Parser) -> NodeID {
         }
 
         if (p.current_tok.type == TOK_SEMICOLON) {
-            parser_advance(p);
+            parser_advance(ref p);
         } else {
             if (!is_compound) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after statement in block. ");
-                synchronize(p);
+                synchronize(ref p);
             }
         }
         
         if (p.current_tok.type == TOK_CATCH) {
             let catch_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p); // skip catch
+            parser_advance(ref p); // skip catch
             
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after 'catch'. ");
             }
-            parser_advance(p);
+            parser_advance(ref p);
             
             let err_name: Token = Token();
             if (is_name_token(p.current_tok.type)) {
                 err_name = p.current_tok;
-                parser_advance(p);
+                parser_advance(ref p);
             } else {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected identifier for catch variable. ");
@@ -1528,9 +1528,9 @@ func parse_block_inner(p: Parser) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after catch variable. ");
             }
-            parser_advance(p);
+            parser_advance(ref p);
             
-            let catch_body: NodeID = parse_block(p);
+            let catch_body: NodeID = parse_block(ref p);
             stmt = add_catch_node(p.arena, CatchNode(type=NODE_CATCH, stmt=stmt, err_name=err_name, body=catch_body, pos=catch_pos, alloc_id=0));
         }
 
@@ -1542,26 +1542,26 @@ func parse_block_inner(p: Parser) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '}' to close block. ");
     }
-    parser_advance(p); // skip }
+    parser_advance(ref p); // skip }
 
     return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
-func if_stmt(p: Parser) -> NodeID {
+func if_stmt(ref p: Parser) -> NodeID {
     let if_tok: Token = p.current_tok;
-    parser_advance(p); // skip 'if'
+    parser_advance(ref p); // skip 'if'
     
-    let cond: NodeID = atom(p);
-    let body: NodeID = parse_block(p);
+    let cond: NodeID = atom(ref p);
+    let body: NodeID = parse_block(ref p);
 
     let else_body: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_ELSE) {
-        parser_advance(p); // skip 'else'
+        parser_advance(ref p); // skip 'else'
         
         if (p.current_tok.type == TOK_IF) { // else if
-            else_body = if_stmt(p);
+            else_body = if_stmt(ref p);
         } else {
-            else_body = parse_block(p);
+            else_body = parse_block(ref p);
         }
     }
     
@@ -1569,50 +1569,50 @@ func if_stmt(p: Parser) -> NodeID {
     return add_if_node(p.arena, IfNode(type=NODE_IF, condition=cond, body=body, else_body=else_body, pos=pos));
 }
 
-func while_stmt(p: Parser) -> NodeID {
+func while_stmt(ref p: Parser) -> NodeID {
     let while_tok: Token = p.current_tok;
-    parser_advance(p); // skip 'while'
-    let cond: NodeID = atom(p);
-    let body: NodeID = parse_block(p);
+    parser_advance(ref p); // skip 'while'
+    let cond: NodeID = atom(ref p);
+    let body: NodeID = parse_block(ref p);
 
     let pos: Position = Position(idx=0, ln=while_tok.line, col=while_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_while_node(p.arena, WhileNode(type=NODE_WHILE, condition=cond, body=body, pos=pos));
 }
 
-func break_stmt(p: Parser) -> NodeID {
+func break_stmt(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_break_node(p.arena, BreakNode(type=NODE_BREAK, pos=pos));
 }
 
-func continue_stmt(p: Parser) -> NodeID {
+func continue_stmt(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_continue_node(p.arena, ContinueNode(type=NODE_CONTINUE, pos=pos));
 }
 
-func for_stmt(p: Parser) -> NodeID {
+func for_stmt(ref p: Parser) -> NodeID {
     let for_tok: Token = p.current_tok;
-    parser_advance(p); // skip 'for'
+    parser_advance(ref p); // skip 'for'
 
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after 'for'. ");
     }
-    parser_advance(p); // skip '('
+    parser_advance(ref p); // skip '('
 
     let init: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_SEMICOLON) {
         init = NO_NODE;
     } else {
         if (p.current_tok.type == TOK_LET) {
-            init = var_decl(p, [], true);
-        } else if ((is_name_token(p.current_tok.type) && (peek_type(p) == TOK_TYPE_ARROW || peek_type(p) == TOK_COLON)) || (p.current_tok.type == TOK_PTR)) {
-            init = var_decl_core(p, false, [], false);
+            init = var_decl(ref p, [], true);
+        } else if ((is_name_token(p.current_tok.type) && (peek_type(ref p) == TOK_TYPE_ARROW || peek_type(ref p) == TOK_COLON)) || (p.current_tok.type == TOK_PTR)) {
+            init = var_decl_core(ref p, false, [], false);
         } else {
-            init = expression(p);    // i = 0
+            init = expression(ref p);    // i = 0
         }
     }
 
@@ -1620,46 +1620,46 @@ func for_stmt(p: Parser) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ';' after for-init. ");
     }
-    parser_advance(p); // skip ';'
+    parser_advance(ref p); // skip ';'
 
     let cond: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_SEMICOLON) {
-        cond = expression(p);
+        cond = expression(ref p);
     }
 
     if (p.current_tok.type != TOK_SEMICOLON) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ';' after for-condition. ");
     }
-    parser_advance(p); // skip ';'
+    parser_advance(ref p); // skip ';'
 
     let step: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_RPAREN) {
-        step = expression(p);
+        step = expression(ref p);
     }
 
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after for-step. ");
     }
-    parser_advance(p); // skip ')'
+    parser_advance(ref p); // skip ')'
 
-    let body: NodeID = parse_block(p);
+    let body: NodeID = parse_block(ref p);
     let pos: Position = Position(idx=0, ln=for_tok.line, col=for_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_for_node(p.arena, ForNode(type=NODE_FOR, init=init, cond=cond, step=step, body=body, pos=pos));
 }
 
-func statement(p: Parser) -> NodeID {
+func statement(ref p: Parser) -> NodeID {
     let anns: Vector(AnnotationNode) = [];
     if (p.current_tok.type == TOK_AT) {
-        anns = parse_annotations(p);
+        anns = parse_annotations(ref p);
     }
 
     if (p.current_tok.type == TOK_LET || p.current_tok.type == TOK_CONST) { 
-        return var_decl(p, anns, true); 
+        return var_decl(ref p, anns, true); 
     }
     if (p.current_tok.type == TOK_FUNC) { 
-        return func_def(p, anns); 
+        return func_def(ref p, anns); 
     }
 
     if (anns.length() > 0) {
@@ -1667,16 +1667,16 @@ func statement(p: Parser) -> NodeID {
         throw_invalid_syntax(err_pos, "Annotations are only allowed on declarations (func, let, const, etc.).");
     }
 
-    if (p.current_tok.type == TOK_IF)  { return if_stmt(p); }
-    if (p.current_tok.type == TOK_WHILE) { return while_stmt(p); }
-    if (p.current_tok.type == TOK_LBRACE) { return parse_block(p); }
-    if (p.current_tok.type == TOK_BREAK) { return break_stmt(p); }
-    if (p.current_tok.type == TOK_CONTINUE) { return continue_stmt(p); }
-    if (p.current_tok.type == TOK_FOR) { return for_stmt(p); }
-    if (p.current_tok.type == TOK_RETURN) { return return_stmt(p); }
-    if (p.current_tok.type == TOK_THROW) { return throw_stmt(p); }
+    if (p.current_tok.type == TOK_IF)  { return if_stmt(ref p); }
+    if (p.current_tok.type == TOK_WHILE) { return while_stmt(ref p); }
+    if (p.current_tok.type == TOK_LBRACE) { return parse_block(ref p); }
+    if (p.current_tok.type == TOK_BREAK) { return break_stmt(ref p); }
+    if (p.current_tok.type == TOK_CONTINUE) { return continue_stmt(ref p); }
+    if (p.current_tok.type == TOK_FOR) { return for_stmt(ref p); }
+    if (p.current_tok.type == TOK_RETURN) { return return_stmt(ref p); }
+    if (p.current_tok.type == TOK_THROW) { return throw_stmt(ref p); }
 
-    return expression(p);
+    return expression(ref p);
 }
 
 
@@ -1699,7 +1699,7 @@ func is_default_param(arena: AstArena, node: NodeID) -> Bool {
     return false;
 }
 
-func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
+func parse_params(ref p: Parser, callable: Bool) -> Vector(ParamNode) {
     if (p.current_tok.type == TOK_RPAREN) {
         return null;
     }
@@ -1715,9 +1715,9 @@ func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
                 throw_invalid_syntax(err_pos, "Reference fields are not supported; use an explicit pointer field when aliasing is required.");
             }
             pass_mode = PARAM_REF;
-            parser_advance(p);
+            parser_advance(ref p);
         }
-        let tid: TypedIdent = parse_typed_name(p, false);
+        let tid: TypedIdent = parse_typed_name(ref p, false);
         let pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let is_variadic: Bool = false;
         if (p.current_tok.type == TOK_ELLIPSIS) {
@@ -1731,7 +1731,7 @@ func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
             if (pass_mode == PARAM_REF) {
                 throw_invalid_syntax(pos, "A variadic parameter cannot be passed by reference.");
             }
-            parser_advance(p);
+            parser_advance(ref p);
         }
 
         let default_val: NodeID = NO_NODE;
@@ -1743,8 +1743,8 @@ func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
             } else if is_variadic {
                 throw_invalid_syntax(pos, "A variadic parameter cannot have a default value.");
             }
-            parser_advance(p);
-            default_val = expression(p);
+            parser_advance(ref p);
+            default_val = expression(ref p);
             if (!is_default_param(p.arena, default_val)) {
                 throw_invalid_syntax(pos, "A default parameter value must be a constant expression.");
             }
@@ -1755,134 +1755,134 @@ func parse_params(p: Parser, callable: Bool) -> Vector(ParamNode) {
 
         params.append(ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pos=pos, pass_mode=pass_mode, is_variadic=is_variadic, default_val=default_val));
         if (p.current_tok.type != TOK_COMMA) { break; }
-        parser_advance(p);
+        parser_advance(ref p);
     }
     return params;
 }
 
-func func_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
+func func_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let func_tok: Token = p.current_tok;
-    parser_advance(p); // skip 'func'
+    parser_advance(ref p); // skip 'func'
     
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "expected a function name after 'func'");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
-        type_params = parse_type_params(p);
+        type_params = parse_type_params(ref p);
     }
 
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after function name.");
     }
-    parser_advance(p); // skip '('
+    parser_advance(ref p); // skip '('
     
-    let params: Vector(ParamNode) = parse_params(p, true);
+    let params: Vector(ParamNode) = parse_params(ref p, true);
     
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after parameters.");
     }
-    parser_advance(p); // skip ')'
+    parser_advance(ref p); // skip ')'
     
     // -> RetType
     if (p.current_tok.type != TOK_TYPE_ARROW) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '->' for return type.");
     }
-    parser_advance(p);
+    parser_advance(ref p);
 
-    let ret_type_node: NodeID = parse_return_type(p);
+    let ret_type_node: NodeID = parse_return_type(ref p);
 
-    let body: NodeID = parse_block(p);
+    let body: NodeID = parse_block(ref p);
     
     let pos: Position = Position(idx=0, ln=func_tok.line, col=func_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let definition: FunctionDefNode = FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, type_params=type_params, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
     return add_func_def_node(p.arena, definition);
 }
 
-func return_stmt(p: Parser) -> NodeID {
+func return_stmt(ref p: Parser) -> NodeID {
     let ret_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
     
     let val: NodeID = NO_NODE;
     if (p.current_tok.type != TOK_SEMICOLON) {
-        val = expression(p);
+        val = expression(ref p);
     }
     
     let pos: Position = Position(idx=0, ln=ret_tok.line, col=ret_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_return_node(p.arena, ReturnNode(type=NODE_RETURN, value=val, pos=pos));
 }
 
-func throw_stmt(p: Parser) -> NodeID {
+func throw_stmt(ref p: Parser) -> NodeID {
     let throw_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
     
-    let val: NodeID = expression(p);
+    let val: NodeID = expression(ref p);
     
     let pos: Position = Position(idx=0, ln=throw_tok.line, col=throw_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     return add_throw_node(p.arena, ThrowNode(type=NODE_THROW, value=val, pos=pos));
 }
 
-func parse_struct_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
+func parse_struct_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-    parser_advance(p); // skip 'struct'
+    parser_advance(ref p); // skip 'struct'
 
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected struct name.");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
-        type_params = parse_type_params(p);
+        type_params = parse_type_params(ref p);
     }
 
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after struct name.");
     }
-    parser_advance(p); // skip '('
+    parser_advance(ref p); // skip '('
 
-    let fields: Vector(ParamNode) = parse_params(p, false);
+    let fields: Vector(ParamNode) = parse_params(ref p, false);
 
     if (p.current_tok.type != TOK_RPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after struct fields.");
     }
-    parser_advance(p); // skip ')'
+    parser_advance(ref p); // skip ')'
 
     let body: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_LBRACE) {
-        body = parse_block(p); // initialization
+        body = parse_block(ref p); // initialization
     }
     return add_struct_def_node(p.arena, StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos));
 }
 
-func parse_extern_func(p: Parser) -> NodeID {
+func parse_extern_func(ref p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip 'func'
+    parser_advance(ref p); // skip 'func'
     
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected function name in extern block.");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
     
     if (p.current_tok.type != TOK_LPAREN) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '(' after function name.");
     }
-    parser_advance(p); // skip '('
+    parser_advance(ref p); // skip '('
 
     let params: Vector(ParamNode) = [];
     let is_varargs: Bool = false;
@@ -1892,7 +1892,7 @@ func parse_extern_func(p: Parser) -> NodeID {
             if (p.current_tok.type == TOK_ELLIPSIS) {
                 is_varargs = true;
  
-                parser_advance(p); // skip ...
+                parser_advance(ref p); // skip ...
                 if (p.current_tok.type == TOK_COMMA) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     throw_invalid_syntax(err_pos, "Varargs '...' must be the last parameter.");
@@ -1903,16 +1903,16 @@ func parse_extern_func(p: Parser) -> NodeID {
                 let pass_mode: Int = PARAM_VALUE;
                 if (p.current_tok.type == TOK_REF) {
                     pass_mode = PARAM_REF;
-                    parser_advance(p);
+                    parser_advance(ref p);
                 }
-                let tid: TypedIdent = parse_typed_name(p, false);
+                let tid: TypedIdent = parse_typed_name(ref p, false);
                 let param_pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 let new_param: ParamNode = ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pass_mode=pass_mode, pos=param_pos);
 
                 params.append(new_param);
 
                 if (p.current_tok.type == TOK_COMMA) {
-                    parser_advance(p);
+                    parser_advance(ref p);
                 } else {
                     break;
                 }
@@ -1924,12 +1924,12 @@ func parse_extern_func(p: Parser) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected ')' after extern parameters.");
     }
-    parser_advance(p); // skip ')'
+    parser_advance(ref p); // skip ')'
     
     let ret_type: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_TYPE_ARROW) {
-        parser_advance(p);
-        ret_type = parse_return_type(p);
+        parser_advance(ref p);
+        ret_type = parse_return_type(ref p);
     } else {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected return type ('-> Type').");
@@ -1939,30 +1939,30 @@ func parse_extern_func(p: Parser) -> NodeID {
     return add_extern_func_node(p.arena, declaration);
 }
 
-func parse_extern(p: Parser) -> NodeID {
+func parse_extern(ref p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip 'extern'
+    parser_advance(ref p); // skip 'extern'
 
     if (p.current_tok.type == TOK_STR_LIT) {
         let abi_name: String = p.current_tok.value;
         let link_name: String = "";
-        parser_advance(p); // skip abi
+        parser_advance(ref p); // skip abi
 
         if (p.current_tok.type == TOK_IN) {
-            parser_advance(p); // skip 'in'
+            parser_advance(ref p); // skip 'in'
             if (p.current_tok.type != TOK_STR_LIT) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected library name after 'in'.");
             }
             link_name = p.current_tok.value;
-            parser_advance(p); // skip library
+            parser_advance(ref p); // skip library
         }
 
         if (p.current_tok.type != TOK_LBRACE) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected '{' to start extern block.");
         }
-        parser_advance(p); // skip '{'
+        parser_advance(ref p); // skip '{'
 
         let funcs: Vector(NodeID) = [];
         while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
@@ -1972,7 +1972,7 @@ func parse_extern(p: Parser) -> NodeID {
                 break;
             }
 
-            let func_node: NodeID = parse_extern_func(p);
+            let func_node: NodeID = parse_extern_func(ref p);
             let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
             f_node.abi_name = abi_name;
             f_node.link_name = link_name;
@@ -1982,7 +1982,7 @@ func parse_extern(p: Parser) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after extern function declaration.");
             }
-            parser_advance(p); // skip ';'
+            parser_advance(ref p); // skip ';'
             funcs.append(func_node);
         }
 
@@ -1990,18 +1990,18 @@ func parse_extern(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected '}' to end extern block.");
         }
-        parser_advance(p); // skip '}'
+        parser_advance(ref p); // skip '}'
         return add_extern_block_node(p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
     }
 
     if (p.current_tok.type == TOK_FUNC) {
-        let func_node: NodeID = parse_extern_func(p);
+        let func_node: NodeID = parse_extern_func(ref p);
 
         if (p.current_tok.type != TOK_FROM) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected 'from' after extern function declaration.");
         }
-        parser_advance(p); // skip 'from'
+        parser_advance(ref p); // skip 'from'
 
         if (p.current_tok.type != TOK_STR_LIT) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2009,23 +2009,23 @@ func parse_extern(p: Parser) -> NodeID {
         }
         let abi_name: String = p.current_tok.value;
         let link_name: String = "";
-        parser_advance(p); // skip abi
+        parser_advance(ref p); // skip abi
 
         if (p.current_tok.type == TOK_IN) {
-            parser_advance(p); // skip 'in'
+            parser_advance(ref p); // skip 'in'
             if (p.current_tok.type != TOK_STR_LIT) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected library name after 'in'.");
             }
             link_name = p.current_tok.value;
-            parser_advance(p); // skip library
+            parser_advance(ref p); // skip library
         }
 
         if (p.current_tok.type != TOK_SEMICOLON) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ';' at the end of extern declaration.");
         }
-        parser_advance(p); // skip ';'
+        parser_advance(ref p); // skip ';'
 
         let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
         f_node.abi_name = abi_name;
@@ -2040,9 +2040,9 @@ func parse_extern(p: Parser) -> NodeID {
     return NO_NODE;
 }
 
-func parse_import(p: Parser) -> NodeID {
+func parse_import(ref p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip 'import'
+    parser_advance(ref p); // skip 'import'
 
     let symbols: Vector(ImportSymbolNode) = null;
     let path_tok: Token = Token();
@@ -2051,7 +2051,7 @@ func parse_import(p: Parser) -> NodeID {
     if (p.current_tok.type == TOK_MUL) {
         symbols = [];
         let star_tok: Token = p.current_tok;
-        parser_advance(p); // skip '*'
+        parser_advance(ref p); // skip '*'
 
         symbols.append(ImportSymbolNode(name_tok=star_tok, alias_tok=Token()));
         
@@ -2059,7 +2059,7 @@ func parse_import(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected 'from' after '*'.");
         }
-        parser_advance(p); // skip 'from'
+        parser_advance(ref p); // skip 'from'
     }
 
     // import A, B from "..."
@@ -2073,24 +2073,24 @@ func parse_import(p: Parser) -> NodeID {
             }
             
             let name_tok: Token = p.current_tok;
-            parser_advance(p); // skip name
+            parser_advance(ref p); // skip name
 
             let alias_tok: Token = Token();
             if (p.current_tok.type == TOK_AS) {
-                parser_advance(p); // skip 'as'
+                parser_advance(ref p); // skip 'as'
                 if (!is_name_token(p.current_tok.type)) {
                     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                     throw_invalid_syntax(err_pos, "Expected identifier after 'as'.");
                 }
                 alias_tok = p.current_tok;
-                parser_advance(p); // skip alias name
+                parser_advance(ref p); // skip alias name
             }
 
             let node: ImportSymbolNode = ImportSymbolNode(name_tok=name_tok, alias_tok=alias_tok);
             symbols.append(node);
 
             if (p.current_tok.type == TOK_COMMA) {
-                parser_advance(p); // skip ','
+                parser_advance(ref p); // skip ','
             } else {
                 parsing = false;
             }
@@ -2100,7 +2100,7 @@ func parse_import(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected 'from' after import symbols.");
         }
-        parser_advance(p); // skip 'from'
+        parser_advance(ref p); // skip 'from'
     }
 
     if (p.current_tok.type != TOK_STR_LIT) {
@@ -2108,7 +2108,7 @@ func parse_import(p: Parser) -> NodeID {
         throw_invalid_syntax(err_pos, "Expected string literal for import path.");
     }
     path_tok = p.current_tok;
-    parser_advance(p); // skip string
+    parser_advance(ref p); // skip string
 
     let alias_tok: Token = Token();
     if (p.current_tok.type == TOK_AS) {
@@ -2116,45 +2116,45 @@ func parse_import(p: Parser) -> NodeID {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "A module alias can only be used with 'import \"module\" as name'. Alias imported symbols before 'from'.");
         }
-        parser_advance(p); // skip 'as'
+        parser_advance(ref p); // skip 'as'
         if (!is_name_token(p.current_tok.type)) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected identifier after 'as' for module alias.");
         }
         alias_tok = p.current_tok;
-        parser_advance(p); // skip alias identifier
+        parser_advance(ref p); // skip alias identifier
     }
 
     if (p.current_tok.type == TOK_SEMICOLON) {
-        parser_advance(p);
+        parser_advance(ref p);
     }
 
     return add_import_node(p.arena, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=alias_tok, pos=start_pos));
 }
 
-func parse_interface_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
+func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip 'interface'
+    parser_advance(ref p); // skip 'interface'
 
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected interface name.");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
-        type_params = parse_type_params(p);
+        type_params = parse_type_params(ref p);
     }
 
     let interfaces: Vector(NodeID) = [];
     if (p.current_tok.type == TOK_WITH) {
-        parser_advance(p); // skip 'with'
-        interfaces.append(parse_return_type(p));
+        parser_advance(ref p); // skip 'with'
+        interfaces.append(parse_return_type(ref p));
         while (p.current_tok.type == TOK_COMMA) {
-            parser_advance(p); // skip ','
-            interfaces.append(parse_return_type(p));
+            parser_advance(ref p); // skip ','
+            interfaces.append(parse_return_type(ref p));
         }
     }
 
@@ -2162,14 +2162,14 @@ func parse_interface_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '{' before interface body.");
     }
-    parser_advance(p); // skip '{'
+    parser_advance(ref p); // skip '{'
 
     let methods: Vector(NodeID) = [];
 
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
         let member_anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
-            member_anns = parse_annotations(p);
+            member_anns = parse_annotations(ref p);
         }
 
         if (p.current_tok.type == TOK_METHOD) {
@@ -2179,41 +2179,41 @@ func parse_interface_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
 
         if (p.current_tok.type == TOK_METHOD || p.current_tok.type == TOK_FUNC) {
             let m_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p);
+            parser_advance(ref p);
             let m_name: Token = p.current_tok;
-            parser_advance(p);
+            parser_advance(ref p);
 
             let type_params: Vector(GenericParamNode) = null;
             if (p.current_tok.type == TOK_LT) {
-                type_params = parse_type_params(p);
+                type_params = parse_type_params(ref p);
             }
 
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after method name.");
             }
-            parser_advance(p); // skip '('
+            parser_advance(ref p); // skip '('
 
-            let params: Vector(ParamNode) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(ref p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after parameters.");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=m_pos.ln, col=m_pos.col);
             let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=m_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
-                parser_advance(p);
-                ret_type = parse_return_type(p);
+                parser_advance(ref p);
+                ret_type = parse_return_type(ref p);
             }
 
             if (p.current_tok.type != TOK_SEMICOLON) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after interface method declaration. Interface methods cannot have bodies.");
             }
-            parser_advance(p); // skip ';'
+            parser_advance(ref p); // skip ';'
 
             let declaration: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=NO_NODE, is_override=false, annotations=member_anns);
             methods.append(add_method_def_node(p.arena, declaration));
@@ -2229,47 +2229,47 @@ func parse_interface_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '}' after interface body.");
     }
-    parser_advance(p); // skip '}'
+    parser_advance(ref p); // skip '}'
 
     let definition: InterfaceDefNode = InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, interfaces=interfaces, methods=methods, annotations=anns, pos=pos);
     return add_interface_def_node(p.arena, definition);
 }
 
-func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
+func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    parser_advance(p); // skip 'class'
+    parser_advance(ref p); // skip 'class'
 
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected class name.");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     let type_params: Vector(GenericParamNode) = null;
     if (p.current_tok.type == TOK_LT) {
-        type_params = parse_type_params(p);
+        type_params = parse_type_params(ref p);
     }
 
     let parent_tok: NodeID = NO_NODE;
     if (p.current_tok.type == TOK_LPAREN) {
-        parser_advance(p); // skip '('
-        parent_tok = parse_return_type(p);
+        parser_advance(ref p); // skip '('
+        parent_tok = parse_return_type(ref p);
         if (p.current_tok.type != TOK_RPAREN) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected ')' after parent class name.");
         }
-        parser_advance(p); // skip ')'
+        parser_advance(ref p); // skip ')'
     }
 
     let interfaces: Vector(NodeID) = [];
     if (p.current_tok.type == TOK_WITH) {
-        parser_advance(p); // skip 'with'
-        interfaces.append(parse_return_type(p));
+        parser_advance(ref p); // skip 'with'
+        interfaces.append(parse_return_type(ref p));
         
         while (p.current_tok.type == TOK_COMMA) {
-            parser_advance(p); // skip ','
-            interfaces.append(parse_return_type(p));
+            parser_advance(ref p); // skip ','
+            interfaces.append(parse_return_type(ref p));
         }
     }
 
@@ -2277,7 +2277,7 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '{' before class body.");
     }
-    parser_advance(p); // skip '{'
+    parser_advance(ref p); // skip '{'
 
     let fields: Vector(NodeID) = [];
     let methods: Vector(NodeID) = [];
@@ -2285,7 +2285,7 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     while (p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
         let member_anns: Vector(AnnotationNode) = [];
         if (p.current_tok.type == TOK_AT) {
-            member_anns = parse_annotations(p);
+            member_anns = parse_annotations(ref p);
         }
 
         if (p.current_tok.type == TOK_METHOD) {
@@ -2295,59 +2295,59 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
 
         if (p.current_tok.type == TOK_LET) {
             let f_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p); // skip 'let'
+            parser_advance(ref p); // skip 'let'
 
-            let tid: TypedIdent = parse_typed_name(p, true);
+            let tid: TypedIdent = parse_typed_name(ref p, true);
 
             let default_val: NodeID = NO_NODE;
             if (p.current_tok.type == TOK_ASSIGN) {
-                parser_advance(p); // skip '='
-                default_val = expression(p);
+                parser_advance(ref p); // skip '='
+                default_val = expression(ref p);
             }
 
             if (p.current_tok.type != TOK_SEMICOLON) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ';' after field declaration.");
             }
-            parser_advance(p); // skip ';'
+            parser_advance(ref p); // skip ';'
 
             let field: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=default_val, is_const=false, annotations=member_anns, pos=f_pos, alloc_id=0);
             fields.append(add_var_decl_node(p.arena, field));
             
         } else if (p.current_tok.type == TOK_METHOD || p.current_tok.type == TOK_FUNC) {
             let m_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p);
+            parser_advance(ref p);
             let m_name: Token = p.current_tok;
-            parser_advance(p);
+            parser_advance(ref p);
 
             let type_params: Vector(GenericParamNode) = null;
             if (p.current_tok.type == TOK_LT) {
-                type_params = parse_type_params(p);
+                type_params = parse_type_params(ref p);
             }
 
             if (p.current_tok.type != TOK_LPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after method name.");
             }
-            parser_advance(p); // skip '('
+            parser_advance(ref p); // skip '('
 
-            let params: Vector(ParamNode) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(ref p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after parameters.");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
 
             if (p.current_tok.type != TOK_TYPE_ARROW) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '->' for return type.");
             }
-            parser_advance(p); // skip '->'
+            parser_advance(ref p); // skip '->'
 
-            let ret_type: NodeID = parse_return_type(p);
+            let ret_type: NodeID = parse_return_type(ref p);
 
-            let body: NodeID = parse_block(p); 
+            let body: NodeID = parse_block(ref p); 
             
             let method_def: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
             methods.append(add_method_def_node(p.arena, method_def));
@@ -2357,18 +2357,18 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             if (member_anns.length() > 0) {
                 throw_invalid_syntax(type_pos, "Conversion declarations cannot have annotations.");
             }
-            parser_advance(p); // skip 'type'
+            parser_advance(ref p); // skip 'type'
 
-            let target_type: NodeID = parse_return_type(p);
+            let target_type: NodeID = parse_return_type(ref p);
             let type_name_tok: Token = Token(type=TOK_IDENTIFIER, value="$type", line=type_pos.ln, col=type_pos.col);
-            let body: NodeID = parse_block(p);
+            let body: NodeID = parse_block(ref p);
 
             let conversion: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, type_params=null, params=[], return_type=target_type, body=body, is_override=false, annotations=null);
             methods.append(add_method_def_node(p.arena, conversion));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "init") {
             let init_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p); // skip 'init'
+            parser_advance(ref p); // skip 'init'
 
             let init_name_tok: Token = Token(type=TOK_IDENTIFIER, value="$init", line=init_pos.ln, col=init_pos.col);
             
@@ -2376,31 +2376,31 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after init.");
             }
-            parser_advance(p); // skip '('
+            parser_advance(ref p); // skip '('
 
-            let params: Vector(ParamNode) = parse_params(p, true); 
+            let params: Vector(ParamNode) = parse_params(ref p, true); 
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after parameters.");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=init_pos.ln, col=init_pos.col);
             let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=init_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
-                parser_advance(p);
-                parse_return_type(p);
+                parser_advance(ref p);
+                parse_return_type(ref p);
             }
 
-            let body: NodeID = parse_block(p); 
+            let body: NodeID = parse_block(ref p); 
             
             let initializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
             methods.append(add_method_def_node(p.arena, initializer));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "deinit") {
             let deinit_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            parser_advance(p); // skip 'deinit'
+            parser_advance(ref p); // skip 'deinit'
 
             let deinit_name_tok: Token = Token(type=TOK_IDENTIFIER, value="$deinit", line=deinit_pos.ln, col=deinit_pos.col);
             
@@ -2408,24 +2408,24 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected '(' after deinit.");
             }
-            parser_advance(p); // skip '('
+            parser_advance(ref p); // skip '('
 
-            let params: Vector(ParamNode) = parse_params(p, true);
+            let params: Vector(ParamNode) = parse_params(ref p, true);
 
             if (p.current_tok.type != TOK_RPAREN) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "Expected ')' after parameters.");
             }
-            parser_advance(p); // skip ')'
+            parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=deinit_pos.ln, col=deinit_pos.col);
             let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=deinit_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
-                parser_advance(p);
-                parse_return_type(p);
+                parser_advance(ref p);
+                parse_return_type(ref p);
             }
 
-            let body: NodeID = parse_block(p); 
+            let body: NodeID = parse_block(ref p); 
             let deinitializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
             methods.append(add_method_def_node(p.arena, deinitializer));
 
@@ -2439,7 +2439,7 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "Expected '}' after class body.");
     }
-    parser_advance(p); // skip '}'
+    parser_advance(ref p); // skip '}'
 
     let field_init_stmts: Vector(NodeID) = [];
     let field_idx: Int = 0;
@@ -2503,25 +2503,25 @@ func parse_class_def(p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     return add_class_def_node(p.arena, definition);
 }
 
-func parse_enum_def(p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> NodeID {
+func parse_enum_def(ref p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let kind: String = "enum";
     if is_error { kind = "error"; }
 
-    parser_advance(p); // skip 'enum' or 'error'
+    parser_advance(ref p); // skip 'enum' or 'error'
 
     if (!is_name_token(p.current_tok.type)) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "expected a name after '" + kind + "'");
     }
     let name_tok: Token = p.current_tok;
-    parser_advance(p);
+    parser_advance(ref p);
 
     if (p.current_tok.type != TOK_LBRACE) {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "expected '{' after " + kind + " name '" + name_tok.value + "'");
     }
-    parser_advance(p); // skip '{'
+    parser_advance(ref p); // skip '{'
 
     let fields: Vector(EnumFieldNode) = [];
 
@@ -2529,23 +2529,23 @@ func parse_enum_def(p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> 
         if (!is_name_token(p.current_tok.type)) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "expected a member name in " + kind + " '" + name_tok.value + "'");
-            parser_advance(p);
+            parser_advance(ref p);
             continue;
         }
         let field_name_tok: Token = p.current_tok;
         let field_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        parser_advance(p);
+        parser_advance(ref p);
 
         let value_expr: NodeID = NO_NODE;
         if (p.current_tok.type == TOK_ASSIGN) {
-            parser_advance(p); // skip '='
-            value_expr = expression(p);
+            parser_advance(ref p); // skip '='
+            value_expr = expression(ref p);
         }
 
         fields.append(EnumFieldNode(type=NODE_ENUM_FIELD, name_tok=field_name_tok, value=value_expr, pos=field_pos));
 
         if (p.current_tok.type == TOK_COMMA) {
-            parser_advance(p);
+            parser_advance(ref p);
         } else if (p.current_tok.type != TOK_RBRACE) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "expected ',' or '}' after " + kind + " member '" + field_name_tok.value + "'");
@@ -2554,7 +2554,7 @@ func parse_enum_def(p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> 
     }
 
     if (p.current_tok.type == TOK_RBRACE) {
-        parser_advance(p);
+        parser_advance(ref p);
     } else {
         let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         throw_invalid_syntax(err_pos, "expected '}' to close " + kind + " '" + name_tok.value + "'");

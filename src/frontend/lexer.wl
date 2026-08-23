@@ -107,19 +107,19 @@ func is_digit_for_base(c: Char, base: Int) -> Bool {
     return false;
 }
 
-func report_bad_number(l: Lexer, line: Int, col: Int, value: String) -> Void {
+func report_bad_number(ref l: Lexer, line: Int, col: Int, value: String) -> Void {
     let pos: Position = Position(idx=0, ln=line, col=col, text=l.text, fn=l.pos.fn);
     throw_invalid_syntax(pos, "Invalid numeric literal '" + value + "'.");
 }
 
-func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Bool) -> Bool {
+func validate_number(ref l: Lexer, line: Int, col: Int, value: String, is_float: Bool) -> Bool {
     if (value.length() == 0) { return false; }
 
     let end: Int = value.length();
     if is_float {
         if (value.ends_with("f") || value.ends_with("F")) { end -= 1; }
         if (end == 0) {
-            report_bad_number(l, line, col, value);
+            report_bad_number(ref l, line, col, value);
             return false;
         }
 
@@ -134,26 +134,26 @@ func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Boo
                 prev_digit = true;
             } else if (ch == '.') {
                 if dot_seen {
-                    report_bad_number(l, line, col, value);
+                    report_bad_number(ref l, line, col, value);
                     return false;
                 }
                 dot_seen = true;
                 prev_digit = false;
             } else if (ch == '_') {
                 if (!prev_digit || i + 1 >= end || !is_digit(value[i + 1])) {
-                    report_bad_number(l, line, col, value);
+                    report_bad_number(ref l, line, col, value);
                     return false;
                 }
                 prev_digit = false;
             } else {
-                report_bad_number(l, line, col, value);
+                report_bad_number(ref l, line, col, value);
                 return false;
             }
             i += 1;
         }
 
         if (!dot_seen || !digit_seen) {
-            report_bad_number(l, line, col, value);
+            report_bad_number(ref l, line, col, value);
             return false;
         }
         return true;
@@ -181,7 +181,7 @@ func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Boo
     }
 
     if (start >= end) {
-        report_bad_number(l, line, col, value);
+        report_bad_number(ref l, line, col, value);
         return false;
     }
 
@@ -193,12 +193,12 @@ func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Boo
             prev_digit = true;
         } else if (ch == '_') {
             if (!prev_digit || i + 1 >= end || !is_digit_for_base(value[i + 1], base)) {
-                report_bad_number(l, line, col, value);
+                report_bad_number(ref l, line, col, value);
                 return false;
             }
             prev_digit = false;
         } else {
-            report_bad_number(l, line, col, value);
+            report_bad_number(ref l, line, col, value);
             return false;
         }
         i += 1;
@@ -206,7 +206,7 @@ func validate_number(l: Lexer, line: Int, col: Int, value: String, is_float: Boo
     return true;
 }
 
-func lexer_load_current(l: Lexer) -> Void {
+func lexer_load_current(ref l: Lexer) -> Void {
     while (l.pos.idx < l.length) {
         let first: Int = Int(l.text[l.pos.idx]);
         if (first > 0 && first <= 127) {
@@ -239,7 +239,7 @@ func lexer_load_current(l: Lexer) -> Void {
 func __new_lexer(fn: String, text: String, collect_trivia: Bool) -> Lexer {
     let pos: Position = Position(idx=0, ln=0, col=0, text=text, fn=fn);
     let l: Lexer = Lexer(text=text, length=text.length(), pos=pos, current_char='\0', current_width=0, current_valid=true, collect_trivia=collect_trivia, trivia=[]);
-    lexer_load_current(l);
+    lexer_load_current(ref l);
     return l;
 }
 
@@ -251,7 +251,7 @@ func new_lexer_trivia(fn: String, text: String) -> Lexer {
     return __new_lexer(fn, text, true);
 }
 
-func lexer_advance(l: Lexer) -> Void {
+func lexer_advance(ref l: Lexer) -> Void {
     if (l.current_char == '\0') { return; }
     let previous_width: Int = l.current_width;
     if (l.current_char == '\n') {
@@ -271,13 +271,13 @@ func lexer_advance(l: Lexer) -> Void {
             return;
         }
     }
-    lexer_load_current(l);
+    lexer_load_current(ref l);
 }
 
-func get_string(l: Lexer) -> Token {
+func get_string(ref l: Lexer) -> Token {
     let start_ln: Int = l.pos.ln;
     let start_col: Int = l.pos.col;
-    lexer_advance(l);
+    lexer_advance(ref l);
 
     let result: String = "";
     let chunk_start: Int = l.pos.idx;
@@ -286,7 +286,7 @@ func get_string(l: Lexer) -> Token {
             if (l.pos.idx > chunk_start) {
                 result += l.text.slice(chunk_start, l.pos.idx);
             }
-            lexer_advance(l);
+            lexer_advance(ref l);
             if (l.current_char == 'n') {
                 result += "\n";
             } else if (l.current_char == 't') {
@@ -301,10 +301,10 @@ func get_string(l: Lexer) -> Token {
                 let idx: Int = l.pos.idx;
                 result += l.text.slice(idx, idx + l.current_width);
             }
-            lexer_advance(l);
+            lexer_advance(ref l);
             chunk_start = l.pos.idx;
         } else {
-            lexer_advance(l);
+            lexer_advance(ref l);
         }
     }
 
@@ -312,7 +312,7 @@ func get_string(l: Lexer) -> Token {
         if (l.pos.idx > chunk_start) {
             result += l.text.slice(chunk_start, l.pos.idx);
         }
-        lexer_advance(l);
+        lexer_advance(ref l);
         return WhitelangTokens.Token(type=TOK_STR_LIT, value=result, line=start_ln, col=start_col);
     }
 
@@ -323,15 +323,15 @@ func get_string(l: Lexer) -> Token {
     return WhitelangTokens.Token(type=TOK_STR_LIT, value=result, line=start_ln, col=start_col);
 }
 
-func get_char_literal(l: Lexer) -> Token {
+func get_char_literal(ref l: Lexer) -> Token {
     let start_ln: Int = l.pos.ln;
     let start_col: Int = l.pos.col;
     
-    lexer_advance(l); // skip opening '
+    lexer_advance(ref l); // skip opening '
     let char_val: Int = 0;
     
     if (l.current_char == '\\') { // '\'
-        lexer_advance(l);
+        lexer_advance(ref l);
         if (l.current_char == 'n') { char_val = 10; } // \n
         else if (l.current_char == 't') { char_val = 9; } // \t
         else if (l.current_char == 'r') { char_val = 13; } // \r
@@ -339,14 +339,14 @@ func get_char_literal(l: Lexer) -> Token {
         else if (l.current_char == '\\') { char_val = 92; } // \\
         else if (l.current_char == '\'') { char_val = 39; } // \'
         else { char_val = Int(l.current_char); }
-        lexer_advance(l);
+        lexer_advance(ref l);
     } else {
         char_val = Int(l.current_char);
-        lexer_advance(l);
+        lexer_advance(ref l);
     }
     
     if (l.current_char == '\'') {
-        lexer_advance(l); // skip closing '
+        lexer_advance(ref l); // skip closing '
     } else {
         throw_illegal_char(l.pos, "Unterminated char literal.");
     }
@@ -355,7 +355,7 @@ func get_char_literal(l: Lexer) -> Token {
 }
 
 
-func get_number(l: Lexer) -> Token {
+func get_number(ref l: Lexer) -> Token {
     let start_line: Int = l.pos.ln;
     let start_col: Int = l.pos.col;
     let start_pos: Int = l.pos.idx;
@@ -365,11 +365,11 @@ func get_number(l: Lexer) -> Token {
         if (l.current_char == '.') {
             if (dot_count == 1) { break; }
             dot_count = 1;
-            lexer_advance(l);
+            lexer_advance(ref l);
             continue;
         }
         if (is_digit(l.current_char) || is_alpha(l.current_char)) {
-            lexer_advance(l);
+            lexer_advance(ref l);
         } else {
             break;
         }
@@ -384,10 +384,10 @@ func get_number(l: Lexer) -> Token {
     }
 
     if (dot_count == 1) {
-        validate_number(l, start_line, start_col, value, true);
+        validate_number(ref l, start_line, start_col, value, true);
         return WhitelangTokens.Token(type=TOK_FLOAT, value=value, line=start_line, col=start_col);
     }
-    validate_number(l, start_line, start_col, value, false);
+    validate_number(ref l, start_line, start_col, value, false);
     return WhitelangTokens.Token(type=TOK_INT, value=value, line=start_line, col=start_col);
 }
 
@@ -493,12 +493,12 @@ func keyword_type(text: String, start: Int, length: Int) -> Int {
     return TOK_IDENTIFIER;
 }
 
-func get_identifier(l: Lexer) -> Token {
+func get_identifier(ref l: Lexer) -> Token {
     let start_line: Int = l.pos.ln;
     let start_col: Int = l.pos.col;
     let start_pos: Int = l.pos.idx;
     while (l.current_char != '\0' && (is_alpha(l.current_char) || is_digit(l.current_char))) {
-        lexer_advance(l);
+        lexer_advance(ref l);
     }
     let length: Int = l.pos.idx - start_pos;
     let type: Int = keyword_type(l.text, start_pos, length);
@@ -510,20 +510,20 @@ func get_identifier(l: Lexer) -> Token {
 }
 
 
-func handle_slash(l: Lexer) -> Token {
+func handle_slash(ref l: Lexer) -> Token {
     let line: Int = l.pos.ln;
     let col: Int = l.pos.col;
-    lexer_advance(l); // skip first /
+    lexer_advance(ref l); // skip first /
 
     // /=
     if (l.current_char == '=') {
-        lexer_advance(l);
+        lexer_advance(ref l);
         return WhitelangTokens.Token(type=TOK_DIV_ASSIGN, value="/=", line=line, col=col);
     }
 
     // //
     if (l.current_char == '/') {
-        while (l.current_char != '\0' && l.current_char != '\n') { lexer_advance(l); }
+        while (l.current_char != '\0' && l.current_char != '\n') { lexer_advance(ref l); }
         if (l.collect_trivia) {
             l.trivia.append(LexerTrivia(
                 kind=TRIVIA_LINE_COMMENT,
@@ -538,16 +538,16 @@ func handle_slash(l: Lexer) -> Token {
 
     // /*  */
     if (l.current_char == '*') {
-        lexer_advance(l);
+        lexer_advance(ref l);
         let comment_closed: Int = 0;
         while (l.current_char != '\0' && comment_closed == 0) {
             if (l.current_char == '*') {
-                lexer_advance(l);
+                lexer_advance(ref l);
                 if (l.current_char == '/') {
-                    lexer_advance(l);
+                    lexer_advance(ref l);
                     comment_closed = 1;
                 }
-            } else { lexer_advance(l); }
+            } else { lexer_advance(ref l); }
         }
         if (comment_closed == 0) { throw_illegal_char(l.pos, "Unterminated block comment."); }
         if (l.collect_trivia) {
@@ -566,24 +566,24 @@ func handle_slash(l: Lexer) -> Token {
 }
 
 
-func get_next_token(l: Lexer) -> Token {
+func get_next_token(ref l: Lexer) -> Token {
     while (l.current_char != '\0') {
         if (!l.current_valid) {
             throw_illegal_char(l.pos, "Invalid UTF-8 byte in source.");
-            lexer_advance(l);
+            lexer_advance(ref l);
             continue;
         }
         if (is_space(l.current_char)) {
-            lexer_advance(l);
+            lexer_advance(ref l);
             continue;
         }
 
         if (is_digit(l.current_char)) {
-            return get_number(l);
+            return get_number(ref l);
         }
 
         if (is_alpha(l.current_char)) {
-            return get_identifier(l);
+            return get_identifier(ref l);
         }
 
         let char: Char = l.current_char;
@@ -591,10 +591,10 @@ func get_next_token(l: Lexer) -> Token {
         let char_col: Int  = l.pos.col;
 
         if (char == '"') {
-            return get_string(l);
+            return get_string(ref l);
         }
         if (char == '\'') {
-            return get_char_literal(l);
+            return get_char_literal(ref l);
         }
 
         // . and ...
@@ -609,38 +609,38 @@ func get_next_token(l: Lexer) -> Token {
             }
 
             if is_ellipsis {
-                lexer_advance(l); lexer_advance(l); lexer_advance(l); // consume ...
+                lexer_advance(ref l); lexer_advance(ref l); lexer_advance(ref l); // consume ...
                 return WhitelangTokens.Token(type=TOK_ELLIPSIS, value="...", line=char_line, col=char_col);
             } else {
-                lexer_advance(l);
+                lexer_advance(ref l);
                 return WhitelangTokens.Token(type=TOK_DOT, value=".", line=char_line, col=char_col);
             }
         }
 
         // + and ++ and +=
         if (char == '+') { 
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_PLUS_ASSIGN, value="+=", line=char_line, col=char_col); } // +=
-            if (l.current_char == '+') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_INC, value="++", line=char_line, col=char_col); } // ++
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_PLUS_ASSIGN, value="+=", line=char_line, col=char_col); } // +=
+            if (l.current_char == '+') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_INC, value="++", line=char_line, col=char_col); } // ++
             return WhitelangTokens.Token(type=TOK_PLUS, value="+", line=char_line, col=char_col); 
         }
 
         // - and -- and: and -=
         if (char == '-') { 
-            lexer_advance(l); 
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_SUB_ASSIGN, value="-=", line=char_line, col=char_col); } // -=
-            if (l.current_char == '>') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_TYPE_ARROW, value="->", line=char_line, col=char_col); } // ->
-            if (l.current_char == '-') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_DEC, value="--", line=char_line, col=char_col); } // --
+            lexer_advance(ref l); 
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_SUB_ASSIGN, value="-=", line=char_line, col=char_col); } // -=
+            if (l.current_char == '>') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_TYPE_ARROW, value="->", line=char_line, col=char_col); } // ->
+            if (l.current_char == '-') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_DEC, value="--", line=char_line, col=char_col); } // --
             return WhitelangTokens.Token(type=TOK_SUB, value="-", line=char_line, col=char_col); 
         }
 
         // * *= ** **=
         if (char == '*') { 
-            lexer_advance(l); 
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_MUL_ASSIGN, value="*=", line=char_line, col=char_col); } // *=
+            lexer_advance(ref l); 
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_MUL_ASSIGN, value="*=", line=char_line, col=char_col); } // *=
             if (l.current_char == '*') { 
-                lexer_advance(l); 
-                if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_POW_ASSIGN, value="**=", line=char_line, col=char_col); } // **=
+                lexer_advance(ref l); 
+                if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_POW_ASSIGN, value="**=", line=char_line, col=char_col); } // **=
                 return WhitelangTokens.Token(type=TOK_POW, value="**", line=char_line, col=char_col); // **
             }
             return WhitelangTokens.Token(type=TOK_MUL, value="*", line=char_line, col=char_col); 
@@ -648,38 +648,38 @@ func get_next_token(l: Lexer) -> Token {
 
         // / /= // /*
         if (char == '/') {
-            let tok: Token = handle_slash(l);
+            let tok: Token = handle_slash(ref l);
             if (tok.type == 0) { continue; }
             return tok;
         }
 
         if (char == '%') { 
-            lexer_advance(l); 
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_MOD_ASSIGN, value="%=", line=char_line, col=char_col); } // %=
+            lexer_advance(ref l); 
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_MOD_ASSIGN, value="%=", line=char_line, col=char_col); } // %=
             return WhitelangTokens.Token(type=TOK_MOD, value="%", line=char_line, col=char_col); 
         }
 
         // ! and !=
         if (char == '!') {
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_NE, value="!=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_NE, value="!=", line=char_line, col=char_col); }
             return WhitelangTokens.Token(type=TOK_NOT, value="!", line=char_line, col=char_col);
         }
 
         // = and ==
         if (char == '=') {
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_EE, value="==", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_EE, value="==", line=char_line, col=char_col); }
             return WhitelangTokens.Token(type=TOK_ASSIGN, value="=", line=char_line, col=char_col);
         }
 
         // <, <=, <<, <<=
         if (char == '<') {
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_LTE, value="<=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_LTE, value="<=", line=char_line, col=char_col); }
             if (l.current_char == '<') { // <<
-                lexer_advance(l);
-                if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_LSHIFT_ASSIGN, value="<<=", line=char_line, col=char_col); }
+                lexer_advance(ref l);
+                if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_LSHIFT_ASSIGN, value="<<=", line=char_line, col=char_col); }
                 return WhitelangTokens.Token(type=TOK_LSHIFT, value="<<", line=char_line, col=char_col);
             }
             return WhitelangTokens.Token(type=TOK_LT, value="<", line=char_line, col=char_col);
@@ -687,11 +687,11 @@ func get_next_token(l: Lexer) -> Token {
 
         // >, >=, >>, >>=
         if (char == '>') {
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_GTE, value=">=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_GTE, value=">=", line=char_line, col=char_col); }
             if (l.current_char == '>') { // >>
-                lexer_advance(l);
-                if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_RSHIFT_ASSIGN, value=">>=", line=char_line, col=char_col); }
+                lexer_advance(ref l);
+                if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_RSHIFT_ASSIGN, value=">>=", line=char_line, col=char_col); }
                 return WhitelangTokens.Token(type=TOK_RSHIFT, value=">>", line=char_line, col=char_col);
             }
             return WhitelangTokens.Token(type=TOK_GT, value=">", line=char_line, col=char_col);
@@ -699,53 +699,53 @@ func get_next_token(l: Lexer) -> Token {
 
         // &, &&, &=
         if (char == '&') {
-            lexer_advance(l);
-            if (l.current_char == '&') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_AND, value="&&", line=char_line, col=char_col); }
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_BIT_AND_ASSIGN, value="&=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '&') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_AND, value="&&", line=char_line, col=char_col); }
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_BIT_AND_ASSIGN, value="&=", line=char_line, col=char_col); }
             return WhitelangTokens.Token(type=TOK_BIT_AND, value="&", line=char_line, col=char_col);
         }
 
         // |, ||, |=
         if (char == '|') {
-            lexer_advance(l);
-            if (l.current_char == '|') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_OR, value="||", line=char_line, col=char_col); }
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_BIT_OR_ASSIGN, value="|=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '|') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_OR, value="||", line=char_line, col=char_col); }
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_BIT_OR_ASSIGN, value="|=", line=char_line, col=char_col); }
             return WhitelangTokens.Token(type=TOK_BIT_OR, value="|", line=char_line, col=char_col);
         }
 
         // ^, ^=
         if (char == '^') {
-            lexer_advance(l);
-            if (l.current_char == '=') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_BIT_XOR_ASSIGN, value="^=", line=char_line, col=char_col); }
+            lexer_advance(ref l);
+            if (l.current_char == '=') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_BIT_XOR_ASSIGN, value="^=", line=char_line, col=char_col); }
             return WhitelangTokens.Token(type=TOK_BIT_XOR, value="^", line=char_line, col=char_col);
         }
 
         // ~
         if (char == '~') {
-            lexer_advance(l);
+            lexer_advance(ref l);
             return WhitelangTokens.Token(type=TOK_BIT_NOT, value="~", line=char_line, col=char_col);
         }
 
         // @
         if (char == '@') {
-            lexer_advance(l);
+            lexer_advance(ref l);
             return WhitelangTokens.Token(type=TOK_AT, value="@", line=char_line, col=char_col);
         }
 
         // Single char tokens
-        if (char == '(') { lexer_advance(l);  return WhitelangTokens.Token(type=TOK_LPAREN,   value="(", line=char_line, col=char_col); }
-        if (char == ')') { lexer_advance(l);  return WhitelangTokens.Token(type=TOK_RPAREN,   value=")", line=char_line, col=char_col); }
-        if (char == ';') { lexer_advance(l);  return WhitelangTokens.Token(type=TOK_SEMICOLON,value=";", line=char_line, col=char_col); }
-        if (char == '{') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_LBRACE,   value="{", line=char_line, col=char_col); }
-        if (char == '}') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_RBRACE,   value="}", line=char_line, col=char_col); }
-        if (char == ',') { lexer_advance(l);  return WhitelangTokens.Token(type=TOK_COMMA,    value=",", line=char_line, col=char_col); }
-        if (char == '[') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_LBRACKET, value="[", line=char_line, col=char_col); }
-        if (char == ']') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_RBRACKET, value="]", line=char_line, col=char_col); }
-        if (char == ':') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_COLON, value=":", line=char_line, col=char_col); }
-        if (char == '?') { lexer_advance(l); return WhitelangTokens.Token(type=TOK_QUESTION, value="?", line=char_line, col=char_col); }
+        if (char == '(') { lexer_advance(ref l);  return WhitelangTokens.Token(type=TOK_LPAREN,   value="(", line=char_line, col=char_col); }
+        if (char == ')') { lexer_advance(ref l);  return WhitelangTokens.Token(type=TOK_RPAREN,   value=")", line=char_line, col=char_col); }
+        if (char == ';') { lexer_advance(ref l);  return WhitelangTokens.Token(type=TOK_SEMICOLON,value=";", line=char_line, col=char_col); }
+        if (char == '{') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_LBRACE,   value="{", line=char_line, col=char_col); }
+        if (char == '}') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_RBRACE,   value="}", line=char_line, col=char_col); }
+        if (char == ',') { lexer_advance(ref l);  return WhitelangTokens.Token(type=TOK_COMMA,    value=",", line=char_line, col=char_col); }
+        if (char == '[') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_LBRACKET, value="[", line=char_line, col=char_col); }
+        if (char == ']') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_RBRACKET, value="]", line=char_line, col=char_col); }
+        if (char == ':') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_COLON, value=":", line=char_line, col=char_col); }
+        if (char == '?') { lexer_advance(ref l); return WhitelangTokens.Token(type=TOK_QUESTION, value="?", line=char_line, col=char_col); }
 
         throw_illegal_char(l.pos, "unknown character '" + char + "'. ");
-        lexer_advance(l);
+        lexer_advance(ref l);
         continue;
     }
 

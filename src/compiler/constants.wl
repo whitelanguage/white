@@ -6,7 +6,7 @@ import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "lowering/numeric.wl"
 
-func check_layout_type(c: Compiler, type_id: Int, is_align: Bool, pos: Position) -> Bool {
+func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Position) -> Bool {
     let property: String = "size";
     if is_align { property = "alignment"; }
     if (type_id == TYPE_POISON) { return false; }
@@ -19,13 +19,13 @@ func check_layout_type(c: Compiler, type_id: Int, is_align: Bool, pos: Position)
         return false;
     }
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_FUNCTION || type_id == TYPE_GENERIC_CLASS || type_id == TYPE_GENERIC_METHOD || type_id == TYPE_GENERIC_ENUM) {
-        throw_type_error(pos, "Type-erased '" + get_type_name(c, type_id) + "' has no defined " + property + ".");
+        throw_type_error(pos, "Type-erased '" + get_type_name(ref c, type_id) + "' has no defined " + property + ".");
         return false;
     }
     return true;
 }
 
-func eval_const_long(c: Compiler, node: NodeID, pos: Position) -> Long {
+func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
     if (!has_node(node)) { return 0L; }
     let base: Int = node_tag(node);
     
@@ -35,21 +35,21 @@ func eval_const_long(c: Compiler, node: NodeID, pos: Position) -> Long {
     }
 
     if (base == NODE_VAR_ACCESS) {
-        return get_const_integer(c, get_var_access_node(c.arena, node), pos);
+        return get_const_integer(ref c, get_var_access_node(c.arena, node), pos);
     }
 
     if (base == NODE_TYPE_LAYOUT) {
         let layout: TypeLayoutNode = get_type_layout_node(c.arena, node);
-        let type_id: Int = resolve_type(c, layout.type_node);
-        if (!check_layout_type(c, type_id, layout.is_align, layout.pos)) { return 0L; }
-        if (layout.is_align) { return Long(get_type_align_bytes(c, type_id)); }
-        return Long(get_type_size_bytes(c, type_id));
+        let type_id: Int = resolve_type(ref c, layout.type_node);
+        if (!check_layout_type(ref c, type_id, layout.is_align, layout.pos)) { return 0L; }
+        if (layout.is_align) { return Long(get_type_align_bytes(ref c, type_id)); }
+        return Long(get_type_size_bytes(ref c, type_id));
     }
 
     if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = get_unary_node(c.arena, node);
         let op_str: String = u.op_tok.value;
-        let val: Long = eval_const_long(c, u.node, pos);
+        let val: Long = eval_const_long(ref c, u.node, pos);
         if (op_str == "-") { return 0L - val; }
         if (op_str == "~") { return val ^ -1L; }
         throw_type_error(pos, "Invalid unary operator for const integer.");
@@ -59,8 +59,8 @@ func eval_const_long(c: Compiler, node: NodeID, pos: Position) -> Long {
     if (base == NODE_BINOP) {
         let b: BinOpNode = get_binop_node(c.arena, node);
         let op_str: String = b.op_tok.value;
-        let left: Long = eval_const_long(c, b.left, pos);
-        let right: Long = eval_const_long(c, b.right, pos);
+        let left: Long = eval_const_long(ref c, b.left, pos);
+        let right: Long = eval_const_long(ref c, b.right, pos);
         
         if (op_str == "+") { return left + right; }
         if (op_str == "-") { return left - right; }
@@ -86,8 +86,8 @@ func eval_const_long(c: Compiler, node: NodeID, pos: Position) -> Long {
     return 0L;
 }
 
-func get_const_symbol(c: Compiler, node: VarAccessNode, pos: Position) -> SymbolInfo {
-    let info: SymbolInfo = find_symbol(c, node.name_tok.value);
+func get_const_symbol(ref c: Compiler, node: VarAccessNode, pos: Position) -> SymbolInfo {
+    let info: SymbolInfo = find_symbol(ref c, node.name_tok.value);
     if (!has_symbol(info)) {
         throw_name_error(pos, "Unknown constant '" + node.name_tok.value + "'.");
         return SymbolInfo();
@@ -103,8 +103,8 @@ func get_const_symbol(c: Compiler, node: VarAccessNode, pos: Position) -> Symbol
     return info;
 }
 
-func get_const_num(c: Compiler, node: VarAccessNode, pos: Position) -> Float {
-    let info: SymbolInfo = get_const_symbol(c, node, pos);
+func get_const_num(ref c: Compiler, node: VarAccessNode, pos: Position) -> Float {
+    let info: SymbolInfo = get_const_symbol(ref c, node, pos);
     if (!has_symbol(info)) { return 0.0; }
     if (!c.constant_nums.contains_key(info.reg)) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not numeric.");
@@ -113,8 +113,8 @@ func get_const_num(c: Compiler, node: VarAccessNode, pos: Position) -> Float {
     return c.constant_nums.lookup(info.reg);
 }
 
-func get_const_integer(c: Compiler, node: VarAccessNode, pos: Position) -> Long {
-    let info: SymbolInfo = get_const_symbol(c, node, pos);
+func get_const_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> Long {
+    let info: SymbolInfo = get_const_symbol(ref c, node, pos);
     if (!has_symbol(info)) { return 0L; }
     if (!c.constant_integers.contains_key(info.reg)) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");
@@ -123,8 +123,8 @@ func get_const_integer(c: Compiler, node: VarAccessNode, pos: Position) -> Long 
     return c.constant_integers.lookup(info.reg);
 }
 
-func get_const_wide_integer(c: Compiler, node: VarAccessNode, pos: Position) -> UInt128 {
-    let info: SymbolInfo = get_const_symbol(c, node, pos);
+func get_const_wide_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> UInt128 {
+    let info: SymbolInfo = get_const_symbol(ref c, node, pos);
     if (!has_symbol(info)) { return UInt128(0); }
     if (c.constant_wide_integers.contains_key(info.reg)) { return c.constant_wide_integers.lookup(info.reg); }
     if (c.constant_integers.contains_key(info.reg)) { let integer: Long = c.constant_integers.lookup(info.reg); return UInt128(integer); }
@@ -132,7 +132,7 @@ func get_const_wide_integer(c: Compiler, node: VarAccessNode, pos: Position) -> 
     return UInt128(0);
 }
 
-func eval_const_float(c: Compiler, node: NodeID, pos: Position) -> Float {
+func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
     if (!has_node(node)) { return 0.0; }
     let base: Int = node_tag(node);
     if (base == NODE_FLOAT) {
@@ -140,12 +140,12 @@ func eval_const_float(c: Compiler, node: NodeID, pos: Position) -> Float {
         return parse_decimal_float_literal(value.tok.value);
     }
     if (base == NODE_INT) {
-        let value_type: Int = get_expr_type(c, node);
+        let value_type: Int = get_expr_type(ref c, node);
         if (get_type_bitwidth(value_type) == 128) {
             throw_type_error(pos, "128-bit integers are not supported in floating-point constant expressions.");
             return 0.0;
         }
-        return Float(eval_const_long(c, node, pos));
+        return Float(eval_const_long(ref c, node, pos));
     }
     if (base == NODE_CHAR) {
         let value: CharNode = get_char_node(c.arena, node);
@@ -156,11 +156,11 @@ func eval_const_float(c: Compiler, node: NodeID, pos: Position) -> Float {
         return Float(value.value);
     }
     if (base == NODE_VAR_ACCESS) {
-        return get_const_num(c, get_var_access_node(c.arena, node), pos);
+        return get_const_num(ref c, get_var_access_node(c.arena, node), pos);
     }
     if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(c.arena, node);
-        let value: Float = eval_const_float(c, unary.node, pos);
+        let value: Float = eval_const_float(ref c, unary.node, pos);
         if (unary.op_tok.type == TOK_PLUS) { return value; }
         if (unary.op_tok.type == TOK_SUB) { return 0.0 - value; }
         throw_type_error(pos, "Invalid unary operator in floating-point constant expression.");
@@ -168,8 +168,8 @@ func eval_const_float(c: Compiler, node: NodeID, pos: Position) -> Float {
     }
     if (base == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(c.arena, node);
-        let left: Float = eval_const_float(c, binary.left, pos);
-        let right: Float = eval_const_float(c, binary.right, pos);
+        let left: Float = eval_const_float(ref c, binary.left, pos);
+        let right: Float = eval_const_float(ref c, binary.right, pos);
         let op: Int = binary.op_tok.type;
         if (op == TOK_PLUS) { return left + right; }
         if (op == TOK_SUB) { return left - right; }
@@ -234,7 +234,7 @@ func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
     return value;
 }
 
-func eval_const_wide(c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool) -> UInt128 {
+func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool) -> UInt128 {
     if (!has_node(node)) { return UInt128(0); }
     let base: Int = node_tag(node);
 
@@ -248,14 +248,14 @@ func eval_const_wide(c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool
         return parsed;
     }
     if (base == NODE_VAR_ACCESS) {
-        return get_const_wide_integer(c, get_var_access_node(c.arena, node), pos);
+        return get_const_wide_integer(ref c, get_var_access_node(c.arena, node), pos);
     }
     if (base == NODE_TYPE_LAYOUT) {
-        return UInt128(eval_const_long(c, node, pos));
+        return UInt128(eval_const_long(ref c, node, pos));
     }
     if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(c.arena, node);
-        let value: UInt128 = eval_const_wide(c, unary.node, pos, is_unsigned);
+        let value: UInt128 = eval_const_wide(ref c, unary.node, pos, is_unsigned);
         if (unary.op_tok.value == "-") { return UInt128(0) - value; }
         if (unary.op_tok.value == "~") { return value ^ 340282366920938463463374607431768211455ULL; }
         throw_type_error(pos, "Invalid unary operator for 128-bit constant integer.");
@@ -264,8 +264,8 @@ func eval_const_wide(c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool
     if (base == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(c.arena, node);
         let op: String = binary.op_tok.value;
-        let left: UInt128 = eval_const_wide(c, binary.left, pos, is_unsigned);
-        let right: UInt128 = eval_const_wide(c, binary.right, pos, is_unsigned);
+        let left: UInt128 = eval_const_wide(ref c, binary.left, pos, is_unsigned);
+        let right: UInt128 = eval_const_wide(ref c, binary.right, pos, is_unsigned);
 
         if (op == "+") { return left + right; }
         if (op == "-") { return left - right; }
@@ -305,7 +305,7 @@ func eval_const_wide(c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool
     throw_invalid_syntax(pos, "Expression is not a compile-time constant 128-bit integer.");
     return UInt128(0);
 }
-func eval_const_bool(c: Compiler, node: NodeID, pos: Position) -> Int {
+func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
     if (!has_node(node)) { return 0; }
     let base: Int = node_tag(node);
 
@@ -314,7 +314,7 @@ func eval_const_bool(c: Compiler, node: NodeID, pos: Position) -> Int {
         return b.value;
     }
     if (base == NODE_VAR_ACCESS) {
-        let value: Long = get_const_integer(c, get_var_access_node(c.arena, node), pos);
+        let value: Long = get_const_integer(ref c, get_var_access_node(c.arena, node), pos);
         if (value == 0L) { return 0; }
         if (value == 1L) { return 1; }
         throw_type_error(pos, "Boolean constant expression requires a Bool value.");
@@ -324,7 +324,7 @@ func eval_const_bool(c: Compiler, node: NodeID, pos: Position) -> Int {
         let u: UnaryOpNode = get_unary_node(c.arena, node);
         let op_str: String = u.op_tok.value;
         if (op_str == "!") {
-            let val: Int = eval_const_bool(c, u.node, pos);
+            let val: Int = eval_const_bool(ref c, u.node, pos);
             if (val == 1) { return 0; } else { return 1; }
         }
         throw_type_error(pos, "Invalid unary operator for const boolean.");
@@ -335,23 +335,23 @@ func eval_const_bool(c: Compiler, node: NodeID, pos: Position) -> Int {
         let op_str: String = b.op_tok.value;
 
         if (op_str == "&&") {
-            let left: Int = eval_const_bool(c, b.left, pos);
-            let right: Int = eval_const_bool(c, b.right, pos);
+            let left: Int = eval_const_bool(ref c, b.left, pos);
+            let right: Int = eval_const_bool(ref c, b.right, pos);
             if (left == 1 && right == 1) { return 1; } else { return 0; }
         }
         if (op_str == "||") {
-            let left: Int = eval_const_bool(c, b.left, pos);
-            let right: Int = eval_const_bool(c, b.right, pos);
+            let left: Int = eval_const_bool(ref c, b.left, pos);
+            let right: Int = eval_const_bool(ref c, b.right, pos);
             if (left == 1 || right == 1) { return 1; } else { return 0; }
         }
 
         if (op_str == "==" || op_str == "!=" || op_str == "<" || op_str == ">" || op_str == "<=" || op_str == ">=") {
-            let left_type: Int = get_expr_type(c, b.left);
-            let right_type: Int = get_expr_type(c, b.right);
+            let left_type: Int = get_expr_type(ref c, b.left);
+            let right_type: Int = get_expr_type(ref c, b.right);
             if (get_type_bitwidth(left_type) == 128 || get_type_bitwidth(right_type) == 128) {
                 let use_unsigned: Bool = is_unsigned_integer(left_type) || is_unsigned_integer(right_type);
-                let left_wide: UInt128 = eval_const_wide(c, b.left, pos, use_unsigned);
-                let right_wide: UInt128 = eval_const_wide(c, b.right, pos, use_unsigned);
+                let left_wide: UInt128 = eval_const_wide(ref c, b.left, pos, use_unsigned);
+                let right_wide: UInt128 = eval_const_wide(ref c, b.right, pos, use_unsigned);
                 if (op_str == "==") { if (left_wide == right_wide) { return 1; } else { return 0; } }
                 if (op_str == "!=") { if (left_wide != right_wide) { return 1; } else { return 0; } }
                 if use_unsigned {
@@ -368,8 +368,8 @@ func eval_const_bool(c: Compiler, node: NodeID, pos: Position) -> Int {
                     if (op_str == ">=") { if (signed_left >= signed_right) { return 1; } else { return 0; } }
                 }
             }
-            let left: Long = eval_const_long(c, b.left, pos);
-            let right: Long = eval_const_long(c, b.right, pos);
+            let left: Long = eval_const_long(ref c, b.left, pos);
+            let right: Long = eval_const_long(ref c, b.right, pos);
             if (op_str == "==") { if (left == right) { return 1; } else { return 0; } }
             if (op_str == "!=") { if (left != right) { return 1; } else { return 0; } }
             if (op_str == "<") { if (left < right) { return 1; } else { return 0; } }

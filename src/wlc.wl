@@ -385,9 +385,9 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let arena: WhitelangArena.AstArena = WhitelangArena.new_ast_arena();
     let lexer: WhitelangLexer.Lexer = WhitelangLexer.new_lexer(cfg.source_file, source);
-    let first_token: WhitelangTokens.Token = WhitelangLexer.get_next_token(lexer);
+    let first_token: WhitelangTokens.Token = WhitelangLexer.get_next_token(ref lexer);
     let parser: WhitelangParser.Parser = WhitelangParser.Parser(lexer=lexer, current_tok=first_token, nesting=0, arena=arena);
-    let ast: WhitelangNodes.NodeID = WhitelangParser.parse(parser);
+    let ast: WhitelangNodes.NodeID = WhitelangParser.parse(ref parser);
 
     WhitelangExceptions.check_errors_and_abort();
     if (cfg.verbose) { print("Parsed source: " + cfg.source_file); }
@@ -401,7 +401,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
-    WhitelangCompiler.compile(compiler, ast);
+    WhitelangCompiler.compile(ref compiler, ast);
     if (cfg.verbose) { print("Lowered source to LLVM IR"); }
 
     WhitelangExceptions.check_errors_and_abort();

@@ -4,15 +4,15 @@ import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 
-func runtime_type_name(c: Compiler, type_id: Int) -> String {
+func runtime_type_name(ref c: Compiler, type_id: Int) -> String {
     if (has_symbol(c.func_ret_map.lookup("" + type_id)) || has_symbol(c.method_ret_map.lookup("" + type_id))) {
         // callable labels belong to source binding, not runtime type identity
-        return mangle_type(c, type_id);
+        return mangle_type(ref c, type_id);
     }
-    return get_type_name(c, type_id);
+    return get_type_name(ref c, type_id);
 }
 
-func type_fingerprint(c: Compiler, type_id: Int) -> UInt64 {
+func type_fingerprint(ref c: Compiler, type_id: Int) -> UInt64 {
     /*
     fnv-1a over the canonical type name:
 
@@ -24,7 +24,7 @@ func type_fingerprint(c: Compiler, type_id: Int) -> UInt64 {
 
     using the type name keeps erased tags independent of addresses and table order
     */
-    let name: String = "whitelang:" + runtime_type_name(c, type_id);
+    let name: String = "whitelang:" + runtime_type_name(ref c, type_id);
     let hash: UInt64 = 14695981039346656037UL;
     let i: Int = 0;
     while (i < name.length()) {
@@ -36,10 +36,10 @@ func type_fingerprint(c: Compiler, type_id: Int) -> UInt64 {
     return hash;
 }
 
-func is_dict_key_type(c: Compiler, type_id: Int) -> Bool {
+func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) { return true; }
     if (is_primitive_type(type_id)) { return type_id != TYPE_ANY_ERROR; }
-    if (is_pointer_type(c, type_id)) { return true; }
+    if (is_pointer_type(ref c, type_id)) { return true; }
 
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (has_struct(info)) {
@@ -55,14 +55,14 @@ func is_dynamic_dict(info: StructInfo) -> Bool {
     return has_struct(info) && (info.name == "dict.Dict" || info.name == "Dict");
 }
 
-func is_typed_dict(c: Compiler, info: StructInfo) -> Bool {
+func is_typed_dict(ref c: Compiler, info: StructInfo) -> Bool {
     if (!has_struct(info)) { return false; }
 
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
     return has_template(template) && (template.name == "Dict" || template.name.ends_with(".Dict"));
 }
 
-func is_generic_class(c: Compiler, info: StructInfo) -> Bool {
+func is_generic_class(ref c: Compiler, info: StructInfo) -> Bool {
     if (!has_struct(info)) { return false; }
 
     let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
@@ -76,12 +76,12 @@ func is_dynamic_dict_key_method(name: String) -> Bool {
     return name == "put" || name == "get" || name == "remove" || name == "contains_key";
 }
 
-func append_dict_key_case(c: Compiler, cases: String, seen: Dict(String, StringConstant), type_id: Int, label: String) -> String {
+func append_dict_key_case(ref c: Compiler, cases: String, seen: Dict(String, StringConstant), type_id: Int, label: String) -> String {
 // keep the full name around so a 64-bit collision fails during compilation
-    let fingerprint: UInt64 = type_fingerprint(c, type_id);
+    let fingerprint: UInt64 = type_fingerprint(ref c, type_id);
     let key: String = "" + fingerprint;
     let previous: StringConstant = seen.lookup(key);
-    let type_name: String = runtime_type_name(c, type_id);
+    let type_name: String = runtime_type_name(ref c, type_id);
     if (has_string_constant(previous) && previous.value != type_name) {
         throw_internal_compiler_error(no_position(), "Dict key fingerprint collision between " + previous.value + " and " + type_name);
         return cases;
@@ -91,11 +91,11 @@ func append_dict_key_case(c: Compiler, cases: String, seen: Dict(String, StringC
     return cases + "    i64 " + fingerprint + ", label " + label + "\n";
 }
 
-func append_variant_ref_case(c: Compiler, cases: String, seen: Dict(String, StringConstant), type_id: Int) -> String {
-    let fingerprint: UInt64 = type_fingerprint(c, type_id);
+func append_variant_ref_case(ref c: Compiler, cases: String, seen: Dict(String, StringConstant), type_id: Int) -> String {
+    let fingerprint: UInt64 = type_fingerprint(ref c, type_id);
     let key: String = "" + fingerprint;
     let previous: StringConstant = seen.lookup(key);
-    let type_name: String = runtime_type_name(c, type_id);
+    let type_name: String = runtime_type_name(ref c, type_id);
     if (has_string_constant(previous) && previous.value != type_name) {
         throw_internal_compiler_error(no_position(), "Variant fingerprint collision between " + previous.value + " and " + type_name);
         return cases;
@@ -105,7 +105,7 @@ func append_variant_ref_case(c: Compiler, cases: String, seen: Dict(String, Stri
     return cases + "    i64 " + fingerprint + ", label %release\n";
 }
 
-func emit_dict_key_helpers(c: Compiler) -> Void {
+func emit_dict_key_helpers(ref c: Compiler) -> Void {
     c.output_file.write("define internal i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high) {\n");
     c.output_file.write("entry:\n");
     c.output_file.write("  %mixed.0 = xor i64 %tag, %low\n");
@@ -190,13 +190,13 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     let hash_interface: StructInfo = c.struct_table.lookup("hashing.Hash");
     let type_id: Int = 1;
     while (type_id < c.type_counter) {
-        if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(c, type_id)) {
+        if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(ref c, type_id)) {
             let label: String = "%bits";
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
     
             let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-            if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(c, type_id, hash_interface.type_id)) {
+            if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
                 label = "%class.hash." + type_id;
                 c.hash_types.put("" + type_id, StringConstant(id=type_id, value=""));
                 class_hash_blocks += "class.hash." + type_id + ":\n";
@@ -205,7 +205,7 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
                 class_hash_blocks += "  ret i32 %class.result." + type_id + "\n";
             }
 
-            key_cases = append_dict_key_case(c, key_cases, seen_keys, type_id, label);
+            key_cases = append_dict_key_case(ref c, key_cases, seen_keys, type_id, label);
         }
         type_id++;
     }
@@ -279,8 +279,8 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
     type_id = 1;
     while (type_id < c.type_counter) {
         let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
-        if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(c, type_id, hash_interface.type_id)) {
-            class_equal_cases += "    i64 " + type_fingerprint(c, type_id) + ", label %class.equal." + type_id + "\n";
+        if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
+            class_equal_cases += "    i64 " + type_fingerprint(ref c, type_id) + ", label %class.equal." + type_id + "\n";
             class_equal_blocks += "class.equal." + type_id + ":\n";
             class_equal_blocks += "  %class.left.addr." + type_id + " = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n";
             class_equal_blocks += "  %class.right.addr." + type_id + " = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n";
@@ -296,9 +296,9 @@ func emit_dict_key_helpers(c: Compiler) -> Void {
 
     c.output_file.write("dispatch:\n");
     c.output_file.write("  switch i64 %left.tag, label %bits [\n");
-    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_STRING) + ", label %string\n");
-    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT) + ", label %float\n");
-    c.output_file.write("    i64 " + type_fingerprint(c, TYPE_FLOAT32) + ", label %float\n");
+    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_STRING) + ", label %string\n");
+    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_FLOAT) + ", label %float\n");
+    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_FLOAT32) + ", label %float\n");
     c.output_file.write(class_equal_cases);
     c.output_file.write("  ]\n");
     c.output_file.write("bits:\n");
@@ -352,15 +352,15 @@ func class_method_index(info: StructInfo, name: String) -> Int {
     return -1;
 }
 
-func emit_class_hash_helpers(c: Compiler, info: StructInfo, type_id: Int, llvm_type: String, hash_name: String, equal_name: String) -> Void {
+func emit_class_hash_helpers(ref c: Compiler, info: StructInfo, type_id: Int, llvm_type: String, hash_name: String, equal_name: String) -> Void {
     let hash_index: Int = class_method_index(info, "hash");
     let equal_index: Int = class_method_index(info, "equals");
     if (hash_index < 0 || equal_index < 0) {
-        throw_internal_compiler_error(no_position(), "Hash implementation is incomplete for " + get_type_name(c, type_id));
+        throw_internal_compiler_error(no_position(), "Hash implementation is incomplete for " + get_type_name(ref c, type_id));
         return;
     }
 
-    let table_type: String = class_vtable_type(c, info);
+    let table_type: String = class_vtable_type(ref c, info);
     c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\n");
     c.output_file.write("entry:\n");
     c.output_file.write("  %is.null = icmp eq " + llvm_type + " %key, null\n");
@@ -374,7 +374,7 @@ func emit_class_hash_helpers(c: Compiler, info: StructInfo, type_id: Int, llvm_t
     c.output_file.write("  %method = bitcast i8* %method.raw to i32 (" + llvm_type + ")*\n");
     c.output_file.write("  %value = call i32 %method(" + llvm_type + " %key)\n");
     c.output_file.write("  %wide = sext i32 %value to i64\n");
-    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %wide, i64 0)\n");
+    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %wide, i64 0)\n");
     c.output_file.write("  ret i32 %result\n");
     c.output_file.write("invalid:\n");
     c.output_file.write("  ret i32 0\n");
@@ -405,14 +405,14 @@ func emit_class_hash_helpers(c: Compiler, info: StructInfo, type_id: Int, llvm_t
     c.output_file.write("}\n\n");
 }
 
-func emit_hash_helpers(c: Compiler) -> Void {
+func emit_hash_helpers(ref c: Compiler) -> Void {
     let slot: Int = 0;
     while (slot < c.hash_types.capacity) {
         if (c.hash_types.hashes[slot] >= 2) {
             let entry: StringConstant = c.hash_types.values[slot];
             let type_id: Int = entry.id;
-            let repr_type: Int = get_repr_type(c, type_id);
-            let llvm_type: String = get_llvm_type_str(c, type_id);
+            let repr_type: Int = get_repr_type(ref c, type_id);
+            let llvm_type: String = get_llvm_type_str(ref c, type_id);
             let hash_name: String = "@__wl_hash_value_" + type_id;
             let equal_name: String = "@__wl_values_equal_" + type_id;
             let key_info: StructInfo = c.struct_id_map.lookup("" + repr_type);
@@ -442,25 +442,25 @@ func emit_hash_helpers(c: Compiler) -> Void {
                 c.output_file.write("  br label %loop\n");
                 c.output_file.write("finish:\n");
                 c.output_file.write("  %len.wide = zext i32 %len to i64\n");
-                c.output_file.write("  %hash = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %state, i64 %len.wide)\n");
+                c.output_file.write("  %hash = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %state, i64 %len.wide)\n");
                 c.output_file.write("  ret i32 %hash\n");
                 c.output_file.write("invalid:\n");
                 c.output_file.write("  ret i32 0\n");
                 c.output_file.write("}\n\n");
                 c.output_file.write("define internal i1 " + equal_name + "(%struct.$String* %left, %struct.$String* %right) {\nentry:\n  %result = call i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right)\n  ret i1 %result\n}\n\n");
             } else if (has_struct(key_info) && key_info.is_class) {
-                emit_class_hash_helpers(c, key_info, type_id, llvm_type, hash_name, equal_name);
+                emit_class_hash_helpers(ref c, key_info, type_id, llvm_type, hash_name, equal_name);
             } else {
                 c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
                 let bits: String = "%bits";
-                if (is_pointer_type(c, repr_type) || repr_type == TYPE_ANYPTR || 
+                if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR || 
                     has_symbol(c.func_ret_map.lookup("" + repr_type)) || 
                     has_symbol(c.method_ret_map.lookup("" + repr_type))) {
 
                     c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
                 else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {
-                    c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
+                    c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
                     bits = "";
                 }
                 else if (repr_type == TYPE_FLOAT) {
@@ -482,7 +482,7 @@ func emit_hash_helpers(c: Compiler) -> Void {
                 }
 
                 if (bits.length() > 0) {
-                    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
+                    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
                 }
                 if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
                     c.output_file.write("invalid:\n  ret i32 0\n");
@@ -504,7 +504,7 @@ func emit_hash_helpers(c: Compiler) -> Void {
 }
 
 
-func class_vtable_type(c: Compiler, info: StructInfo) -> String {
+func class_vtable_type(ref c: Compiler, info: StructInfo) -> String {
     if (has_template(c.generic_instance_templates.lookup("" + info.type_id))) {
         return generic_llvm_name("%vtable_type.__generic.", info.type_id);
     }
