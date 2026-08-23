@@ -249,6 +249,13 @@ func wir_call(ref program: WirModule, block: WirBlockID, function: WirValueID, a
     return value;
 }
 
+func wir_cast(ref program: WirModule, block: WirBlockID, value: WirValueID, type_id: WirTypeID, name: String, location: WirLocation) -> WirValueID {
+    if (wir_value_type(program, value) == type_id) { return value; }
+    let result: WirValueID = wir_append(ref program, block, WirOpcode.Cast, type_id, [value], [], location);
+    wir_name_value(ref program, result, name);
+    return result;
+}
+
 func wir_return(ref program: WirModule, block: WirBlockID, value: WirValueID, location: WirLocation) -> Void {
     let operands: Vector(WirValueID) = [];
     if (value != NO_WIR_VALUE) { operands.append(value); }

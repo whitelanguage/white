@@ -131,8 +131,17 @@ func wir_binary_name(opcode: WirOpcode) -> String {
     if (opcode == WirOpcode.Equal) { return "eq"; }
     if (opcode == WirOpcode.NotEqual) { return "ne"; }
     if (opcode == WirOpcode.SignedLess) { return "slt"; }
+    if (opcode == WirOpcode.SignedLessEqual) { return "sle"; }
+    if (opcode == WirOpcode.SignedGreater) { return "sgt"; }
+    if (opcode == WirOpcode.SignedGreaterEqual) { return "sge"; }
     if (opcode == WirOpcode.UnsignedLess) { return "ult"; }
+    if (opcode == WirOpcode.UnsignedLessEqual) { return "ule"; }
+    if (opcode == WirOpcode.UnsignedGreater) { return "ugt"; }
+    if (opcode == WirOpcode.UnsignedGreaterEqual) { return "uge"; }
     if (opcode == WirOpcode.FloatLess) { return "flt"; }
+    if (opcode == WirOpcode.FloatLessEqual) { return "fle"; }
+    if (opcode == WirOpcode.FloatGreater) { return "fgt"; }
+    if (opcode == WirOpcode.FloatGreaterEqual) { return "fge"; }
     return "";
 }
 

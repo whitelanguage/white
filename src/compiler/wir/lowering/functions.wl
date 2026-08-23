@@ -5,6 +5,7 @@ import * from "types.wl"
 import * from "declarations.wl"
 import * from "../../context.wl"
 import parse_const_uint128, parse_decimal_float_literal from "../../constants.wl"
+import is_unsuffix_int_literal from "../../validation.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 import * from "../../../frontend/tokens.wl"
@@ -28,6 +29,7 @@ struct WirLoop(
 
 struct WirFunctionLowering(
     function: WirFuncID,
+    return_type: Int,
     block: WirBlockID,
     bindings: Vector(WirBinding),
     loops: Vector(WirLoop),
@@ -91,6 +93,91 @@ func wir_numeric_opcode(source_type: Int, token: Int) -> WirOpcode {
     return WirOpcode.Invalid;
 }
 
+func wir_comparison_opcode(source_type: Int, token: Int) -> WirOpcode {
+    if (token == TOK_EE) { return WirOpcode.Equal; }
+    if (token == TOK_NE) { return WirOpcode.NotEqual; }
+
+    let floating: Bool = source_type == TYPE_FLOAT || source_type == TYPE_FLOAT32;
+    if floating {
+        if (token == TOK_LT) { return WirOpcode.FloatLess; }
+        if (token == TOK_LTE) { return WirOpcode.FloatLessEqual; }
+        if (token == TOK_GT) { return WirOpcode.FloatGreater; }
+        if (token == TOK_GTE) { return WirOpcode.FloatGreaterEqual; }
+        return WirOpcode.Invalid;
+    }
+
+    let unsigned: Bool = is_unsigned_integer(source_type) || source_type == TYPE_CHAR;
+    if unsigned {
+        if (token == TOK_LT) { return WirOpcode.UnsignedLess; }
+        if (token == TOK_LTE) { return WirOpcode.UnsignedLessEqual; }
+        if (token == TOK_GT) { return WirOpcode.UnsignedGreater; }
+        if (token == TOK_GTE) { return WirOpcode.UnsignedGreaterEqual; }
+        return WirOpcode.Invalid;
+    }
+    if (is_signed_integer(source_type)) {
+        if (token == TOK_LT) { return WirOpcode.SignedLess; }
+        if (token == TOK_LTE) { return WirOpcode.SignedLessEqual; }
+        if (token == TOK_GT) { return WirOpcode.SignedGreater; }
+        if (token == TOK_GTE) { return WirOpcode.SignedGreaterEqual; }
+    }
+    return WirOpcode.Invalid;
+}
+
+func wir_source_numeric(source_type: Int) -> Bool {
+    return is_integer_type(source_type) || source_type == TYPE_FLOAT || source_type == TYPE_FLOAT32 || source_type == TYPE_CHAR;
+}
+
+func wir_implicit_numeric_cast(source_type: Int, target_type: Int) -> Bool {
+    if (source_type == target_type) { return true; }
+    if (is_integer_type(source_type) && is_integer_type(target_type)) {
+        let source_bits: Int = get_type_bitwidth(source_type);
+        let target_bits: Int = get_type_bitwidth(target_type);
+        return source_bits < target_bits && !(is_signed_integer(source_type) && is_unsigned_integer(target_type));
+    }
+    if (source_type == TYPE_BYTE && target_type == TYPE_CHAR) { return true; }
+    if (target_type == TYPE_FLOAT && (source_type == TYPE_INT || source_type == TYPE_LONG || source_type == TYPE_FLOAT32)) { return true; }
+    return false;
+}
+
+func wir_cast_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, target_type: Int, implicit: Bool) -> WirExpr {
+    if (value.value == NO_WIR_VALUE || value.source_type == target_type) { return value; }
+    if (!wir_source_numeric(value.source_type) || !wir_source_numeric(target_type)) {
+        state.errors.append("non-numeric conversion reached WIR lowering");
+        return wir_no_expr();
+    }
+    if (implicit && !wir_implicit_numeric_cast(value.source_type, target_type)) {
+        state.errors.append("implicit conversion from " + get_type_name(ref source, value.source_type) + " to " + get_type_name(ref source, target_type) + " reached WIR lowering");
+        return wir_no_expr();
+    }
+    let target: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, target_type);
+    return WirExpr(value=wir_cast(ref program, state.block, value.value, target, "", no_wir_location()), source_type=target_type);
+}
+
+func wir_binary_type(ref state: WirFunctionLowering, ref source: Compiler, left: WirExpr, right: WirExpr, left_node: NodeID, right_node: NodeID) -> Int {
+    if (left.source_type == right.source_type) { return left.source_type; }
+    if (!wir_source_numeric(left.source_type) || !wir_source_numeric(right.source_type)) { return TYPE_POISON; }
+    if (left.source_type == TYPE_FLOAT || right.source_type == TYPE_FLOAT) { return TYPE_FLOAT; }
+    if (left.source_type == TYPE_FLOAT32 || right.source_type == TYPE_FLOAT32) { return TYPE_FLOAT32; }
+
+    if (is_signed_integer(left.source_type) != is_signed_integer(right.source_type)) {
+        let left_bits: Int = get_type_bitwidth(left.source_type);
+        let right_bits: Int = get_type_bitwidth(right.source_type);
+        if (is_signed_integer(left.source_type) && left_bits > right_bits) { return left.source_type; }
+        if (is_signed_integer(right.source_type) && right_bits > left_bits) { return right.source_type; }
+        if (is_unsuffix_int_literal(ref source, left_node)) { return right.source_type; }
+        if (is_unsuffix_int_literal(ref source, right_node)) { return left.source_type; }
+        state.errors.append("signed and unsigned integers reached WIR lowering without an explicit conversion");
+        return TYPE_POISON;
+    }
+
+    let left_bits: Int = get_type_bitwidth(left.source_type);
+    let right_bits: Int = get_type_bitwidth(right.source_type);
+    if (right_bits > left_bits) { return right.source_type; }
+    if (left_bits > right_bits) { return left.source_type; }
+    if (is_unsigned_integer(right.source_type)) { return right.source_type; }
+    return left.source_type;
+}
+
 func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
     if (!has_node(node)) {
         state.errors.append("expression is missing from the resolved AST");
@@ -129,19 +216,29 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let left: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.left);
         let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.right);
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) { return wir_no_expr(); }
-        if (left.source_type != right.source_type) {
-            state.errors.append("binary operands reached WIR lowering with different source types");
+        let common_type: Int = wir_binary_type(ref state, ref source, left, right, binary.left, binary.right);
+        if (common_type == TYPE_POISON) {
+            if (state.errors.length() == 0) { state.errors.append("binary operands reached WIR lowering with incompatible types"); }
             return wir_no_expr();
         }
+        left = wir_cast_expr(ref state, ref types, ref source, ref program, left, common_type, false);
+        right = wir_cast_expr(ref state, ref types, ref source, ref program, right, common_type, false);
+        if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) { return wir_no_expr(); }
 
-        let opcode: WirOpcode = wir_numeric_opcode(left.source_type, binary.op_tok.type);
+        let opcode: WirOpcode = wir_comparison_opcode(common_type, binary.op_tok.type);
+        if (opcode != WirOpcode.Invalid) {
+            let value: WirValueID = wir_binary(ref program, state.block, opcode, program.bool_type, left.value, right.value, "", no_wir_location());
+            return WirExpr(value=value, source_type=TYPE_BOOL);
+        }
+
+        opcode = wir_numeric_opcode(common_type, binary.op_tok.type);
         if (opcode == WirOpcode.Invalid) {
             state.errors.append("binary operator '" + binary.op_tok.value + "' is not lowered to WIR yet");
             return wir_no_expr();
         }
-        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, left.source_type);
+        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, common_type);
         let value: WirValueID = wir_binary(ref program, state.block, opcode, type_id, left.value, right.value, "", no_wir_location());
-        return WirExpr(value=value, source_type=left.source_type);
+        return WirExpr(value=value, source_type=common_type);
     }
     if (kind == NODE_CALL) {
         let call: CallNode = get_call_node(source.arena, node);
@@ -177,9 +274,14 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             }
             let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
             if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
-            if (i < signature.parameters.length() && wir_value_type(program, value.value) != signature.parameters[i]) {
-                state.errors.append("argument " + i + " to '" + info.name + "' requires a conversion before WIR lowering");
-                return wir_no_expr();
+            if (i < signature.parameters.length()) {
+                let parameter: TypeListNode = info.arg_types[i];
+                if (parameter.pass_mode != PARAM_VALUE) {
+                    state.errors.append("reference arguments are not lowered to WIR calls yet");
+                    return wir_no_expr();
+                }
+                value = wir_cast_expr(ref state, ref types, ref source, ref program, value, parameter.type, true);
+                if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
             }
             arguments.append(value.value);
             i++;
@@ -201,10 +303,8 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         let declared: Int = resolve_type(ref source, node.type_node);
         if (declared != TYPE_AUTO) { source_type = declared; }
     }
-    if (source_type != value.source_type) {
-        state.errors.append("local '" + node.name_tok.value + "' requires a conversion before WIR lowering");
-        return;
-    }
+    value = wir_cast_expr(ref state, ref types, ref source, ref program, value, source_type, true);
+    if (value.value == NO_WIR_VALUE) { return; }
 
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     let address: WirValueID = wir_stack_alloc(ref program, state.block, type_id, node.name_tok.value + ".addr", no_wir_location());
@@ -232,10 +332,8 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
         if (value.value == NO_WIR_VALUE) { return; }
-        if (value.source_type != binding.source_type) {
-            state.errors.append("assignment to '" + statement.name_tok.value + "' requires a conversion before WIR lowering");
-            return;
-        }
+        value = wir_cast_expr(ref state, ref types, ref source, ref program, value, binding.source_type, true);
+        if (value.value == NO_WIR_VALUE) { return; }
         wir_store(ref program, state.block, value.value, binding.address, no_wir_location());
         return;
     }
@@ -250,9 +348,12 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         } else if (result.value == NO_WIR_VALUE) {
             state.errors.append("non-Void function reached WIR lowering without a return value");
             return;
-        } else if (wir_value_type(program, result.value) != signature.result) {
-            state.errors.append("return value reached WIR lowering with the wrong type");
-            return;
+        } else {
+            result = wir_cast_expr(ref state, ref types, ref source, ref program, result, state.return_type, true);
+            if (result.value == NO_WIR_VALUE || wir_value_type(program, result.value) != signature.result) {
+                state.errors.append("return value reached WIR lowering with the wrong type");
+                return;
+            }
         }
         wir_return(ref program, state.block, result.value, no_wir_location());
         state.terminated = true;
@@ -390,7 +491,7 @@ func wir_lower_function_body(ref types: WirTypeMap, ref source: Compiler, ref pr
     }
 
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
-    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, block=entry, bindings=[], loops=[], errors=[], terminated=false, next_block=0);
+    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=info.ret_type, block=entry, bindings=[], loops=[], errors=[], terminated=false, next_block=0);
     let i: Int = 0;
     while (i < function.parameters.length()) {
         let parameter: WirValueID = function.parameters[i];
@@ -411,7 +512,7 @@ func wir_lower_function_body(ref types: WirTypeMap, ref source: Compiler, ref pr
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     if (!state.terminated) {
         if (signature.result == program.void_type) {
-            wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
+            wir_return(ref program, state.block, NO_WIR_VALUE, no_wir_location());
         } else {
             state.errors.append("function '" + info.name + "' has no terminating return in WIR lowering");
         }

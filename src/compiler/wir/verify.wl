@@ -195,6 +195,18 @@ func wir_equality_type(program: WirModule, type_id: WirTypeID) -> Bool {
     return wir_numeric_kind(kind);
 }
 
+func wir_signed_comparison(opcode: WirOpcode) -> Bool {
+    return opcode == WirOpcode.SignedLess || opcode == WirOpcode.SignedLessEqual || opcode == WirOpcode.SignedGreater || opcode == WirOpcode.SignedGreaterEqual;
+}
+
+func wir_unsigned_comparison(opcode: WirOpcode) -> Bool {
+    return opcode == WirOpcode.UnsignedLess || opcode == WirOpcode.UnsignedLessEqual || opcode == WirOpcode.UnsignedGreater || opcode == WirOpcode.UnsignedGreaterEqual;
+}
+
+func wir_float_comparison(opcode: WirOpcode) -> Bool {
+    return opcode == WirOpcode.FloatLess || opcode == WirOpcode.FloatLessEqual || opcode == WirOpcode.FloatGreater || opcode == WirOpcode.FloatGreaterEqual;
+}
+
 func wir_check_no_result(program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
     if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) { wir_report(errors, "side-effect instruction produces a value"); }
 }
@@ -264,7 +276,7 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     } else if (opcode == WirOpcode.BitAnd || opcode == WirOpcode.BitOr || opcode == WirOpcode.BitXor || opcode == WirOpcode.ShiftLeft) {
         wir_check_binary(program, instruction, errors);
         if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "bitwise instruction requires an integer type"); }
-    } else if (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual || opcode == WirOpcode.SignedLess || opcode == WirOpcode.UnsignedLess || opcode == WirOpcode.FloatLess) {
+    } else if (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual || wir_signed_comparison(opcode) || wir_unsigned_comparison(opcode) || wir_float_comparison(opcode)) {
         if (instruction.operands.length() != 2 || !wir_value_valid(program, instruction.operands[0]) || !wir_value_valid(program, instruction.operands[1])) {
             wir_report(errors, "comparison requires two valid operands");
         } else {
@@ -275,13 +287,13 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             if (left == right && (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual) && !wir_equality_type(program, left)) {
                 wir_report(errors, "equality comparison requires a scalar or pointer type");
             }
-            if (left == right && opcode == WirOpcode.SignedLess && !wir_type_is(program, left, WirTypeKind.SignedInt)) {
+            if (left == right && wir_signed_comparison(opcode) && !wir_type_is(program, left, WirTypeKind.SignedInt)) {
                 wir_report(errors, "signed comparison requires a signed integer type");
             }
-            if (left == right && opcode == WirOpcode.UnsignedLess && !wir_type_is(program, left, WirTypeKind.UnsignedInt)) {
+            if (left == right && wir_unsigned_comparison(opcode) && !wir_type_is(program, left, WirTypeKind.UnsignedInt)) {
                 wir_report(errors, "unsigned comparison requires an unsigned integer type");
             }
-            if (left == right && opcode == WirOpcode.FloatLess && !wir_type_is(program, left, WirTypeKind.FloatType)) {
+            if (left == right && wir_float_comparison(opcode) && !wir_type_is(program, left, WirTypeKind.FloatType)) {
                 wir_report(errors, "floating-point comparison requires a floating-point type");
             }
         }
