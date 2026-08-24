@@ -153,27 +153,138 @@ func wir_cast_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     return WirExpr(value=wir_cast(ref program, state.block, value.value, target, "", no_wir_location()), source_type=target_type);
 }
 
-func wir_lower_address(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> WirExpr {
+func wir_lvalue_type(state: WirFunctionLowering, source: Compiler, node: NodeID) -> Int {
+    if (!has_node(node)) { return TYPE_POISON; }
+    let kind: Int = node_tag(node);
+    if (kind == NODE_VAR_ACCESS) {
+        let access: VarAccessNode = get_var_access_node(source.arena, node);
+        let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
+        catch(err) { return TYPE_POISON; }
+        return binding.source_type;
+    }
+    if (kind == NODE_FIELD_ACCESS) {
+        let access: FieldAccessNode = get_field_access_node(source.arena, node);
+        let object_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, access.obj));
+        let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+        let field: FieldInfo = find_field(info, access.field_name);
+        if (has_field(field)) { return field.type; }
+        return TYPE_POISON;
+    }
+    if (kind == NODE_INDEX_ACCESS) {
+        let access: IndexAccessNode = get_index_access_node(source.arena, node);
+        let target_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, access.target));
+        let info: ArrayInfo = source.array_info_map.lookup("" + target_type);
+        if (has_array_info(info)) { return info.base_type; }
+    }
+    return TYPE_POISON;
+}
+
+func wir_lvalue_const(state: WirFunctionLowering, source: Compiler, node: NodeID) -> Bool {
+    if (!has_node(node)) { return false; }
+    let kind: Int = node_tag(node);
+    if (kind == NODE_VAR_ACCESS) {
+        let access: VarAccessNode = get_var_access_node(source.arena, node);
+        let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
+        catch(err) { return false; }
+        return binding.is_const;
+    }
+    if (kind == NODE_FIELD_ACCESS) {
+        let access: FieldAccessNode = get_field_access_node(source.arena, node);
+        if (wir_lvalue_const(state, source, access.obj)) { return true; }
+        let object_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, access.obj));
+        let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+        let field: FieldInfo = find_field(info, access.field_name);
+        return has_field(field) && field.is_const;
+    }
+    if (kind == NODE_INDEX_ACCESS) {
+        return wir_lvalue_const(state, source, get_index_access_node(source.arena, node).target);
+    }
+    return false;
+}
+
+func wir_field_const(state: WirFunctionLowering, source: Compiler, object: NodeID, name: String) -> Bool {
+    if (wir_lvalue_const(state, source, object)) { return true; }
+    let object_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, object));
+    let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+    let field: FieldInfo = find_field(info, name);
+    return has_field(field) && field.is_const;
+}
+
+func wir_lower_field_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, object_node: NodeID, name: String) -> WirExpr {
+    let object: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, object_node);
+    if (object.value == NO_WIR_VALUE) { return wir_no_expr(); }
+    let object_type: Int = get_repr_type(ref source, object.source_type);
+    let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+    let field: FieldInfo = find_field(info, name);
+    if (!has_struct(info) || info.is_class || !has_field(field)) {
+        state.errors.append("field '" + name + "' is not an addressable value-struct field in WIR lowering");
+        return wir_no_expr();
+    }
+    return WirExpr(value=wir_field_address(ref program, state.block, object.value, field.offset, "", no_wir_location()), source_type=field.type);
+}
+
+func wir_lower_index_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, target_node: NodeID, index_node: NodeID) -> WirExpr {
+    let target: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, target_node);
+    if (target.value == NO_WIR_VALUE) { return wir_no_expr(); }
+    let target_type: Int = get_repr_type(ref source, target.source_type);
+    let info: ArrayInfo = source.array_info_map.lookup("" + target_type);
+    if (!has_array_info(info) || info.size < 0) {
+        state.errors.append("only fixed arrays have addressable WIR index operations at this stage");
+        return wir_no_expr();
+    }
+    let index: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, index_node);
+    if (index.value == NO_WIR_VALUE) { return wir_no_expr(); }
+    if (index.source_type != TYPE_INT) {
+        state.errors.append("array index reached WIR lowering with a non-Int type");
+        return wir_no_expr();
+    }
+    let length: WirValueID = wir_const_int(ref program, wir_lower_source_type(ref types, ref source, ref program, TYPE_INT), UInt128(UInt32(info.size)));
+    wir_append(ref program, state.block, WirOpcode.BoundsCheck, program.void_type, [index.value, length], [], no_wir_location());
+    return WirExpr(value=wir_index_address(ref program, state.block, target.value, index.value, "", no_wir_location()), source_type=info.base_type);
+}
+
+func wir_lower_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
+    if (!has_node(node)) {
+        state.errors.append("missing lvalue reached WIR lowering");
+        return wir_no_expr();
+    }
+
+    let kind: Int = node_tag(node);
+    if (kind == NODE_VAR_ACCESS) {
+        let access: VarAccessNode = get_var_access_node(source.arena, node);
+        let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
+        catch(err) {
+            state.errors.append("unknown local '" + access.name_tok.value + "' in WIR lvalue lowering");
+            return wir_no_expr();
+        }
+        return WirExpr(value=binding.address, source_type=binding.source_type);
+    }
+
+    if (kind == NODE_FIELD_ACCESS) {
+        let access: FieldAccessNode = get_field_access_node(source.arena, node);
+        return wir_lower_field_lvalue(ref state, ref types, ref source, ref program, access.obj, access.field_name);
+    }
+
+    if (kind == NODE_INDEX_ACCESS) {
+        let access: IndexAccessNode = get_index_access_node(source.arena, node);
+        return wir_lower_index_lvalue(ref state, ref types, ref source, ref program, access.target, access.index_node);
+    }
+
+    state.errors.append("expression is not an addressable WIR value");
+    return wir_no_expr();
+}
+
+func wir_lower_address(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
     if (!has_node(node) || node_tag(node) != NODE_REF) {
         state.errors.append("reference parameter reached WIR lowering without 'ref'");
         return wir_no_expr();
     }
     let reference: RefNode = get_ref_node(source.arena, node);
-    if (!has_node(reference.node) || node_tag(reference.node) != NODE_VAR_ACCESS) {
-        state.errors.append("reference expression is not an addressable local in WIR lowering");
+    if (wir_lvalue_const(state, source, reference.node)) {
+        state.errors.append("const value reached WIR lowering as a mutable reference");
         return wir_no_expr();
     }
-    let access: VarAccessNode = get_var_access_node(source.arena, reference.node);
-    let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
-    catch(err) {
-        state.errors.append("unknown local '" + access.name_tok.value + "' in WIR reference lowering");
-        return wir_no_expr();
-    }
-    if (binding.is_const) {
-        state.errors.append("const local '" + access.name_tok.value + "' reached WIR lowering as a mutable reference");
-        return wir_no_expr();
-    }
-    return WirExpr(value=binding.address, source_type=binding.source_type);
+    return wir_lower_lvalue(ref state, ref types, ref source, ref program, reference.node);
 }
 
 func wir_one(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirValueID {
@@ -243,6 +354,16 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let value: WirValueID = wir_load(ref program, state.block, binding.address, "", no_wir_location());
         return WirExpr(value=value, source_type=binding.source_type);
+    }
+    if (kind == NODE_FIELD_ACCESS) {
+        let address: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, node);
+        if (address.value == NO_WIR_VALUE) { return wir_no_expr(); }
+        return WirExpr(value=wir_load(ref program, state.block, address.value, "", no_wir_location()), source_type=address.source_type);
+    }
+    if (kind == NODE_INDEX_ACCESS) {
+        let address: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, node);
+        if (address.value == NO_WIR_VALUE) { return wir_no_expr(); }
+        return WirExpr(value=wir_load(ref program, state.block, address.value, "", no_wir_location()), source_type=address.source_type);
     }
     if (kind == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(source.arena, node);
@@ -408,7 +529,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             if (i < signature.parameters.length()) {
                 let parameter: TypeListNode = info.arg_types[i];
                 if (parameter.pass_mode == PARAM_REF) {
-                    value = wir_lower_address(ref state, ref source, argument.val);
+                    value = wir_lower_address(ref state, ref types, ref source, ref program, argument.val);
                     if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
                     if (value.source_type != parameter.type) {
                         state.errors.append("reference argument to '" + info.name + "' has the wrong type in WIR lowering");
@@ -476,6 +597,36 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         value = wir_cast_expr(ref state, ref types, ref source, ref program, value, binding.source_type, true);
         if (value.value == NO_WIR_VALUE) { return; }
         wir_store(ref program, state.block, value.value, binding.address, no_wir_location());
+        return;
+    }
+    if (kind == NODE_FIELD_ASSIGN) {
+        let statement: FieldAssignNode = get_field_assign_node(source.arena, node);
+        if (wir_field_const(state, source, statement.obj, statement.field_name)) {
+            state.errors.append("const field reached WIR lowering with an assignment");
+            return;
+        }
+        let address: WirExpr = wir_lower_field_lvalue(ref state, ref types, ref source, ref program, statement.obj, statement.field_name);
+        if (address.value == NO_WIR_VALUE) { return; }
+        let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
+        if (value.value == NO_WIR_VALUE) { return; }
+        value = wir_cast_expr(ref state, ref types, ref source, ref program, value, address.source_type, true);
+        if (value.value == NO_WIR_VALUE) { return; }
+        wir_store(ref program, state.block, value.value, address.value, no_wir_location());
+        return;
+    }
+    if (kind == NODE_INDEX_ASSIGN) {
+        let statement: IndexAssignNode = get_index_assign_node(source.arena, node);
+        if (wir_lvalue_const(state, source, statement.target)) {
+            state.errors.append("const array reached WIR lowering with an index assignment");
+            return;
+        }
+        let address: WirExpr = wir_lower_index_lvalue(ref state, ref types, ref source, ref program, statement.target, statement.index_node);
+        if (address.value == NO_WIR_VALUE) { return; }
+        let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
+        if (value.value == NO_WIR_VALUE) { return; }
+        value = wir_cast_expr(ref state, ref types, ref source, ref program, value, address.source_type, true);
+        if (value.value == NO_WIR_VALUE) { return; }
+        wir_store(ref program, state.block, value.value, address.value, no_wir_location());
         return;
     }
     if (kind == NODE_POSTFIX) {

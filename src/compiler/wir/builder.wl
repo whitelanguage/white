@@ -229,6 +229,40 @@ func wir_store(ref program: WirModule, block: WirBlockID, value: WirValueID, add
     wir_append(ref program, block, WirOpcode.Store, program.void_type, [value, address], [], location);
 }
 
+func wir_field(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, field: Int, name: String, location: WirLocation) -> WirValueID {
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let field_id: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(field)));
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.Field, aggregate_type.fields[field], [aggregate, field_id], [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
+func wir_field_address(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, field: Int, name: String, location: WirLocation) -> WirValueID {
+    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
+    let field_id: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(field)));
+    let result_type: WirTypeID = wir_pointer_type(ref program, aggregate_type.fields[field]);
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.FieldAddress, result_type, [aggregate, field_id], [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
+func wir_index(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, index: WirValueID, name: String, location: WirLocation) -> WirValueID {
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.Index, aggregate_type.element, [aggregate, index], [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
+func wir_index_address(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, index: WirValueID, name: String, location: WirLocation) -> WirValueID {
+    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
+    let result_type: WirTypeID = wir_pointer_type(ref program, aggregate_type.element);
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.IndexAddress, result_type, [aggregate, index], [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
 func wir_binary(ref program: WirModule, block: WirBlockID, opcode: WirOpcode, type_id: WirTypeID, left: WirValueID, right: WirValueID, name: String, location: WirLocation) -> WirValueID {
     let value: WirValueID = wir_append(ref program, block, opcode, type_id, [left, right], [], location);
     wir_name_value(ref program, value, name);

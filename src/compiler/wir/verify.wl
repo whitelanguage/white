@@ -219,6 +219,84 @@ func wir_check_no_result(program: WirModule, instruction: WirInstruction, errors
     if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) { wir_report(errors, "side-effect instruction produces a value"); }
 }
 
+func wir_constant_index(program: WirModule, value_id: WirValueID) -> Int {
+    if (!wir_value_valid(program, value_id)) { return -1; }
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind != WirValueKind.Integer || !wir_is_integer_type(program, value.type_id)) { return -1; }
+    return Int(value.integer);
+}
+
+func wir_check_field(program: WirModule, instruction: WirInstruction, address: Bool, errors: Vector(String)) -> Void {
+    if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0])) {
+        wir_report(errors, "field instruction requires an aggregate and a constant field index");
+        return;
+    }
+
+    let aggregate_type_id: WirTypeID = wir_value_type(program, instruction.operands[0]);
+    if address {
+        if (!wir_is_pointer_type(program, aggregate_type_id)) {
+            wir_report(errors, "field.addr requires a pointer to a struct");
+            return;
+        }
+        aggregate_type_id = program.arena.types[wir_id_index(UInt32(aggregate_type_id))].element;
+    }
+    if (!wir_type_is(program, aggregate_type_id, WirTypeKind.Struct)) {
+        wir_report(errors, "field instruction requires a struct operand");
+        return;
+    }
+
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(aggregate_type_id))];
+    let field: Int = wir_constant_index(program, instruction.operands[1]);
+    if (field < 0 || field >= aggregate_type.fields.length()) {
+        wir_report(errors, "field index is outside the struct layout");
+        return;
+    }
+
+    let expected: WirTypeID = aggregate_type.fields[field];
+    if (!wir_type_valid(program, instruction.type_id)) {
+        wir_report(errors, "field instruction has an unknown result type");
+        return;
+    }
+    if ((!address && instruction.type_id != expected) || (address && (!wir_is_pointer_type(program, instruction.type_id) || program.arena.types[wir_id_index(UInt32(instruction.type_id))].element != expected))) {
+        wir_report(errors, "field result type does not match the struct field");
+    }
+}
+
+func wir_check_index(program: WirModule, instruction: WirInstruction, address: Bool, errors: Vector(String)) -> Void {
+    if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || !wir_value_valid(program, instruction.operands[1])) {
+        wir_report(errors, "index instruction requires an aggregate and an integer index");
+        return;
+    }
+    if (!wir_is_integer_type(program, wir_value_type(program, instruction.operands[1]))) {
+        wir_report(errors, "index operand is not an integer");
+        return;
+    }
+
+    let aggregate_type_id: WirTypeID = wir_value_type(program, instruction.operands[0]);
+    if address {
+        if (!wir_is_pointer_type(program, aggregate_type_id)) {
+            wir_report(errors, "index.addr requires a pointer to an array");
+            return;
+        }
+        aggregate_type_id = program.arena.types[wir_id_index(UInt32(aggregate_type_id))].element;
+    }
+    if (!wir_type_is(program, aggregate_type_id, WirTypeKind.Array)) {
+        wir_report(errors, "index instruction requires an array operand");
+        return;
+    }
+
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(aggregate_type_id))];
+    if (!wir_type_valid(program, instruction.type_id)) {
+        wir_report(errors, "index instruction has an unknown result type");
+        return;
+    }
+    if (!address && instruction.type_id != aggregate_type.element) {
+        wir_report(errors, "index result type does not match the array element");
+    } else if (address && (!wir_is_pointer_type(program, instruction.type_id) || program.arena.types[wir_id_index(UInt32(instruction.type_id))].element != aggregate_type.element)) {
+        wir_report(errors, "index.addr result does not point to the array element");
+    }
+}
+
 func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_id: WirBlockID, errors: Vector(String)) -> Void {
     let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
     wir_check_location(program, instruction.location, errors);
@@ -338,6 +416,14 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
                 wir_report(errors, "stored value does not match the pointer element type");
             }
         }
+    } else if (opcode == WirOpcode.Field) {
+        wir_check_field(program, instruction, false, errors);
+    } else if (opcode == WirOpcode.FieldAddress) {
+        wir_check_field(program, instruction, true, errors);
+    } else if (opcode == WirOpcode.Index) {
+        wir_check_index(program, instruction, false, errors);
+    } else if (opcode == WirOpcode.IndexAddress) {
+        wir_check_index(program, instruction, true, errors);
     } else if (opcode == WirOpcode.Cast) {
         if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || instruction.result == NO_WIR_VALUE) {
             wir_report(errors, "cast requires one operand and one result");

@@ -189,6 +189,18 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
     } else if (instruction.opcode == WirOpcode.Store) {
         output.write("store ")?;
         wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.Field) {
+        output.write("field ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.FieldAddress) {
+        output.write("field.addr ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.Index) {
+        output.write("index ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.IndexAddress) {
+        output.write("index.addr ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
     } else if (instruction.opcode == WirOpcode.Cast) {
         output.write("cast ")?;
         wir_write_value(output, program, instruction.operands[0])?;
