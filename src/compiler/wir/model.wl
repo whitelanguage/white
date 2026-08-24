@@ -51,6 +51,8 @@ enum WirOpcode {
     FieldAddress,
     Index,
     IndexAddress,
+    StructValue,
+    ArrayValue,
     Add,
     Subtract,
     Multiply,

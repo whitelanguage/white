@@ -297,6 +297,31 @@ func wir_check_index(program: WirModule, instruction: WirInstruction, address: B
     }
 }
 
+func wir_check_aggregate_value(program: WirModule, instruction: WirInstruction, kind: WirTypeKind, errors: Vector(String)) -> Void {
+    if (instruction.edges.length() != 0 || instruction.result == NO_WIR_VALUE || !wir_type_is(program, instruction.type_id, kind)) {
+        wir_report(errors, "aggregate constructor has an invalid result type or shape");
+        return;
+    }
+    let type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+    let count: Int = type.fields.length();
+    if (kind == WirTypeKind.Array) { count = Int(type.length); }
+    if (instruction.operands.length() > count) {
+        wir_report(errors, "aggregate constructor has too many elements");
+        return;
+    }
+    let i: Int = 0;
+    while (i < instruction.operands.length()) {
+        if (wir_value_valid(program, instruction.operands[i])) {
+            let expected: WirTypeID = type.element;
+            if (kind == WirTypeKind.Struct) { expected = type.fields[i]; }
+            if (wir_value_type(program, instruction.operands[i]) != expected) {
+                wir_report(errors, "aggregate element type does not match its layout");
+            }
+        }
+        i++;
+    }
+}
+
 func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_id: WirBlockID, errors: Vector(String)) -> Void {
     let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
     wir_check_location(program, instruction.location, errors);
@@ -424,6 +449,10 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
         wir_check_index(program, instruction, false, errors);
     } else if (opcode == WirOpcode.IndexAddress) {
         wir_check_index(program, instruction, true, errors);
+    } else if (opcode == WirOpcode.StructValue) {
+        wir_check_aggregate_value(program, instruction, WirTypeKind.Struct, errors);
+    } else if (opcode == WirOpcode.ArrayValue) {
+        wir_check_aggregate_value(program, instruction, WirTypeKind.Array, errors);
     } else if (opcode == WirOpcode.Cast) {
         if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || instruction.result == NO_WIR_VALUE) {
             wir_report(errors, "cast requires one operand and one result");

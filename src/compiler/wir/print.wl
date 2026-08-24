@@ -201,6 +201,16 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
     } else if (instruction.opcode == WirOpcode.IndexAddress) {
         output.write("index.addr ")?;
         wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.StructValue) {
+        output.write("struct ")?;
+        wir_write_type(output, program, instruction.type_id)?;
+        output.write("(")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+        output.write(")")?;
+    } else if (instruction.opcode == WirOpcode.ArrayValue) {
+        output.write("array [")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+        output.write("]")?;
     } else if (instruction.opcode == WirOpcode.Cast) {
         output.write("cast ")?;
         wir_write_value(output, program, instruction.operands[0])?;

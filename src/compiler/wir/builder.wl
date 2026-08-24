@@ -263,6 +263,18 @@ func wir_index_address(ref program: WirModule, block: WirBlockID, aggregate: Wir
     return value;
 }
 
+func wir_struct_value(ref program: WirModule, block: WirBlockID, type_id: WirTypeID, fields: Vector(WirValueID), name: String, location: WirLocation) -> WirValueID {
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.StructValue, type_id, fields, [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
+func wir_array_value(ref program: WirModule, block: WirBlockID, type_id: WirTypeID, elements: Vector(WirValueID), name: String, location: WirLocation) -> WirValueID {
+    let value: WirValueID = wir_append(ref program, block, WirOpcode.ArrayValue, type_id, elements, [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
 func wir_binary(ref program: WirModule, block: WirBlockID, opcode: WirOpcode, type_id: WirTypeID, left: WirValueID, right: WirValueID, name: String, location: WirLocation) -> WirValueID {
     let value: WirValueID = wir_append(ref program, block, opcode, type_id, [left, right], [], location);
     wir_name_value(ref program, value, name);
