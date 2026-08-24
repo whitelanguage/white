@@ -3,6 +3,7 @@
 // Focus: Mapping resolved White types to target-specific WIR layouts.
 
 import * from "../../../src/compiler/context.wl"
+import PARAM_VALUE from "../../../src/frontend/ast.wl"
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/verify.wl"
@@ -40,7 +41,7 @@ func main() -> Int {
     source.named_type_ids.put("105", NamedTypeInfo(name="NodeID", type_id=105, underlying_type=TYPE_UINT32, is_alias=false, resolved=true));
     source.array_info_map.put("106", ArrayInfo(base_type=TYPE_BYTE, size=-1, llvm_name="slice"));
     source.fallible_base_map.put("107", SymbolInfo(reg="", type=TYPE_INT));
-    source.func_ret_map.put("108", SymbolInfo(reg="", type=TYPE_INT));
+    source.func_ret_map.put("108", SymbolInfo(reg="", type=TYPE_INT, func_arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)]));
 
     let program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
     let types: WirTypeMap = new_wir_type_map();
@@ -88,8 +89,10 @@ func main() -> Int {
         print("FAIL: fallible value layout was not lowered");
         return 1;
     }
-    if (type_kind(program, wir_lower_source_type(ref types, ref source, ref program, 108)) != WirTypeKind.Pointer) {
-        print("FAIL: first-class function representation was not lowered");
+    let function_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, 108);
+    let function_layout: WirType = program.arena.types[wir_id_index(UInt32(function_type))];
+    if (function_layout.kind != WirTypeKind.Function || function_layout.parameters.length() != 1 || function_layout.result != wir_lower_source_type(ref types, ref source, ref program, TYPE_INT)) {
+        print("FAIL: first-class function signature was not preserved");
         return 1;
     }
     wir_lower_source_type(ref types, ref source, ref program, TYPE_STRING);

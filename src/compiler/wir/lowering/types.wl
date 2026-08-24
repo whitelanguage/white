@@ -2,6 +2,7 @@
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "../../context.wl"
+import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
 struct WirTypeMap(
     cache: Vector(WirTypeID),
@@ -38,6 +39,28 @@ func wir_type_failure(ref types: WirTypeMap, source_type: Int) -> WirTypeID {
 func wir_opaque_pointer(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
     if (types.opaque_pointer == NO_WIR_TYPE) { types.opaque_pointer = wir_pointer_type(ref program, program.void_type); }
     return types.opaque_pointer;
+}
+
+func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, signature: SymbolInfo) -> WirTypeID {
+    let result: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, signature.type);
+    if (result == NO_WIR_TYPE) { return NO_WIR_TYPE; }
+
+    let parameters: Vector(WirTypeID) = [];
+    let i: Int = 0;
+    while (signature.func_arg_types is !null && i < signature.func_arg_types.length()) {
+        let parameter: TypeListNode = signature.func_arg_types[i];
+        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, parameter.type);
+        if (type_id == NO_WIR_TYPE) { return NO_WIR_TYPE; }
+        if (parameter.pass_mode == PARAM_REF) {
+            type_id = wir_pointer_type(ref program, type_id);
+        } else if (parameter.pass_mode != PARAM_VALUE) {
+            types.errors.append("Unknown parameter passing mode " + parameter.pass_mode + " in callable type " + source_type);
+            return NO_WIR_TYPE;
+        }
+        parameters.append(type_id);
+        i++;
+    }
+    return wir_function_type(ref program, parameters, result, false);
 }
 
 func wir_string_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
@@ -174,7 +197,13 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
             return wir_cache_type(ref types, source_type, wir_struct_type(ref program, fields));
         }
     }
-    if ((source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup(key))) || (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key)))) {
+    if (source.func_ret_map is !null) {
+        let function: SymbolInfo = source.func_ret_map.lookup(key);
+        if (has_symbol(function)) {
+            return wir_cache_type(ref types, source_type, wir_lower_callable_type(ref types, ref source, ref program, source_type, function));
+        }
+    }
+    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key))) {
         return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
     }
     if (source.struct_id_map is !null) {
