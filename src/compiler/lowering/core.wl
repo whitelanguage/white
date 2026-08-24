@@ -27,6 +27,7 @@ import * from "../initialization.wl"
 import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
+import hoist_llvm_allocas from "../backend/llvm.wl"
 
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
@@ -7057,6 +7058,12 @@ func compile_end(ref c: Compiler) -> Void {
         rewrite.write(c.generic_type_defs);
         rewrite.write(body.slice(line_end, body.length()));
         rewrite.close();
+    }
+
+    hoist_llvm_allocas(c.output_file.path)?;
+    catch(err) {
+        throw_internal_compiler_error(no_position(), "Cannot finalize generated LLVM IR.");
+        return;
     }
 }
 
