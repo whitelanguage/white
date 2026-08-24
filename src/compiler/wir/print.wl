@@ -145,6 +145,13 @@ func wir_binary_name(opcode: WirOpcode) -> String {
     return "";
 }
 
+func wir_unary_name(opcode: WirOpcode) -> String {
+    if (opcode == WirOpcode.Negate) { return "neg"; }
+    if (opcode == WirOpcode.FloatNegate) { return "fneg"; }
+    if (opcode == WirOpcode.Not) { return "not"; }
+    return "";
+}
+
 func wir_write_operands(output: strings.Builder, program: WirModule, operands: Vector(WirValueID), start: Int) -> Void? {
     let i: Int = start;
     while (i < operands.length()) {
@@ -168,6 +175,10 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
         output.write(binary)?;
         output.write(" ")?;
         wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (wir_unary_name(instruction.opcode).length() != 0) {
+        output.write(wir_unary_name(instruction.opcode))?;
+        output.write(" ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
     } else if (instruction.opcode == WirOpcode.StackAlloc) {
         output.write("alloca ")?;
         let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];

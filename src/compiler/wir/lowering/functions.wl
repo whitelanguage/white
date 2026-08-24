@@ -234,6 +234,38 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let value: WirValueID = wir_load(ref program, state.block, binding.address, "", no_wir_location());
         return WirExpr(value=value, source_type=binding.source_type);
     }
+    if (kind == NODE_UNARYOP) {
+        let unary: UnaryOpNode = get_unary_node(source.arena, node);
+        let operand: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, unary.node);
+        if (operand.value == NO_WIR_VALUE) { return wir_no_expr(); }
+
+        if (unary.op_tok.type == TOK_PLUS) {
+            if (!wir_source_numeric(operand.source_type)) {
+                state.errors.append("unary '+' reached WIR lowering with a non-numeric operand");
+                return wir_no_expr();
+            }
+            return operand;
+        }
+
+        let opcode: WirOpcode = WirOpcode.Invalid;
+        if (unary.op_tok.type == TOK_SUB) {
+            if (is_integer_type(operand.source_type)) { opcode = WirOpcode.Negate; }
+            else if (operand.source_type == TYPE_FLOAT || operand.source_type == TYPE_FLOAT32) { opcode = WirOpcode.FloatNegate; }
+            else { state.errors.append("unary '-' reached WIR lowering with a non-numeric operand"); }
+        } else if (unary.op_tok.type == TOK_NOT) {
+            if (operand.source_type == TYPE_BOOL) { opcode = WirOpcode.Not; }
+            else { state.errors.append("operator '!' reached WIR lowering with a non-Bool operand"); }
+        } else if (unary.op_tok.type == TOK_BIT_NOT) {
+            if (is_integer_type(operand.source_type)) { opcode = WirOpcode.Not; }
+            else { state.errors.append("operator '~' reached WIR lowering with a non-integer operand"); }
+        } else {
+            state.errors.append("unary operator '" + unary.op_tok.value + "' is not lowered to WIR yet");
+        }
+        if (opcode == WirOpcode.Invalid) { return wir_no_expr(); }
+
+        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, operand.source_type);
+        return WirExpr(value=wir_unary(ref program, state.block, opcode, type_id, operand.value, "", no_wir_location()), source_type=operand.source_type);
+    }
     if (kind == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(source.arena, node);
         if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR) {

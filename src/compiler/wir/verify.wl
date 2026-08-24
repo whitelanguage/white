@@ -171,6 +171,14 @@ func wir_check_binary(program: WirModule, instruction: WirInstruction, errors: V
     if (!integer && !floating) { wir_report(errors, "binary instruction requires a numeric type"); }
 }
 
+func wir_check_unary(program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
+    if (instruction.operands.length() != 1 || !wir_value_valid(program, instruction.operands[0])) {
+        wir_report(errors, "unary instruction requires one valid operand");
+        return;
+    }
+    if (wir_value_type(program, instruction.operands[0]) != instruction.type_id) { wir_report(errors, "unary instruction operand does not match its type"); }
+}
+
 func wir_numeric_kind(kind: WirTypeKind) -> Bool {
     return kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt || kind == WirTypeKind.FloatType;
 }
@@ -276,6 +284,15 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     } else if (opcode == WirOpcode.BitAnd || opcode == WirOpcode.BitOr || opcode == WirOpcode.BitXor || opcode == WirOpcode.ShiftLeft) {
         wir_check_binary(program, instruction, errors);
         if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "bitwise instruction requires an integer type"); }
+    } else if (opcode == WirOpcode.Negate) {
+        wir_check_unary(program, instruction, errors);
+        if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "integer negation requires an integer type"); }
+    } else if (opcode == WirOpcode.FloatNegate) {
+        wir_check_unary(program, instruction, errors);
+        if (!wir_is_float_type(program, instruction.type_id)) { wir_report(errors, "floating-point negation requires a floating-point type"); }
+    } else if (opcode == WirOpcode.Not) {
+        wir_check_unary(program, instruction, errors);
+        if (!wir_is_integer_type(program, instruction.type_id) && instruction.type_id != program.bool_type) { wir_report(errors, "not requires a Bool or integer type"); }
     } else if (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual || wir_signed_comparison(opcode) || wir_unsigned_comparison(opcode) || wir_float_comparison(opcode)) {
         if (instruction.operands.length() != 2 || !wir_value_valid(program, instruction.operands[0]) || !wir_value_valid(program, instruction.operands[1])) {
             wir_report(errors, "comparison requires two valid operands");

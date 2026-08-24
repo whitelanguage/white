@@ -235,6 +235,12 @@ func wir_binary(ref program: WirModule, block: WirBlockID, opcode: WirOpcode, ty
     return value;
 }
 
+func wir_unary(ref program: WirModule, block: WirBlockID, opcode: WirOpcode, type_id: WirTypeID, operand: WirValueID, name: String, location: WirLocation) -> WirValueID {
+    let value: WirValueID = wir_append(ref program, block, opcode, type_id, [operand], [], location);
+    wir_name_value(ref program, value, name);
+    return value;
+}
+
 func wir_call(ref program: WirModule, block: WirBlockID, function: WirValueID, arguments: Vector(WirValueID), name: String, location: WirLocation) -> WirValueID {
     let callee: WirValue = program.arena.values[wir_id_index(UInt32(function))];
     let signature: WirType = program.arena.types[wir_id_index(UInt32(callee.type_id))];
