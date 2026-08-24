@@ -71,7 +71,21 @@ func wir_write_hex(output: strings.Builder, value: UInt64, digits: Int) -> Void?
 func wir_write_value(output: strings.Builder, program: WirModule, value_id: WirValueID) -> Void? {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
     if (value.kind == WirValueKind.Integer) {
-        output.write(String(value.integer))?;
+        let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
+        if (type.kind == WirTypeKind.SignedInt && type.bits < 128) {
+            let limit: UInt128 = UInt128(1U) << UInt128(type.bits);
+            let sign: UInt128 = UInt128(1U) << UInt128(type.bits - 1);
+            if ((value.integer & sign) != UInt128(0U)) {
+                output.write("-")?;
+                output.write(String(limit - value.integer))?;
+            } else {
+                output.write(String(value.integer))?;
+            }
+        } else if (type.kind == WirTypeKind.SignedInt) {
+            output.write(String(Int128(value.integer)))?;
+        } else {
+            output.write(String(value.integer))?;
+        }
     } else if (value.kind == WirValueKind.FloatValue) {
         let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
         output.write("f")?;

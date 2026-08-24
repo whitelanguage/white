@@ -1,0 +1,137 @@
+// compiler/wir/lowering/globals.wl
+import * from "../model.wl"
+import * from "../builder.wl"
+import * from "types.wl"
+import * from "../../context.wl"
+import * from "../../constants.wl"
+import * from "../../../frontend/ast.wl"
+import * from "../../../frontend/arena.wl"
+
+struct WirSourceGlobal(
+    name: String,
+    source_type: Int,
+    is_const: Bool
+)
+
+func no_wir_source_global() -> WirSourceGlobal {
+    return WirSourceGlobal(name="", source_type=TYPE_POISON, is_const=false);
+}
+
+func has_wir_source_global(global: WirSourceGlobal) -> Bool {
+    return global.name.length() != 0 && global.source_type != TYPE_POISON;
+}
+
+func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
+    if (source.global_symbol_table is null) { return no_wir_source_global(); }
+
+    let key: String = name;
+    let info: SymbolInfo = SymbolInfo();
+    if (source.current_package_prefix.length() != 0) {
+        key = source.current_package_prefix + name;
+        info = source.global_symbol_table.lookup(key);
+    }
+    if (!has_symbol(info)) {
+        key = name;
+        info = source.global_symbol_table.lookup(key);
+    }
+    if (!has_symbol(info) && source.current_file_global_aliases is !null) {
+        let mapped: String = source.current_file_global_aliases.lookup(name);
+        if (mapped is !null) {
+            key = mapped;
+            info = source.global_symbol_table.lookup(key);
+        }
+    }
+    if (!has_symbol(info) && source.global_var_aliases is !null) {
+        let mapped: String = source.global_var_aliases.lookup(name);
+        if (mapped is !null) {
+            key = mapped;
+            info = source.global_symbol_table.lookup(key);
+        }
+    }
+    if (!has_symbol(info)) { return no_wir_source_global(); }
+
+    let wir_name: String = key;
+    if (info.reg is !null && info.reg.starts_with("@")) { wir_name = info.reg.slice(1, info.reg.length()); }
+    return WirSourceGlobal(name=wir_name, source_type=info.type, is_const=info.is_const);
+}
+
+func wir_find_global(program: WirModule, name: String) -> WirGlobalID {
+    let i: Int = 0;
+    while (i < program.arena.globals.length()) {
+        if (program.arena.globals[i].name == name) { return WirGlobalID(UInt32(i + 1)); }
+        i++;
+    }
+    return NO_WIR_GLOBAL;
+}
+
+func wir_truncate_integer(value: UInt128, bits: Int) -> UInt128 {
+    if (bits >= 128) { return value; }
+    let limit: UInt128 = UInt128(1U) << UInt128(bits);
+    return value & (limit - UInt128(1U));
+}
+
+func wir_global_initializer(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: VarDeclareNode, source_type: Int) -> WirValueID {
+    let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
+    if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
+    let repr: Int = get_repr_type(ref source, source_type);
+
+    if (!has_node(node.value)) {
+        if (repr == TYPE_BOOL) { return wir_const_bool(ref program, false); }
+        if (is_integer_type(repr) || repr == TYPE_CHAR) { return wir_const_int(ref program, type_id, UInt128(0U)); }
+        if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) { return wir_const_float(ref program, type_id, 0.0); }
+        if (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR) { return wir_null(ref program, type_id); }
+        types.errors.append("Global '" + node.name_tok.value + "' needs an initializer that WIR can represent");
+        return NO_WIR_VALUE;
+    }
+
+    let kind: Int = node_tag(node.value);
+    if (kind == NODE_NULLPTR && (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR)) {
+        return wir_null(ref program, type_id);
+    }
+    if (repr == TYPE_BOOL) {
+        return wir_const_bool(ref program, eval_const_bool(ref source, node.value, node.pos) != 0);
+    }
+    if (repr == TYPE_CHAR) {
+        return wir_const_int(ref program, type_id, UInt128(eval_const_long(ref source, node.value, node.pos)));
+    }
+    if (is_integer_type(repr)) {
+        let value: UInt128 = eval_const_wide(ref source, node.value, node.pos, is_unsigned_integer(repr));
+        return wir_const_int(ref program, type_id, wir_truncate_integer(value, get_type_bitwidth(repr)));
+    }
+    if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
+        let value: Float = eval_const_float(ref source, node.value, node.pos);
+        if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
+        return wir_const_float(ref program, type_id, value);
+    }
+
+    types.errors.append("Global '" + node.name_tok.value + "' does not have a scalar WIR initializer yet");
+    return NO_WIR_VALUE;
+}
+
+func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: VarDeclareNode) -> WirGlobalID {
+    let source_type: Int = resolve_type(ref source, node.type_node);
+    if (source_type == TYPE_AUTO) { source_type = get_expr_type(ref source, node.value); }
+    if (source_type == TYPE_AUTO || source_type == TYPE_POISON || source_type == TYPE_VOID) {
+        types.errors.append("Cannot determine the type of global '" + node.name_tok.value + "'");
+        return NO_WIR_GLOBAL;
+    }
+
+    let annotations: SystemAnnResult = consume_annotations(ref source, node.annotations, node.name_tok.value);
+    if ((annotations.ann_flags & FLAG_ANN_INTRINSIC) != 0) { return NO_WIR_GLOBAL; }
+    let name: String = source.current_package_prefix + node.name_tok.value;
+    let linkage: WirLinkage = WirLinkage.Internal;
+    if ((annotations.ann_flags & FLAG_ANN_EXPORT) != 0) {
+        name = node.name_tok.value;
+        linkage = WirLinkage.Exported;
+    }
+
+    let initializer: WirValueID = wir_global_initializer(ref types, ref source, ref program, node, source_type);
+    if (initializer == NO_WIR_VALUE) { return NO_WIR_GLOBAL; }
+    let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
+    if (type_id == NO_WIR_TYPE) { return NO_WIR_GLOBAL; }
+    let global_id: WirGlobalID = wir_add_global(ref program, name, type_id, initializer, linkage, node.is_const);
+    let source_name: String = source.current_package_prefix + node.name_tok.value;
+    let symbol: SymbolInfo = SymbolInfo(reg="@" + name, type=source_type, origin_type=source_type, is_const=node.is_const);
+    update_symbol(ref source, source_name, symbol);
+    return global_id;
+}
