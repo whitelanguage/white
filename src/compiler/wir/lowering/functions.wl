@@ -176,6 +176,16 @@ func wir_lower_address(ref state: WirFunctionLowering, ref source: Compiler, nod
     return WirExpr(value=binding.address, source_type=binding.source_type);
 }
 
+func wir_one(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirValueID {
+    let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
+
+    if (source_type == TYPE_FLOAT || source_type == TYPE_FLOAT32) {
+        return wir_const_float(ref program, type_id, 1.0);
+    }
+
+    return wir_const_int(ref program, type_id, UInt128(1U));
+}
+
 func wir_binary_type(ref state: WirFunctionLowering, ref source: Compiler, left: WirExpr, right: WirExpr, left_node: NodeID, right_node: NodeID) -> Int {
     if (left.source_type == right.source_type) { return left.source_type; }
     if (!wir_source_numeric(left.source_type) || !wir_source_numeric(right.source_type)) { return TYPE_POISON; }
@@ -265,6 +275,43 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
 
         let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, operand.source_type);
         return WirExpr(value=wir_unary(ref program, state.block, opcode, type_id, operand.value, "", no_wir_location()), source_type=operand.source_type);
+    }
+    if (kind == NODE_POSTFIX) {
+        let postfix: PostfixOpNode = get_postfix_node(source.arena, node);
+        if (!has_node(postfix.node) || node_tag(postfix.node) != NODE_VAR_ACCESS) {
+            state.errors.append("postfix operator target is not an addressable local in WIR lowering");
+            return wir_no_expr();
+        }
+
+        let access: VarAccessNode = get_var_access_node(source.arena, postfix.node);
+        let binding: WirBinding = wir_find_binding(state, access.name_tok.value)?;
+        catch(err) {
+            state.errors.append("unknown local '" + access.name_tok.value + "' in WIR postfix lowering");
+            return wir_no_expr();
+        }
+
+        if (binding.is_const) {
+            state.errors.append("const local '" + access.name_tok.value + "' reached WIR postfix lowering");
+            return wir_no_expr();
+        }
+
+        if (!wir_source_numeric(binding.source_type)) {
+            state.errors.append("postfix operator reached WIR lowering with a non-numeric operand");
+            return wir_no_expr();
+        }
+
+        let old_value: WirValueID = wir_load(ref program, state.block, binding.address, "", no_wir_location());
+        let one: WirValueID = wir_one(ref types, ref source, ref program, binding.source_type);
+        let opcode: WirOpcode = WirOpcode.Add;
+
+        if (postfix.op_tok.type == TOK_DEC) {
+            opcode = WirOpcode.Subtract;
+        }
+
+        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, binding.source_type);
+        let new_value: WirValueID = wir_binary(ref program, state.block, opcode, type_id, old_value, one, "", no_wir_location());
+        wir_store(ref program, state.block, new_value, binding.address, no_wir_location());
+        return WirExpr(value=old_value, source_type=binding.source_type);
     }
     if (kind == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(source.arena, node);
@@ -429,6 +476,14 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         value = wir_cast_expr(ref state, ref types, ref source, ref program, value, binding.source_type, true);
         if (value.value == NO_WIR_VALUE) { return; }
         wir_store(ref program, state.block, value.value, binding.address, no_wir_location());
+        return;
+    }
+    if (kind == NODE_POSTFIX) {
+        wir_lower_expr(ref state, ref types, ref source, ref program, node);
+        return;
+    }
+    if (kind == NODE_CALL) {
+        wir_lower_expr(ref state, ref types, ref source, ref program, node);
         return;
     }
     if (kind == NODE_RETURN) {

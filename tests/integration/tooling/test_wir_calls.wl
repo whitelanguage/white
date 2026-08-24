@@ -33,7 +33,7 @@ func main() -> Int {
     let seven: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=call_token(TOK_INT, "7"), pos=pos));
     let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=seven, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
 
     let caller: FuncInfo = FuncInfo(name="call_abs", base_name="call_abs", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -55,7 +55,7 @@ func main() -> Int {
         print("FAIL: lowered direct call could not be printed");
         return 1;
     }
-    let expected: String = "internal func @call_abs() -> i32 {\n^entry:\n    %4:i32 = call @abs(7)\n    ret %4\n}\n\nextern func @abs(i32) -> i32\n";
+    let expected: String = "internal func @call_abs() -> i32 {\n^entry:\n    %4:i32 = call @abs(7)\n    %6:i32 = call @abs(7)\n    ret %6\n}\n\nextern func @abs(i32) -> i32\n";
     if (text != expected) {
         print("FAIL: lowered call text is not stable");
         print(text);
