@@ -301,9 +301,42 @@ func wir_call(ref program: WirModule, block: WirBlockID, function: WirValueID, a
     return value;
 }
 
+func wir_cast_opcode(program: WirModule, source_id: WirTypeID, target_id: WirTypeID) -> WirOpcode {
+    let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
+    let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
+    let source_integer: Bool = source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
+    let target_integer: Bool = target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
+
+    if (source_integer && target_integer) {
+        if (source.bits > target.bits) { return WirOpcode.Truncate; }
+        if (source.bits < target.bits && source.kind == WirTypeKind.SignedInt) { return WirOpcode.SignExtend; }
+        if (source.bits < target.bits) { return WirOpcode.ZeroExtend; }
+        return WirOpcode.Bitcast;
+    }
+    if (source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType) {
+        if (source.bits < target.bits) { return WirOpcode.FloatExtend; }
+        if (source.bits > target.bits) { return WirOpcode.FloatTruncate; }
+        return WirOpcode.Bitcast;
+    }
+    if (source_integer && target.kind == WirTypeKind.FloatType) {
+        if (source.kind == WirTypeKind.SignedInt) { return WirOpcode.SignedIntToFloat; }
+        return WirOpcode.UnsignedIntToFloat;
+    }
+    if (source.kind == WirTypeKind.FloatType && target_integer) {
+        if (target.kind == WirTypeKind.SignedInt) { return WirOpcode.FloatToSignedInt; }
+        return WirOpcode.FloatToUnsignedInt;
+    }
+    if (source.kind == WirTypeKind.Pointer && target.kind == WirTypeKind.Pointer) { return WirOpcode.Bitcast; }
+    if (source.kind == WirTypeKind.Pointer && target_integer) { return WirOpcode.PointerToInt; }
+    if (source_integer && target.kind == WirTypeKind.Pointer) { return WirOpcode.IntToPointer; }
+    return WirOpcode.Invalid;
+}
+
 func wir_cast(ref program: WirModule, block: WirBlockID, value: WirValueID, type_id: WirTypeID, name: String, location: WirLocation) -> WirValueID {
-    if (wir_value_type(program, value) == type_id) { return value; }
-    let result: WirValueID = wir_append(ref program, block, WirOpcode.Cast, type_id, [value], [], location);
+    let source_id: WirTypeID = wir_value_type(program, value);
+    if (source_id == type_id) { return value; }
+    let opcode: WirOpcode = wir_cast_opcode(program, source_id, type_id);
+    let result: WirValueID = wir_append(ref program, block, opcode, type_id, [value], [], location);
     wir_name_value(ref program, result, name);
     return result;
 }

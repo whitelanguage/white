@@ -74,7 +74,7 @@ func main() -> Int {
         print("FAIL: pointer WIR could not be printed");
         return 1;
     }
-    let expected: String = "internal func @pointer_ops() -> i32 {\n^entry:\n    %x.addr:ptr<i32> = alloca i32\n    store 5, %x.addr\n    %p.addr:ptr<ptr<i32>> = alloca ptr<i32>\n    store %x.addr, %p.addr\n    %4:ptr<i32> = load %p.addr\n    check.null %4\n    store 7, %4\n    %pp.addr:ptr<ptr<ptr<i32>>> = alloca ptr<ptr<i32>>\n    store %p.addr, %pp.addr\n    %7:ptr<ptr<i32>> = load %pp.addr\n    check.null %7\n    %8:ptr<i32> = load %7\n    check.null %8\n    store 9, %8\n    %10:ptr<ptr<i32>> = load %pp.addr\n    check.null %10\n    %11:ptr<i32> = load %10\n    check.null %11\n    %12:i32 = load %11\n    ret %12\n}\n\ninternal func @null_pointer() -> ptr<i32> {\n^entry:\n    %15:ptr<i32> = cast null\n    ret %15\n}\n";
+    let expected: String = "internal func @pointer_ops() -> i32 {\n^entry:\n    %x.addr:ptr<i32> = alloca i32\n    store 5, %x.addr\n    %p.addr:ptr<ptr<i32>> = alloca ptr<i32>\n    store %x.addr, %p.addr\n    %4:ptr<i32> = load %p.addr\n    check.null %4\n    store 7, %4\n    %pp.addr:ptr<ptr<ptr<i32>>> = alloca ptr<ptr<i32>>\n    store %p.addr, %pp.addr\n    %7:ptr<ptr<i32>> = load %pp.addr\n    check.null %7\n    %8:ptr<i32> = load %7\n    check.null %8\n    store 9, %8\n    %10:ptr<ptr<i32>> = load %pp.addr\n    check.null %10\n    %11:ptr<i32> = load %10\n    check.null %11\n    %12:i32 = load %11\n    ret %12\n}\n\ninternal func @null_pointer() -> ptr<i32> {\n^entry:\n    %15:ptr<i32> = bitcast null\n    ret %15\n}\n";
     if (text != expected) {
         print("FAIL: lowered pointer text is not stable");
         print(text);

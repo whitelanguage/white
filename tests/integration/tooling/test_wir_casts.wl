@@ -42,7 +42,7 @@ func check_return_cast() -> Bool {
 
     let text: String = print_wir(program)?;
     catch(err) { return false; }
-    let expected: String = "internal func @widen(%value:i32) -> i64 {\n^entry:\n    %value.addr:ptr<i32> = alloca i32\n    store %value, %value.addr\n    %3:i32 = load %value.addr\n    %4:i64 = cast %3\n    ret %4\n}\n";
+    let expected: String = "internal func @widen(%value:i32) -> i64 {\n^entry:\n    %value.addr:ptr<i32> = alloca i32\n    store %value, %value.addr\n    %3:i32 = load %value.addr\n    %4:i64 = sext %3\n    ret %4\n}\n";
     return text == expected;
 }
 
@@ -63,8 +63,55 @@ func check_binary_cast() -> Bool {
 
     let text: String = print_wir(program)?;
     catch(err) { return false; }
-    let expected: String = "internal func @add_wide(%a:i32, %b:i64) -> i64 {\n^entry:\n    %a.addr:ptr<i32> = alloca i32\n    store %a, %a.addr\n    %b.addr:ptr<i64> = alloca i64\n    store %b, %b.addr\n    %5:i32 = load %a.addr\n    %6:i64 = load %b.addr\n    %7:i64 = cast %5\n    %8:i64 = add %7, %6\n    ret %8\n}\n";
+    let expected: String = "internal func @add_wide(%a:i32, %b:i64) -> i64 {\n^entry:\n    %a.addr:ptr<i32> = alloca i32\n    store %a, %a.addr\n    %b.addr:ptr<i64> = alloca i64\n    store %b, %b.addr\n    %5:i32 = load %a.addr\n    %6:i64 = load %b.addr\n    %7:i64 = sext %5\n    %8:i64 = add %7, %6\n    ret %8\n}\n";
     return text == expected;
+}
+
+func cast_result_opcode(program: WirModule, value_id: WirValueID) -> WirOpcode {
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    return program.arena.instructions[wir_id_index(value.owner)].opcode;
+}
+
+func check_low_level_casts() -> Bool {
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i8: WirTypeID = wir_signed_int_type(ref program, 8);
+    let u8: WirTypeID = wir_unsigned_int_type(ref program, 8);
+    let i32: WirTypeID = wir_signed_int_type(ref program, 32);
+    let u32: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let i64: WirTypeID = wir_signed_int_type(ref program, 64);
+    let u64: WirTypeID = wir_unsigned_int_type(ref program, 64);
+    let f32: WirTypeID = wir_float_type(ref program, 32);
+    let f64: WirTypeID = wir_float_type(ref program, 64);
+    let p8: WirTypeID = wir_pointer_type(ref program, u8);
+    let p32: WirTypeID = wir_pointer_type(ref program, i32);
+    let function_id: WirFuncID = wir_add_function(ref program, "casts", [], program.void_type, false, WirLinkage.Internal, WirABI.White);
+    let block: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
+    let signed_value: WirValueID = wir_const_int(ref program, i8, UInt128(1U));
+    let unsigned_value: WirValueID = wir_const_int(ref program, u8, UInt128(1U));
+    let signed_word: WirValueID = wir_const_int(ref program, i32, UInt128(1U));
+    let unsigned_word: WirValueID = wir_const_int(ref program, u32, UInt128(1U));
+    let signed_long: WirValueID = wir_const_int(ref program, i64, UInt128(1U));
+    let unsigned_long: WirValueID = wir_const_int(ref program, u64, UInt128(1U));
+    let narrow_float: WirValueID = wir_const_float(ref program, f32, 1.0);
+    let wide_float: WirValueID = wir_const_float(ref program, f64, 1.0);
+    let pointer: WirValueID = wir_null(ref program, p8);
+
+    if (cast_result_opcode(program, wir_cast(ref program, block, signed_value, i64, "", no_wir_location())) != WirOpcode.SignExtend) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, unsigned_value, i64, "", no_wir_location())) != WirOpcode.ZeroExtend) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, signed_long, i8, "", no_wir_location())) != WirOpcode.Truncate) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, narrow_float, f64, "", no_wir_location())) != WirOpcode.FloatExtend) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, wide_float, f32, "", no_wir_location())) != WirOpcode.FloatTruncate) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, signed_word, f64, "", no_wir_location())) != WirOpcode.SignedIntToFloat) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, unsigned_word, f64, "", no_wir_location())) != WirOpcode.UnsignedIntToFloat) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, wide_float, i32, "", no_wir_location())) != WirOpcode.FloatToSignedInt) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, wide_float, u32, "", no_wir_location())) != WirOpcode.FloatToUnsignedInt) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, signed_word, u32, "", no_wir_location())) != WirOpcode.Bitcast) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, pointer, p32, "", no_wir_location())) != WirOpcode.Bitcast) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, pointer, u64, "", no_wir_location())) != WirOpcode.PointerToInt) { return false; }
+    if (cast_result_opcode(program, wir_cast(ref program, block, unsigned_long, p8, "", no_wir_location())) != WirOpcode.IntToPointer) { return false; }
+    wir_return(ref program, block, NO_WIR_VALUE, no_wir_location());
+    let errors: Vector(String) = verify_wir(program);
+    return errors.length() == 0;
 }
 
 func main() -> Int {
@@ -74,6 +121,10 @@ func main() -> Int {
     }
     if (!check_binary_cast()) {
         print("FAIL: WIR binary widening");
+        return 1;
+    }
+    if (!check_low_level_casts()) {
+        print("FAIL: WIR low-level cast selection");
         return 1;
     }
     print("PASS: WIR casts");

@@ -107,6 +107,48 @@ func wir_check_types(program: WirModule, errors: Vector(String)) -> Void {
     }
 }
 
+func wir_check_sized_type(program: WirModule, type_id: WirTypeID, states: Vector(Int), errors: Vector(String)) -> Void {
+    if (!wir_type_valid(program, type_id)) { return; }
+    let index: Int = wir_id_index(UInt32(type_id));
+    if (states[index] == 2) { return; }
+    if (states[index] == 1) {
+        wir_report(errors, "aggregate type contains itself by value");
+        return;
+    }
+
+    let type: WirType = program.arena.types[index];
+    if (type.kind != WirTypeKind.Array && type.kind != WirTypeKind.Struct) {
+        states[index] = 2;
+        return;
+    }
+
+    states[index] = 1;
+    if (type.kind == WirTypeKind.Array) {
+        wir_check_sized_type(program, type.element, states, errors);
+    } else {
+        let i: Int = 0;
+        while (i < type.fields.length()) {
+            wir_check_sized_type(program, type.fields[i], states, errors);
+            i++;
+        }
+    }
+    states[index] = 2;
+}
+
+func wir_check_sized_types(program: WirModule, errors: Vector(String)) -> Void {
+    let states: Vector(Int) = [];
+    let i: Int = 0;
+    while (i < program.arena.types.length()) {
+        states.append(0);
+        i++;
+    }
+    i = 0;
+    while (i < program.arena.types.length()) {
+        wir_check_sized_type(program, WirTypeID(UInt32(i + 1)), states, errors);
+        i++;
+    }
+}
+
 func wir_check_values(program: WirModule, errors: Vector(String)) -> Void {
     let i: Int = 0;
     while (i < program.arena.values.length()) {
@@ -188,12 +230,35 @@ func wir_type_is(program: WirModule, type_id: WirTypeID, kind: WirTypeKind) -> B
     return program.arena.types[wir_id_index(UInt32(type_id))].kind == kind;
 }
 
-func wir_cast_allowed(program: WirModule, source: WirTypeID, target: WirTypeID) -> Bool {
-    if (!wir_type_valid(program, source) || !wir_type_valid(program, target)) { return false; }
-    let source_type: WirType = program.arena.types[wir_id_index(UInt32(source))];
-    let target_type: WirType = program.arena.types[wir_id_index(UInt32(target))];
-    if (wir_numeric_kind(source_type.kind) && wir_numeric_kind(target_type.kind)) { return true; }
-    return source_type.kind == WirTypeKind.Pointer && target_type.kind == WirTypeKind.Pointer;
+func wir_is_cast(opcode: WirOpcode) -> Bool {
+    return opcode == WirOpcode.Truncate || opcode == WirOpcode.SignExtend || opcode == WirOpcode.ZeroExtend ||
+           opcode == WirOpcode.FloatExtend || opcode == WirOpcode.FloatTruncate ||
+           opcode == WirOpcode.SignedIntToFloat || opcode == WirOpcode.UnsignedIntToFloat ||
+           opcode == WirOpcode.FloatToSignedInt || opcode == WirOpcode.FloatToUnsignedInt ||
+           opcode == WirOpcode.Bitcast || opcode == WirOpcode.PointerToInt || opcode == WirOpcode.IntToPointer;
+}
+
+func wir_cast_matches(program: WirModule, opcode: WirOpcode, source_id: WirTypeID, target_id: WirTypeID) -> Bool {
+    if (!wir_type_valid(program, source_id) || !wir_type_valid(program, target_id) || source_id == target_id) { return false; }
+    let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
+    let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
+    let source_integer: Bool = source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
+    let target_integer: Bool = target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
+
+    if (opcode == WirOpcode.Truncate) { return source_integer && target_integer && source.bits > target.bits; }
+    if (opcode == WirOpcode.SignExtend) { return source.kind == WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
+    if (opcode == WirOpcode.ZeroExtend) { return source.kind == WirTypeKind.UnsignedInt && target_integer && source.bits < target.bits; }
+    if (opcode == WirOpcode.FloatExtend) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits < target.bits; }
+    if (opcode == WirOpcode.FloatTruncate) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits > target.bits; }
+    if (opcode == WirOpcode.SignedIntToFloat) { return source.kind == WirTypeKind.SignedInt && target.kind == WirTypeKind.FloatType; }
+    if (opcode == WirOpcode.UnsignedIntToFloat) { return source.kind == WirTypeKind.UnsignedInt && target.kind == WirTypeKind.FloatType; }
+    if (opcode == WirOpcode.FloatToSignedInt) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.SignedInt; }
+    if (opcode == WirOpcode.FloatToUnsignedInt) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.UnsignedInt; }
+    if (opcode == WirOpcode.PointerToInt) { return source.kind == WirTypeKind.Pointer && target_integer; }
+    if (opcode == WirOpcode.IntToPointer) { return source_integer && target.kind == WirTypeKind.Pointer; }
+    if (opcode != WirOpcode.Bitcast) { return false; }
+    if (source.kind == WirTypeKind.Pointer && target.kind == WirTypeKind.Pointer) { return true; }
+    return wir_numeric_kind(source.kind) && wir_numeric_kind(target.kind) && source.bits == target.bits;
 }
 
 func wir_equality_type(program: WirModule, type_id: WirTypeID) -> Bool {
@@ -418,7 +483,17 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             }
         }
     } else if (opcode == WirOpcode.StackAlloc) {
-        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || !wir_is_pointer_type(program, instruction.type_id)) { wir_report(errors, "stack allocation must produce a pointer"); }
+        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || !wir_is_pointer_type(program, instruction.type_id)) {
+            wir_report(errors, "stack allocation must produce a pointer");
+        } else {
+            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+            if (wir_func_valid(program, block.function)) {
+                let function: WirFunction = program.arena.functions[wir_id_index(UInt32(block.function))];
+                if (function.entry != block_id) { wir_report(errors, "stack allocation is outside the function entry block"); }
+            }
+            let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+            if (pointer.element == program.void_type) { wir_report(errors, "stack allocation has no storage type"); }
+        }
     } else if (opcode == WirOpcode.Load) {
         if (instruction.operands.length() != 1 || !wir_value_valid(program, instruction.operands[0])) {
             wir_report(errors, "load requires one valid pointer operand");
@@ -453,11 +528,11 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
         wir_check_aggregate_value(program, instruction, WirTypeKind.Struct, errors);
     } else if (opcode == WirOpcode.ArrayValue) {
         wir_check_aggregate_value(program, instruction, WirTypeKind.Array, errors);
-    } else if (opcode == WirOpcode.Cast) {
+    } else if (wir_is_cast(opcode)) {
         if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(program, instruction.operands[0]) || instruction.result == NO_WIR_VALUE) {
             wir_report(errors, "cast requires one operand and one result");
-        } else if (!wir_cast_allowed(program, wir_value_type(program, instruction.operands[0]), instruction.type_id)) {
-            wir_report(errors, "cast uses incompatible source and target types");
+        } else if (!wir_cast_matches(program, opcode, wir_value_type(program, instruction.operands[0]), instruction.type_id)) {
+            wir_report(errors, "cast opcode does not match its source and target types");
         }
     } else if (opcode == WirOpcode.Call) {
         if (instruction.edges.length() != 0) { wir_report(errors, "call cannot contain control-flow edges"); }
@@ -715,15 +790,203 @@ func wir_check_symbols(program: WirModule, errors: Vector(String)) -> Void {
     }
 }
 
+func wir_function_block_index(function: WirFunction, block_id: WirBlockID) -> Int {
+    let i: Int = 0;
+    while (i < function.blocks.length()) {
+        if (function.blocks[i] == block_id) { return i; }
+        i++;
+    }
+    return -1;
+}
+
+func wir_block_reaches(program: WirModule, source_id: WirBlockID, target_id: WirBlockID) -> Bool {
+    if (!wir_block_valid(program, source_id)) { return false; }
+    let source: WirBlock = program.arena.blocks[wir_id_index(UInt32(source_id))];
+    if (source.instructions.length() == 0) { return false; }
+    let terminator_id: WirInstID = source.instructions[source.instructions.length() - 1];
+    if (!wir_inst_valid(program, terminator_id)) { return false; }
+    let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(terminator_id))];
+    let i: Int = 0;
+    while (i < terminator.edges.length()) {
+        if (terminator.edges[i].target == target_id) { return true; }
+        i++;
+    }
+    return false;
+}
+
+func wir_bool_row(length: Int, value: Bool) -> Vector(Bool) {
+    let row: Vector(Bool) = [];
+    let i: Int = 0;
+    while (i < length) {
+        row.append(value);
+        i++;
+    }
+    return row;
+}
+
+func wir_dominators(program: WirModule, function: WirFunction) -> Vector(Vector(Bool)) {
+    let count: Int = function.blocks.length();
+    let entry: Int = wir_function_block_index(function, function.entry);
+    let dominators: Vector(Vector(Bool)) = [];
+    let i: Int = 0;
+    while (i < count) {
+        if (i == entry) {
+            let row: Vector(Bool) = wir_bool_row(count, false);
+            row[i] = true;
+            dominators.append(row);
+        } else {
+            dominators.append(wir_bool_row(count, true));
+        }
+        i++;
+    }
+
+    let changed: Bool = true;
+    while changed {
+        changed = false;
+        i = 0;
+        while (i < count) {
+            if (i == entry) { i++; continue; }
+            let next: Vector(Bool) = wir_bool_row(count, true);
+            let has_predecessor: Bool = false;
+            let predecessor: Int = 0;
+            while (predecessor < count) {
+                if (wir_block_reaches(program, function.blocks[predecessor], function.blocks[i])) {
+                    has_predecessor = true;
+                    let bit: Int = 0;
+                    while (bit < count) {
+                        next[bit] = next[bit] && dominators[predecessor][bit];
+                        bit++;
+                    }
+                }
+                predecessor++;
+            }
+            if (!has_predecessor) { next = wir_bool_row(count, false); }
+            next[i] = true;
+
+            let bit: Int = 0;
+            while (bit < count) {
+                if (dominators[i][bit] != next[bit]) { changed = true; }
+                bit++;
+            }
+            dominators[i] = next;
+            i++;
+        }
+    }
+    return dominators;
+}
+
+func wir_instruction_blocks(program: WirModule) -> Vector(WirBlockID) {
+    let blocks: Vector(WirBlockID) = [];
+    let i: Int = 0;
+    while (i < program.arena.instructions.length()) {
+        blocks.append(NO_WIR_BLOCK);
+        i++;
+    }
+    i = 0;
+    while (i < program.arena.blocks.length()) {
+        let block_id: WirBlockID = WirBlockID(UInt32(i + 1));
+        let block: WirBlock = program.arena.blocks[i];
+        let j: Int = 0;
+        while (j < block.instructions.length()) {
+            blocks[wir_id_index(UInt32(block.instructions[j]))] = block_id;
+            j++;
+        }
+        i++;
+    }
+    return blocks;
+}
+
+func wir_instruction_position(block: WirBlock, instruction_id: WirInstID) -> Int {
+    let i: Int = 0;
+    while (i < block.instructions.length()) {
+        if (block.instructions[i] == instruction_id) { return i; }
+        i++;
+    }
+    return -1;
+}
+
+func wir_value_in_scope(program: WirModule, function_id: WirFuncID, function: WirFunction, block_id: WirBlockID, instruction_id: WirInstID, value_id: WirValueID, instruction_blocks: Vector(WirBlockID), dominators: Vector(Vector(Bool))) -> Bool {
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) { return true; }
+    if (value.kind == WirValueKind.FunctionParameter) { return value.owner == UInt32(function_id); }
+
+    let definition_block: WirBlockID = NO_WIR_BLOCK;
+    if (value.kind == WirValueKind.BlockParameter) {
+        definition_block = WirBlockID(value.owner);
+    } else if (value.kind == WirValueKind.Instruction) {
+        definition_block = instruction_blocks[wir_id_index(value.owner)];
+    } else {
+        return false;
+    }
+
+    if (!wir_block_valid(program, definition_block)) { return false; }
+    let definition: WirBlock = program.arena.blocks[wir_id_index(UInt32(definition_block))];
+    if (definition.function != function_id) { return false; }
+    if (definition_block == block_id) {
+        if (value.kind == WirValueKind.BlockParameter) { return true; }
+        return wir_instruction_position(definition, WirInstID(value.owner)) < wir_instruction_position(definition, instruction_id);
+    }
+
+    let definition_index: Int = wir_function_block_index(function, definition_block);
+    let use_index: Int = wir_function_block_index(function, block_id);
+    return definition_index >= 0 && use_index >= 0 && dominators[use_index][definition_index];
+}
+
+func wir_check_value_scopes(program: WirModule, errors: Vector(String)) -> Void {
+    let instruction_blocks: Vector(WirBlockID) = wir_instruction_blocks(program);
+    let function_index: Int = 0;
+    while (function_index < program.arena.functions.length()) {
+        let function_id: WirFuncID = WirFuncID(UInt32(function_index + 1));
+        let function: WirFunction = program.arena.functions[function_index];
+        if (function.linkage == WirLinkage.External) { function_index++; continue; }
+        let dominators: Vector(Vector(Bool)) = wir_dominators(program, function);
+        let block_index: Int = 0;
+        while (block_index < function.blocks.length()) {
+            let block_id: WirBlockID = function.blocks[block_index];
+            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+            let instruction_index: Int = 0;
+            while (instruction_index < block.instructions.length()) {
+                let instruction_id: WirInstID = block.instructions[instruction_index];
+                let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
+                let operand_index: Int = 0;
+                while (operand_index < instruction.operands.length()) {
+                    if (!wir_value_in_scope(program, function_id, function, block_id, instruction_id, instruction.operands[operand_index], instruction_blocks, dominators)) {
+                        wir_report(errors, "instruction uses a value outside its SSA scope");
+                    }
+                    operand_index++;
+                }
+                let edge_index: Int = 0;
+                while (edge_index < instruction.edges.length()) {
+                    let argument_index: Int = 0;
+                    while (argument_index < instruction.edges[edge_index].arguments.length()) {
+                        let argument: WirValueID = instruction.edges[edge_index].arguments[argument_index];
+                        if (!wir_value_in_scope(program, function_id, function, block_id, instruction_id, argument, instruction_blocks, dominators)) {
+                            wir_report(errors, "branch uses a value outside its SSA scope");
+                        }
+                        argument_index++;
+                    }
+                    edge_index++;
+                }
+                instruction_index++;
+            }
+            block_index++;
+        }
+        function_index++;
+    }
+}
+
 func verify_wir(program: WirModule) -> Vector(String) {
     let errors: Vector(String) = [];
+    if (program.target.length() == 0) { wir_report(errors, "module has no target triple"); }
     if (program.pointer_bits != 32 && program.pointer_bits != 64) { wir_report(errors, "module has an unsupported pointer width"); }
     if (!wir_type_valid(program, program.void_type) || program.arena.types[wir_id_index(UInt32(program.void_type))].kind != WirTypeKind.VoidType) { wir_report(errors, "module has no canonical Void type"); }
     if (!wir_type_valid(program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) { wir_report(errors, "module has no canonical Bool type"); }
     wir_check_types(program, errors);
+    wir_check_sized_types(program, errors);
     wir_check_values(program, errors);
     wir_check_symbols(program, errors);
     wir_check_globals(program, errors);
     wir_check_functions(program, errors);
+    if (errors.length() == 0) { wir_check_value_scopes(program, errors); }
     return errors;
 }

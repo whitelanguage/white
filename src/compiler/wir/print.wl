@@ -166,6 +166,22 @@ func wir_unary_name(opcode: WirOpcode) -> String {
     return "";
 }
 
+func wir_cast_name(opcode: WirOpcode) -> String {
+    if (opcode == WirOpcode.Truncate) { return "trunc"; }
+    if (opcode == WirOpcode.SignExtend) { return "sext"; }
+    if (opcode == WirOpcode.ZeroExtend) { return "zext"; }
+    if (opcode == WirOpcode.FloatExtend) { return "fpext"; }
+    if (opcode == WirOpcode.FloatTruncate) { return "fptrunc"; }
+    if (opcode == WirOpcode.SignedIntToFloat) { return "sitofp"; }
+    if (opcode == WirOpcode.UnsignedIntToFloat) { return "uitofp"; }
+    if (opcode == WirOpcode.FloatToSignedInt) { return "fptosi"; }
+    if (opcode == WirOpcode.FloatToUnsignedInt) { return "fptoui"; }
+    if (opcode == WirOpcode.Bitcast) { return "bitcast"; }
+    if (opcode == WirOpcode.PointerToInt) { return "ptrtoint"; }
+    if (opcode == WirOpcode.IntToPointer) { return "inttoptr"; }
+    return "";
+}
+
 func wir_write_operands(output: strings.Builder, program: WirModule, operands: Vector(WirValueID), start: Int) -> Void? {
     let i: Int = start;
     while (i < operands.length()) {
@@ -225,8 +241,9 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
         output.write("array [")?;
         wir_write_operands(output, program, instruction.operands, 0)?;
         output.write("]")?;
-    } else if (instruction.opcode == WirOpcode.Cast) {
-        output.write("cast ")?;
+    } else if (wir_cast_name(instruction.opcode).length() != 0) {
+        output.write(wir_cast_name(instruction.opcode))?;
+        output.write(" ")?;
         wir_write_value(output, program, instruction.operands[0])?;
     } else if (instruction.opcode == WirOpcode.Call) {
         output.write("call ")?;
