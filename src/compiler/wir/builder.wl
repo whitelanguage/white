@@ -231,7 +231,7 @@ func wir_append(ref program: WirModule, block_id: WirBlockID, opcode: WirOpcode,
     if (type_id != program.void_type) {
         result = wir_add_value(ref program, WirValue(name="", type_id=type_id, kind=WirValueKind.Instruction, owner=UInt32(instruction_id), index=-1, integer=UInt128(0U), float_bits=UInt64(0)));
     }
-    program.arena.instructions.append(WirInstruction(opcode=opcode, type_id=type_id, result=result, operands=operands, edges=edges, location=location));
+    program.arena.instructions.append(WirInstruction(opcode=opcode, type_id=type_id, call_type=NO_WIR_TYPE, result=result, operands=operands, edges=edges, location=location));
     program.arena.blocks[wir_id_index(UInt32(block_id))].instructions.append(instruction_id);
     return result;
 }
@@ -323,7 +323,11 @@ func wir_unary(ref program: WirModule, block: WirBlockID, opcode: WirOpcode, typ
 
 func wir_call(ref program: WirModule, block: WirBlockID, function: WirValueID, arguments: Vector(WirValueID), name: String, location: WirLocation) -> WirValueID {
     let callee: WirValue = program.arena.values[wir_id_index(UInt32(function))];
-    let signature: WirType = program.arena.types[wir_id_index(UInt32(callee.type_id))];
+    return wir_call_typed(ref program, block, function, callee.type_id, arguments, name, location);
+}
+
+func wir_call_typed(ref program: WirModule, block: WirBlockID, function: WirValueID, call_type: WirTypeID, arguments: Vector(WirValueID), name: String, location: WirLocation) -> WirValueID {
+    let signature: WirType = program.arena.types[wir_id_index(UInt32(call_type))];
     let operands: Vector(WirValueID) = [function];
     let i: Int = 0;
     while (i < arguments.length()) {
@@ -331,6 +335,7 @@ func wir_call(ref program: WirModule, block: WirBlockID, function: WirValueID, a
         i++;
     }
     let value: WirValueID = wir_append(ref program, block, WirOpcode.Call, signature.result, operands, [], location);
+    program.arena.instructions[program.arena.instructions.length() - 1].call_type = call_type;
     if (value != NO_WIR_VALUE) { wir_name_value(ref program, value, name); }
     return value;
 }

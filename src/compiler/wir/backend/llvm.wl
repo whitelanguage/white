@@ -525,10 +525,9 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write(", i32 0, ")?;
         llvm_write_typed_value(output, program, instruction.operands[1])?;
     } else if (instruction.opcode == WirOpcode.Call) {
-        let callee: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
-        let signature: WirType = program.arena.types[wir_id_index(UInt32(callee.type_id))];
+        let signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
         output.write("call ")?;
-        output.write(llvm_callee_callconv(program, instruction.operands[0]))?;
+        output.write(llvm_callconv(program, signature.abi))?;
         llvm_write_type(output, program, signature.result)?;
         output.write(" ")?;
         llvm_write_value(output, program, instruction.operands[0])?;

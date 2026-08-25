@@ -21,6 +21,7 @@ import * from "casts.wl"
 import * from "literals.wl"
 import * from "../validation.wl"
 import * from "../registration.wl"
+import * from "../analysis.wl"
 import * from "ownership.wl"
 import * from "../modules.wl"
 import * from "../initialization.wl"
@@ -32,14 +33,7 @@ import hoist_llvm_allocas from "../backend/llvm.wl"
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
 // enum bodies go first because later declarations may use their members as constants
-    c.current_file_visible_prefixes = p_mod.visible;
-    c.current_file_namespaces       = p_mod.namespaces;
-    c.current_file_type_aliases     = p_mod.types;
-    c.current_file_func_aliases     = p_mod.funcs;
-    c.current_file_global_aliases   = p_mod.globals;
-    c.current_package_prefix        = p_mod.prefix;
-    c.current_module_is_package     = p_mod.is_package;
-    c.current_dir                   = p_mod.dir;
+    set_module_context(ref c, p_mod);
 
     let imports: Vector(NodeID) = p_mod.imports;
     let i_len: Int = 0; if (imports is !null) { i_len = imports.length(); }
@@ -2085,18 +2079,10 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
 func compile_struct_def(ref c: Compiler, node: StructDefNode) -> CompileResult {
     if (node.type_params is !null && node.type_params.length() > 0) { return void_result(); }
 
-    let raw_name: String = node.name_tok.value;
-    let struct_name: String = c.current_package_prefix + raw_name;
+    let struct_name: String = c.current_package_prefix + node.name_tok.value;
 
     let info: StructInfo = c.struct_table.lookup(struct_name);
-    if (!has_struct(info)) {
-        throw_type_error(node.pos, "Struct info missing for '" + struct_name + "'.");
-        return void_result();
-    }
-
-    if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
-        return void_result();
-    }
+    if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0) { return void_result(); }
 
     let full_name: String = "struct." + struct_name;
     if (has_struct(c.struct_table.lookup(full_name))) {
@@ -2105,37 +2091,16 @@ func compile_struct_def(ref c: Compiler, node: StructDefNode) -> CompileResult {
     }
 
     let llvm_body: String = "";
-    let fields_vec: Vector(Struct) = [];
-    
-    let fields: Vector(ParamNode) = node.fields;
-    let f_len: Int = 0; if (fields is !null) { f_len = fields.length(); }
+    let fields_vec: Vector(Struct) = info.fields;
     let idx: Int = 0;
-    let field_names: Dict(String, StringConstant) = Dict();
-    
-    while (idx < f_len) {
-        let p: ParamNode = fields[idx];
-        let f_name: String = p.name_tok.value;
-        if (field_names.contains_key(f_name)) { throw_name_error(p.pos, "field '" + f_name + "' is already defined in struct '" + struct_name + "'"); return void_result(); }
-        field_names.put(f_name, StringConstant(id=0, value=f_name));
-        let f_type_id: Int = resolve_type(ref c, p.type_tok);
-        if (f_type_id == TYPE_AUTO) {
-            throw_type_error(node.pos, "struct fields cannot use 'Auto' because they lack initializers for static deduction.");
-            return void_result();
-        }
-        if (f_type_id == TYPE_POISON) { return void_result(); }
-        if (value_layout_contains(ref c, f_type_id, info.type_id, [])) {
-            throw_type_error(p.pos, "Struct '" + struct_name + "' contains itself by value through field '" + f_name + "'. Use a pointer for recursive storage.");
-            return void_result();
-        }
-
-        let f_llvm_type: String = get_llvm_type_str(ref c, f_type_id);
-        if (idx > 0) { llvm_body = llvm_body + ", "; }
-        llvm_body += f_llvm_type;
-        
-        fields_vec.append(FieldInfo(name=f_name, type=f_type_id, llvm_type=f_llvm_type, offset=idx, is_const=false));
-        idx += 1;
+    while (idx < fields_vec.length()) {
+        let field: FieldInfo = fields_vec[idx];
+        field.llvm_type = get_llvm_type_str(ref c, field.type);
+        fields_vec[idx] = field;
+        if (idx > 0) { llvm_body += ", "; }
+        llvm_body += field.llvm_type;
+        idx++;
     }
-
     info.fields = fields_vec;
     store_struct(ref c, info);
     if (fields_vec.length() == 0) { llvm_body = "i8"; }
@@ -2424,7 +2389,10 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
 
     let info: StructInfo = c.struct_table.lookup(class_name);
     let parent_info: StructInfo = StructInfo();
-    if (has_node(node.parent_tok)) {
+    let has_analyzed_metadata: Bool = c.generic_class_type == 0;
+    if (has_analyzed_metadata && info.parent_id != 0) {
+        parent_info = c.struct_id_map.lookup("" + info.parent_id);
+    } else if (!has_analyzed_metadata && has_node(node.parent_tok)) {
         let parent_type: Int = resolve_type(ref c, node.parent_tok);
         parent_info = c.struct_id_map.lookup("" + parent_type);
         if (!has_struct(parent_info) || !parent_info.is_class) {
@@ -2434,32 +2402,53 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
         info.parent_id = parent_info.type_id;
     }
 
-    let effective_interfaces: Vector(Struct) = [];
-    if (has_struct(parent_info)) {
-        let inherited_idx: Int = 0;
-        while (parent_info.interfaces is !null && inherited_idx < parent_info.interfaces.length()) {
-            let inherited: TypeListNode = parent_info.interfaces[inherited_idx];
-            if (!add_interface_type(ref c, effective_interfaces, inherited.type, node.pos)) { return void_result(); }
-            inherited_idx += 1;
+    if (!has_analyzed_metadata) {
+        let effective_interfaces: Vector(Struct) = [];
+        if (has_struct(parent_info)) {
+            let inherited_idx: Int = 0;
+            while (parent_info.interfaces is !null && inherited_idx < parent_info.interfaces.length()) {
+                let inherited: TypeListNode = parent_info.interfaces[inherited_idx];
+                if (!add_interface_type(ref c, effective_interfaces, inherited.type, node.pos)) { return void_result(); }
+                inherited_idx += 1;
+            }
         }
-    }
-    let declared_idx: Int = 0;
-    while (node.interfaces is !null && declared_idx < node.interfaces.length()) {
-        let declared: NodeID = node.interfaces[declared_idx];
-        if (!add_interface(ref c, effective_interfaces, declared, node.pos)) { return void_result(); }
-        declared_idx += 1;
-    }
-    info.interfaces = effective_interfaces;
-    store_struct(ref c, info);
+        let declared_idx: Int = 0;
+        while (node.interfaces is !null && declared_idx < node.interfaces.length()) {
+            let declared: NodeID = node.interfaces[declared_idx];
+            if (!add_interface(ref c, effective_interfaces, declared, node.pos)) { return void_result(); }
+            declared_idx += 1;
+        }
+        info.interfaces = effective_interfaces;
+        store_struct(ref c, info);
 
-    check_class_initialization(ref c, class_name, node, parent_info);
+        check_class_initialization(ref c, class_name, node, parent_info);
+    }
 
     let llvm_body: String = "";
     let fields_vec: Vector(Struct) = [];
     let vtable_vec: Vector(Struct) = [];
     let current_offset: Int = 0;
 
-    if (has_struct(parent_info)) {
+    if (has_analyzed_metadata) {
+        let analyzed_index: Int = 0;
+        while (info.fields is !null && analyzed_index < info.fields.length()) {
+            let field: FieldInfo = info.fields[analyzed_index];
+            if (field.name == "_vptr" && field.type == TYPE_VOID) {
+                field.llvm_type = "i8*";
+            } else {
+                field.llvm_type = get_llvm_type_str(ref c, field.type);
+            }
+            if (analyzed_index > 0) { llvm_body += ", "; }
+            llvm_body += field.llvm_type;
+            fields_vec.append(field);
+            analyzed_index++;
+        }
+        let analyzed_method_index: Int = 0;
+        while (info.vtable is !null && analyzed_method_index < info.vtable.length()) {
+            vtable_vec.append(info.vtable[analyzed_method_index]);
+            analyzed_method_index++;
+        }
+    } else if (has_struct(parent_info)) {
         let p_fields: Vector(Struct) = parent_info.fields;
         let pf_len: Int = p_fields.length();
         let pf_i: Int = 0;
@@ -2491,7 +2480,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
     let class_field_names: Dict(String, StringConstant) = Dict();
     let inherited_field_idx: Int = 0;
     while (inherited_field_idx < fields_vec.length()) { let inherited_field: FieldInfo = fields_vec[inherited_field_idx]; class_field_names.put(inherited_field.name, StringConstant(id=0, value=inherited_field.name)); inherited_field_idx += 1; }
-    while (mf_idx < mf_len) {
+    while (!has_analyzed_metadata && mf_idx < mf_len) {
         let p: VarDeclareNode = get_var_decl_node(c.arena, my_fields[mf_idx]);
         let f_name: String = p.name_tok.value;
         if (class_field_names.contains_key(f_name)) { throw_name_error(p.pos, "field '" + f_name + "' is already defined in class '" + class_name + "'"); return void_result(); }
@@ -2530,7 +2519,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
     let my_methods: Vector(NodeID) = node.methods;
     let mm_len: Int = 0; if (my_methods is !null) { mm_len = my_methods.length(); }
     let mm_idx: Int = 0;
-    while (mm_idx < mm_len) {
+    while (!has_analyzed_metadata && mm_idx < mm_len) {
         let m_node: MethodDefNode = get_method_def_node(c.arena, my_methods[mm_idx]);
         let raw_m_name: String = method_base_name(ref c, m_node);
 
@@ -2640,50 +2629,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
                 while (im_idx < im_len) {
                     let req_m: MethodDefNode = im_methods[im_idx];
                     let req_name: String = req_m.name_tok.value;
-                    
-                    let found_impl: FuncInfo = FuncInfo();
-                    let vt_idx: Int = 0;
-                    while (vt_idx < vt_final_len) {
-                        let f: FuncInfo = vtable_vec[vt_idx];
-                        if (f.base_name == req_name) {
-                            let match: Bool = true;
-                            let req_ret_type: Int = interface_method_type_for(ref c, i_info, req_m.return_type, info.type_id);
-                            if (f.ret_type != req_ret_type) {
-                                match = false;
-                            } else {
-                                let req_params: Vector(ParamNode) = req_m.params;
-                                let req_p_len: Int = 0;
-                                if (req_params is !null) { req_p_len = req_params.length(); }
-                                
-                                let f_p_len: Int = 0;
-                                if (f.arg_types is !null) { f_p_len = f.arg_types.length(); }
-                                
-                                if (f_p_len != req_p_len + 1) {
-                                    match = false;
-                                } else {
-                                    let p_idx: Int = 0;
-                                    while (p_idx < req_p_len) {
-                                        let req_p: ParamNode = req_params[p_idx];
-                                        let req_p_type: Int = interface_method_type_for(ref c, i_info, req_p.type_tok, info.type_id);
-                                        let f_p: TypeListNode = f.arg_types[p_idx + 1];
-                                        
-                                        if (f_p.type != req_p_type || f_p.pass_mode != req_p.pass_mode) {
-                                            match = false;
-                                            break;
-                                        }
-                                        p_idx += 1;
-                                    }
-                                }
-                            }
-                            
-                            if match {
-                                found_impl = f;
-                                break;
-                            }
-                        }
-                        vt_idx += 1;
-                    }
-                    
+                    let found_impl: FuncInfo = find_interface_implementation(ref c, info, i_info, req_m);
                     if (!has_func(found_impl)) {
                         throw_name_error(node.pos, "Class '" + raw_name + "' does not implement interface method '" + req_name + "'.");
                         return void_result();
@@ -6850,34 +6796,7 @@ func compile_string_method_call(ref c: Compiler, obj_node: NodeID, method_name: 
 }
 // --------------
 
-func compile_start(ref c: Compiler) -> Void {
-
-    c.output_file.write("target triple = \"" + get_target_triple() + "\"\n\n");
-    c.output_file.write("declare void @llvm.trap()\n\n");
-
-    c.output_file.write("@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"\n");
-    c.output_file.write("@.fmt_long = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
-    c.output_file.write("@.fmt_float = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\"\n");
-    c.output_file.write("@.fmt_str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n\n");
-    c.output_file.write("@.fmt_char = private unnamed_addr constant [3 x i8] c\"%c\\00\"\n");
-    c.output_file.write("@.fmt_hex_ptr = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n");
-
-    c.output_file.write("@.str_true = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
-    c.output_file.write("@.str_false = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
-    c.output_file.write("@.str_null = private unnamed_addr constant [5 x i8] c\"null\\00\"\n\n");
-    c.output_file.write("@.str_newline = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n");
-
-    c.output_file.write("@.str_idx_err = private unnamed_addr constant [21 x i8] c\"Index out of bounds\\0A\\00\"\n\n");
-    c.output_file.write("@.fmt_err_bounds = private unnamed_addr constant [66 x i8] c\"\\0ARuntimeError\\1B[0m: Index out of bounds\\0A    at Line %d, Column %d\\0A\\00\"\n\n");
-
-    // print
-    c.output_file.write("@.str_open_bracket = private unnamed_addr constant [2 x i8] c\"[\\00\"\n");
-    c.output_file.write("@.str_close_bracket = private unnamed_addr constant [2 x i8] c\"]\\00\"\n");
-    c.output_file.write("@.str_comma_space = private unnamed_addr constant [3 x i8] c\", \\00\"\n");
-    c.output_file.write("@.str_open_paren = private unnamed_addr constant [2 x i8] c\"(\\00\"\n");
-    c.output_file.write("@.str_close_paren = private unnamed_addr constant [2 x i8] c\")\\00\"\n");
-    c.output_file.write("@.str_equal = private unnamed_addr constant [2 x i8] c\"=\\00\"\n");
-
+func init_compiler_intrinsics(ref c: Compiler) -> Void {
     // for dict.wl
     let variant_id: Int = c.type_counter;
     c.type_counter += 1;
@@ -6924,68 +6843,36 @@ func compile_start(ref c: Compiler) -> Void {
     );
     c.struct_table.put("String", string_info);
     c.struct_id_map.put("" + TYPE_STRING, string_info);
+}
+
+func emit_llvm_prelude(ref c: Compiler) -> Void {
+    c.output_file.write("target triple = \"" + get_target_triple() + "\"\n\n");
+    c.output_file.write("declare void @llvm.trap()\n\n");
+
+    c.output_file.write("@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"\n");
+    c.output_file.write("@.fmt_long = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
+    c.output_file.write("@.fmt_float = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\"\n");
+    c.output_file.write("@.fmt_str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n\n");
+    c.output_file.write("@.fmt_char = private unnamed_addr constant [3 x i8] c\"%c\\00\"\n");
+    c.output_file.write("@.fmt_hex_ptr = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n");
+
+    c.output_file.write("@.str_true = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
+    c.output_file.write("@.str_false = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
+    c.output_file.write("@.str_null = private unnamed_addr constant [5 x i8] c\"null\\00\"\n\n");
+    c.output_file.write("@.str_newline = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n");
+    c.output_file.write("@.str_idx_err = private unnamed_addr constant [21 x i8] c\"Index out of bounds\\0A\\00\"\n\n");
+    c.output_file.write("@.fmt_err_bounds = private unnamed_addr constant [66 x i8] c\"\\0ARuntimeError\\1B[0m: Index out of bounds\\0A    at Line %d, Column %d\\0A\\00\"\n\n");
+
+    c.output_file.write("@.str_open_bracket = private unnamed_addr constant [2 x i8] c\"[\\00\"\n");
+    c.output_file.write("@.str_close_bracket = private unnamed_addr constant [2 x i8] c\"]\\00\"\n");
+    c.output_file.write("@.str_comma_space = private unnamed_addr constant [3 x i8] c\", \\00\"\n");
+    c.output_file.write("@.str_open_paren = private unnamed_addr constant [2 x i8] c\"(\\00\"\n");
+    c.output_file.write("@.str_close_paren = private unnamed_addr constant [2 x i8] c\")\\00\"\n");
+    c.output_file.write("@.str_equal = private unnamed_addr constant [2 x i8] c\"=\\00\"\n");
 
     c.output_file.write("; ====== COMPILER INTRINSICS ======\n");
     c.output_file.write("%struct.$Variant = type { i64, i64, i64 }\n");
     c.output_file.write("%struct.$String = type { i8*, i32, i32 }\n\n");
-}
-
-func compile(ref c: Compiler, node: NodeID) -> Void {
-    // discover every module before lowering; import order must not change symbol visibility
-    compile_start(ref c);
-
-    let fake_path: Token = Token(type=TOK_STR_LIT, value="dict", line=0, col=0);
-    let fake_pos: Position = Position(idx=0, ln=0, col=0, text="", fn="<prelude>");
-    let star_tok: Token = Token(type=TOK_MUL, value="*", line=0, col=0);
-    let star_sym: ImportSymbolNode = ImportSymbolNode(name_tok=star_tok, alias_tok=Token());
-    let fake_syms: Vector(ImportSymbolNode) = [];
-    fake_syms.append(star_sym);
-
-    // error is a language-level prelude item, not part of the builtin namespace
-    let fake_error_path: Token = Token(type=TOK_STR_LIT, value="errors", line=0, col=0);
-    let fake_error_import: ImportNode = ImportNode(type=NODE_IMPORT, path_tok=fake_error_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos);
-    compile_import(ref c, fake_error_import);
-
-    // builtin is the prelude and carries the hooks required by generated code
-    let fake_builtin_path: Token = Token(type=TOK_STR_LIT, value="builtin", line=0, col=0);
-    let fake_builtin_import: ImportNode = ImportNode(type=NODE_IMPORT, path_tok=fake_builtin_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos);
-    compile_import(ref c, fake_builtin_import);
-
-    let fake_import: ImportNode = ImportNode(type=NODE_IMPORT, path_tok=fake_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos);
-    compile_import(ref c, fake_import);
-
-    if (!has_struct(c.struct_table.lookup("dict.Variant"))) {
-        throw_import_error(fake_pos, "Missing required intrinsic item '@CompilerIntrinsic struct Variant'. The standard library 'dict.wl' may be corrupted or missing.");
-        return;
-    }
-
-    precompile_ast(ref c, node, "<main>", "", c.current_dir);
-
-    let mod_i: Int = 0;
-    while (mod_i < c.all_modules.length()) {
-        let p_mod: ParsedModule = c.all_modules[mod_i];
-        c.current_file_visible_prefixes = p_mod.visible;
-        c.current_file_namespaces       = p_mod.namespaces;
-        c.current_file_type_aliases     = p_mod.types;
-        c.current_file_func_aliases     = p_mod.funcs;
-        c.current_file_global_aliases   = p_mod.globals;
-        c.current_package_prefix        = p_mod.prefix;
-        c.current_module_is_package     = p_mod.is_package;
-        c.current_dir                   = p_mod.dir;
-        bind_module_prelude(ref c, Position(idx=0, ln=0, col=0, text="", fn=p_mod.path));
-        mod_i += 1;
-    }
-
-    c.is_precompile_phase = false;
-
-    mod_i = 0;
-    while (mod_i < c.all_modules.length()) {
-        let p_mod: ParsedModule = c.all_modules[mod_i];
-        compile_ast_pass(ref c, p_mod);
-        mod_i += 1;
-    }
-    emit_pending_generics(ref c);
-    compile_end(ref c);
 }
 
 func compile_end(ref c: Compiler) -> Void {

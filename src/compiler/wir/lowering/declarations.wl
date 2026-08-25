@@ -63,3 +63,10 @@ func wir_find_function(program: WirModule, name: String) -> WirFuncID {
     }
     return NO_WIR_FUNC;
 }
+
+func wir_compiler_link_function(ref source: Compiler, name: String) -> FuncInfo {
+    if (source.compiler_link is null) { return FuncInfo(); }
+    let key: String = source.compiler_link.lookup(name);
+    if (key is null || key.length() == 0) { return FuncInfo(); }
+    return source.func_table.lookup(key);
+}

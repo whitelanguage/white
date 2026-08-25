@@ -333,6 +333,17 @@ struct ParsedModule(
     imports: Vector(NodeID)
 )
 
+func set_module_context(ref c: Compiler, module: ParsedModule) -> Void {
+    c.current_file_visible_prefixes = module.visible;
+    c.current_file_namespaces = module.namespaces;
+    c.current_file_type_aliases = module.types;
+    c.current_file_func_aliases = module.funcs;
+    c.current_file_global_aliases = module.globals;
+    c.current_package_prefix = module.prefix;
+    c.current_module_is_package = module.is_package;
+    c.current_dir = module.dir;
+}
+
 
 struct LoopScope(
     label_continue: String,

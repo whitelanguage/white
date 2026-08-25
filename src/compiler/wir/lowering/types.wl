@@ -99,6 +99,22 @@ func wir_error_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeI
     return record;
 }
 
+func wir_dispatch_table_type(ref types: WirTypeMap, ref program: WirModule, length: Int) -> WirTypeID {
+    return wir_array_type(ref program, wir_opaque_pointer(ref types, ref program), UIntSize(length));
+}
+
+func wir_class_vtable_name(info: StructInfo) -> String {
+    if (info.vtable_name is !null && info.vtable_name.length() > 0) {
+        if (info.vtable_name[0] == '@') { return info.vtable_name.slice(1, info.vtable_name.length()); }
+        return info.vtable_name;
+    }
+    return "vtable." + info.name;
+}
+
+func wir_interface_table_name(class_info: StructInfo, interface_info: StructInfo) -> String {
+    return "itable." + class_info.name + "." + interface_info.name;
+}
+
 func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, info: StructInfo) -> WirTypeID {
     if (info.is_enum) { return wir_cache_type(ref types, source_type, wir_signed_int_type(ref program, 32)); }
 
@@ -109,16 +125,19 @@ func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref prog
 
     let fields: Vector(WirTypeID) = [];
     if (info.is_interface) {
-        let pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
-        fields.append(pointer);
-        fields.append(pointer);
+        fields.append(wir_opaque_pointer(ref types, ref program));
+        let method_count: Int = 0;
+        if (info.vtable is !null) { method_count = info.vtable.length(); }
+        fields.append(wir_pointer_type(ref program, wir_dispatch_table_type(ref types, ref program, method_count)));
     } else {
         let i: Int = 0;
         while (info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             let field_type: WirTypeID = NO_WIR_TYPE;
             if (field.name == "_vptr" && field.type == TYPE_VOID) {
-                field_type = wir_opaque_pointer(ref types, ref program);
+                let method_count: Int = 0;
+                if (info.vtable is !null) { method_count = info.vtable.length(); }
+                field_type = wir_pointer_type(ref program, wir_dispatch_table_type(ref types, ref program, method_count));
             } else {
                 field_type = wir_lower_source_type(ref types, ref source, ref program, field.type);
             }

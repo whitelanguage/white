@@ -584,6 +584,7 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     }
 
     let opcode: WirOpcode = instruction.opcode;
+    if (opcode != WirOpcode.Call && instruction.call_type != NO_WIR_TYPE) { wir_report(errors, "non-call instruction contains a call signature"); }
     if (!wir_is_terminator(opcode) && instruction.edges.length() != 0) { wir_report(errors, "non-terminator instruction contains control-flow edges"); }
     if (opcode == WirOpcode.Invalid) {
         wir_report(errors, "instruction has an invalid opcode");
@@ -690,10 +691,15 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             wir_report(errors, "call has no valid callee");
         } else {
             let callee: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
-            if (!wir_type_valid(program, callee.type_id) || program.arena.types[wir_id_index(UInt32(callee.type_id))].kind != WirTypeKind.Function) {
-                wir_report(errors, "call target does not have a function type");
+            if (!wir_type_valid(program, instruction.call_type) || program.arena.types[wir_id_index(UInt32(instruction.call_type))].kind != WirTypeKind.Function) {
+                wir_report(errors, "call does not have a function signature");
+            } else if (!wir_type_valid(program, callee.type_id) || (program.arena.types[wir_id_index(UInt32(callee.type_id))].kind != WirTypeKind.Function && program.arena.types[wir_id_index(UInt32(callee.type_id))].kind != WirTypeKind.Pointer)) {
+                wir_report(errors, "call target is not an address");
             } else {
-                let signature: WirType = program.arena.types[wir_id_index(UInt32(callee.type_id))];
+                let signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
+                if (program.arena.types[wir_id_index(UInt32(callee.type_id))].kind == WirTypeKind.Function && callee.type_id != instruction.call_type) {
+                    wir_report(errors, "direct call signature does not match the function");
+                }
                 let argument_count: Int = instruction.operands.length() - 1;
                 if ((!signature.variadic && argument_count != signature.parameters.length()) || (signature.variadic && argument_count < signature.parameters.length())) { wir_report(errors, "call argument count does not match the function type"); }
                 let argument_index: Int = 0;

@@ -90,7 +90,7 @@ func main() -> Int {
     wir_append(ref program, exercise_entry, WirOpcode.Branch, program.void_type, [less], [wir_edge(exercise_then, []), wir_edge(exercise_trap, [])], no_wir_location());
 
     let increment_value: WirValueID = wir_const_int(ref program, int_type, UInt128(1U));
-    let increment: WirValueID = wir_append(ref program, exercise_then, WirOpcode.Call, int_type, [wir_function_value(program, function_id), loaded, increment_value], [], no_wir_location());
+    let increment: WirValueID = wir_call(ref program, exercise_then, wir_function_value(program, function_id), [loaded, increment_value], "", no_wir_location());
     wir_name_value(ref program, increment, "increment");
     let wide: WirValueID = wir_append(ref program, exercise_then, WirOpcode.SignExtend, long_type, [increment], [], no_wir_location());
     wir_name_value(ref program, wide, "wide");

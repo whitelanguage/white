@@ -9,7 +9,7 @@ import "frontend/ast.wl" as WhitelangNodes
 import "frontend/arena.wl" as WhitelangArena
 import "frontend/parser.wl" as WhitelangParser
 import "frontend/diagnostics.wl" as WhitelangExceptions
-import "compiler/lowering/core.wl" as WhitelangCompiler
+import "compiler/pipeline.wl" as WhitelangCompiler
 import "compiler/context.wl" as WhitelangUtils
 import "compiler/target.wl" as WhitelangTarget
 

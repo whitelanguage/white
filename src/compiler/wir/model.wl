@@ -184,6 +184,7 @@ struct WirEdge(
 struct WirInstruction(
     opcode: WirOpcode,
     type_id: WirTypeID,
+    call_type: WirTypeID,
     result: WirValueID,
     operands: Vector(WirValueID),
     edges: Vector(WirEdge),
