@@ -78,6 +78,56 @@ func llvm_float32_bits(bits: UInt64) -> UInt64 {
     return sign | double_exponent | double_fraction;
 }
 
+func llvm_write_byte_string(output: strings.Builder, bytes: String) -> Void? {
+    output.write("c\"")?;
+    let alphabet: String = "0123456789ABCDEF";
+    let i: Int = 0;
+    while (i < bytes.length()) {
+        let byte: Byte = bytes[i];
+        if (byte >= Byte(32) && byte <= Byte(126) && byte != Byte(34) && byte != Byte(92)) {
+            output.write_byte(byte)?;
+        } else {
+            output.write("\\")?;
+            output.write(alphabet.slice(Int(byte >> 4) & 15, (Int(byte >> 4) & 15) + 1))?;
+            output.write(alphabet.slice(Int(byte) & 15, (Int(byte) & 15) + 1))?;
+        }
+        i++;
+    }
+    output.write("\"")?;
+    return;
+}
+
+func llvm_write_constant(output: strings.Builder, program: WirModule, constant: WirConstant) -> Void? {
+    if (constant.kind == WirConstKind.Zero) {
+        output.write("zeroinitializer")?;
+    } else if (constant.kind == WirConstKind.Bytes) {
+        llvm_write_byte_string(output, constant.bytes)?;
+    } else if (constant.kind == WirConstKind.Aggregate) {
+        let type: WirType = program.arena.types[wir_id_index(UInt32(constant.type_id))];
+        if (type.kind == WirTypeKind.Array) { output.write("[")?; } else { output.write("{")?; }
+        let i: Int = 0;
+        while (i < constant.elements.length()) {
+            if (i != 0) { output.write(", ")?; }
+            llvm_write_typed_value(output, program, constant.elements[i])?;
+            i++;
+        }
+        if (type.kind == WirTypeKind.Array) { output.write("]")?; } else { output.write("}")?; }
+    } else if (constant.kind == WirConstKind.Address) {
+        if (constant.addend == 0L) {
+            llvm_write_value(output, program, constant.target)?;
+        } else {
+            output.write("getelementptr (i8, ptr ")?;
+            llvm_write_value(output, program, constant.target)?;
+            output.write(", i64 ")?;
+            output.write_long(constant.addend)?;
+            output.write(")")?;
+        }
+    } else {
+        throw Error.InvalidData;
+    }
+    return;
+}
+
 func llvm_write_value(output: strings.Builder, program: WirModule, value_id: WirValueID) -> Void? {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
     if (value.kind == WirValueKind.Integer) {
@@ -92,6 +142,7 @@ func llvm_write_value(output: strings.Builder, program: WirModule, value_id: Wir
         else { throw Error.Unsupported; }
     }
     else if (value.kind == WirValueKind.Null) { output.write("null")?; }
+    else if (value.kind == WirValueKind.Constant) { llvm_write_constant(output, program, program.arena.constants[wir_id_index(value.owner)])?; }
     else if (value.kind == WirValueKind.Global) {
         output.write("@")?;
         output.write(program.arena.globals[wir_id_index(value.owner)].name)?;
@@ -193,18 +244,23 @@ func llvm_cast_opcode(opcode: WirOpcode) -> String {
     return "";
 }
 
-func llvm_function_callconv(program: WirModule, function: WirFunction) -> String {
-    if (function.abi == WirABI.C) { return "ccc "; }
-    if (function.abi != WirABI.System) { return ""; }
+func llvm_callconv(program: WirModule, abi: WirABI) -> String {
+    if (abi == WirABI.C) { return "ccc "; }
+    if (abi != WirABI.System) { return ""; }
     if (program.target.starts_with("i686-pc-windows")) { return "x86_stdcallcc "; }
     if (program.target.starts_with("x86_64-pc-windows")) { return "win64cc "; }
     return "ccc ";
 }
 
+func llvm_function_callconv(program: WirModule, function: WirFunction) -> String {
+    return llvm_callconv(program, function.abi);
+}
+
 func llvm_callee_callconv(program: WirModule, value_id: WirValueID) -> String {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    if (value.kind != WirValueKind.Function) { return ""; }
-    return llvm_function_callconv(program, program.arena.functions[wir_id_index(value.owner)]);
+    let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
+    if (type.kind != WirTypeKind.Function) { return ""; }
+    return llvm_callconv(program, type.abi);
 }
 
 func llvm_instruction_supported(program: WirModule, instruction: WirInstruction) -> Bool {
@@ -643,6 +699,10 @@ func llvm_write_global(output: strings.Builder, program: WirModule, global: WirG
         output.write("external ")?;
         if (global.is_const) { output.write("constant ")?; } else { output.write("global ")?; }
         llvm_write_type(output, program, global.type_id)?;
+        if (global.alignment != 0) {
+            output.write(", align ")?;
+            output.write_int(global.alignment)?;
+        }
         output.write("\n")?;
         return;
     }
@@ -651,6 +711,10 @@ func llvm_write_global(output: strings.Builder, program: WirModule, global: WirG
     llvm_write_type(output, program, global.type_id)?;
     output.write(" ")?;
     if (global.initializer == NO_WIR_VALUE) { output.write("zeroinitializer")?; } else { llvm_write_value(output, program, global.initializer)?; }
+    if (global.alignment != 0) {
+        output.write(", align ")?;
+        output.write_int(global.alignment)?;
+    }
     output.write("\n")?;
     return;
 }

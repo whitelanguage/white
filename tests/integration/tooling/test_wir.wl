@@ -94,8 +94,8 @@ func main() -> Int {
     wir_name_value(ref program, increment, "increment");
     let wide: WirValueID = wir_append(ref program, exercise_then, WirOpcode.SignExtend, long_type, [increment], [], no_wir_location());
     wir_name_value(ref program, wide, "wide");
-    wir_append(ref program, exercise_then, WirOpcode.Retain, program.void_type, [exercise_info.parameters[1]], [], no_wir_location());
-    wir_append(ref program, exercise_then, WirOpcode.Release, program.void_type, [exercise_info.parameters[1]], [], no_wir_location());
+    wir_retain(ref program, exercise_then, exercise_info.parameters[1], no_wir_location());
+    wir_release(ref program, exercise_then, exercise_info.parameters[1], no_wir_location());
     wir_append(ref program, exercise_then, WirOpcode.Jump, program.void_type, [], [wir_edge(exercise_exit, [wide])], no_wir_location());
     wir_append(ref program, exercise_trap, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
     let exercise_exit_info: WirBlock = program.arena.blocks[wir_id_index(UInt32(exercise_exit))];
@@ -112,7 +112,7 @@ func main() -> Int {
         print("FAIL: valid WIR could not be printed");
         return 1;
     }
-    let expected: String = "type !Node = {i32, ptr<!Node>}\n\nprivate global @scratch:i32 = 0\ninternal global @count:i32 = 0\nexport const @answer:i32 = 42\nextern global @errno:i32\n\nextern func @write(i32, ptr<u8>, u64) -> i64\n\nextern func @printf(ptr<u8>, ...) -> i32\n\nextern \"system\" func @GetStdHandle(i32) -> ptr<void>\n\ninternal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %sum:i32 = add %a, %b\n    jmp ^exit(%sum)\n\n^exit(%value:i32):\n    ret %value\n}\n\nexport func @one() -> f64 {\n^entry:\n    ret f64(0x3FF0000000000000)\n}\n\nprivate func @exercise(%value:i32, %address:ptr<i32>) -> i64 {\n^entry:\n    %slot:ptr<i32> = alloca i32\n    store %value, %slot\n    %loaded:i32 = load %slot\n    %less:bool = slt %loaded, 10\n    check.null %address\n    check.bounds %loaded, 10\n    br %less, ^then(), ^trap()\n\n^then:\n    %increment:i32 = call @add(%loaded, 1)\n    %wide:i64 = sext %increment\n    retain %address\n    release %address\n    jmp ^exit(%wide)\n\n^trap:\n    unreachable\n\n^exit(%result:i64):\n    ret %result\n}\n";
+    let expected: String = "type !Node = {i32, ptr<!Node>}\n\nglobal @scratch:i32 = 0\ninternal global @count:i32 = 0\npub const @answer:i32 = 42\nextern global @errno:i32\n\nextern c func @write(i32, ptr<u8>, u64) -> i64\n\nextern c func @printf(ptr<u8>, ...) -> i32\n\nextern system func @GetStdHandle(i32) -> ptr<void>\n\ninternal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %sum:i32 = add %a, %b\n    jmp ^exit(%sum)\n\n^exit(%value:i32):\n    ret %value\n}\n\npub func @one() -> f64 {\n^entry:\n    ret f64(0x3FF0000000000000)\n}\n\nfunc @exercise(%value:i32, %address:ptr<i32>) -> i64 {\n^entry:\n    %slot:ptr<i32> = alloca i32\n    store %value, %slot\n    %loaded:i32 = load %slot\n    %less:bool = slt %loaded, 10\n    check.null %address\n    check.bounds %loaded, 10\n    br %less, ^then(), ^trap()\n\n^then:\n    %increment:i32 = call @add(%loaded, 1)\n    %wide:i64 = sext %increment\n    retain %address\n    release %address\n    jmp ^exit(%wide)\n\n^trap:\n    unreachable\n\n^exit(%result:i64):\n    ret %result\n}\n";
     if (text != expected) {
         print("FAIL: WIR text is not stable");
         print(text);

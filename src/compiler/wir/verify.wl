@@ -1,6 +1,7 @@
 // compiler/wir/verify.wl
 import * from "model.wl"
 import wir_value_type from "builder.wl"
+import wir_type_layout from "layout.wl"
 
 func wir_type_valid(program: WirModule, id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(id));
@@ -32,6 +33,11 @@ func wir_global_valid(program: WirModule, id: WirGlobalID) -> Bool {
     return index >= 0 && index < program.arena.globals.length();
 }
 
+func wir_const_valid(program: WirModule, id: WirConstID) -> Bool {
+    let index: Int = wir_id_index(UInt32(id));
+    return index >= 0 && index < program.arena.constants.length();
+}
+
 func wir_is_integer_type(program: WirModule, id: WirTypeID) -> Bool {
     if (!wir_type_valid(program, id)) { return false; }
     let kind: WirTypeKind = program.arena.types[wir_id_index(UInt32(id))].kind;
@@ -44,6 +50,20 @@ func wir_is_float_type(program: WirModule, id: WirTypeID) -> Bool {
 
 func wir_is_pointer_type(program: WirModule, id: WirTypeID) -> Bool {
     return wir_type_valid(program, id) && program.arena.types[wir_id_index(UInt32(id))].kind == WirTypeKind.Pointer;
+}
+
+func wir_is_constant_value(program: WirModule, id: WirValueID) -> Bool {
+    if (!wir_value_valid(program, id)) { return false; }
+    let kind: WirValueKind = program.arena.values[wir_id_index(UInt32(id))].kind;
+    return kind == WirValueKind.Integer || kind == WirValueKind.FloatValue || kind == WirValueKind.BoolValue ||
+           kind == WirValueKind.Null || kind == WirValueKind.Constant || kind == WirValueKind.Global || kind == WirValueKind.Function;
+}
+
+func wir_type_can_zero(program: WirModule, type_id: WirTypeID) -> Bool {
+    if (!wir_type_valid(program, type_id)) { return false; }
+    let kind: WirTypeKind = program.arena.types[wir_id_index(UInt32(type_id))].kind;
+    return kind == WirTypeKind.BoolType || kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt ||
+           kind == WirTypeKind.FloatType || kind == WirTypeKind.Pointer || kind == WirTypeKind.Array || kind == WirTypeKind.Struct;
 }
 
 func wir_report(errors: Vector(String), message: String) -> Void {
@@ -66,6 +86,8 @@ func wir_check_types(program: WirModule, errors: Vector(String)) -> Void {
         let value: WirType = program.arena.types[i];
         if (value.kind == WirTypeKind.Invalid) {
             wir_report(errors, "type table contains an invalid type");
+        } else if (value.kind != WirTypeKind.Function && value.abi != WirABI.White) {
+            wir_report(errors, "non-function type contains an ABI");
         } else if (value.kind == WirTypeKind.Struct && !value.complete) {
             wir_report(errors, "struct type was declared but never defined");
         } else if (value.kind == WirTypeKind.BoolType && value.bits != 1) {
@@ -102,6 +124,9 @@ func wir_check_types(program: WirModule, errors: Vector(String)) -> Void {
         }
         if (value.kind == WirTypeKind.Function && !wir_type_valid(program, value.result)) {
             wir_report(errors, "function type has an unknown return type");
+        }
+        if (value.kind == WirTypeKind.Function && value.variadic && value.abi != WirABI.C) {
+            wir_report(errors, "variadic function type does not use the C ABI");
         }
         i++;
     }
@@ -172,6 +197,13 @@ func wir_check_values(program: WirModule, errors: Vector(String)) -> Void {
             wir_report(errors, "Bool constant does not use the program Bool type");
         } else if (value.kind == WirValueKind.Null && type.kind != WirTypeKind.Pointer) {
             wir_report(errors, "null value does not have a pointer type");
+        } else if (value.kind == WirValueKind.Constant) {
+            let constant_id: WirConstID = WirConstID(value.owner);
+            if (!wir_const_valid(program, constant_id)) {
+                wir_report(errors, "constant value refers to an unknown constant");
+            } else if (program.arena.constants[wir_id_index(UInt32(constant_id))].type_id != value.type_id) {
+                wir_report(errors, "constant value and constant definition disagree");
+            }
         } else if (value.kind == WirValueKind.FunctionParameter) {
             let function_id: WirFuncID = WirFuncID(value.owner);
             if (!wir_func_valid(program, function_id)) {
@@ -192,6 +224,123 @@ func wir_check_values(program: WirModule, errors: Vector(String)) -> Void {
         } else if (value.kind == WirValueKind.Function && !wir_func_valid(program, WirFuncID(value.owner))) {
             wir_report(errors, "function address refers to an unknown function");
         }
+        i++;
+    }
+}
+
+func wir_check_constant(program: WirModule, constant_id: WirConstID, states: Vector(Int), errors: Vector(String)) -> Void {
+    let index: Int = wir_id_index(UInt32(constant_id));
+    if (states[index] == 2) { return; }
+    if (states[index] == 1) {
+        wir_report(errors, "constant initializer contains a cycle");
+        return;
+    }
+
+    states[index] = 1;
+    let constant: WirConstant = program.arena.constants[index];
+    if (!wir_type_valid(program, constant.type_id)) {
+        wir_report(errors, "constant has an unknown type");
+        states[index] = 2;
+        return;
+    }
+
+    let type: WirType = program.arena.types[wir_id_index(UInt32(constant.type_id))];
+    if (constant.kind == WirConstKind.Zero) {
+        if (constant.elements.length() != 0 || constant.bytes.length() != 0 ||
+            constant.target != NO_WIR_VALUE || constant.addend != 0L) {
+            wir_report(errors, "zero constant contains unused payload data");
+        }
+        if (!wir_type_can_zero(program, constant.type_id)) { wir_report(errors, "zero constant has an unsupported type"); }
+    } else if (constant.kind == WirConstKind.Aggregate) {
+        if (constant.bytes.length() != 0 || constant.target != NO_WIR_VALUE || constant.addend != 0L) {
+            wir_report(errors, "aggregate constant contains unused payload data");
+        }
+        let expected_count: UIntSize = UIntSize(0U);
+        if (type.kind == WirTypeKind.Struct) {
+            expected_count = UIntSize(type.fields.length());
+        } else if (type.kind == WirTypeKind.Array) {
+            expected_count = type.length;
+        } else {
+            wir_report(errors, "aggregate constant does not have an aggregate type");
+        }
+
+        if (UIntSize(constant.elements.length()) != expected_count) {
+            wir_report(errors, "aggregate constant has the wrong element count");
+        }
+        let i: Int = 0;
+        while (i < constant.elements.length()) {
+            let element_id: WirValueID = constant.elements[i];
+            if (!wir_is_constant_value(program, element_id)) {
+                wir_report(errors, "aggregate constant contains a non-constant value");
+            } else {
+                let element: WirValue = program.arena.values[wir_id_index(UInt32(element_id))];
+                let expected_type: WirTypeID = NO_WIR_TYPE;
+                if (type.kind == WirTypeKind.Struct && i < type.fields.length()) { expected_type = type.fields[i]; }
+                else if (type.kind == WirTypeKind.Array && UIntSize(i) < type.length) { expected_type = type.element; }
+                if (expected_type != NO_WIR_TYPE && element.type_id != expected_type) { wir_report(errors, "aggregate constant element has the wrong type"); }
+                if (element.kind == WirValueKind.Constant && wir_const_valid(program, WirConstID(element.owner))) {
+                    wir_check_constant(program, WirConstID(element.owner), states, errors);
+                }
+            }
+            i++;
+        }
+    } else if (constant.kind == WirConstKind.Bytes) {
+        if (constant.elements.length() != 0 || constant.target != NO_WIR_VALUE || constant.addend != 0L) {
+            wir_report(errors, "byte constant contains unused payload data");
+        }
+        if (type.kind != WirTypeKind.Array || !wir_type_valid(program, type.element)) {
+            wir_report(errors, "byte constant does not have an array type");
+        } else {
+            let element: WirType = program.arena.types[wir_id_index(UInt32(type.element))];
+            if (element.kind != WirTypeKind.UnsignedInt || element.bits != 8) { wir_report(errors, "byte constant element type is not u8"); }
+            if (type.length != UIntSize(constant.bytes.length())) { wir_report(errors, "byte constant length does not match its array type"); }
+        }
+    } else if (constant.kind == WirConstKind.Address) {
+        if (constant.elements.length() != 0 || constant.bytes.length() != 0) {
+            wir_report(errors, "address constant contains unused payload data");
+        }
+        if (!wir_value_valid(program, constant.target)) {
+            wir_report(errors, "address constant refers to an unknown symbol");
+        } else {
+            let target: WirValue = program.arena.values[wir_id_index(UInt32(constant.target))];
+            if (target.kind != WirValueKind.Global && target.kind != WirValueKind.Function) {
+                wir_report(errors, "address constant target is not a symbol");
+            }
+            if (type.kind != WirTypeKind.Pointer && type.kind != WirTypeKind.Function) {
+                wir_report(errors, "address constant does not have an address type");
+            } else if (type.kind == WirTypeKind.Function && target.type_id != constant.type_id) {
+                wir_report(errors, "function address constant has the wrong type");
+            }
+        }
+    } else {
+        wir_report(errors, "constant table contains an invalid constant");
+    }
+    states[index] = 2;
+}
+
+func wir_check_constants(program: WirModule, errors: Vector(String)) -> Void {
+    let states: Vector(Int) = [];
+    let owners: Vector(Int) = [];
+    let i: Int = 0;
+    while (i < program.arena.constants.length()) {
+        states.append(0);
+        owners.append(0);
+        i++;
+    }
+    i = 0;
+    while (i < program.arena.values.length()) {
+        let value: WirValue = program.arena.values[i];
+        if (value.kind == WirValueKind.Constant && wir_const_valid(program, WirConstID(value.owner))) {
+            let index: Int = wir_id_index(value.owner);
+            owners[index] = owners[index] + 1;
+        }
+        i++;
+    }
+    i = 0;
+    while (i < program.arena.constants.length()) {
+        let constant_id: WirConstID = WirConstID(UInt32(i + 1));
+        if (owners[i] != 1) { wir_report(errors, "constant does not have exactly one value definition"); }
+        wir_check_constant(program, constant_id, states, errors);
         i++;
     }
 }
@@ -493,6 +642,7 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             }
             let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
             if (pointer.element == program.void_type) { wir_report(errors, "stack allocation has no storage type"); }
+            else if (!wir_type_layout(program, pointer.element).valid) { wir_report(errors, "stack allocation has an unsized storage type"); }
         }
     } else if (opcode == WirOpcode.Load) {
         if (instruction.operands.length() != 1 || !wir_value_valid(program, instruction.operands[0])) {
@@ -634,6 +784,7 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
             if (address.kind != WirValueKind.Function || address.owner != UInt32(function_id) || address.type_id != function.type_id) { wir_report(errors, "function address has invalid ownership metadata"); }
         }
         if (function.parameters.length() != function_type.parameters.length()) { wir_report(errors, "function parameter count does not match its type"); }
+        if (function.abi != function_type.abi) { wir_report(errors, "function ABI does not match its type"); }
         if (function.linkage == WirLinkage.External && function.abi == WirABI.White) { wir_report(errors, "external function uses the White ABI"); }
         if (function.linkage != WirLinkage.External && function.abi != WirABI.White) { wir_report(errors, "defined function uses a foreign ABI"); }
         if (function_type.variadic && function.abi != WirABI.C) { wir_report(errors, "variadic function does not use the C ABI"); }
@@ -718,7 +869,16 @@ func wir_check_globals(program: WirModule, errors: Vector(String)) -> Void {
         let global: WirGlobal = program.arena.globals[i];
         let global_id: WirGlobalID = WirGlobalID(UInt32(i + 1));
         if (global.name.length() == 0) { wir_report(errors, "global has no name"); }
-        if (!wir_type_valid(program, global.type_id)) { wir_report(errors, "global has an unknown type"); }
+        if (global.alignment < 0 || (global.alignment != 0 && (global.alignment & (global.alignment - 1)) != 0)) {
+            wir_report(errors, "global alignment is not a power of two");
+        }
+        if (!wir_type_valid(program, global.type_id)) {
+            wir_report(errors, "global has an unknown type");
+        } else {
+            let layout: WirTypeLayout = wir_type_layout(program, global.type_id);
+            if (!layout.valid) { wir_report(errors, "global has an unsized type"); }
+            else if (global.alignment != 0 && global.alignment < layout.alignment) { wir_report(errors, "global alignment is smaller than the type alignment"); }
+        }
         if (!wir_value_valid(program, global.address)) {
             wir_report(errors, "global has no address value");
         } else {
@@ -735,7 +895,7 @@ func wir_check_globals(program: WirModule, errors: Vector(String)) -> Void {
             } else {
                 let initializer: WirValue = program.arena.values[wir_id_index(UInt32(global.initializer))];
                 if (initializer.type_id != global.type_id) { wir_report(errors, "global initializer does not match the global type"); }
-                if (initializer.kind == WirValueKind.Instruction || initializer.kind == WirValueKind.FunctionParameter || initializer.kind == WirValueKind.BlockParameter) { wir_report(errors, "global initializer is not a constant value"); }
+                if (!wir_is_constant_value(program, global.initializer)) { wir_report(errors, "global initializer is not a constant value"); }
             }
         }
         if (global.linkage == WirLinkage.External && global.initializer != NO_WIR_VALUE) {
@@ -907,7 +1067,7 @@ func wir_instruction_position(block: WirBlock, instruction_id: WirInstID) -> Int
 
 func wir_value_in_scope(program: WirModule, function_id: WirFuncID, function: WirFunction, block_id: WirBlockID, instruction_id: WirInstID, value_id: WirValueID, instruction_blocks: Vector(WirBlockID), dominators: Vector(Vector(Bool))) -> Bool {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) { return true; }
+    if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Constant || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) { return true; }
     if (value.kind == WirValueKind.FunctionParameter) { return value.owner == UInt32(function_id); }
 
     let definition_block: WirBlockID = NO_WIR_BLOCK;
@@ -979,11 +1139,14 @@ func verify_wir(program: WirModule) -> Vector(String) {
     let errors: Vector(String) = [];
     if (program.target.length() == 0) { wir_report(errors, "module has no target triple"); }
     if (program.pointer_bits != 32 && program.pointer_bits != 64) { wir_report(errors, "module has an unsupported pointer width"); }
+    if (!program.data_layout.valid) { wir_report(errors, "module has no data layout for its target"); }
+    else if (program.data_layout.pointer_bits != program.pointer_bits) { wir_report(errors, "module pointer width does not match its data layout"); }
     if (!wir_type_valid(program, program.void_type) || program.arena.types[wir_id_index(UInt32(program.void_type))].kind != WirTypeKind.VoidType) { wir_report(errors, "module has no canonical Void type"); }
     if (!wir_type_valid(program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) { wir_report(errors, "module has no canonical Bool type"); }
     wir_check_types(program, errors);
     wir_check_sized_types(program, errors);
     wir_check_values(program, errors);
+    wir_check_constants(program, errors);
     wir_check_symbols(program, errors);
     wir_check_globals(program, errors);
     wir_check_functions(program, errors);

@@ -2,8 +2,8 @@
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "types.wl"
+import * from "static_data.wl"
 import * from "../../context.wl"
-import * from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 
@@ -64,12 +64,6 @@ func wir_find_global(program: WirModule, name: String) -> WirGlobalID {
     return NO_WIR_GLOBAL;
 }
 
-func wir_truncate_integer(value: UInt128, bits: Int) -> UInt128 {
-    if (bits >= 128) { return value; }
-    let limit: UInt128 = UInt128(1U) << UInt128(bits);
-    return value & (limit - UInt128(1U));
-}
-
 func wir_global_initializer(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: VarDeclareNode, source_type: Int) -> WirValueID {
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
@@ -84,27 +78,9 @@ func wir_global_initializer(ref types: WirTypeMap, ref source: Compiler, ref pro
         return NO_WIR_VALUE;
     }
 
-    let kind: Int = node_tag(node.value);
-    if (kind == NODE_NULLPTR && (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR)) {
-        return wir_null(ref program, type_id);
-    }
-    if (repr == TYPE_BOOL) {
-        return wir_const_bool(ref program, eval_const_bool(ref source, node.value, node.pos) != 0);
-    }
-    if (repr == TYPE_CHAR) {
-        return wir_const_int(ref program, type_id, UInt128(eval_const_long(ref source, node.value, node.pos)));
-    }
-    if (is_integer_type(repr)) {
-        let value: UInt128 = eval_const_wide(ref source, node.value, node.pos, is_unsigned_integer(repr));
-        return wir_const_int(ref program, type_id, wir_truncate_integer(value, get_type_bitwidth(repr)));
-    }
-    if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
-        let value: Float = eval_const_float(ref source, node.value, node.pos);
-        if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
-        return wir_const_float(ref program, type_id, value);
-    }
-
-    types.errors.append("Global '" + node.name_tok.value + "' does not have a scalar WIR initializer yet");
+    let value: WirValueID = wir_lower_static_value(ref types, ref source, ref program, node.value, source_type, node.pos);
+    if (value != NO_WIR_VALUE) { return value; }
+    types.errors.append("Global '" + node.name_tok.value + "' does not have a WIR initializer yet");
     return NO_WIR_VALUE;
 }
 

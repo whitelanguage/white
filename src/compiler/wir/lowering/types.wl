@@ -9,11 +9,15 @@ struct WirTypeMap(
     errors: Vector(String),
     opaque_pointer: WirTypeID,
     string_type: WirTypeID,
+    string_record: WirTypeID,
+    string_object: WirTypeID,
+    string_values: Dict(String, WirValueID),
+    string_count: Int,
     error_type: WirTypeID
 )
 
 func new_wir_type_map() -> WirTypeMap {
-    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, error_type=NO_WIR_TYPE);
+    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE);
 }
 
 func wir_prepare_type_slot(ref types: WirTypeMap, source_type: Int) -> Void {
@@ -60,17 +64,31 @@ func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref pr
         parameters.append(type_id);
         i++;
     }
-    return wir_function_type(ref program, parameters, result, false);
+    return wir_function_type(ref program, parameters, result, false, WirABI.White);
 }
 
-func wir_string_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
-    if (types.string_type != NO_WIR_TYPE) { return types.string_type; }
+func wir_string_record(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
+    if (types.string_record != NO_WIR_TYPE) { return types.string_record; }
     let record: WirTypeID = wir_declare_struct(ref program, "$String");
     let byte: WirTypeID = wir_unsigned_int_type(ref program, 8);
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
     wir_define_struct(ref program, record, [wir_pointer_type(ref program, byte), int_type, int_type]);
+    types.string_record = record;
+    return record;
+}
+
+func wir_string_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
+    if (types.string_type != NO_WIR_TYPE) { return types.string_type; }
+    let record: WirTypeID = wir_string_record(ref types, ref program);
     types.string_type = wir_pointer_type(ref program, record);
     return types.string_type;
+}
+
+func wir_string_object_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
+    if (types.string_object != NO_WIR_TYPE) { return types.string_object; }
+    let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
+    types.string_object = wir_struct_type(ref program, [int_type, int_type, wir_string_record(ref types, ref program)]);
+    return types.string_object;
 }
 
 func wir_error_layout(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {

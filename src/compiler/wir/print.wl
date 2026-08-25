@@ -38,7 +38,13 @@ func wir_write_type(output: strings.Builder, program: WirModule, type_id: WirTyp
         output.write("!")?;
         output.write(wir_type_name(program, type_id))?;
     } else if (type.kind == WirTypeKind.Function) {
-        output.write("func(")?;
+        output.write("func")?;
+        if (type.abi == WirABI.C) {
+            output.write(" c")?;
+        } else if (type.abi == WirABI.System) {
+            output.write(" system")?;
+        }
+        output.write("(")?;
         let i: Int = 0;
         while (i < type.parameters.length()) {
             if (i != 0) { output.write(", ")?; }
@@ -64,6 +70,54 @@ func wir_write_hex(output: strings.Builder, value: UInt64, digits: Int) -> Void?
         let digit: Int = Int((value >> UInt64(shift)) & UInt64(15));
         output.write(alphabet.slice(digit, digit + 1))?;
         shift -= 4;
+    }
+    return;
+}
+
+func wir_write_bytes(output: strings.Builder, bytes: String) -> Void? {
+    output.write("b\"")?;
+    let i: Int = 0;
+    while (i < bytes.length()) {
+        let byte: Byte = bytes[i];
+        if (byte >= Byte(32) && byte <= Byte(126) && byte != Byte(34) && byte != Byte(92)) {
+            output.write_byte(byte)?;
+        } else {
+            output.write("\\")?;
+            wir_write_hex(output, UInt64(byte), 2)?;
+        }
+        i++;
+    }
+    output.write("\"")?;
+    return;
+}
+
+func wir_write_constant(output: strings.Builder, program: WirModule, constant: WirConstant) -> Void? {
+    if (constant.kind == WirConstKind.Zero) {
+        output.write("zero")?;
+    } else if (constant.kind == WirConstKind.Bytes) {
+        wir_write_bytes(output, constant.bytes)?;
+    } else if (constant.kind == WirConstKind.Aggregate) {
+        output.write("{")?;
+        let i: Int = 0;
+        while (i < constant.elements.length()) {
+            if (i != 0) { output.write(", ")?; }
+            wir_write_value(output, program, constant.elements[i])?;
+            i++;
+        }
+        output.write("}")?;
+    } else if (constant.kind == WirConstKind.Address) {
+        output.write("addr ")?;
+        wir_write_value(output, program, constant.target)?;
+        if (constant.addend > 0L) {
+            output.write(" + ")?;
+            output.write_long(constant.addend)?;
+        } else if (constant.addend < 0L) {
+            let encoded: String = String(constant.addend);
+            output.write(" - ")?;
+            output.write(encoded.slice(1, encoded.length()))?;
+        }
+    } else {
+        throw Error.InvalidData;
     }
     return;
 }
@@ -97,6 +151,8 @@ func wir_write_value(output: strings.Builder, program: WirModule, value_id: WirV
         if (value.integer == UInt128(0U)) { output.write("false")?; } else { output.write("true")?; }
     } else if (value.kind == WirValueKind.Null) {
         output.write("null")?;
+    } else if (value.kind == WirValueKind.Constant) {
+        wir_write_constant(output, program, program.arena.constants[wir_id_index(value.owner)])?;
     } else if (value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
         output.write("@")?;
         output.write(value.name)?;
@@ -312,16 +368,19 @@ func wir_write_structs(output: strings.Builder, program: WirModule) -> Bool? {
 }
 
 func wir_linkage_name(linkage: WirLinkage) -> String? {
-    if (linkage == WirLinkage.Private) { return "private"; }
+    if (linkage == WirLinkage.Private) { return ""; }
     if (linkage == WirLinkage.Internal) { return "internal"; }
-    if (linkage == WirLinkage.Exported) { return "export"; }
+    if (linkage == WirLinkage.Exported) { return "pub"; }
     if (linkage == WirLinkage.External) { return "extern"; }
     throw Error.InvalidData;
 }
 
 func wir_write_global(output: strings.Builder, program: WirModule, item: WirGlobal) -> Void? {
-    output.write(wir_linkage_name(item.linkage)?)?;
-    output.write(" ")?;
+    let linkage: String = wir_linkage_name(item.linkage)?;
+    if (linkage.length() != 0) {
+        output.write(linkage)?;
+        output.write(" ")?;
+    }
     if (item.is_const) {
         output.write("const @")?;
     } else {
@@ -330,6 +389,10 @@ func wir_write_global(output: strings.Builder, program: WirModule, item: WirGlob
     output.write(item.name)?;
     output.write(":")?;
     wir_write_type(output, program, item.type_id)?;
+    if (item.alignment != 0) {
+        output.write(" align ")?;
+        output.write_int(item.alignment)?;
+    }
     if (item.initializer != NO_WIR_VALUE) {
         output.write(" = ")?;
         wir_write_value(output, program, item.initializer)?;
@@ -340,9 +403,17 @@ func wir_write_global(output: strings.Builder, program: WirModule, item: WirGlob
 
 func wir_write_function(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
-    output.write(wir_linkage_name(function.linkage)?)?;
-    if (function.linkage == WirLinkage.External && function.abi == WirABI.System) { output.write(" \"system\"")?; }
-    output.write(" func @")?;
+    let linkage: String = wir_linkage_name(function.linkage)?;
+    if (linkage.length() != 0) {
+        output.write(linkage)?;
+        output.write(" ")?;
+    }
+    if (function.abi == WirABI.C) {
+        output.write("c ")?;
+    } else if (function.abi == WirABI.System) {
+        output.write("system ")?;
+    }
+    output.write("func @")?;
     output.write(function.name)?;
     output.write("(")?;
     let i: Int = 0;

@@ -86,6 +86,57 @@ func wir_lower_root_items(ref types: WirTypeMap, ref source: Compiler, ref progr
     }
 }
 
+func wir_select_module(ref source: Compiler, module: ParsedModule) -> Void {
+    source.current_file_visible_prefixes = module.visible;
+    source.current_file_namespaces = module.namespaces;
+    source.current_file_type_aliases = module.types;
+    source.current_file_func_aliases = module.funcs;
+    source.current_file_global_aliases = module.globals;
+    source.current_package_prefix = module.prefix;
+    source.current_module_is_package = module.is_package;
+    source.current_dir = module.dir;
+}
+
+func wir_verify_lowering(ref types: WirTypeMap, program: WirModule) -> Void {
+    if (types.errors.length() != 0) { return; }
+    let verify_errors: Vector(String) = verify_wir(program);
+    let i: Int = 0;
+    while (i < verify_errors.length()) {
+        types.errors.append(verify_errors[i]);
+        i++;
+    }
+}
+
+func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), target: String, pointer_bits: Int) -> WirLoweringResult {
+    let program: WirModule = new_wir_module(target, pointer_bits);
+    let types: WirTypeMap = new_wir_type_map();
+
+    let i: Int = 0;
+    while (i < modules.length()) {
+        let module: ParsedModule = modules[i];
+        wir_select_module(ref source, module);
+        if (!has_node(module.ast) || node_tag(module.ast) != NODE_BLOCK) {
+            types.errors.append("Module '" + module.path + "' has no root block");
+        } else {
+            wir_declare_root_functions(ref types, ref source, ref program, get_block_node(source.arena, module.ast));
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < modules.length()) {
+        let module: ParsedModule = modules[i];
+        wir_select_module(ref source, module);
+        if (has_node(module.ast) && node_tag(module.ast) == NODE_BLOCK) {
+            wir_lower_root_items(ref types, ref source, ref program, get_block_node(source.arena, module.ast));
+        }
+        i++;
+    }
+
+    wir_verify_lowering(ref types, program);
+    return WirLoweringResult(program=program, errors=types.errors);
+}
+
 func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, pointer_bits: Int) -> WirLoweringResult {
     let program: WirModule = new_wir_module(target, pointer_bits);
     let types: WirTypeMap = new_wir_type_map();
@@ -97,13 +148,6 @@ func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, p
     let root: BlockNode = get_block_node(source.arena, root_node);
     wir_declare_root_functions(ref types, ref source, ref program, root);
     wir_lower_root_items(ref types, ref source, ref program, root);
-    if (types.errors.length() == 0) {
-        let verify_errors: Vector(String) = verify_wir(program);
-        let i: Int = 0;
-        while (i < verify_errors.length()) {
-            types.errors.append(verify_errors[i]);
-            i++;
-        }
-    }
+    wir_verify_lowering(ref types, program);
     return WirLoweringResult(program=program, errors=types.errors);
 }

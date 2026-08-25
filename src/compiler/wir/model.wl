@@ -7,6 +7,7 @@ type WirBlockID = UInt32;
 type WirFuncID = UInt32;
 type WirGlobalID = UInt32;
 type WirFileID = UInt32;
+type WirConstID = UInt32;
 
 const NO_WIR_TYPE: WirTypeID = WirTypeID(0U);
 const NO_WIR_VALUE: WirValueID = WirValueID(0U);
@@ -15,6 +16,7 @@ const NO_WIR_BLOCK: WirBlockID = WirBlockID(0U);
 const NO_WIR_FUNC: WirFuncID = WirFuncID(0U);
 const NO_WIR_GLOBAL: WirGlobalID = WirGlobalID(0U);
 const NO_WIR_FILE: WirFileID = WirFileID(0U);
+const NO_WIR_CONST: WirConstID = WirConstID(0U);
 
 enum WirTypeKind {
     Invalid,
@@ -38,8 +40,17 @@ enum WirValueKind {
     FunctionParameter,
     BlockParameter,
     Instruction,
+    Constant,
     Global,
     Function
+}
+
+enum WirConstKind {
+    Invalid,
+    Zero,
+    Aggregate,
+    Bytes,
+    Address
 }
 
 enum WirOpcode {
@@ -137,7 +148,8 @@ struct WirType(
     fields: Vector(WirTypeID),
     parameters: Vector(WirTypeID),
     result: WirTypeID,
-    variadic: Bool
+    variadic: Bool,
+    abi: WirABI
 )
 
 struct WirParam(
@@ -153,6 +165,15 @@ struct WirValue(
     index: Int,
     integer: UInt128,
     float_bits: UInt64
+)
+
+struct WirConstant(
+    kind: WirConstKind,
+    type_id: WirTypeID,
+    elements: Vector(WirValueID),
+    bytes: String,
+    target: WirValueID,
+    addend: Long
 )
 
 struct WirEdge(
@@ -193,10 +214,29 @@ struct WirGlobal(
     address: WirValueID,
     initializer: WirValueID,
     linkage: WirLinkage,
-    is_const: Bool
+    is_const: Bool,
+    alignment: Int
 )
 
 struct WirSourceFile(path: String)
+
+struct WirDataLayout(
+    valid: Bool,
+    little_endian: Bool,
+    pointer_bits: Int,
+    pointer_alignment: Int,
+    i64_alignment: Int,
+    i128_alignment: Int,
+    f64_alignment: Int,
+    stack_alignment: Int
+)
+
+struct WirTypeLayout(
+    valid: Bool,
+    size: UInt64,
+    alignment: Int,
+    field_offsets: Vector(UInt64)
+)
 
 struct WirArena(
     types: Vector(WirType),
@@ -204,12 +244,14 @@ struct WirArena(
     instructions: Vector(WirInstruction),
     blocks: Vector(WirBlock),
     functions: Vector(WirFunction),
-    globals: Vector(WirGlobal)
+    globals: Vector(WirGlobal),
+    constants: Vector(WirConstant)
 )
 
 struct WirModule(
     target: String,
     pointer_bits: Int,
+    data_layout: WirDataLayout,
     files: Vector(WirSourceFile),
     arena: WirArena,
     void_type: WirTypeID,

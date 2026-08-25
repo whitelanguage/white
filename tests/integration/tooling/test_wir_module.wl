@@ -68,7 +68,7 @@ func main() -> Int {
         print("FAIL: lowered root module could not be printed");
         return 1;
     }
-    let expected: String = "internal global @counter:i32 = 3\n\nexport func @main() -> i32 {\n^entry:\n    %4:i32 = call @helper()\n    ret %4\n}\n\ninternal func @helper() -> i32 {\n^entry:\n    %5:i32 = load @counter\n    ret %5\n}\n";
+    let expected: String = "internal global @counter:i32 = 3\n\npub func @main() -> i32 {\n^entry:\n    %4:i32 = call @helper()\n    ret %4\n}\n\ninternal func @helper() -> i32 {\n^entry:\n    %5:i32 = load @counter\n    ret %5\n}\n";
     if (text != expected) {
         print("FAIL: lowered root module text is not stable");
         print(text);

@@ -80,12 +80,53 @@ func rejects_non_dominating_value() -> Bool {
     return verifier_has(errors, "instruction uses a value outside its SSA scope");
 }
 
+func rejects_bad_static_data() -> Bool {
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let u8_type: WirTypeID = wir_unsigned_int_type(ref program, 8);
+    let i64_type: WirTypeID = wir_signed_int_type(ref program, 64);
+    let bytes_type: WirTypeID = wir_array_type(ref program, u8_type, UIntSize(2U));
+    let bytes: WirValueID = wir_const_bytes(ref program, bytes_type, "x");
+    wir_add_aligned_global(ref program, "bad", bytes_type, bytes, WirLinkage.Private, true, 3);
+    wir_add_aligned_global(ref program, "under_aligned", i64_type, wir_const_zero(ref program, i64_type), WirLinkage.Private, false, 4);
+    let errors: Vector(String) = verify_wir(program);
+    return verifier_has(errors, "byte constant length does not match its array type") &&
+           verifier_has(errors, "global alignment is not a power of two") &&
+           verifier_has(errors, "global alignment is smaller than the type alignment");
+}
+
+func rejects_non_symbol_address() -> Bool {
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32_type: WirTypeID = wir_signed_int_type(ref program, 32);
+    let pointer_type: WirTypeID = wir_pointer_type(ref program, i32_type);
+    let scalar: WirValueID = wir_const_int(ref program, i32_type, UInt128(1U));
+    wir_const_address(ref program, pointer_type, scalar, 0L);
+    let errors: Vector(String) = verify_wir(program);
+    return verifier_has(errors, "address constant target is not a symbol");
+}
+
+func rejects_unsized_zero() -> Bool {
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    wir_const_zero(ref program, program.void_type);
+    let errors: Vector(String) = verify_wir(program);
+    return verifier_has(errors, "zero constant has an unsupported type");
+}
+
+func rejects_target_layout_mismatch() -> Bool {
+    let program: WirModule = new_wir_module("i686-pc-windows-msvc", 64);
+    let errors: Vector(String) = verify_wir(program);
+    return verifier_has(errors, "module has no data layout for its target");
+}
+
 func main() -> Int {
     if (!rejects_recursive_layout()) { print("FAIL: recursive WIR layout was accepted"); return 1; }
     if (!rejects_late_alloca()) { print("FAIL: late WIR stack allocation was accepted"); return 1; }
     if (!rejects_wrong_cast_opcode()) { print("FAIL: mismatched WIR cast opcode was accepted"); return 1; }
     if (!rejects_cross_function_value()) { print("FAIL: cross-function WIR value was accepted"); return 1; }
     if (!rejects_non_dominating_value()) { print("FAIL: non-dominating WIR value was accepted"); return 1; }
+    if (!rejects_bad_static_data()) { print("FAIL: malformed static WIR was accepted"); return 1; }
+    if (!rejects_non_symbol_address()) { print("FAIL: non-symbol relocation target was accepted"); return 1; }
+    if (!rejects_unsized_zero()) { print("FAIL: zero initializer accepted an unsized type"); return 1; }
+    if (!rejects_target_layout_mismatch()) { print("FAIL: mismatched target layout was accepted"); return 1; }
     print("PASS: WIR verifier invariants");
     return 0;
 }

@@ -55,7 +55,7 @@ func main() -> Int {
         print("FAIL: lowered direct call could not be printed");
         return 1;
     }
-    let expected: String = "internal func @call_abs() -> i32 {\n^entry:\n    %4:i32 = call @abs(7)\n    %6:i32 = call @abs(7)\n    ret %6\n}\n\nextern func @abs(i32) -> i32\n";
+    let expected: String = "internal func @call_abs() -> i32 {\n^entry:\n    %4:i32 = call @abs(7)\n    %6:i32 = call @abs(7)\n    ret %6\n}\n\nextern c func @abs(i32) -> i32\n";
     if (text != expected) {
         print("FAIL: lowered call text is not stable");
         print(text);

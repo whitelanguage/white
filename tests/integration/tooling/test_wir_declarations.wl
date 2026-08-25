@@ -56,7 +56,7 @@ func main() -> Int {
         print("FAIL: lowered declarations could not be printed");
         return 1;
     }
-    let expected: String = "extern func @write(i32, ptr<u8>, u32) -> i32\n\nextern \"system\" func @GetStdHandle(i32) -> ptr<void>\n\nextern func @printf(ptr<u8>, ...) -> i32\n\ninternal func @touch(%value:ptr<i32>) -> void {\n^entry:\n    ret\n}\n\nexport func @main() -> i32 {\n^entry:\n    ret 0\n}\n";
+    let expected: String = "extern c func @write(i32, ptr<u8>, u32) -> i32\n\nextern system func @GetStdHandle(i32) -> ptr<void>\n\nextern c func @printf(ptr<u8>, ...) -> i32\n\ninternal func @touch(%value:ptr<i32>) -> void {\n^entry:\n    ret\n}\n\npub func @main() -> i32 {\n^entry:\n    ret 0\n}\n";
     if (text != expected) {
         print("FAIL: lowered declaration text is not stable");
         print(text);
