@@ -272,7 +272,7 @@ func llvm_instruction_supported(program: WirModule, instruction: WirInstruction)
            opcode == WirOpcode.NullCheck || opcode == WirOpcode.BoundsCheck ||
            opcode == WirOpcode.Retain || opcode == WirOpcode.Release ||
            opcode == WirOpcode.StackAlloc || opcode == WirOpcode.Load || opcode == WirOpcode.Store || opcode == WirOpcode.Call ||
-           opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Unreachable ||
+           opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Trap || opcode == WirOpcode.Unreachable ||
            opcode == WirOpcode.Negate || opcode == WirOpcode.FloatNegate || opcode == WirOpcode.Not;
 }
 
@@ -518,11 +518,13 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         llvm_write_value(output, program, instruction.operands[1])?;
     } else if (instruction.opcode == WirOpcode.IndexAddress) {
         let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, instruction.operands[0])))];
+        let element: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
         output.write("getelementptr ")?;
         llvm_write_type(output, program, pointer.element)?;
         output.write(", ptr ")?;
         llvm_write_value(output, program, instruction.operands[0])?;
-        output.write(", i32 0, ")?;
+        output.write(", ")?;
+        if (element.kind == WirTypeKind.Array) { output.write("i32 0, ")?; }
         llvm_write_typed_value(output, program, instruction.operands[1])?;
     } else if (instruction.opcode == WirOpcode.Call) {
         let signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
@@ -553,6 +555,8 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write("ret ")?;
         if (instruction.operands.length() == 0) { output.write("void")?; }
         else { llvm_write_typed_value(output, program, instruction.operands[0])?; }
+    } else if (instruction.opcode == WirOpcode.Trap) {
+        output.write("call void @llvm.trap()\n  unreachable")?;
     } else if (instruction.opcode == WirOpcode.Unreachable) { output.write("unreachable")?; }
     output.write("\n")?;
     return;
@@ -722,7 +726,7 @@ func llvm_module_uses_trap(program: WirModule) -> Bool {
     let i: Int = 0;
     while (i < program.arena.instructions.length()) {
         let opcode: WirOpcode = program.arena.instructions[i].opcode;
-        if (opcode == WirOpcode.NullCheck || opcode == WirOpcode.BoundsCheck) { return true; }
+        if (opcode == WirOpcode.NullCheck || opcode == WirOpcode.BoundsCheck || opcode == WirOpcode.Trap) { return true; }
         i++;
     }
     return false;

@@ -60,7 +60,17 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
 func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int, retain: Bool) -> Void {
     if (!wir_value_needs_drop(ref source, source_type)) { return; }
     if (is_fallible_type(ref source, source_type)) {
-        state.errors.append("fallible ownership is not lowered to WIR yet");
+        let inner_type: Int = get_inner_fallible_type(ref source, source_type);
+        if (inner_type == TYPE_VOID || !wir_value_needs_drop(ref source, inner_type)) { return; }
+        let is_error: WirValueID = wir_field(ref program, state.block, value, 0, "", no_wir_location());
+        let payload_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "ownership.payload."), []);
+        let end_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "ownership.end."), []);
+        wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_error], [wir_edge(end_block, []), wir_edge(payload_block, [])], no_wir_location());
+        state.block = payload_block;
+        let payload: WirValueID = wir_field(ref program, state.block, value, 2, "", no_wir_location());
+        wir_emit_ownership_value(ref state, ref source, ref program, payload, inner_type, retain);
+        wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end_block, [])], no_wir_location());
+        state.block = end_block;
         return;
     }
 

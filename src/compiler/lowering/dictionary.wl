@@ -4,38 +4,6 @@ import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 
-func runtime_type_name(ref c: Compiler, type_id: Int) -> String {
-    if (has_symbol(c.func_ret_map.lookup("" + type_id)) || has_symbol(c.method_ret_map.lookup("" + type_id))) {
-        // callable labels belong to source binding, not runtime type identity
-        return mangle_type(ref c, type_id);
-    }
-    return get_type_name(ref c, type_id);
-}
-
-func type_fingerprint(ref c: Compiler, type_id: Int) -> UInt64 {
-    /*
-    fnv-1a over the canonical type name:
-
-        hash := offset_basis
-        for each byte:
-            hash := hash xor byte
-            hash := hash * prime
-        return hash
-
-    using the type name keeps erased tags independent of addresses and table order
-    */
-    let name: String = "whitelang:" + runtime_type_name(ref c, type_id);
-    let hash: UInt64 = 14695981039346656037UL;
-    let i: Int = 0;
-    while (i < name.length()) {
-        hash ^= UInt64(name[i]);
-        hash *= 1099511628211UL;
-        i += 1;
-    }
-    if (hash == UInt64(0)) { return UInt64(1); }
-    return hash;
-}
-
 func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) { return true; }
     if (is_primitive_type(type_id)) { return type_id != TYPE_ANY_ERROR; }

@@ -93,7 +93,11 @@ func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref prog
     }
 
     let annotations: SystemAnnResult = consume_annotations(ref source, node.annotations, node.name_tok.value);
-    if ((annotations.ann_flags & FLAG_ANN_INTRINSIC) != 0) { return NO_WIR_GLOBAL; }
+    if ((annotations.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+        let source_name: String = source.current_package_prefix + node.name_tok.value;
+        source.global_symbol_table.put(source_name, SymbolInfo(reg="$intrinsic." + annotations.intrinsic_name, type=source_type, origin_type=source_type, is_const=true));
+        return NO_WIR_GLOBAL;
+    }
     let name: String = source.current_package_prefix + node.name_tok.value;
     let linkage: WirLinkage = WirLinkage.Internal;
     if ((annotations.ann_flags & FLAG_ANN_EXPORT) != 0) {

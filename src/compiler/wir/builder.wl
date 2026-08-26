@@ -290,8 +290,10 @@ func wir_index(ref program: WirModule, block: WirBlockID, aggregate: WirValueID,
 
 func wir_index_address(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, index: WirValueID, name: String, location: WirLocation) -> WirValueID {
     let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
-    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
-    let result_type: WirTypeID = wir_pointer_type(ref program, aggregate_type.element);
+    let element: WirTypeID = pointer.element;
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(element))];
+    if (aggregate_type.kind == WirTypeKind.Array) { element = aggregate_type.element; }
+    let result_type: WirTypeID = wir_pointer_type(ref program, element);
     let value: WirValueID = wir_append(ref program, block, WirOpcode.IndexAddress, result_type, [aggregate, index], [], location);
     wir_name_value(ref program, value, name);
     return value;
@@ -351,8 +353,8 @@ func wir_release(ref program: WirModule, block: WirBlockID, value: WirValueID, l
 func wir_cast_opcode(program: WirModule, source_id: WirTypeID, target_id: WirTypeID) -> WirOpcode {
     let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
     let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
-    let source_integer: Bool = source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
-    let target_integer: Bool = target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
+    let source_integer: Bool = source.kind == WirTypeKind.BoolType || source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
+    let target_integer: Bool = target.kind == WirTypeKind.BoolType || target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
 
     if (source_integer && target_integer) {
         if (source.bits > target.bits) { return WirOpcode.Truncate; }
@@ -392,6 +394,10 @@ func wir_return(ref program: WirModule, block: WirBlockID, value: WirValueID, lo
     let operands: Vector(WirValueID) = [];
     if (value != NO_WIR_VALUE) { operands.append(value); }
     wir_append(ref program, block, WirOpcode.Return, program.void_type, operands, [], location);
+}
+
+func wir_trap(ref program: WirModule, block: WirBlockID, location: WirLocation) -> Void {
+    wir_append(ref program, block, WirOpcode.Trap, program.void_type, [], [], location);
 }
 
 func wir_add_global(ref program: WirModule, name: String, type_id: WirTypeID, initializer: WirValueID, linkage: WirLinkage, is_const: Bool) -> WirGlobalID {

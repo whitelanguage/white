@@ -116,6 +116,7 @@ enum WirOpcode {
     Jump,
     Branch,
     Return,
+    Trap,
     Unreachable
 }
 
@@ -268,5 +269,5 @@ func wir_id_index(id: UInt32) -> Int {
 }
 
 func wir_is_terminator(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Unreachable;
+    return opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Trap || opcode == WirOpcode.Unreachable;
 }

@@ -9,6 +9,8 @@ import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
+import WirLLVMResult from "../../../src/compiler/wir/backend/llvm.wl"
+import * from "../../../src/compiler/wir/pipeline.wl"
 
 func program_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -84,6 +86,21 @@ func main() -> Int {
     }
     if (!program_contains(text, "call @lib.answer()")) {
         print("FAIL: imported function did not resolve to its module symbol");
+        return 1;
+    }
+
+    let emitted: WirLLVMResult = lower_program_to_llvm(ref source, modules, "x86_64-pc-windows-msvc", 64)?;
+    catch(err) {
+        print("FAIL: WIR program could not be emitted as LLVM IR");
+        return 1;
+    }
+    if (emitted.errors.length() != 0) {
+        print("FAIL: WIR LLVM pipeline rejected a valid program: ", emitted.errors[0]);
+        return 1;
+    }
+    if (!program_contains(emitted.text, "define internal i32 @lib.answer()") ||
+        !program_contains(emitted.text, "call i32 @lib.answer()")) {
+        print("FAIL: WIR LLVM pipeline lost a cross-module function");
         return 1;
     }
     print("PASS: WIR program lowering");

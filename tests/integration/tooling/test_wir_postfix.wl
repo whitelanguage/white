@@ -26,6 +26,17 @@ func postfix_access(arena: AstArena, pos: Position) -> NodeID {
     return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "value"), pos=pos));
 }
 
+func postfix_contains(text: String, needle: String) -> Bool {
+    let start: Int = 0;
+    while (start + needle.length() <= text.length()) {
+        let offset: Int = 0;
+        while (offset < needle.length() && text[start + offset] == needle[offset]) { offset++; }
+        if (offset == needle.length()) { return true; }
+        start++;
+    }
+    return false;
+}
+
 func check_postfix_expression() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = postfix_position();
@@ -64,9 +75,34 @@ func check_postfix_statement() -> Bool {
     return text == "internal func @post_dec(%value:f64) -> f64 {\n^entry:\n    %value.addr:ptr<f64> = alloca f64\n    store %value, %value.addr\n    %3:f64 = load %value.addr\n    %5:f64 = sub %3, f64(0x3FF0000000000000)\n    store %5, %value.addr\n    %6:f64 = load %value.addr\n    ret %6\n}\n";
 }
 
+func check_postfix_index() -> Bool {
+    let vectors: Dict(String, SymbolInfo) = Dict();
+    vectors.put("100", SymbolInfo(type=TYPE_INT));
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), vector_base_map=vectors, array_info_map=Dict(), struct_id_map=Dict());
+    let pos: Position = postfix_position();
+    let target: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "values"), pos=pos));
+    let index: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "index"), pos=pos));
+    let access: NodeID = add_index_access_node(source.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=target, index_node=index, pos=pos));
+    let postfix: NodeID = add_postfix_node(source.arena, PostfixOpNode(type=NODE_POSTFIX, node=access, op_tok=postfix_token(TOK_INC, "++"), pos=pos));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let args: Vector(Struct) = [TypeListNode(type=100, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
+    let info: FuncInfo = FuncInfo(name="post_index", base_name="post_index", ret_type=TYPE_INT, arg_types=args, arg_names=["values", "index"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    return postfix_contains(text, "check.bounds") && postfix_contains(text, "index.addr") && postfix_contains(text, "add") && postfix_contains(text, "store");
+}
+
 func main() -> Int {
     if (!check_postfix_expression()) { print("FAIL: WIR postfix expression"); return 1; }
     if (!check_postfix_statement()) { print("FAIL: WIR postfix statement"); return 1; }
+    if (!check_postfix_index()) { print("FAIL: WIR postfix index"); return 1; }
     print("PASS: WIR postfix expressions");
     return 0;
 }

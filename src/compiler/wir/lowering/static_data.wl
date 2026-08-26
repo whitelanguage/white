@@ -57,7 +57,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
     let i: Int = 0;
     while (i < literal.elements.length()) {
         let argument: ArgNode = literal.elements[i];
-        if (argument.name.length() != 0 || argument.is_spread) {
+        if ((argument.name is !null && argument.name.length() != 0) || argument.is_spread) {
             types.errors.append("Static array initializer contains a named or spread element");
             return NO_WIR_VALUE;
         }
@@ -104,7 +104,7 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
             return NO_WIR_VALUE;
         }
         let field_index: Int = i;
-        if (argument.name.length() != 0) {
+        if (argument.name is !null && argument.name.length() != 0) {
             saw_named = true;
             let field: FieldInfo = find_field(info, argument.name);
             if (!has_field(field)) {
@@ -141,6 +141,12 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (kind == NODE_NULLPTR &&
         (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR)) {
         return wir_null(ref program, type_id);
+    }
+    if (kind == NODE_NULL && !is_pointer_type(ref source, source_type) && is_nullable_reference_type(ref source, source_type)) {
+        if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) {
+            return wir_null(ref program, type_id);
+        }
+        return wir_const_zero(ref program, type_id);
     }
     if (repr == TYPE_STRING && kind == NODE_STRING) {
         return wir_lower_string_constant(ref types, ref program, get_string_node(source.arena, node).tok.value);

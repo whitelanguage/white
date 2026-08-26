@@ -11,6 +11,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
+import WirLLVMResult, emit_wir_llvm from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
 
@@ -24,6 +25,17 @@ func cast_token(kind: Int, value: String) -> Token {
 
 func cast_access(arena: AstArena, name: String, pos: Position) -> NodeID {
     return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=cast_token(TOK_IDENTIFIER, name), pos=pos));
+}
+
+func cast_contains(text: String, needle: String) -> Bool {
+    let start: Int = 0;
+    while (start + needle.length() <= text.length()) {
+        let offset: Int = 0;
+        while (offset < needle.length() && text[start + offset] == needle[offset]) { offset++; }
+        if (offset == needle.length()) { return true; }
+        start++;
+    }
+    return needle.length() == 0;
 }
 
 func check_return_cast() -> Bool {
@@ -114,6 +126,106 @@ func check_low_level_casts() -> Bool {
     return errors.length() == 0;
 }
 
+func check_checked_cast() -> Bool {
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let pos: Position = cast_position();
+    let callee: NodeID = cast_access(source.arena, "Byte", pos);
+    let argument: NodeID = cast_access(source.arena, "value", pos);
+    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
+    let info: FuncInfo = FuncInfo(name="checked_byte", base_name="checked_byte", ret_type=TYPE_BYTE, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    if (!cast_contains(text, "br ") || !cast_contains(text, "trap") || !cast_contains(text, "trunc")) { return false; }
+
+    let emitted: WirLLVMResult = emit_wir_llvm(program)?;
+    catch(err) { return false; }
+    if (emitted.errors.length() != 0) { return false; }
+    if (!cast_contains(emitted.text, "declare void @llvm.trap()") || !cast_contains(emitted.text, "call void @llvm.trap()") || !cast_contains(emitted.text, "unreachable")) { return false; }
+    return true;
+}
+
+func check_fallible_cast() -> Bool {
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_cache=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), generic_type_names=Dict(), struct_id_map=Dict(), error_types=[], type_counter=100);
+    let error_type: Int = 150;
+    let error_fields: Vector(Struct) = [FieldInfo(name="Overflow", type=error_type, llvm_type="i32", offset=8)];
+    let error_info: StructInfo = StructInfo(name="Error", type_id=error_type, fields=error_fields, compiler_link_name="Error", is_enum=true, is_error=true);
+    source.struct_id_map.put("" + error_type, error_info);
+    source.error_types.append(error_info);
+
+    let pos: Position = cast_position();
+    let callee: NodeID = cast_access(source.arena, "Byte", pos);
+    let argument: NodeID = cast_access(source.arena, "value", pos);
+    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=true));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
+    let return_type: Int = get_fallible_type_id(ref source, TYPE_BYTE);
+    let info: FuncInfo = FuncInfo(name="fallible_byte", base_name="fallible_byte", ret_type=return_type, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    if (!cast_contains(text, "^cast.fail.") || !cast_contains(text, "^cast.end.") || cast_contains(text, "trap")) { return false; }
+
+    let emitted: WirLLVMResult = emit_wir_llvm(program)?;
+    catch(err) { return false; }
+    return emitted.errors.length() == 0 && !cast_contains(emitted.text, "llvm.trap");
+}
+
+func check_pointer_casts() -> Bool {
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict());
+    let pos: Position = cast_position();
+
+    let to_size: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let size_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=to_size, pos=pos));
+    let size_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[size_return]));
+    let size_args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
+    let size_info: FuncInfo = FuncInfo(name="pointer_bits", base_name="pointer_bits", ret_type=TYPE_INTSIZE, arg_types=size_args, arg_names=["handle"], is_varargs=false, abi_name="");
+
+    let to_pointer: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let pointer_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=to_pointer, pos=pos));
+    let pointer_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[pointer_return]));
+    let pointer_args: Vector(Struct) = [TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];
+    let pointer_info: FuncInfo = FuncInfo(name="from_bits", base_name="from_bits", ret_type=TYPE_ANYPTR, arg_types=pointer_args, arg_names=["bits"], is_varargs=false, abi_name="");
+
+    let null_value: NodeID = add_null_node(source.arena, NullNode(type=NODE_NULL, pos=pos));
+    let null_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
+    let null_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
+    let null_info: FuncInfo = FuncInfo(name="empty_string", base_name="empty_string", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, size_info, size_body);
+    wir_lower_function_body(ref types, ref source, ref program, pointer_info, pointer_body);
+    wir_lower_function_body(ref types, ref source, ref program, null_info, null_body);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    if (!cast_contains(text, "ptrtoint") || !cast_contains(text, "inttoptr")) { return false; }
+
+    let emitted: WirLLVMResult = emit_wir_llvm(program)?;
+    catch(err) { return false; }
+    return emitted.errors.length() == 0 && cast_contains(emitted.text, "ptrtoint") && cast_contains(emitted.text, "inttoptr");
+}
+
 func main() -> Int {
     if (!check_return_cast()) {
         print("FAIL: WIR return widening");
@@ -125,6 +237,18 @@ func main() -> Int {
     }
     if (!check_low_level_casts()) {
         print("FAIL: WIR low-level cast selection");
+        return 1;
+    }
+    if (!check_checked_cast()) {
+        print("FAIL: WIR checked cast lowering");
+        return 1;
+    }
+    if (!check_fallible_cast()) {
+        print("FAIL: WIR fallible cast lowering");
+        return 1;
+    }
+    if (!check_pointer_casts()) {
+        print("FAIL: WIR pointer cast lowering");
         return 1;
     }
     print("PASS: WIR casts");

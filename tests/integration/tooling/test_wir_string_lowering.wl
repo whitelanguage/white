@@ -7,9 +7,14 @@ import * from "../../../src/frontend/ast.wl"
 import * from "../../../src/frontend/arena.wl"
 import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
+import * from "../../../src/compiler/wir/model.wl"
+import * from "../../../src/compiler/wir/builder.wl"
+import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
+import * from "../../../src/compiler/wir/lowering/types.wl"
+import * from "../../../src/compiler/wir/lowering/functions.wl"
 
 func string_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -25,6 +30,43 @@ func string_access(arena: AstArena, name: String, pos: Position) -> NodeID {
 
 func string_literal(arena: AstArena, value: String, pos: Position) -> NodeID {
     return add_string_node(arena, StringNode(type=NODE_STRING, tok=string_token(TOK_STR_LIT, value), pos=pos));
+}
+
+func check_string_concat() -> Bool {
+    let functions: Dict(String, FuncInfo) = Dict();
+    let links: Dict(String, String) = Dict();
+    let args: Vector(Struct) = [TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)];
+    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="C"));
+    links.put("string_concat", "runtime.concat");
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict(), func_table=functions, compiler_link=links);
+    let pos: Position = string_position();
+    let left: NodeID = string_access(source.arena, "left", pos);
+    let right: NodeID = string_access(source.arena, "right", pos);
+    let sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=string_token(TOK_PLUS, "+"), right=right, pos=pos));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let info: FuncInfo = FuncInfo(name="join", base_name="join", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    let errors: Vector(String) = verify_wir(program);
+    if (types.errors.length() != 0) { print("FAIL: String concatenation lowering: ", types.errors[0]); return false; }
+    if (errors.length() != 0) { print("FAIL: String concatenation verification: ", errors[0]); return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    if (!string_contains(text, "call @runtime.concat")) { print(text); return false; }
+    return true;
+}
+
+func string_contains(text: String, needle: String) -> Bool {
+    let start: Int = 0;
+    while (start + needle.length() <= text.length()) {
+        let offset: Int = 0;
+        while (offset < needle.length() && text[start + offset] == needle[offset]) { offset++; }
+        if (offset == needle.length()) { return true; }
+        start++;
+    }
+    return needle.length() == 0;
 }
 
 func main() -> Int {
@@ -61,6 +103,7 @@ func main() -> Int {
     let emitted: WirLLVMResult = emit_wir_llvm(result.program)?;
     catch(err) { print("FAIL: String LLVM emission failed"); return 1; }
     if (emitted.errors.length() != 0) { print("FAIL: String WIR was rejected: ", emitted.errors[0]); return 1; }
+    if (!check_string_concat()) { print("FAIL: String concatenation lowering"); return 1; }
     print("PASS: WIR String literal lowering");
     return 0;
 }

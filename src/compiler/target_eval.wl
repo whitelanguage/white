@@ -6,8 +6,8 @@ import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "target.wl"
 
-func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
-    if (!has_node(node)) { return ""; }
+func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> SymbolInfo {
+    if (!has_node(node)) { return SymbolInfo(); }
     let base: Int = node_tag(node);
     let info: SymbolInfo = SymbolInfo();
     if (base == NODE_FIELD_ACCESS) {
@@ -20,7 +20,13 @@ func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
         let access: VarAccessNode = get_var_access_node(c.arena, node);
         info = find_symbol(ref c, access.name_tok.value);
     }
-    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return ""; }
+    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return SymbolInfo(); }
+    return info;
+}
+
+func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
+    let info: SymbolInfo = target_intrinsic_symbol(ref c, node);
+    if (!has_symbol(info)) { return ""; }
     return info.reg.slice(11, info.reg.length());
 }
 

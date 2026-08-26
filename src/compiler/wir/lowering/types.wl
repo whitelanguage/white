@@ -13,11 +13,14 @@ struct WirTypeMap(
     string_object: WirTypeID,
     string_values: Dict(String, WirValueID),
     string_count: Int,
-    error_type: WirTypeID
+    error_type: WirTypeID,
+    enum_values: Dict(String, WirEnumValue)
 )
 
+struct WirEnumValue(source_type: Int, value: Long)
+
 func new_wir_type_map() -> WirTypeMap {
-    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE);
+    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE, enum_values=Dict());
 }
 
 func wir_prepare_type_slot(ref types: WirTypeMap, source_type: Int) -> Void {
@@ -35,8 +38,10 @@ func wir_cache_type(ref types: WirTypeMap, source_type: Int, type_id: WirTypeID)
     return type_id;
 }
 
-func wir_type_failure(ref types: WirTypeMap, source_type: Int) -> WirTypeID {
-    types.errors.append("Cannot lower White type id " + source_type + " to WIR");
+func wir_type_failure(ref types: WirTypeMap, source_type: Int, context: String = "") -> WirTypeID {
+    let suffix: String = "";
+    if (context.length() != 0) { suffix = " for " + context; }
+    types.errors.append("Cannot lower White type id " + source_type + " to WIR" + suffix);
     return NO_WIR_TYPE;
 }
 
@@ -46,6 +51,10 @@ func wir_opaque_pointer(ref types: WirTypeMap, ref program: WirModule) -> WirTyp
 }
 
 func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, signature: SymbolInfo) -> WirTypeID {
+    if (signature.type <= 0) {
+        types.errors.append("Callable type " + source_type + " has no resolved return type during WIR lowering");
+        return NO_WIR_TYPE;
+    }
     let result: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, signature.type);
     if (result == NO_WIR_TYPE) { return NO_WIR_TYPE; }
 
@@ -53,6 +62,10 @@ func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref pr
     let i: Int = 0;
     while (signature.func_arg_types is !null && i < signature.func_arg_types.length()) {
         let parameter: TypeListNode = signature.func_arg_types[i];
+        if (parameter.type <= 0) {
+            types.errors.append("Parameter " + i + " of callable type " + source_type + " has no resolved type during WIR lowering");
+            return NO_WIR_TYPE;
+        }
         let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, parameter.type);
         if (type_id == NO_WIR_TYPE) { return NO_WIR_TYPE; }
         if (parameter.pass_mode == PARAM_REF) {
@@ -139,6 +152,10 @@ func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref prog
                 if (info.vtable is !null) { method_count = info.vtable.length(); }
                 field_type = wir_pointer_type(ref program, wir_dispatch_table_type(ref types, ref program, method_count));
             } else {
+                if (field.type <= 0) {
+                    types.errors.append("Field '" + info.name + "." + field.name + "' has no resolved type during WIR lowering");
+                    return result;
+                }
                 field_type = wir_lower_source_type(ref types, ref source, ref program, field.type);
             }
             if (field_type == NO_WIR_TYPE) { return result; }
@@ -163,7 +180,7 @@ func wir_lower_array_type(ref types: WirTypeMap, ref source: Compiler, ref progr
 }
 
 func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirTypeID {
-    if (source_type <= 0) { return wir_type_failure(ref types, source_type); }
+    if (source_type <= 0) { return wir_type_failure(ref types, source_type, "module '" + source.current_package_prefix + "'"); }
     let cached: WirTypeID = wir_cached_type(ref types, source_type);
     if (cached != NO_WIR_TYPE) { return cached; }
 

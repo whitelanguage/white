@@ -8,6 +8,7 @@ import * from "globals.wl"
 import * from "functions.wl"
 import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
+import eval_const_long from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 
@@ -26,6 +27,23 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> FuncInfo {
     let key: String = source.current_package_prefix + node.name_tok.value;
     let info: FuncInfo = source.func_table.lookup(key);
     if (!has_func(info)) { info = source.func_table.lookup(node.name_tok.value); }
+    if (has_func(info)) { return info; }
+
+    let return_type: Int = resolve_type(ref source, node.ret_type_tok);
+    if (return_type == TYPE_AUTO || return_type == TYPE_POISON) { return FuncInfo(); }
+    let argument_types: Vector(Struct) = [];
+    let argument_names: Vector(String) = [];
+    let i: Int = 0;
+    while (node.params is !null && i < node.params.length()) {
+        let parameter: ParamNode = node.params[i];
+        let parameter_type: Int = resolve_type(ref source, parameter.type_tok);
+        if (parameter_type == TYPE_AUTO || parameter_type == TYPE_POISON || parameter.pass_mode == PARAM_REF) { return FuncInfo(); }
+        argument_types.append(TypeListNode(type=parameter_type, pass_mode=PARAM_VALUE));
+        argument_names.append(parameter.name_tok.value);
+        i++;
+    }
+    info = FuncInfo(name=node.name_tok.value, base_name=node.name_tok.value, ret_type=return_type, arg_types=argument_types, arg_names=argument_names, is_varargs=node.is_varargs, abi_name=node.abi_name, mutates_self=false);
+    source.func_table.put(key, info);
     return info;
 }
 
@@ -44,6 +62,29 @@ func wir_class_name(source: Compiler, node: ClassDefNode) -> String {
 
 func wir_method_info(ref source: Compiler, class_name: String, node: MethodDefNode) -> FuncInfo {
     return source.func_table.lookup(class_name + "_" + method_base_name(ref source, node));
+}
+
+func wir_register_enum(ref types: WirTypeMap, ref source: Compiler, node: EnumDefNode) -> Void {
+    let name: String = source.current_package_prefix + node.name_tok.value;
+    let info: StructInfo = source.struct_table.lookup(name);
+    if (!has_struct(info) || !info.is_enum) {
+        types.errors.append("Enum '" + name + "' was not registered before WIR lowering");
+        return;
+    }
+
+    let value: Long = 0L;
+    let i: Int = 0;
+    while (node.fields is !null && i < node.fields.length()) {
+        let field: EnumFieldNode = node.fields[i];
+        if (has_node(field.value)) { value = eval_const_long(ref source, field.value, field.pos); }
+        if (value < -2147483648L || value > 2147483647L) {
+            types.errors.append("Enum member '" + name + "." + field.name_tok.value + "' is outside the Int range");
+            return;
+        }
+        types.enum_values.put(name + "." + field.name_tok.value, WirEnumValue(source_type=info.type_id, value=value));
+        value++;
+        i++;
+    }
 }
 
 func wir_declare_class_methods(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ClassDefNode) -> Void {
@@ -143,12 +184,14 @@ func wir_emit_interface_tables(ref types: WirTypeMap, ref source: Compiler, ref 
     }
 }
 
-func wir_declare_root_functions(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, root: BlockNode) -> Void {
+func wir_declare_root_items(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, root: BlockNode) -> Void {
     let i: Int = 0;
     while (i < root.stmts.length()) {
         let node: NodeID = root.stmts[i];
         let kind: Int = node_tag(node);
-        if (kind == NODE_FUNC_DEF) {
+        if (kind == NODE_ENUM_DEF) {
+            wir_register_enum(ref types, ref source, get_enum_def_node(source.arena, node));
+        } else if (kind == NODE_FUNC_DEF) {
             let definition: FunctionDefNode = get_func_def_node(source.arena, node);
             if (definition.type_params is null || definition.type_params.length() == 0) {
                 let info: FuncInfo = wir_definition_info(ref source, definition);
@@ -220,7 +263,7 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
         if (!has_node(module.ast) || node_tag(module.ast) != NODE_BLOCK) {
             types.errors.append("Module '" + module.path + "' has no root block");
         } else {
-            wir_declare_root_functions(ref types, ref source, ref program, get_block_node(source.arena, module.ast));
+            wir_declare_root_items(ref types, ref source, ref program, get_block_node(source.arena, module.ast));
         }
         i++;
     }
@@ -248,7 +291,7 @@ func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, p
     }
 
     let root: BlockNode = get_block_node(source.arena, root_node);
-    wir_declare_root_functions(ref types, ref source, ref program, root);
+    wir_declare_root_items(ref types, ref source, ref program, root);
     wir_lower_root_items(ref types, ref source, ref program, root);
     wir_verify_lowering(ref types, program);
     return WirLoweringResult(program=program, errors=types.errors);

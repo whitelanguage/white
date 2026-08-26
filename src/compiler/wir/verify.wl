@@ -391,8 +391,8 @@ func wir_cast_matches(program: WirModule, opcode: WirOpcode, source_id: WirTypeI
     if (!wir_type_valid(program, source_id) || !wir_type_valid(program, target_id) || source_id == target_id) { return false; }
     let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
     let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
-    let source_integer: Bool = source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
-    let target_integer: Bool = target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
+    let source_integer: Bool = source.kind == WirTypeKind.BoolType || source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
+    let target_integer: Bool = target.kind == WirTypeKind.BoolType || target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
 
     if (opcode == WirOpcode.Truncate) { return source_integer && target_integer && source.bits > target.bits; }
     if (opcode == WirOpcode.SignExtend) { return source.kind == WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
@@ -489,25 +489,31 @@ func wir_check_index(program: WirModule, instruction: WirInstruction, address: B
     let aggregate_type_id: WirTypeID = wir_value_type(program, instruction.operands[0]);
     if address {
         if (!wir_is_pointer_type(program, aggregate_type_id)) {
-            wir_report(errors, "index.addr requires a pointer to an array");
+            wir_report(errors, "index.addr requires a pointer operand");
             return;
         }
         aggregate_type_id = program.arena.types[wir_id_index(UInt32(aggregate_type_id))].element;
     }
-    if (!wir_type_is(program, aggregate_type_id, WirTypeKind.Array)) {
+    if (!address && !wir_type_is(program, aggregate_type_id, WirTypeKind.Array)) {
         wir_report(errors, "index instruction requires an array operand");
         return;
     }
 
     let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(aggregate_type_id))];
+    let element_type: WirTypeID = aggregate_type_id;
+    if (aggregate_type.kind == WirTypeKind.Array) { element_type = aggregate_type.element; }
+    if (address && aggregate_type.kind == WirTypeKind.VoidType) {
+        wir_report(errors, "index.addr cannot perform arithmetic on a Void pointer");
+        return;
+    }
     if (!wir_type_valid(program, instruction.type_id)) {
         wir_report(errors, "index instruction has an unknown result type");
         return;
     }
-    if (!address && instruction.type_id != aggregate_type.element) {
+    if (!address && instruction.type_id != element_type) {
         wir_report(errors, "index result type does not match the array element");
-    } else if (address && (!wir_is_pointer_type(program, instruction.type_id) || program.arena.types[wir_id_index(UInt32(instruction.type_id))].element != aggregate_type.element)) {
-        wir_report(errors, "index.addr result does not point to the array element");
+    } else if (address && (!wir_is_pointer_type(program, instruction.type_id) || program.arena.types[wir_id_index(UInt32(instruction.type_id))].element != element_type)) {
+        wir_report(errors, "index.addr result does not point to the indexed element");
     }
 }
 
@@ -599,9 +605,20 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     } else if (opcode == WirOpcode.FloatDivide || opcode == WirOpcode.FloatRemainder) {
         wir_check_binary(program, instruction, errors);
         if (!wir_is_float_type(program, instruction.type_id)) { wir_report(errors, "floating-point instruction requires a floating-point type"); }
-    } else if (opcode == WirOpcode.BitAnd || opcode == WirOpcode.BitOr || opcode == WirOpcode.BitXor || opcode == WirOpcode.ShiftLeft) {
+    } else if (opcode == WirOpcode.BitAnd || opcode == WirOpcode.BitOr || opcode == WirOpcode.BitXor) {
+        if (instruction.type_id == program.bool_type) {
+            if (instruction.operands.length() != 2 || !wir_value_valid(program, instruction.operands[0]) || !wir_value_valid(program, instruction.operands[1])) {
+                wir_report(errors, "boolean instruction requires two valid operands");
+            } else if (wir_value_type(program, instruction.operands[0]) != program.bool_type || wir_value_type(program, instruction.operands[1]) != program.bool_type) {
+                wir_report(errors, "boolean instruction requires Bool operands");
+            }
+        } else {
+            wir_check_binary(program, instruction, errors);
+            if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "bitwise instruction requires an integer type"); }
+        }
+    } else if (opcode == WirOpcode.ShiftLeft) {
         wir_check_binary(program, instruction, errors);
-        if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "bitwise instruction requires an integer type"); }
+        if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "shift instruction requires an integer type"); }
     } else if (opcode == WirOpcode.Negate) {
         wir_check_unary(program, instruction, errors);
         if (!wir_is_integer_type(program, instruction.type_id)) { wir_report(errors, "integer negation requires an integer type"); }
@@ -748,6 +765,9 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
         } else if (wir_value_valid(program, instruction.operands[0]) && program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id != function_type.result) {
             wir_report(errors, "return value does not match the function return type");
         }
+    } else if (opcode == WirOpcode.Trap) {
+        wir_check_no_result(program, instruction, errors);
+        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "trap instruction has an invalid shape"); }
     } else if (opcode == WirOpcode.Unreachable) {
         wir_check_no_result(program, instruction, errors);
         if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "unreachable instruction has an invalid shape"); }

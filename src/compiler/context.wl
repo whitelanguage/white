@@ -4405,6 +4405,40 @@ func get_method_def_sig_str(ref c: Compiler, m_node: MethodDefNode) -> String {
     return ret_str + " (" + args_str + ")*";
 }
 
+func runtime_type_name(ref c: Compiler, type_id: Int) -> String {
+    let callable: Bool = c.func_ret_map is !null && has_symbol(c.func_ret_map.lookup("" + type_id));
+    if (!callable) { callable = c.method_ret_map is !null && has_symbol(c.method_ret_map.lookup("" + type_id)); }
+    if (callable) {
+        // callable labels belong to source binding, not runtime type identity
+        return mangle_type(ref c, type_id);
+    }
+    return get_type_name(ref c, type_id);
+}
+
+func type_fingerprint(ref c: Compiler, type_id: Int) -> UInt64 {
+    /*
+    fnv-1a over the canonical type name:
+
+        hash := offset_basis
+        for each byte:
+            hash := hash xor byte
+            hash := hash * prime
+        return hash
+
+    using the type name keeps erased tags independent of addresses and table order
+    */
+    let name: String = "whitelang:" + runtime_type_name(ref c, type_id);
+    let hash: UInt64 = 14695981039346656037UL;
+    let i: Int = 0;
+    while (i < name.length()) {
+        hash ^= UInt64(name[i]);
+        hash *= 1099511628211UL;
+        i++;
+    }
+    if (hash == UInt64(0)) { return UInt64(1); }
+    return hash;
+}
+
 func mangle_type(ref c: Compiler, type_id: Int) -> String {
     let named: NamedTypeInfo = get_named_type(ref c, type_id);
     if (has_named_type(named)) { return "N" + named.name.length() + named.name; }

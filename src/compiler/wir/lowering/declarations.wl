@@ -35,12 +35,20 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     }
     if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0) { return NO_WIR_FUNC; }
 
+    if (info.ret_type <= 0) {
+        types.errors.append("Function '" + info.name + "' has no resolved return type during WIR lowering");
+        return NO_WIR_FUNC;
+    }
     let result: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, info.ret_type);
     if (result == NO_WIR_TYPE) { return NO_WIR_FUNC; }
     let parameters: Vector(WirParam) = [];
     let i: Int = 0;
     while (info.arg_types is !null && i < info.arg_types.length()) {
         let parameter: TypeListNode = info.arg_types[i];
+        if (parameter.type <= 0) {
+            types.errors.append("Parameter " + i + " of function '" + info.name + "' has no resolved type during WIR lowering");
+            return NO_WIR_FUNC;
+        }
         let type_id: WirTypeID = wir_lower_parameter_type(ref types, ref source, ref program, parameter);
         if (type_id == NO_WIR_TYPE) { return NO_WIR_FUNC; }
         let name: String = "arg" + i;

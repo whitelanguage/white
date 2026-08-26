@@ -22,6 +22,17 @@ func comparison_token(kind: Int, value: String) -> Token {
     return Token(type=kind, value=value, line=1, col=1);
 }
 
+func comparison_contains(text: String, needle: String) -> Bool {
+    let start: Int = 0;
+    while (start + needle.length() <= text.length()) {
+        let offset: Int = 0;
+        while (offset < needle.length() && text[start + offset] == needle[offset]) { offset++; }
+        if (offset == needle.length()) { return true; }
+        start++;
+    }
+    return false;
+}
+
 func check_comparison(source_type: Int, token_kind: Int, token_value: String, wir_type: String, opcode: String) -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = comparison_position();
@@ -46,6 +57,27 @@ func check_comparison(source_type: Int, token_kind: Int, token_value: String, wi
     return text == expected;
 }
 
+func check_identity() -> Bool {
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let pos: Position = comparison_position();
+    let value: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "value"), pos=pos));
+    let null_value: NodeID = add_nullptr_node(source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
+    let identity: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_IS_NOT, left=value, op_tok=comparison_token(TOK_IS, "is !"), right=null_value, pos=pos));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=identity, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
+    let info: FuncInfo = FuncInfo(name="has_value", base_name="has_value", ret_type=TYPE_BOOL, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    return comparison_contains(text, "ne ") && comparison_contains(text, "null");
+}
+
 func main() -> Int {
     if (!check_comparison(TYPE_INT, TOK_LTE, "<=", "i32", "sle")) {
         print("FAIL: signed comparison lowering");
@@ -57,6 +89,10 @@ func main() -> Int {
     }
     if (!check_comparison(TYPE_FLOAT, TOK_GTE, ">=", "f64", "fge")) {
         print("FAIL: floating-point comparison lowering");
+        return 1;
+    }
+    if (!check_identity()) {
+        print("FAIL: identity comparison lowering");
         return 1;
     }
 

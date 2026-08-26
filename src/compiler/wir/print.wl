@@ -335,6 +335,8 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
             output.write(" ")?;
             wir_write_value(output, program, instruction.operands[0])?;
         }
+    } else if (instruction.opcode == WirOpcode.Trap) {
+        output.write("trap")?;
     } else if (instruction.opcode == WirOpcode.Unreachable) {
         output.write("unreachable")?;
     } else {

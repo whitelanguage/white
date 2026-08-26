@@ -35,7 +35,40 @@ func global_decl(arena: AstArena, name: String, type_name: String, value: NodeID
     return VarDeclareNode(type=NODE_VAR_DECL, name_tok=global_token(TOK_IDENTIFIER, name), type_node=global_access(arena, type_name, pos), value=value, is_const=is_const, annotations=[], pos=pos, alloc_id=0);
 }
 
+func global_contains(text: String, needle: String) -> Bool {
+    let start: Int = 0;
+    while (start + needle.length() <= text.length()) {
+        let offset: Int = 0;
+        while (offset < needle.length() && text[start + offset] == needle[offset]) { offset++; }
+        if (offset == needle.length()) { return true; }
+        start++;
+    }
+    return needle.length() == 0;
+}
+
+func check_null_global() -> Bool {
+    let symbols: Dict(String, SymbolInfo) = Dict();
+    symbols.put("buffer", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=false));
+    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, current_package_prefix="", current_file_global_aliases=Dict(), global_var_aliases=Dict(), generic_bindings=Dict());
+    let pos: Position = global_position();
+    let value: NodeID = add_null_node(source.arena, NullNode(type=NODE_NULL, pos=pos));
+    let declaration: VarDeclareNode = global_decl(source.arena, "buffer", "String", value, false, pos);
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_global_decl(ref types, ref source, ref program, declaration);
+    if (types.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    return global_contains(text, "@buffer") && global_contains(text, " = null");
+}
+
 func main() -> Int {
+    if (!check_null_global()) {
+        print("FAIL: null String global");
+        return 1;
+    }
     let symbols: Dict(String, SymbolInfo) = Dict();
     let aliases: Dict(String, String) = Dict();
     let imported_aliases: Dict(String, String) = Dict();
