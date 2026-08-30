@@ -78,6 +78,7 @@ func main() -> Int {
     symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false));
     symbols.put("limit", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=true));
     symbols.put("ready", SymbolInfo(reg="poison", type=TYPE_BOOL, origin_type=TYPE_BOOL, is_const=true));
+    symbols.put("mask", SymbolInfo(reg="poison", type=TYPE_UINT32, origin_type=TYPE_UINT32, is_const=true));
     let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=locals, parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=imported_aliases, named_type_ids=named_types, generic_bindings=generics);
     let pos: Position = global_position();
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -88,9 +89,11 @@ func main() -> Int {
     let limit: VarDeclareNode = global_decl(source.arena, "limit", "Int", negative, true, pos);
     let ready_value: NodeID = add_bool_node(source.arena, BooleanNode(type=NODE_BOOL, tok=global_token(TOK_TRUE, "true"), value=1, pos=pos));
     let ready: VarDeclareNode = global_decl(source.arena, "ready", "Bool", ready_value, true, pos);
+    let mask: VarDeclareNode = global_decl(source.arena, "mask", "UInt32", global_int(source.arena, "0x00ff_ffffU", pos), true, pos);
     wir_lower_global_decl(ref types, ref source, ref program, counter);
     wir_lower_global_decl(ref types, ref source, ref program, limit);
     wir_lower_global_decl(ref types, ref source, ref program, ready);
+    wir_lower_global_decl(ref types, ref source, ref program, mask);
 
     let assignment: NodeID = add_var_assign_node(source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=global_token(TOK_IDENTIFIER, "counter"), value=global_int(source.arena, "7", pos), pos=pos));
     let return_value: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=global_access(source.arena, "counter", pos), pos=pos));
@@ -113,7 +116,7 @@ func main() -> Int {
         print("FAIL: global WIR could not be printed");
         return 1;
     }
-    let expected: String = "internal global @counter:i32 = 1\ninternal const @limit:i32 = -2\ninternal const @ready:bool = true\n\ninternal func @use_global() -> i32 {\n^entry:\n    store 7, @counter\n    %8:i32 = load @counter\n    ret %8\n}\n";
+    let expected: String = "internal global @counter:i32 = 1\ninternal const @limit:i32 = -2\ninternal const @ready:bool = true\ninternal const @mask:u32 = 16777215\n\ninternal func @use_global() -> i32 {\n^entry:\n    store 7, @counter\n    %10:i32 = load @counter\n    ret %10\n}\n";
     if (text != expected) {
         print("FAIL: lowered global text is not stable");
         print(text);

@@ -8,6 +8,15 @@ import * from "../../context.wl"
 import * from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+
+func wir_static_cast_target(ref source: Compiler, callee: NodeID) -> Int {
+    let kind: Int = node_tag(callee);
+    if (kind != NODE_VAR_ACCESS && kind != NODE_FIELD_ACCESS) { return 0; }
+    let name: String = format_ast_path(ref source, callee);
+    let target: Int = get_builtin_cast_target(name);
+    if (target != 0) { return target; }
+    return get_cast_target(ref source, name);
+}
 import Position from "../../../frontend/diagnostics.wl"
 
 func wir_truncate_integer(value: UInt128, bits: Int) -> UInt128 {
@@ -137,6 +146,18 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
     let repr: Int = get_repr_type(ref source, source_type);
     let kind: Int = node_tag(node);
+
+    if (kind == NODE_CALL) {
+        let call: CallNode = get_call_node(source.arena, node);
+        let target: Int = wir_static_cast_target(ref source, call.callee);
+        if (target != 0 && call.args is !null && call.args.length() == 1) {
+            let argument: ArgNode = call.args[0];
+            if ((argument.name is null || argument.name.length() == 0) && !argument.is_spread &&
+                get_repr_type(ref source, target) == repr) {
+                return wir_lower_static_value(ref types, ref source, ref program, argument.val, source_type, pos);
+            }
+        }
+    }
 
     if (kind == NODE_NULLPTR &&
         (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR)) {

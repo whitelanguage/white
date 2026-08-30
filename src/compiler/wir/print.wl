@@ -248,6 +248,25 @@ func wir_write_operands(output: strings.Builder, program: WirModule, operands: V
     return;
 }
 
+func wir_memory_order_name(order: WirMemoryOrder) -> String? {
+    if (order == WirMemoryOrder.Relaxed) { return "relaxed"; }
+    if (order == WirMemoryOrder.Acquire) { return "acquire"; }
+    if (order == WirMemoryOrder.Release) { return "release"; }
+    if (order == WirMemoryOrder.AcquireRelease) { return "acq_rel"; }
+    if (order == WirMemoryOrder.SequentiallyConsistent) { return "seq_cst"; }
+    throw Error.InvalidData;
+}
+
+func wir_atomic_op_name(operation: WirAtomicOp) -> String? {
+    if (operation == WirAtomicOp.Exchange) { return "xchg"; }
+    if (operation == WirAtomicOp.Add) { return "add"; }
+    if (operation == WirAtomicOp.Subtract) { return "sub"; }
+    if (operation == WirAtomicOp.BitAnd) { return "and"; }
+    if (operation == WirAtomicOp.BitOr) { return "or"; }
+    if (operation == WirAtomicOp.BitXor) { return "xor"; }
+    throw Error.InvalidData;
+}
+
 func wir_write_instruction(output: strings.Builder, program: WirModule, instruction: WirInstruction) -> Void? {
     if (instruction.result != NO_WIR_VALUE) {
         wir_write_value(output, program, instruction.result)?;
@@ -274,6 +293,23 @@ func wir_write_instruction(output: strings.Builder, program: WirModule, instruct
         wir_write_value(output, program, instruction.operands[0])?;
     } else if (instruction.opcode == WirOpcode.Store) {
         output.write("store ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.AtomicLoad) {
+        output.write("atomic.load ")?;
+        output.write(wir_memory_order_name(instruction.memory_order)?)?;
+        output.write(" ")?;
+        wir_write_value(output, program, instruction.operands[0])?;
+    } else if (instruction.opcode == WirOpcode.AtomicStore) {
+        output.write("atomic.store ")?;
+        output.write(wir_memory_order_name(instruction.memory_order)?)?;
+        output.write(" ")?;
+        wir_write_operands(output, program, instruction.operands, 0)?;
+    } else if (instruction.opcode == WirOpcode.AtomicRmw) {
+        output.write("atomic.rmw.")?;
+        output.write(wir_atomic_op_name(instruction.atomic_op)?)?;
+        output.write(" ")?;
+        output.write(wir_memory_order_name(instruction.memory_order)?)?;
+        output.write(" ")?;
         wir_write_operands(output, program, instruction.operands, 0)?;
     } else if (instruction.opcode == WirOpcode.Field) {
         output.write("field ")?;

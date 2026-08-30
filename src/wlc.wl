@@ -12,6 +12,7 @@ import "frontend/diagnostics.wl" as WhitelangExceptions
 import "compiler/pipeline.wl" as WhitelangCompiler
 import "compiler/context.wl" as WhitelangUtils
 import "compiler/target.wl" as WhitelangTarget
+import "compiler/wir/pipeline.wl" as WhitelangWIR
 
 
 const VERSION      : String = "devel";
@@ -34,6 +35,7 @@ struct CompilerConfig(
     dump_ir         : Bool,
     keep_temps      : Bool,
     is_shared       : Bool,
+    backend         : String,
     target_triple   : String,
     sysroot         : String
 )
@@ -61,6 +63,7 @@ func print_usage() -> Void {
     print("  --dump-ir              Dump LLVM IR to stdout");
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
+    print("  --backend <name>       Select the compiler backend (llvm or wir)");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -216,6 +219,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         dump_ir         = false,
         keep_temps      = false,
         is_shared       = false,
+        backend         = "llvm",
         target_triple   = "native",
         sysroot         = ""
     );
@@ -233,6 +237,15 @@ func main(argc: Int, ptr argv: String) -> Int {
         else if (arg == "-S") { cfg.is_asm_only = true; }
         else if (arg == "--shared") { cfg.is_shared = true; }
         else if (arg == "--emit-llvm") { cfg.is_emit_llvm = true; }
+        else if (arg == "--backend") {
+            i++;
+            if (i >= argc) { print("Error: --backend requires an argument"); return 1; }
+            cfg.backend = process.argument(argc, argv, i);
+        }
+        else if (arg.starts_with("--backend=")) {
+            if (arg.length() == 10) { print("Error: --backend requires an argument"); return 1; }
+            cfg.backend = arg.slice(10, arg.length());
+        }
         else if (arg == "-g") { cfg.debug_info = true; }
         else if (arg == "-O0") { cfg.opt_level = "-O0"; }
         else if (arg == "-O1") { cfg.opt_level = "-O1"; }
@@ -296,6 +309,10 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     if (cfg.source_file.length() == 0) {
         print("Error: No input file.");
+        return 1;
+    }
+    if (cfg.backend != "llvm" && cfg.backend != "wir") {
+        print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm' or 'wir'.");
         return 1;
     }
     if (!WhitelangTarget.select_target(cfg.target_triple)) {
@@ -401,8 +418,31 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
-    WhitelangCompiler.compile(ref compiler, ast);
-    if (cfg.verbose) { print("Lowered source to LLVM IR"); }
+    if (cfg.backend == "wir") {
+        WhitelangCompiler.prepare_program(ref compiler, ast);
+        WhitelangExceptions.check_errors_and_abort();
+
+        let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_llvm(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits())?;
+        catch(err) {
+            compiler.output_file.close();
+            print("Build Failed: WIR backend ran out of memory while producing LLVM IR.");
+            return 1;
+        }
+        if (result.errors.length() != 0) {
+            compiler.output_file.close();
+            let error_index: Int = 0;
+            while (error_index < result.errors.length()) {
+                print("InternalCompilerError: " + result.errors[error_index]);
+                error_index++;
+            }
+            return 1;
+        }
+        compiler.output_file.write(result.text);
+        compiler.output_file.close();
+    } else {
+        WhitelangCompiler.compile(ref compiler, ast);
+    }
+    if (cfg.verbose) { print("Lowered source through the " + cfg.backend + " backend"); }
 
     WhitelangExceptions.check_errors_and_abort();
     if (compiler.output_file.last_error() != file.Error.None) {

@@ -585,12 +585,15 @@ func unbind_namespace(ref c: Compiler, name: String) -> Void {
 func find_symbol(ref c: Compiler, name: String) -> SymbolInfo {
     let curr: Scope = c.symbol_table;
     while true {
-        let info: SymbolInfo = curr.table.lookup(name);
-        if (has_symbol(info)) { return info; }
-        if (curr.parent < 0) { break; }
+        if (curr.table is !null) {
+            let info: SymbolInfo = curr.table.lookup(name);
+            if (has_symbol(info)) { return info; }
+        }
+        if (curr.parent < 0 || c.scope_stack is null || curr.parent >= c.scope_stack.length()) { break; }
         curr = c.scope_stack[curr.parent];
     }
 
+    if (c.global_symbol_table is null) { return SymbolInfo(); }
     if (c.current_package_prefix != "") {
         let fallback: SymbolInfo = c.global_symbol_table.lookup(c.current_package_prefix + name);
         if (has_symbol(fallback)) { return fallback; }
@@ -599,13 +602,15 @@ func find_symbol(ref c: Compiler, name: String) -> SymbolInfo {
     let g_info: SymbolInfo = c.global_symbol_table.lookup(name);
     if (has_symbol(g_info)) { return g_info; }
 
-    let mapped_global: String = c.current_file_global_aliases.lookup(name);
+    let mapped_global: String = null;
+    if (c.current_file_global_aliases is !null) { mapped_global = c.current_file_global_aliases.lookup(name); }
     if (mapped_global is !null) {
         let alias_info: SymbolInfo = c.global_symbol_table.lookup(mapped_global);
         if (has_symbol(alias_info)) { return alias_info; }
     }
 
-    let g_alias: String = c.global_var_aliases.lookup(name);
+    let g_alias: String = null;
+    if (c.global_var_aliases is !null) { g_alias = c.global_var_aliases.lookup(name); }
     if (g_alias is !null) {
         let alias_info: SymbolInfo = c.global_symbol_table.lookup(g_alias);
         if (has_symbol(alias_info)) { return alias_info; }
@@ -1833,13 +1838,14 @@ func get_builtin_cast_target(name: String) -> Int {
 }
 
 func find_named_decl(ref c: Compiler, name: String) -> NamedTypeInfo {
+    if (c.named_types is null) { return NamedTypeInfo(); }
     let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + name);
     if (!has_named_type(info)) { info = c.named_types.lookup(name); }
-    if (!has_named_type(info)) {
+    if (!has_named_type(info) && c.current_file_type_aliases is !null) {
         let mapped: String = c.current_file_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
-    if (!has_named_type(info)) {
+    if (!has_named_type(info) && c.global_type_aliases is !null) {
         let mapped: String = c.global_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
@@ -2030,9 +2036,11 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             h_curr = c.scope_stack[h_curr.parent];
         }
 
-        let f_info: FuncInfo = c.func_table.lookup(v.name_tok.value);
-        if (!has_func(f_info) && c.current_package_prefix != "") { f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value); }
-        if (has_func(f_info)) { return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0)); }
+        if (c.func_table is !null) {
+            let f_info: FuncInfo = c.func_table.lookup(v.name_tok.value);
+            if (!has_func(f_info) && c.current_package_prefix != "") { f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value); }
+            if (has_func(f_info)) { return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0)); }
+        }
 
         return 0;
     }
@@ -2072,7 +2080,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         }
 
         let obj_base: Int = node_tag(f.obj);
-        if (obj_base == NODE_VAR_ACCESS) {
+        if (obj_base == NODE_VAR_ACCESS && c.struct_table is !null) {
             let v_node: VarAccessNode = get_var_access_node(c.arena, f.obj);
             let target_name: String = v_node.name_tok.value;
             if (c.current_package_prefix != "") {
@@ -2724,20 +2732,20 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         let name: String = named.name_tok.value;
         let alias: String = null;
         if is_function {
-            alias = c.current_file_func_aliases.lookup(name);
+            if (c.current_file_func_aliases is !null) { alias = c.current_file_func_aliases.lookup(name); }
         } else {
-            alias = c.current_file_type_aliases.lookup(name);
+            if (c.current_file_type_aliases is !null) { alias = c.current_file_type_aliases.lookup(name); }
         }
 
         if (alias is !null &&
-            ((is_function && has_template(c.generic_funcs.lookup(alias))) ||
-             (!is_function && has_template(c.generic_structs.lookup(alias))))) {
+            ((is_function && c.generic_funcs is !null && has_template(c.generic_funcs.lookup(alias))) ||
+             (!is_function && c.generic_structs is !null && has_template(c.generic_structs.lookup(alias))))) {
             return alias;
         }
         if (c.current_package_prefix != "") {
             let local: String = c.current_package_prefix + name;
-            if ((is_function && has_template(c.generic_funcs.lookup(local))) ||
-                (!is_function && has_template(c.generic_structs.lookup(local)))) {
+            if ((is_function && c.generic_funcs is !null && has_template(c.generic_funcs.lookup(local))) ||
+                (!is_function && c.generic_structs is !null && has_template(c.generic_structs.lookup(local)))) {
                 return local;
             }
         }
@@ -2766,7 +2774,8 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         }
 
         let root: VarAccessNode = get_var_access_node(c.arena, current);
-        let prefix: String = c.current_file_visible_prefixes.lookup(root.name_tok.value);
+        let prefix: String = null;
+        if (c.current_file_visible_prefixes is !null) { prefix = c.current_file_visible_prefixes.lookup(root.name_tok.value); }
         if (prefix is !null) {
             return module_member_name(prefix, path_parts, field.field_name);
         }
@@ -2774,9 +2783,9 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         let source: String = module_member_name(root.name_tok.value + ".", path_parts, field.field_name);
         let alias: String = null;
         if is_function {
-            alias = c.current_file_func_aliases.lookup(source);
+            if (c.current_file_func_aliases is !null) { alias = c.current_file_func_aliases.lookup(source); }
         } else {
-            alias = c.current_file_type_aliases.lookup(source);
+            if (c.current_file_type_aliases is !null) { alias = c.current_file_type_aliases.lookup(source); }
         }
 
         if (alias is !null) {

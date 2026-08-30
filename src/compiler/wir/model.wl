@@ -58,6 +58,9 @@ enum WirOpcode {
     StackAlloc,
     Load,
     Store,
+    AtomicLoad,
+    AtomicStore,
+    AtomicRmw,
     Field,
     FieldAddress,
     Index,
@@ -118,6 +121,25 @@ enum WirOpcode {
     Return,
     Trap,
     Unreachable
+}
+
+enum WirMemoryOrder {
+    None,
+    Relaxed,
+    Acquire,
+    Release,
+    AcquireRelease,
+    SequentiallyConsistent
+}
+
+enum WirAtomicOp {
+    None,
+    Exchange,
+    Add,
+    Subtract,
+    BitAnd,
+    BitOr,
+    BitXor
 }
 
 enum WirLinkage {
@@ -186,6 +208,8 @@ struct WirInstruction(
     opcode: WirOpcode,
     type_id: WirTypeID,
     call_type: WirTypeID,
+    atomic_op: WirAtomicOp,
+    memory_order: WirMemoryOrder,
     result: WirValueID,
     operands: Vector(WirValueID),
     edges: Vector(WirEdge),
@@ -207,6 +231,7 @@ struct WirFunction(
     blocks: Vector(WirBlockID),
     entry: WirBlockID,
     linkage: WirLinkage,
+    export_symbol: Bool,
     abi: WirABI
 )
 
@@ -216,6 +241,7 @@ struct WirGlobal(
     address: WirValueID,
     initializer: WirValueID,
     linkage: WirLinkage,
+    export_symbol: Bool,
     is_const: Bool,
     alignment: Int
 )
@@ -253,6 +279,7 @@ struct WirArena(
 struct WirModule(
     target: String,
     pointer_bits: Int,
+    is_shared: Bool,
     data_layout: WirDataLayout,
     files: Vector(WirSourceFile),
     arena: WirArena,

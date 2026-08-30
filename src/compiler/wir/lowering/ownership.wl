@@ -91,7 +91,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
 
     let struct_info: StructInfo = StructInfo();
     if (source.struct_id_map is !null) { struct_info = source.struct_id_map.lookup("" + repr); }
-    if (has_struct(struct_info) && !struct_info.is_class && !struct_info.is_interface && !struct_info.is_enum) {
+    if (is_value_struct(ref source, source_type) && has_struct(struct_info)) {
         let i: Int = 0;
         while (struct_info.fields is !null && i < struct_info.fields.length()) {
             let field: FieldInfo = struct_info.fields[i];

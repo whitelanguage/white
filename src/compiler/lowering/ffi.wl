@@ -24,30 +24,6 @@ func func_callconv(info: FuncInfo) -> String {
     if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) { return ""; }
     return extern_callconv(info.abi_name);
 }
-func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
-    if (name is null || name.length() == 0) { return; }
-
-    let i: Int = 0;
-    while (i < name.length()) {
-        let ch: Char = name[i];
-        let valid: Bool = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-                            (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' ||
-                            ch == '+' || ch == '.';
-        if (!valid) {
-            throw_extern_error(pos, "Invalid extern library name '" + name + "'. Use a linker library name without paths or flags.");
-            return;
-        }
-        i += 1;
-    }
-
-    i = 0;
-    while (i < c.extra_libs.length()) {
-        if (c.extra_libs[i] == name) { return; }
-        i += 1;
-    }
-    c.extra_libs.append(name);
-}
-
 func backend_symbol_signature(name: String) -> String {
     if (get_target_os() != sys.Os.Windows) { return ""; }
     let size_ty: String = get_size_llvm_type();

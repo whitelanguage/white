@@ -212,22 +212,37 @@ func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
     else if (raw.ends_with("LL") || raw.ends_with("ll") || raw.ends_with("UL") || raw.ends_with("ul")) { end -= 2; }
     else if (raw.ends_with("U") || raw.ends_with("u") || raw.ends_with("L") || raw.ends_with("l")) { end -= 1; }
 
-    let value: UInt128 = UInt128(0);
+    let base: UInt128 = UInt128(10U);
     let i: Int = 0;
-    while (i < end) {
+    if (end >= 2 && raw[0] == '0') {
+        if (raw[1] == 'x' || raw[1] == 'X') { base = UInt128(16U); i = 2; }
+        else if (raw[1] == 'b' || raw[1] == 'B') { base = UInt128(2U); i = 2; }
+        else if (raw[1] == 'o' || raw[1] == 'O') { base = UInt128(8U); i = 2; }
+    }
+    if (i == end) {
+        throw_invalid_syntax(pos, "Integer literal has no digits.");
+        return UInt128(0);
+    }
+
+    let maximum: UInt128 = 340282366920938463463374607431768211455ULL;
+    let value: UInt128 = UInt128(0);
+    while (i != end) {
         let ch: Char = raw[i];
         if (ch != '_') {
-            if (ch < '0' || ch > '9') {
+            let digit: Int = -1;
+            if (ch >= '0' && ch <= '9') { digit = Int(ch) - Int('0'); }
+            else if (ch >= 'a' && ch <= 'f') { digit = Int(ch) - Int('a') + 10; }
+            else if (ch >= 'A' && ch <= 'F') { digit = Int(ch) - Int('A') + 10; }
+            if (digit == -1 || UInt128(digit) >= base) {
                 throw_invalid_syntax(pos, "Invalid 128-bit integer literal.");
                 return UInt128(0);
             }
-            let digit: Int = Int(ch) - 48;
-            if (value > 34028236692093846346337460743176821145ULL ||
-                (value == 34028236692093846346337460743176821145ULL && digit > 5)) {
+            let wide_digit: UInt128 = UInt128(digit);
+            if (value > (maximum - wide_digit) / base) {
                 throw_overflow_error(pos, "128-bit integer literal is out of range.");
                 return UInt128(0);
             }
-            value = value * UInt128(10) + UInt128(digit);
+            value = value * base + wide_digit;
         }
         i += 1;
     }

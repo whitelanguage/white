@@ -58,6 +58,33 @@ func check_string_concat() -> Bool {
     return true;
 }
 
+func check_primitive_concat() -> Bool {
+    let functions: Dict(String, FuncInfo) = Dict();
+    let links: Dict(String, String) = Dict();
+    let string_args: Vector(Struct) = [TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)];
+    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=string_args, arg_names=["left", "right"], is_varargs=false, abi_name="C"));
+    functions.put("runtime.format_int", FuncInfo(name="runtime.format_int", base_name="format_int", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="C"));
+    links.put("string_concat", "runtime.concat");
+    links.put("format_int", "runtime.format_int");
+    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict(), func_table=functions, compiler_link=links);
+    let pos: Position = string_position();
+    let prefix: NodeID = string_literal(source.arena, "value=", pos);
+    let value: NodeID = string_access(source.arena, "value", pos);
+    let sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=prefix, op_tok=string_token(TOK_PLUS, "+"), right=value, pos=pos));
+    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
+    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let info: FuncInfo = FuncInfo(name="describe", base_name="describe", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    wir_lower_function_body(ref types, ref source, ref program, info, body);
+    if (types.errors.length() != 0) { print("FAIL: primitive String concatenation lowering: ", types.errors[0]); return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { print("FAIL: primitive String concatenation verification: ", errors[0]); return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    return string_contains(text, "call @runtime.format_int") && string_contains(text, "call @runtime.concat");
+}
+
 func string_contains(text: String, needle: String) -> Bool {
     let start: Int = 0;
     while (start + needle.length() <= text.length()) {
@@ -104,6 +131,7 @@ func main() -> Int {
     catch(err) { print("FAIL: String LLVM emission failed"); return 1; }
     if (emitted.errors.length() != 0) { print("FAIL: String WIR was rejected: ", emitted.errors[0]); return 1; }
     if (!check_string_concat()) { print("FAIL: String concatenation lowering"); return 1; }
+    if (!check_primitive_concat()) { print("FAIL: primitive String concatenation lowering"); return 1; }
     print("PASS: WIR String literal lowering");
     return 0;
 }

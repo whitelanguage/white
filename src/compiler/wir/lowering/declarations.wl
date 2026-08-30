@@ -60,7 +60,11 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     let abi: WirABI = wir_function_abi(ref types, info);
     let linkage: WirLinkage = wir_function_linkage(info, abi);
     if (linkage == WirLinkage.External && abi == WirABI.White) { return NO_WIR_FUNC; }
-    return wir_add_function(ref program, info.name, parameters, result, info.is_varargs, linkage, abi);
+    let function_id: WirFuncID = wir_add_function(ref program, info.name, parameters, result, info.is_varargs, linkage, abi);
+    if (source.is_shared && (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+        program.arena.functions[wir_id_index(UInt32(function_id))].export_symbol = true;
+    }
+    return function_id;
 }
 
 func wir_find_function(program: WirModule, name: String) -> WirFuncID {

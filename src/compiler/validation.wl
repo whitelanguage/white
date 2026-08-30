@@ -5,6 +5,30 @@ import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
+func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
+    if (name is null || name.length() == 0) { return; }
+
+    let i: Int = 0;
+    while (i < name.length()) {
+        let ch: Char = name[i];
+        let valid: Bool = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                          (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' ||
+                          ch == '+' || ch == '.';
+        if (!valid) {
+            throw_extern_error(pos, "Invalid extern library name '" + name + "'. Use a linker library name without paths or flags.");
+            return;
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < c.extra_libs.length()) {
+        if (c.extra_libs[i] == name) { return; }
+        i++;
+    }
+    c.extra_libs.append(name);
+}
+
 func expr_root_name(ref c: Compiler, node: NodeID) -> String {
     if (!has_node(node)) { return ""; }
     let base: Int = node_tag(node);

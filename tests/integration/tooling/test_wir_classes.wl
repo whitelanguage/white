@@ -100,13 +100,19 @@ func main() -> Int {
     let saw_field_address: Bool = false;
     let saw_interface_value: Bool = false;
     let saw_field_release: Bool = false;
+    let released_method_self: Bool = false;
     let allocation_calls: Int = 0;
     let indirect_calls: Int = 0;
+    let method_id: WirFuncID = wir_find_function(result.program, "Box.get_value");
+    let method_self: WirValueID = result.program.arena.functions[wir_id_index(UInt32(method_id))].parameters[0];
     let i: Int = 0;
     while (i < result.program.arena.instructions.length()) {
         if (result.program.arena.instructions[i].opcode == WirOpcode.FieldAddress) { saw_field_address = true; }
         if (result.program.arena.instructions[i].opcode == WirOpcode.StructValue) { saw_interface_value = true; }
-        if (result.program.arena.instructions[i].opcode == WirOpcode.Release) { saw_field_release = true; }
+        if (result.program.arena.instructions[i].opcode == WirOpcode.Release) {
+            saw_field_release = true;
+            if (result.program.arena.instructions[i].operands[0] == method_self) { released_method_self = true; }
+        }
         if (result.program.arena.instructions[i].opcode == WirOpcode.Call) {
             let instruction: WirInstruction = result.program.arena.instructions[i];
             let callee_value: WirValue = result.program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
@@ -125,6 +131,10 @@ func main() -> Int {
     }
     if (allocation_calls != 2 || !saw_interface_value || !saw_field_release || wir_find_function(result.program, "__wl_drop.100") == NO_WIR_FUNC) {
         print("FAIL: class construction or interface conversion did not lower to primitive WIR");
+        return 1;
+    }
+    if (released_method_self) {
+        print("FAIL: class method released its borrowed self parameter");
         return 1;
     }
     let emitted: WirLLVMResult = emit_wir_llvm(result.program)?;

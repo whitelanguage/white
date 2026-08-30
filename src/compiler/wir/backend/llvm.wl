@@ -3,6 +3,8 @@ import "strings"
 import * from "../model.wl"
 import * from "../verify.wl"
 import wir_value_type from "../builder.wl"
+import wir_type_layout from "../layout.wl"
+import * from "llvm_windows.wl"
 
 struct WirLLVMResult(text: String, errors: Vector(String))
 
@@ -263,6 +265,25 @@ func llvm_callee_callconv(program: WirModule, value_id: WirValueID) -> String {
     return llvm_callconv(program, type.abi);
 }
 
+func llvm_memory_order(order: WirMemoryOrder) -> String? {
+    if (order == WirMemoryOrder.Relaxed) { return "monotonic"; }
+    if (order == WirMemoryOrder.Acquire) { return "acquire"; }
+    if (order == WirMemoryOrder.Release) { return "release"; }
+    if (order == WirMemoryOrder.AcquireRelease) { return "acq_rel"; }
+    if (order == WirMemoryOrder.SequentiallyConsistent) { return "seq_cst"; }
+    throw Error.InvalidData;
+}
+
+func llvm_atomic_op(operation: WirAtomicOp) -> String? {
+    if (operation == WirAtomicOp.Exchange) { return "xchg"; }
+    if (operation == WirAtomicOp.Add) { return "add"; }
+    if (operation == WirAtomicOp.Subtract) { return "sub"; }
+    if (operation == WirAtomicOp.BitAnd) { return "and"; }
+    if (operation == WirAtomicOp.BitOr) { return "or"; }
+    if (operation == WirAtomicOp.BitXor) { return "xor"; }
+    throw Error.InvalidData;
+}
+
 func llvm_instruction_supported(program: WirModule, instruction: WirInstruction) -> Bool {
     let opcode: WirOpcode = instruction.opcode;
     return llvm_binary_opcode(program, instruction).length() != 0 || llvm_compare_opcode(program, instruction).length() != 0 ||
@@ -271,7 +292,8 @@ func llvm_instruction_supported(program: WirModule, instruction: WirInstruction)
            opcode == WirOpcode.StructValue || opcode == WirOpcode.ArrayValue ||
            opcode == WirOpcode.NullCheck || opcode == WirOpcode.BoundsCheck ||
            opcode == WirOpcode.Retain || opcode == WirOpcode.Release ||
-           opcode == WirOpcode.StackAlloc || opcode == WirOpcode.Load || opcode == WirOpcode.Store || opcode == WirOpcode.Call ||
+           opcode == WirOpcode.StackAlloc || opcode == WirOpcode.Load || opcode == WirOpcode.Store ||
+           opcode == WirOpcode.AtomicLoad || opcode == WirOpcode.AtomicStore || opcode == WirOpcode.AtomicRmw || opcode == WirOpcode.Call ||
            opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Trap || opcode == WirOpcode.Unreachable ||
            opcode == WirOpcode.Negate || opcode == WirOpcode.FloatNegate || opcode == WirOpcode.Not;
 }
@@ -483,6 +505,34 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         llvm_write_typed_value(output, program, instruction.operands[0])?;
         output.write(", ptr ")?;
         llvm_write_value(output, program, instruction.operands[1])?;
+    } else if (instruction.opcode == WirOpcode.AtomicLoad) {
+        output.write("load atomic ")?;
+        llvm_write_type(output, program, instruction.type_id)?;
+        output.write(", ptr ")?;
+        llvm_write_value(output, program, instruction.operands[0])?;
+        output.write(" ")?;
+        output.write(llvm_memory_order(instruction.memory_order)?)?;
+        output.write(", align ")?;
+        output.write_int(wir_type_layout(program, instruction.type_id).alignment)?;
+    } else if (instruction.opcode == WirOpcode.AtomicStore) {
+        let value_type: WirTypeID = wir_value_type(program, instruction.operands[0]);
+        output.write("store atomic ")?;
+        llvm_write_typed_value(output, program, instruction.operands[0])?;
+        output.write(", ptr ")?;
+        llvm_write_value(output, program, instruction.operands[1])?;
+        output.write(" ")?;
+        output.write(llvm_memory_order(instruction.memory_order)?)?;
+        output.write(", align ")?;
+        output.write_int(wir_type_layout(program, value_type).alignment)?;
+    } else if (instruction.opcode == WirOpcode.AtomicRmw) {
+        output.write("atomicrmw ")?;
+        output.write(llvm_atomic_op(instruction.atomic_op)?)?;
+        output.write(" ptr ")?;
+        llvm_write_value(output, program, instruction.operands[0])?;
+        output.write(", ")?;
+        llvm_write_typed_value(output, program, instruction.operands[1])?;
+        output.write(" ")?;
+        output.write(llvm_memory_order(instruction.memory_order)?)?;
     } else if (instruction.opcode == WirOpcode.Negate) {
         output.write("sub ")?;
         llvm_write_type(output, program, instruction.type_id)?;
@@ -623,6 +673,10 @@ func llvm_linkage(linkage: WirLinkage) -> String {
     return "";
 }
 
+func llvm_windows_export(program: WirModule, export_symbol: Bool) -> Bool {
+    return export_symbol && program.target.ends_with("windows-msvc");
+}
+
 func llvm_write_index_storage(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
     let block_index: Int = 0;
     while (block_index < function.blocks.length()) {
@@ -645,12 +699,14 @@ func llvm_write_index_storage(output: strings.Builder, program: WirModule, funct
 }
 
 func llvm_write_function(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
+    if (function.linkage == WirLinkage.External && llvm_windows_emits_memop(program, function.name)) { return; }
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     if (function.linkage == WirLinkage.External) {
         output.write("declare ")?;
     } else {
         output.write("define ")?;
         output.write(llvm_linkage(function.linkage))?;
+        if (llvm_windows_export(program, function.export_symbol)) { output.write("dllexport ")?; }
     }
     output.write(llvm_function_callconv(program, function))?;
     llvm_write_type(output, program, signature.result)?;
@@ -710,6 +766,7 @@ func llvm_write_global(output: strings.Builder, program: WirModule, global: WirG
         return;
     }
     output.write(llvm_linkage(global.linkage))?;
+    if (llvm_windows_export(program, global.export_symbol)) { output.write("dllexport ")?; }
     if (global.is_const) { output.write("constant ")?; } else { output.write("global ")?; }
     llvm_write_type(output, program, global.type_id)?;
     output.write(" ")?;
@@ -773,6 +830,7 @@ func emit_wir_llvm(program: WirModule) -> WirLLVMResult? {
     output.write("\"\n\n")?;
     if (llvm_module_uses_trap(program)) { output.write("declare void @llvm.trap()\n\n")?; }
     llvm_write_arc_declarations(output, program)?;
+    llvm_write_windows_support(output, program)?;
     let wrote_struct: Bool = false;
     let i: Int = 0;
     while (i < program.arena.types.length()) {

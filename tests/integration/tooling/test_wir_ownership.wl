@@ -62,6 +62,7 @@ func main() -> Int {
     let pos: Position = ownership_position();
     let holder_type: Int = 103;
     let string_array_type: Int = 104;
+    source.struct_id_map.put("" + TYPE_STRING, StructInfo(name="$String", type_id=TYPE_STRING, fields=[], is_class=false, is_enum=false, is_interface=false));
     let fields: Vector(Struct) = [FieldInfo(name="text", type=TYPE_STRING, llvm_type="", offset=0, is_const=false)];
     source.struct_id_map.put("" + holder_type, StructInfo(name="Holder", type_id=holder_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
     source.array_info_map.put("" + string_array_type, ArrayInfo(base_type=TYPE_STRING, size=2, llvm_name=""));

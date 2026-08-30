@@ -396,7 +396,7 @@ func wir_cast_matches(program: WirModule, opcode: WirOpcode, source_id: WirTypeI
 
     if (opcode == WirOpcode.Truncate) { return source_integer && target_integer && source.bits > target.bits; }
     if (opcode == WirOpcode.SignExtend) { return source.kind == WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
-    if (opcode == WirOpcode.ZeroExtend) { return source.kind == WirTypeKind.UnsignedInt && target_integer && source.bits < target.bits; }
+    if (opcode == WirOpcode.ZeroExtend) { return source_integer && source.kind != WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
     if (opcode == WirOpcode.FloatExtend) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits < target.bits; }
     if (opcode == WirOpcode.FloatTruncate) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits > target.bits; }
     if (opcode == WirOpcode.SignedIntToFloat) { return source.kind == WirTypeKind.SignedInt && target.kind == WirTypeKind.FloatType; }
@@ -431,6 +431,42 @@ func wir_float_comparison(opcode: WirOpcode) -> Bool {
 
 func wir_check_no_result(program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
     if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) { wir_report(errors, "side-effect instruction produces a value"); }
+}
+
+func wir_atomic_load_order(order: WirMemoryOrder) -> Bool {
+    return order == WirMemoryOrder.Relaxed || order == WirMemoryOrder.Acquire || order == WirMemoryOrder.SequentiallyConsistent;
+}
+
+func wir_atomic_store_order(order: WirMemoryOrder) -> Bool {
+    return order == WirMemoryOrder.Relaxed || order == WirMemoryOrder.Release || order == WirMemoryOrder.SequentiallyConsistent;
+}
+
+func wir_atomic_rmw_order(order: WirMemoryOrder) -> Bool {
+    return order == WirMemoryOrder.Relaxed || order == WirMemoryOrder.Acquire || order == WirMemoryOrder.Release ||
+           order == WirMemoryOrder.AcquireRelease || order == WirMemoryOrder.SequentiallyConsistent;
+}
+
+func wir_atomic_rmw_op(operation: WirAtomicOp) -> Bool {
+    return operation == WirAtomicOp.Exchange || operation == WirAtomicOp.Add || operation == WirAtomicOp.Subtract ||
+           operation == WirAtomicOp.BitAnd || operation == WirAtomicOp.BitOr || operation == WirAtomicOp.BitXor;
+}
+
+func wir_check_atomic_pointer(program: WirModule, instruction: WirInstruction, address_index: Int, errors: Vector(String)) -> WirTypeID {
+    if (address_index >= instruction.operands.length() || !wir_value_valid(program, instruction.operands[address_index])) {
+        wir_report(errors, "atomic instruction requires a valid address");
+        return NO_WIR_TYPE;
+    }
+    let pointer_type: WirTypeID = wir_value_type(program, instruction.operands[address_index]);
+    if (!wir_is_pointer_type(program, pointer_type)) {
+        wir_report(errors, "atomic instruction address is not a pointer");
+        return NO_WIR_TYPE;
+    }
+    let element: WirTypeID = program.arena.types[wir_id_index(UInt32(pointer_type))].element;
+    if (!wir_is_integer_type(program, element)) {
+        wir_report(errors, "atomic instruction requires integer storage");
+        return NO_WIR_TYPE;
+    }
+    return element;
 }
 
 func wir_constant_index(program: WirModule, value_id: WirValueID) -> Int {
@@ -681,9 +717,43 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             let value_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
             let pointer_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
             if (!wir_is_pointer_type(program, pointer_type_id) || program.arena.types[wir_id_index(UInt32(pointer_type_id))].element != value_type_id) {
-                wir_report(errors, "stored value does not match the pointer element type");
+                let expected_type_id: WirTypeID = NO_WIR_TYPE;
+                if (wir_is_pointer_type(program, pointer_type_id)) { expected_type_id = program.arena.types[wir_id_index(UInt32(pointer_type_id))].element; }
+                let function_name: String = "<unknown>";
+                let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+                if (wir_func_valid(program, block.function)) { function_name = program.arena.functions[wir_id_index(UInt32(block.function))].name; }
+                wir_report(errors, "stored value type " + UInt32(value_type_id) + " does not match pointer element type " + UInt32(expected_type_id) + " in function '" + function_name + "'");
             }
         }
+    } else if (opcode == WirOpcode.AtomicLoad) {
+        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || instruction.result == NO_WIR_VALUE) {
+            wir_report(errors, "atomic load requires one address and one result");
+        }
+        let element: WirTypeID = wir_check_atomic_pointer(program, instruction, 0, errors);
+        if (element != NO_WIR_TYPE && instruction.type_id != element) { wir_report(errors, "atomic load result does not match the pointer element type"); }
+        if (!wir_atomic_load_order(instruction.memory_order)) { wir_report(errors, "atomic load has an invalid memory order"); }
+        if (instruction.atomic_op != WirAtomicOp.None) { wir_report(errors, "atomic load contains an RMW operation"); }
+    } else if (opcode == WirOpcode.AtomicStore) {
+        wir_check_no_result(program, instruction, errors);
+        if (instruction.operands.length() != 2 || instruction.edges.length() != 0) {
+            wir_report(errors, "atomic store requires a value and an address");
+        }
+        let element: WirTypeID = wir_check_atomic_pointer(program, instruction, 1, errors);
+        if (element != NO_WIR_TYPE && (!wir_value_valid(program, instruction.operands[0]) || wir_value_type(program, instruction.operands[0]) != element)) {
+            wir_report(errors, "atomic store value does not match the pointer element type");
+        }
+        if (!wir_atomic_store_order(instruction.memory_order)) { wir_report(errors, "atomic store has an invalid memory order"); }
+        if (instruction.atomic_op != WirAtomicOp.None) { wir_report(errors, "atomic store contains an RMW operation"); }
+    } else if (opcode == WirOpcode.AtomicRmw) {
+        if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || instruction.result == NO_WIR_VALUE) {
+            wir_report(errors, "atomic RMW requires an address, a value, and a result");
+        }
+        let element: WirTypeID = wir_check_atomic_pointer(program, instruction, 0, errors);
+        if (element != NO_WIR_TYPE && (!wir_value_valid(program, instruction.operands[1]) || wir_value_type(program, instruction.operands[1]) != element || instruction.type_id != element)) {
+            wir_report(errors, "atomic RMW value and result must match the pointer element type");
+        }
+        if (!wir_atomic_rmw_op(instruction.atomic_op)) { wir_report(errors, "atomic RMW has an invalid operation"); }
+        if (!wir_atomic_rmw_order(instruction.memory_order)) { wir_report(errors, "atomic RMW has an invalid memory order"); }
     } else if (opcode == WirOpcode.Field) {
         wir_check_field(program, instruction, false, errors);
     } else if (opcode == WirOpcode.FieldAddress) {
@@ -718,7 +788,18 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
                     wir_report(errors, "direct call signature does not match the function");
                 }
                 let argument_count: Int = instruction.operands.length() - 1;
-                if ((!signature.variadic && argument_count != signature.parameters.length()) || (signature.variadic && argument_count < signature.parameters.length())) { wir_report(errors, "call argument count does not match the function type"); }
+                if ((!signature.variadic && argument_count != signature.parameters.length()) || (signature.variadic && argument_count < signature.parameters.length())) {
+                    let callee_name: String = "indirect call";
+                    if (callee.kind == WirValueKind.Function && wir_func_valid(program, WirFuncID(callee.owner))) {
+                        callee_name = "call to '" + program.arena.functions[wir_id_index(callee.owner)].name + "'";
+                    }
+                    let caller_name: String = "unknown function";
+                    if (wir_block_valid(program, block_id)) {
+                        let caller: WirFuncID = program.arena.blocks[wir_id_index(UInt32(block_id))].function;
+                        if (wir_func_valid(program, caller)) { caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'"; }
+                    }
+                    wir_report(errors, callee_name + " in " + caller_name + " expects " + signature.parameters.length() + " arguments, got " + argument_count);
+                }
                 let argument_index: Int = 0;
                 while (argument_index < signature.parameters.length() && argument_index < argument_count) {
                     let argument_id: WirValueID = instruction.operands[argument_index + 1];
@@ -812,7 +893,6 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
         if (function.parameters.length() != function_type.parameters.length()) { wir_report(errors, "function parameter count does not match its type"); }
         if (function.abi != function_type.abi) { wir_report(errors, "function ABI does not match its type"); }
         if (function.linkage == WirLinkage.External && function.abi == WirABI.White) { wir_report(errors, "external function uses the White ABI"); }
-        if (function.linkage != WirLinkage.External && function.abi != WirABI.White) { wir_report(errors, "defined function uses a foreign ABI"); }
         if (function_type.variadic && function.abi != WirABI.C) { wir_report(errors, "variadic function does not use the C ABI"); }
         let j: Int = 0;
         while (j < function.parameters.length()) {
@@ -831,7 +911,7 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
             i++;
             continue;
         }
-        if (function.blocks.length() == 0 || function.entry == NO_WIR_BLOCK) { wir_report(errors, "defined function has no entry block"); }
+        if (function.blocks.length() == 0 || function.entry == NO_WIR_BLOCK) { wir_report(errors, "defined function '" + function.name + "' has no entry block"); }
 
         let entry_found: Bool = false;
         j = 0;
@@ -878,7 +958,7 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
             }
             j++;
         }
-        if (!entry_found) { wir_report(errors, "function entry block is not part of the function"); }
+        if (!entry_found) { wir_report(errors, "entry block is not part of function '" + function.name + "'"); }
         i++;
     }
 

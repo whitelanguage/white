@@ -13,6 +13,8 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import WirLLVMResult, emit_wir_llvm from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
+import * from "../../../src/compiler/wir/lowering/state.wl"
+import * from "../../../src/compiler/wir/lowering/ownership.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
 
 func cast_position() -> Position {
@@ -226,6 +228,39 @@ func check_pointer_casts() -> Bool {
     return emitted.errors.length() == 0 && cast_contains(emitted.text, "ptrtoint") && cast_contains(emitted.text, "inttoptr");
 }
 
+func check_erased_struct_casts() -> Bool {
+    let source: Compiler = Compiler(ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict(), func_table=Dict(), compiler_link=Dict());
+    let record_type: Int = 180;
+    let fields: Vector(Struct) = [FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=0, is_const=false)];
+    source.struct_id_map.put("" + record_type, StructInfo(name="Record", type_id=record_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    let allocator: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C");
+    source.func_table.put("memory_alloc", allocator);
+    source.compiler_link.put("memory_alloc", "memory_alloc");
+
+    let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let types: WirTypeMap = new_wir_type_map();
+    let function_id: WirFuncID = wir_add_function(ref program, "erase_record", [], program.void_type, false, WirLinkage.Internal, WirABI.White);
+    let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
+    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=TYPE_VOID, entry=entry, block=entry, bindings=[], loops=[], error_targets=[], owned_values=[], errors=[], terminated=false, next_block=0);
+    let record_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, record_type);
+    let record: WirExpr = WirExpr(value=wir_const_zero(ref program, record_wir), source_type=record_type);
+    let erased: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, record, TYPE_GENERIC_STRUCT, true);
+    let restored: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, erased, record_type, false);
+    if (restored.value == NO_WIR_VALUE) { return false; }
+    wir_cleanup_temporaries(ref state, ref source, ref program, 0);
+    wir_return(ref program, state.block, NO_WIR_VALUE, no_wir_location());
+
+    if (types.errors.length() != 0 || state.errors.length() != 0) { return false; }
+    let errors: Vector(String) = verify_wir(program);
+    if (errors.length() != 0) { return false; }
+    let text: String = print_wir(program)?;
+    catch(err) { return false; }
+    if (!cast_contains(text, "internal func @__wl_drop.erased.180") || !cast_contains(text, "trap")) { return false; }
+    let emitted: WirLLVMResult = emit_wir_llvm(program)?;
+    catch(err) { return false; }
+    return emitted.errors.length() == 0 && cast_contains(emitted.text, "@__wl_drop.erased.180") && cast_contains(emitted.text, "icmp eq i32");
+}
+
 func main() -> Int {
     if (!check_return_cast()) {
         print("FAIL: WIR return widening");
@@ -249,6 +284,10 @@ func main() -> Int {
     }
     if (!check_pointer_casts()) {
         print("FAIL: WIR pointer cast lowering");
+        return 1;
+    }
+    if (!check_erased_struct_casts()) {
+        print("FAIL: WIR erased Struct lowering");
         return 1;
     }
     print("PASS: WIR casts");

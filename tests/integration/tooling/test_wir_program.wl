@@ -9,7 +9,6 @@ import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
-import WirLLVMResult from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/pipeline.wl"
 
 func program_position() -> Position {
@@ -89,7 +88,13 @@ func main() -> Int {
         return 1;
     }
 
-    let emitted: WirLLVMResult = lower_program_to_llvm(ref source, modules, "x86_64-pc-windows-msvc", 64)?;
+    let erased_modules: Vector(Struct) = [];
+    let module_index: Int = 0;
+    while (module_index < modules.length()) {
+        erased_modules.append(modules[module_index]);
+        module_index++;
+    }
+    let emitted: WirPipelineResult = lower_program_to_llvm(ref source, erased_modules, "x86_64-pc-windows-msvc", 64)?;
     catch(err) {
         print("FAIL: WIR program could not be emitted as LLVM IR");
         return 1;

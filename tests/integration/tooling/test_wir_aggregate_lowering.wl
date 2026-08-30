@@ -62,7 +62,7 @@ func main() -> Int {
         print("FAIL: lowered aggregate WIR could not be printed");
         return 1;
     }
-    let expected: String = "type !Point = {i32, i32}\n\ninternal func @aggregate_lowering(%point:!Point, %values:[i32; 4], %i:i32) -> i32 {\n^entry:\n    %point.addr:ptr<!Point> = alloca !Point\n    store %point, %point.addr\n    %values.addr:ptr<[i32; 4]> = alloca [i32; 4]\n    store %values, %values.addr\n    %i.addr:ptr<i32> = alloca i32\n    store %i, %i.addr\n    %8:ptr<i32> = field.addr %point.addr, 0\n    store 7, %8\n    %10:i32 = load %i.addr\n    check.bounds %10, 4\n    %12:ptr<i32> = index.addr %values.addr, %10\n    %14:ptr<i32> = field.addr %point.addr, 0\n    %15:i32 = load %14\n    store %15, %12\n    %16:i32 = load %i.addr\n    check.bounds %16, 4\n    %18:ptr<i32> = index.addr %values.addr, %16\n    %19:i32 = load %18\n    ret %19\n}\n";
+    let expected: String = "type !Point = {i32, i32}\n\ninternal func @aggregate_lowering(%point:!Point, %values:[i32; 4], %i:i32) -> i32 {\n^entry:\n    %point.addr:ptr<!Point> = alloca !Point\n    store %point, %point.addr\n    %values.addr:ptr<[i32; 4]> = alloca [i32; 4]\n    store %values, %values.addr\n    %i.addr:ptr<i32> = alloca i32\n    store %i, %i.addr\n    %8:ptr<i32> = field.addr %point.addr, 0\n    store 7, %8\n    %10:i32 = load %i.addr\n    check.bounds %10, 4\n    %12:ptr<i32> = index.addr %values.addr, %10\n    %13:!Point = load %point.addr\n    %15:i32 = field %13, 0\n    store %15, %12\n    %16:i32 = load %i.addr\n    check.bounds %16, 4\n    %18:ptr<i32> = index.addr %values.addr, %16\n    %19:i32 = load %18\n    ret %19\n}\n";
     if (text != expected) {
         print("FAIL: lowered aggregate text is not stable");
         print(text);
