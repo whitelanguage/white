@@ -2,6 +2,33 @@
 // File: tests/language/control/test_closure.wl
 // Focus: Lexical scoping, variable capturing in nested functions, and persistent state across calls.
 
+let CLOSURE_DROPPED: Int = 0;
+
+class ClosureProbe {
+    let value: Int;
+
+    init(value: Int) {
+        self.value = value;
+    }
+
+    deinit() {
+        CLOSURE_DROPPED++;
+    }
+}
+
+func make_reader() -> Function() -> Int {
+    let probe = ClosureProbe(17);
+    func read() -> Int {
+        return probe.value;
+    }
+    return read;
+}
+
+func exercise_reader() -> Bool {
+    let reader = make_reader();
+    if (CLOSURE_DROPPED != 0) { return false; }
+    return reader() == 17;
+}
 
 func main() -> Int {
     func outer() -> Function() -> Int {
@@ -19,6 +46,10 @@ func main() -> Int {
     let second_call: Int = counter_fn(); // 6 + 5 = 11
     
     if (first_call == 6 && second_call == 11) {
+        if (!exercise_reader() || CLOSURE_DROPPED != 1) {
+            print("FAIL: Closure capture lifetime");
+            return 1;
+        }
         print("PASS: Closure variable capture and persistence");
     } else {
         print("FAIL: Closure state, got " + second_call);

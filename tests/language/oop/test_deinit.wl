@@ -5,6 +5,7 @@
 
 let SUB_DEINIT_TRIGGERED: Bool = false;
 let SUPER_DEINIT_TRIGGERED: Bool = false;
+let SUPER_DEINIT_COUNT: Int = 0;
 
 class Resource {
     let name: String = "";
@@ -16,6 +17,7 @@ class Resource {
     // virtual destructor hook in parent
     deinit() -> Void {
         SUPER_DEINIT_TRIGGERED = true;
+        SUPER_DEINIT_COUNT++;
     }
 }
 
@@ -34,6 +36,12 @@ class NetworkConnection(Resource) {
     }
 }
 
+class PassiveConnection(Resource) {
+    init(n: String) -> Void {
+        super.init(n);
+    }
+}
+
 func run_scope_test() -> Void {
     // assigning subclass to parent reference to test VTable routing
     let conn: Resource = NetworkConnection("MainServer", "192.168.1.1");
@@ -41,11 +49,16 @@ func run_scope_test() -> Void {
     // function exit will trigger ARC decrement.
 }
 
+func run_inherited_deinit_test() -> Void {
+    let conn: Resource = PassiveConnection("BackupServer");
+}
+
 func main() -> Int {
     run_scope_test();
+    run_inherited_deinit_test();
 
     // verify if the ARC-driven teardown reached both levels of the hierarchy
-    let chain_intact: Bool = SUB_DEINIT_TRIGGERED && SUPER_DEINIT_TRIGGERED;
+    let chain_intact: Bool = SUB_DEINIT_TRIGGERED && SUPER_DEINIT_TRIGGERED && SUPER_DEINIT_COUNT == 2;
 
     if chain_intact {
         print("PASS: Polymorphic deinit chain and ARC scope-bound cleanup");

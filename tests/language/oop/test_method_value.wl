@@ -5,6 +5,7 @@
 
 // global flag for side-effect verification in higher-order functions
 let CALLBACK_EXECUTED: Bool = false;
+let METHOD_OWNER_DROPPED: Int = 0;
 
 class Dog {
     let name: String = "";
@@ -23,9 +24,50 @@ class Dog {
     }
 }
 
+class MethodOwner {
+    init() {}
+
+    func read() -> Int {
+        return 7;
+    }
+
+    deinit() {
+        METHOD_OWNER_DROPPED++;
+    }
+}
+
+class Counter {
+    init() {}
+
+    func read() -> Int {
+        return 1;
+    }
+}
+
+class VirtualCounter(Counter) {
+    init() {}
+
+    func read() -> Int {
+        return 2;
+    }
+}
+
 // higher-order function accepting a bound method closure
 func execute_callback(m: Method() -> String) -> String {
     return m();
+}
+
+func exercise_method_owner() -> Bool {
+    let owner: MethodOwner = MethodOwner();
+    let read: Method() -> Int = owner.read;
+    return read() == 7;
+}
+
+func exercise_virtual_method() -> Bool {
+    let concrete: VirtualCounter = VirtualCounter();
+    let base: Counter = concrete;
+    let read: Method() -> Int = base.read;
+    return read() == 2;
 }
 
 func main() -> Int {
@@ -42,6 +84,8 @@ func main() -> Int {
 
 
     let callback_res: String = execute_callback(bark_func);
+    let owner_ok: Bool = exercise_method_owner() && METHOD_OWNER_DROPPED == 1;
+    let virtual_ok: Bool = exercise_virtual_method();
 
 
     let upcast_ok: Bool = (any_class is ! null);
@@ -49,7 +93,7 @@ func main() -> Int {
     let info_ok: Bool = (info_res == "Buddy is 3");
     let callback_ok: Bool = (callback_res == "Buddy says: Woof!" && CALLBACK_EXECUTED);
 
-    if (upcast_ok && bark_ok && info_ok && callback_ok) {
+    if (upcast_ok && bark_ok && info_ok && callback_ok && owner_ok && virtual_ok) {
         print("PASS: First-class methods and environment capture");
     } else {
         // if this fails, the closure environment or VTable routing is corrupted
