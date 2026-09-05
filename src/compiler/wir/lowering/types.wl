@@ -50,7 +50,7 @@ func wir_opaque_pointer(ref types: WirTypeMap, ref program: WirModule) -> WirTyp
     return types.opaque_pointer;
 }
 
-func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, signature: SymbolInfo) -> WirTypeID {
+func wir_callable_signature(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, signature: SymbolInfo, with_context: Bool = false) -> WirTypeID {
     if (signature.type <= 0) {
         types.errors.append("Callable type " + source_type + " has no resolved return type during WIR lowering");
         return NO_WIR_TYPE;
@@ -59,6 +59,7 @@ func wir_lower_callable_type(ref types: WirTypeMap, ref source: Compiler, ref pr
     if (result == NO_WIR_TYPE) { return NO_WIR_TYPE; }
 
     let parameters: Vector(WirTypeID) = [];
+    if (with_context) { parameters.append(wir_opaque_pointer(ref types, ref program)); }
     let i: Int = 0;
     while (signature.func_arg_types is !null && i < signature.func_arg_types.length()) {
         let parameter: TypeListNode = signature.func_arg_types[i];
@@ -254,12 +255,10 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     if (source.func_ret_map is !null) {
         let function: SymbolInfo = source.func_ret_map.lookup(key);
         if (has_symbol(function)) {
-            return wir_cache_type(ref types, source_type, wir_lower_callable_type(ref types, ref source, ref program, source_type, function));
+            return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
         }
     }
-    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key))) {
-        return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
-    }
+    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key))) { return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program)); }
     if (source.struct_id_map is !null) {
         let info: StructInfo = source.struct_id_map.lookup(key);
         if (has_struct(info)) { return wir_lower_struct_type(ref types, ref source, ref program, source_type, info); }

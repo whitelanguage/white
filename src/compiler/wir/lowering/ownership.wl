@@ -6,9 +6,6 @@ import * from "state.wl"
 import * from "../../context.wl"
 
 func wir_value_needs_drop(ref source: Compiler, source_type: Int) -> Bool {
-    let repr: Int = get_repr_type(ref source, source_type);
-    if (repr == TYPE_GENERIC_FUNCTION) { return false; }
-    if (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + repr))) { return false; }
     return needs_drop(ref source, source_type);
 }
 

@@ -159,6 +159,23 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
             if (call.preserve_fallible || !is_fallible_type(ref source, info.ret_type)) { return info.ret_type; }
             return get_inner_fallible_type(ref source, info.ret_type);
         }
+        if (has_node(call.callee) && node_tag(call.callee) == NODE_FIELD_ACCESS) {
+            let access: FieldAccessNode = get_field_access_node(source.arena, call.callee);
+            let owner_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
+            let owner: StructInfo = StructInfo();
+            if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup("" + owner_type); }
+            if (has_struct(owner) && owner.is_class) {
+                let method_index: Int = 0;
+                while (owner.vtable is !null && method_index < owner.vtable.length()) {
+                    let method_info: FuncInfo = owner.vtable[method_index];
+                    if (method_info.base_name == access.field_name) {
+                        if (call.preserve_fallible || !is_fallible_type(ref source, method_info.ret_type)) { return method_info.ret_type; }
+                        return get_inner_fallible_type(ref source, method_info.ret_type);
+                    }
+                    method_index++;
+                }
+            }
+        }
     }
     let source_type: Int = wir_lvalue_type(state, source, node);
     if (source_type != TYPE_POISON) { return source_type; }
@@ -1121,6 +1138,114 @@ func wir_restore_struct(ref state: WirFunctionLowering, ref types: WirTypeMap, r
         wir_release(ref program, state.block, value.value, no_wir_location());
     }
     return WirExpr(value=restored, source_type=target_type);
+}
+
+func wir_callable_drop_name(source_type: Int) -> String {
+    return "__wl_drop.callable." + source_type;
+}
+
+func wir_callable_drop_function(ref types: WirTypeMap, ref program: WirModule, source_type: Int) -> WirFuncID {
+    let name: String = wir_callable_drop_name(source_type);
+    let function_id: WirFuncID = wir_find_function(program, name);
+    if (function_id != NO_WIR_FUNC) { return function_id; }
+
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    function_id = wir_add_function(ref program, name, [wir_param("callable", raw_pointer)], program.void_type, false, WirLinkage.Internal, WirABI.White);
+    let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+    let context_slot: WirValueID = wir_pointer_offset(ref program, entry, function.parameters[0], program.pointer_bits / 8, wir_pointer_type(ref program, raw_pointer));
+    let context: WirValueID = wir_load(ref program, entry, context_slot, "context", no_wir_location());
+    wir_release(ref program, entry, context, no_wir_location());
+    wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
+    return function_id;
+}
+
+func wir_alloc_callable(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, code: WirValueID, context: WirValueID) -> WirExpr {
+    let allocator: FuncInfo = wir_compiler_link_function(ref source, "memory_alloc");
+    if (!has_func(allocator)) {
+        state.errors.append("Function values require the memory_alloc compiler link");
+        return wir_no_expr();
+    }
+    let allocator_id: WirFuncID = wir_find_function(program, allocator.name);
+    if (allocator_id == NO_WIR_FUNC) { allocator_id = wir_lower_function_decl(ref types, ref source, ref program, allocator); }
+    if (allocator_id == NO_WIR_FUNC) { return wir_no_expr(); }
+
+    let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    let total_size: UInt64 = UInt64(WIR_OBJECT_HEADER_SIZE + (program.pointer_bits / 8) * 2);
+    let raw: WirValueID = wir_call(ref program, state.block, wir_function_value(program, allocator_id), [wir_const_int(ref program, size_type, UInt128(total_size))], "", no_wir_location());
+    wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [raw], [], no_wir_location());
+
+    let drop_id: WirFuncID = wir_callable_drop_function(ref types, ref program, source_type);
+    let drop_address: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(program, drop_id), 0L);
+    let drop_slot: WirValueID = wir_cast(ref program, state.block, raw, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
+    wir_store(ref program, state.block, drop_address, drop_slot, no_wir_location());
+
+    let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let refcount_slot: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE + WIR_ARC_REFCOUNT_OFFSET, wir_pointer_type(ref program, uint32_type));
+    let type_slot: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE + WIR_ARC_TYPE_OFFSET, wir_pointer_type(ref program, uint32_type));
+    wir_store(ref program, state.block, wir_const_int(ref program, uint32_type, UInt128(1U)), refcount_slot, no_wir_location());
+    wir_store(ref program, state.block, wir_const_int(ref program, uint32_type, UInt128(UInt32(source_type))), type_slot, no_wir_location());
+
+    let callable: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE, raw_pointer);
+    let code_slot: WirValueID = wir_cast(ref program, state.block, callable, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
+    let context_slot: WirValueID = wir_pointer_offset(ref program, state.block, callable, program.pointer_bits / 8, wir_pointer_type(ref program, raw_pointer));
+    wir_store(ref program, state.block, code, code_slot, no_wir_location());
+    wir_store(ref program, state.block, context, context_slot, no_wir_location());
+    wir_track_owned(ref state, callable, source_type);
+    return WirExpr(value=callable, source_type=source_type);
+}
+
+func wir_lower_function_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: FuncInfo) -> WirExpr {
+    let function_id: WirFuncID = wir_find_function(program, info.name);
+    if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, info); }
+    if (function_id == NO_WIR_FUNC) { return wir_no_expr(); }
+    let source_type: Int = get_func_type_id(ref source, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    let code: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(program, function_id), 0L);
+    return wir_alloc_callable(ref state, ref types, ref source, ref program, source_type, code, wir_null(ref program, raw_pointer));
+}
+
+func wir_call_callable(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, callable: WirValueID, source_type: Int, signature: SymbolInfo, arguments: Vector(WirValueID)) -> WirValueID {
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [callable], [], no_wir_location());
+
+    let code_slot: WirValueID = wir_cast(ref program, state.block, callable, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
+    let context_slot: WirValueID = wir_pointer_offset(ref program, state.block, callable, program.pointer_bits / 8, wir_pointer_type(ref program, raw_pointer));
+    let code: WirValueID = wir_load(ref program, state.block, code_slot, "code", no_wir_location());
+    let context: WirValueID = wir_load(ref program, state.block, context_slot, "context", no_wir_location());
+    let is_plain: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, context, wir_null(ref program, raw_pointer), "plain", no_wir_location());
+
+    let plain_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "call.plain."), []);
+    let context_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "call.context."), []);
+    let result_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, signature.type);
+    if (result_type == NO_WIR_TYPE) { return NO_WIR_VALUE; }
+    let merge_parameters: Vector(WirParam) = [];
+    if (result_type != program.void_type) { merge_parameters.append(wir_param("result", result_type)); }
+    let merge_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "call.end."), merge_parameters);
+    wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_plain], [wir_edge(plain_block, []), wir_edge(context_block, [])], no_wir_location());
+
+    let plain_signature: WirTypeID = wir_callable_signature(ref types, ref source, ref program, source_type, signature);
+    let plain_result: WirValueID = wir_call_typed(ref program, plain_block, code, plain_signature, arguments, "", no_wir_location());
+    let plain_edge: Vector(WirValueID) = [];
+    if (plain_result != NO_WIR_VALUE) { plain_edge.append(plain_result); }
+    wir_append(ref program, plain_block, WirOpcode.Jump, program.void_type, [], [wir_edge(merge_block, plain_edge)], no_wir_location());
+
+    let context_arguments: Vector(WirValueID) = [context];
+    let i: Int = 0;
+    while (i < arguments.length()) {
+        context_arguments.append(arguments[i]);
+        i++;
+    }
+    let context_signature: WirTypeID = wir_callable_signature(ref types, ref source, ref program, source_type, signature, true);
+    let context_result: WirValueID = wir_call_typed(ref program, context_block, code, context_signature, context_arguments, "", no_wir_location());
+    let context_edge: Vector(WirValueID) = [];
+    if (context_result != NO_WIR_VALUE) { context_edge.append(context_result); }
+    wir_append(ref program, context_block, WirOpcode.Jump, program.void_type, [], [wir_edge(merge_block, context_edge)], no_wir_location());
+
+    state.block = merge_block;
+    if (result_type == program.void_type) { return NO_WIR_VALUE; }
+    return program.arena.blocks[wir_id_index(UInt32(merge_block))].parameters[0];
 }
 
 func wir_cast_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, target_type: Int, implicit: Bool) -> WirExpr {
@@ -2942,7 +3067,7 @@ func wir_lower_super_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
 func wir_lower_class_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, call: CallNode) -> WirMemberCall {
     if (!has_node(call.callee) || node_tag(call.callee) != NODE_FIELD_ACCESS) { return WirMemberCall(handled=false, value=wir_no_expr()); }
     let access: FieldAccessNode = get_field_access_node(source.arena, call.callee);
-    let object_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, access.obj));
+    let object_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
     let owner: StructInfo = source.struct_id_map.lookup("" + object_type);
     if (!has_struct(owner) || has_field(find_field(owner, access.field_name))) { return WirMemberCall(handled=false, value=wir_no_expr()); }
     if (owner.is_interface) { return wir_lower_interface_call(ref state, ref types, ref source, ref program, call, access, owner); }
@@ -3186,6 +3311,232 @@ func wir_call_class_method_value(ref state: WirFunctionLowering, ref types: WirT
     wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
     if (wir_value_needs_drop(ref source, target.ret_type)) { wir_track_owned(ref state, result, target.ret_type); }
     return WirExpr(value=result, source_type=target.ret_type);
+}
+
+func wir_call_class_method_values(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, object: WirExpr, owner: StructInfo, name: String, values: Vector(WirExpr)) -> WirExpr {
+    let slot: Int = 0;
+    let target: FuncInfo = FuncInfo();
+    while (owner.vtable is !null && slot < owner.vtable.length()) {
+        let candidate: FuncInfo = owner.vtable[slot];
+        if (candidate.base_name == name) {
+            target = candidate;
+            break;
+        }
+        slot++;
+    }
+    if (!has_func(target)) {
+        state.errors.append("Method '" + name + "' is unavailable during WIR lowering");
+        return wir_no_expr();
+    }
+    let count: Int = 0;
+    if (values is !null) { count = values.length(); }
+    if (target.arg_types is null || count + 1 != target.arg_types.length()) {
+        state.errors.append("Method '" + name + "' reached WIR lowering with the wrong argument count");
+        return wir_no_expr();
+    }
+
+    queue_generic_class_method(ref source, owner, target.base_name);
+    let function_id: WirFuncID = wir_find_function(program, target.name);
+    if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, target); }
+    if (function_id == NO_WIR_FUNC) { return wir_no_expr(); }
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+
+    wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [object.value], [], no_wir_location());
+    let table: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, object.value, 0, "", no_wir_location()), "", no_wir_location());
+    let slot_value: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, program.pointer_bits), UInt128(UIntSize(slot)));
+    let callee: WirValueID = wir_load(ref program, state.block, wir_index_address(ref program, state.block, table, slot_value, "", no_wir_location()), "", no_wir_location());
+    let arguments: Vector(WirValueID) = [object.value];
+    let i: Int = 0;
+    while (i < count) {
+        let parameter: TypeListNode = target.arg_types[i + 1];
+        if (parameter.pass_mode == PARAM_REF) {
+            state.errors.append("Reference arguments cannot be synthesized for protocol method '" + name + "'");
+            return wir_no_expr();
+        }
+        let value: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, values[i], parameter.type, true);
+        if (value.value == NO_WIR_VALUE) { return wir_no_expr(); }
+        arguments.append(value.value);
+        i++;
+    }
+
+    let result: WirValueID = wir_call_typed(ref program, state.block, callee, function.type_id, arguments, "", no_wir_location());
+    if (wir_value_needs_drop(ref source, target.ret_type)) { wir_track_owned(ref state, result, target.ret_type); }
+    return WirExpr(value=result, source_type=target.ret_type);
+}
+
+func wir_ordering_value(ref state: WirFunctionLowering, ref source: Compiler, name: String) -> Int {
+    let ordering: StructInfo = StructInfo();
+    if (source.struct_table is !null) { ordering = source.struct_table.lookup("comparison.Ordering"); }
+    let field: FieldInfo = find_field(ordering, name);
+    if (!has_struct(ordering) || !has_field(field)) {
+        state.errors.append("Ordering." + name + " is unavailable during WIR lowering");
+        return -1;
+    }
+    return field.offset;
+}
+
+func wir_ordering_result(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, less: WirValueID, greater: WirValueID) -> WirExpr {
+    let ordering: StructInfo = StructInfo();
+    if (source.struct_table is !null) { ordering = source.struct_table.lookup("comparison.Ordering"); }
+    if (!has_struct(ordering)) {
+        state.errors.append("Ordering is unavailable during WIR lowering");
+        return wir_no_expr();
+    }
+    let less_value: Int = wir_ordering_value(ref state, ref source, "Less");
+    let equal_value: Int = wir_ordering_value(ref state, ref source, "Equal");
+    let greater_value: Int = wir_ordering_value(ref state, ref source, "Greater");
+    if (less_value < 0 || equal_value < 0 || greater_value < 0) { return wir_no_expr(); }
+
+    let ordering_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, ordering.type_id);
+    let check_greater: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "compare.greater."), []);
+    let use_less: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "compare.less."), []);
+    let use_equal: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "compare.equal."), []);
+    let use_greater: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "compare.greater.value."), []);
+    let end: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "compare.end."), [wir_param("ordering", ordering_type)]);
+    wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [less], [wir_edge(use_less, []), wir_edge(check_greater, [])], no_wir_location());
+    wir_append(ref program, check_greater, WirOpcode.Branch, program.void_type, [greater], [wir_edge(use_greater, []), wir_edge(use_equal, [])], no_wir_location());
+    wir_append(ref program, use_less, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [wir_const_int(ref program, ordering_type, UInt128(UInt32(less_value)))])], no_wir_location());
+    wir_append(ref program, use_equal, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [wir_const_int(ref program, ordering_type, UInt128(UInt32(equal_value)))])], no_wir_location());
+    wir_append(ref program, use_greater, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [wir_const_int(ref program, ordering_type, UInt128(UInt32(greater_value)))])], no_wir_location());
+    state.block = end;
+    let end_block: WirBlock = program.arena.blocks[wir_id_index(UInt32(end))];
+    return WirExpr(value=end_block.parameters[0], source_type=ordering.type_id);
+}
+
+func wir_lower_builtin_protocol_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, call: CallNode, access: FieldAccessNode) -> WirMemberCall {
+    let receiver_type: Int = wir_argument_type(ref state, ref source, access.obj);
+    let name: String = access.field_name;
+    let available: Bool = false;
+    if (name == "equals" && has_builtin_equal(ref source, receiver_type)) {
+        available = source.struct_table is !null && has_struct(source.struct_table.lookup("comparison.Equal"));
+    } else if (name == "hash" && has_builtin_hash(ref source, receiver_type)) {
+        available = source.struct_table is !null && has_struct(source.struct_table.lookup("hashing.Hash"));
+    } else if (name == "compare" && has_builtin_order(ref source, receiver_type)) {
+        available = source.struct_table is !null && has_struct(source.struct_table.lookup("comparison.Comparable"));
+    } else if (name == "display" && has_builtin_display(ref source, receiver_type)) {
+        available = source.struct_table is !null && has_struct(source.struct_table.lookup("formatting.Display"));
+    }
+    if (!available) { return WirMemberCall(handled=false, value=wir_no_expr()); }
+
+    let expected: Int = 0;
+    if (name == "equals" || name == "compare") { expected = 1; }
+    let count: Int = 0;
+    if (call.args is !null) { count = call.args.length(); }
+    if (count != expected) {
+        state.errors.append("Protocol method '" + name + "' reached WIR lowering with the wrong argument count");
+        return WirMemberCall(handled=true, value=wir_no_expr());
+    }
+    let i: Int = 0;
+    while (call.args is !null && i < call.args.length()) {
+        let argument: ArgNode = call.args[i];
+        if ((argument.name is !null && argument.name.length() != 0) || argument.is_spread) {
+            state.errors.append("Named or spread protocol arguments must be bound before WIR lowering");
+            return WirMemberCall(handled=true, value=wir_no_expr());
+        }
+        i++;
+    }
+
+    let owned_start: Int = state.owned_values.length();
+    let receiver: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, access.obj);
+    if (receiver.value == NO_WIR_VALUE) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+    if (name == "display") {
+        let result: WirExpr = wir_convert_to_string(ref state, ref types, ref source, ref program, receiver);
+        return WirMemberCall(handled=true, value=result);
+    }
+    if (name == "hash") {
+        let function_id: WirFuncID = wir_dict_typed_hash_function(ref types, ref source, ref program, receiver_type);
+        if (function_id == NO_WIR_FUNC) {
+            state.errors.append("Type " + get_type_name(ref source, receiver_type) + " has no WIR hash implementation");
+            return WirMemberCall(handled=true, value=wir_no_expr());
+        }
+        let result: WirValueID = wir_call(ref program, state.block, wir_function_value(program, function_id), [receiver.value], "", no_wir_location());
+        wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
+        return WirMemberCall(handled=true, value=WirExpr(value=result, source_type=TYPE_INT));
+    }
+
+    let argument: ArgNode = call.args[0];
+    let other: WirExpr = wir_lower_expected_expr(ref state, ref types, ref source, ref program, argument.val, receiver_type);
+    if (other.value == NO_WIR_VALUE) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+    other = wir_cast_expr(ref state, ref types, ref source, ref program, other, receiver_type, true);
+    if (other.value == NO_WIR_VALUE) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+
+    let repr: Int = get_repr_type(ref source, receiver_type);
+    if (name == "equals") {
+        let result: WirExpr = wir_no_expr();
+        if (repr == TYPE_STRING) {
+            result = wir_compare_strings(ref state, ref types, ref source, ref program, receiver, other, TOK_EE);
+        } else {
+            result = WirExpr(value=wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, receiver.value, other.value, "", no_wir_location()), source_type=TYPE_BOOL);
+        }
+        wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
+        return WirMemberCall(handled=true, value=result);
+    }
+
+    let less: WirValueID = NO_WIR_VALUE;
+    let greater: WirValueID = NO_WIR_VALUE;
+    if (repr == TYPE_STRING) {
+        let hook: WirValueID = wir_string_runtime(ref state, ref types, ref source, ref program, "string_compare");
+        if (hook == NO_WIR_VALUE) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+        let comparison: WirValueID = wir_call(ref program, state.block, hook, [receiver.value, other.value], "", no_wir_location());
+        let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
+        let zero: WirValueID = wir_const_int(ref program, int_type, UInt128(0U));
+        less = wir_binary(ref program, state.block, WirOpcode.SignedLess, program.bool_type, comparison, zero, "", no_wir_location());
+        greater = wir_binary(ref program, state.block, WirOpcode.SignedGreater, program.bool_type, comparison, zero, "", no_wir_location());
+    } else {
+        let less_opcode: WirOpcode = wir_comparison_opcode(repr, TOK_LT);
+        let greater_opcode: WirOpcode = wir_comparison_opcode(repr, TOK_GT);
+        if (less_opcode == WirOpcode.Invalid || greater_opcode == WirOpcode.Invalid) {
+            state.errors.append("Type " + get_type_name(ref source, receiver_type) + " has no WIR ordering implementation");
+            return WirMemberCall(handled=true, value=wir_no_expr());
+        }
+        less = wir_binary(ref program, state.block, less_opcode, program.bool_type, receiver.value, other.value, "", no_wir_location());
+        greater = wir_binary(ref program, state.block, greater_opcode, program.bool_type, receiver.value, other.value, "", no_wir_location());
+    }
+    let result: WirExpr = wir_ordering_result(ref state, ref types, ref source, ref program, less, greater);
+    wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
+    return WirMemberCall(handled=true, value=result);
+}
+
+func wir_lower_protocol_comparison(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, left: WirExpr, right: WirExpr, token: Int) -> WirMemberCall {
+    if (left.source_type != right.source_type || source.struct_id_map is null) { return WirMemberCall(handled=false, value=wir_no_expr()); }
+    let owner: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, left.source_type));
+    if (!has_struct(owner) || !owner.is_class) { return WirMemberCall(handled=false, value=wir_no_expr()); }
+
+    let ordered: Bool = token == TOK_LT || token == TOK_LTE || token == TOK_GT || token == TOK_GTE;
+    let protocol_name: String = "comparison.Equal";
+    let method_name: String = "equals";
+    if ordered {
+        protocol_name = "comparison.Comparable";
+        method_name = "compare";
+    }
+    let protocol: StructInfo = StructInfo();
+    if (source.struct_table is !null) { protocol = source.struct_table.lookup(protocol_name); }
+    if (!has_struct(protocol) || !implements_interface(ref source, owner.type_id, protocol.type_id)) {
+        return WirMemberCall(handled=false, value=wir_no_expr());
+    }
+
+    let compared: WirExpr = wir_call_class_method_values(ref state, ref types, ref source, ref program, left, owner, method_name, [right]);
+    if (compared.value == NO_WIR_VALUE) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+    if (!ordered) {
+        if (token == TOK_EE) { return WirMemberCall(handled=true, value=compared); }
+        let inverted: WirValueID = wir_unary(ref program, state.block, WirOpcode.Not, program.bool_type, compared.value, "", no_wir_location());
+        return WirMemberCall(handled=true, value=WirExpr(value=inverted, source_type=TYPE_BOOL));
+    }
+
+    let ordinal: Int = wir_ordering_value(ref state, ref source, "Less");
+    let opcode: WirOpcode = WirOpcode.Equal;
+    if (token == TOK_GT) { ordinal = wir_ordering_value(ref state, ref source, "Greater"); }
+    else if (token == TOK_LTE) {
+        ordinal = wir_ordering_value(ref state, ref source, "Greater");
+        opcode = WirOpcode.NotEqual;
+    } else if (token == TOK_GTE) {
+        opcode = WirOpcode.NotEqual;
+    }
+    if (ordinal < 0) { return WirMemberCall(handled=true, value=wir_no_expr()); }
+    let type_id: WirTypeID = wir_value_type(program, compared.value);
+    let expected: WirValueID = wir_const_int(ref program, type_id, UInt128(UInt32(ordinal)));
+    let result: WirValueID = wir_binary(ref program, state.block, opcode, program.bool_type, compared.value, expected, "", no_wir_location());
+    return WirMemberCall(handled=true, value=WirExpr(value=result, source_type=TYPE_BOOL));
 }
 
 func wir_lower_map_literal(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, expected_type: Int) -> WirExpr {
@@ -3642,6 +3993,79 @@ func wir_print_vector(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
     return wir_print_sequence(ref state, ref types, ref source, ref program, data, length, element_type);
 }
 
+func wir_has_display_protocol(ref source: Compiler, info: StructInfo) -> Bool {
+    if (!has_struct(info) || source.struct_table is null) { return false; }
+    let display: StructInfo = source.struct_table.lookup("formatting.Display");
+    return has_struct(display) && implements_interface(ref source, info.type_id, display.type_id);
+}
+
+func wir_print_class_display(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, info: StructInfo) -> Bool {
+    let class_type: WirTypeID = wir_value_type(program, value);
+    let is_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, value, wir_null(ref program, class_type), "", no_wir_location());
+    let null_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.display.null."), []);
+    let value_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.display.value."), []);
+    let end: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.display.end."), []);
+    wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_null], [wir_edge(null_block, []), wir_edge(value_block, [])], no_wir_location());
+
+    state.block = null_block;
+    if (!wir_print_text(ref state, ref types, ref source, ref program, "null")) { return false; }
+    wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [])], no_wir_location());
+
+    state.block = value_block;
+    let text: WirExpr = wir_call_class_method_values(ref state, ref types, ref source, ref program, WirExpr(value=value, source_type=info.type_id), info, "display", []);
+    if (text.value == NO_WIR_VALUE || get_repr_type(ref source, text.source_type) != TYPE_STRING) {
+        state.errors.append("Display implementation for '" + info.name + "' did not return String");
+        return false;
+    }
+    if (!wir_print_string(ref state, ref types, ref source, ref program, text.value)) { return false; }
+    if (wir_take_owned(ref state, text.value)) { wir_emit_ownership_value(ref state, ref source, ref program, text.value, text.source_type, false); }
+    wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [])], no_wir_location());
+    state.block = end;
+    return true;
+}
+
+func wir_print_interface_display(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, info: StructInfo) -> Bool {
+    let slot: Int = 0;
+    while (info.vtable is !null && slot < info.vtable.length()) {
+        let candidate: MethodDefNode = info.vtable[slot];
+        if (candidate.name_tok.value == "display") { break; }
+        slot++;
+    }
+    if (info.vtable is null || slot >= info.vtable.length()) {
+        state.errors.append("Display method is missing from interface '" + info.name + "'");
+        return false;
+    }
+    let method_node: MethodDefNode = info.vtable[slot];
+    let object: WirValueID = wir_field(ref program, state.block, value, 0, "", no_wir_location());
+    let table: WirValueID = wir_field(ref program, state.block, value, 1, "", no_wir_location());
+    let object_type: WirTypeID = wir_value_type(program, object);
+    let is_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, object, wir_null(ref program, object_type), "", no_wir_location());
+    let null_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.interface.null."), []);
+    let value_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.interface.value."), []);
+    let end: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.interface.end."), []);
+    wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_null], [wir_edge(null_block, []), wir_edge(value_block, [])], no_wir_location());
+
+    state.block = null_block;
+    if (!wir_print_text(ref state, ref types, ref source, ref program, "null")) { return false; }
+    wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [])], no_wir_location());
+
+    state.block = value_block;
+    let slot_value: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, program.pointer_bits), UInt128(UIntSize(slot)));
+    let callee: WirValueID = wir_load(ref program, state.block, wir_index_address(ref program, state.block, table, slot_value, "", no_wir_location()), "", no_wir_location());
+    let call_type: WirTypeID = wir_interface_call_type(ref types, ref source, ref program, info, method_node);
+    let result_type: Int = interface_method_type(ref source, info, method_node.return_type);
+    let text: WirValueID = wir_call_typed(ref program, state.block, callee, call_type, [object], "", no_wir_location());
+    if (get_repr_type(ref source, result_type) != TYPE_STRING) {
+        state.errors.append("Display implementation for interface '" + info.name + "' did not return String");
+        return false;
+    }
+    if (!wir_print_string(ref state, ref types, ref source, ref program, text)) { return false; }
+    wir_emit_ownership_value(ref state, ref source, ref program, text, result_type, false);
+    wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end, [])], no_wir_location());
+    state.block = end;
+    return true;
+}
+
 func wir_print_struct(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, info: StructInfo) -> Bool {
     if (!wir_print_text(ref state, ref types, ref source, ref program, info.name + "(")) { return false; }
     let printed: Int = 0;
@@ -3689,6 +4113,10 @@ func wir_print_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     if (source.struct_id_map is !null) { info = source.struct_id_map.lookup("" + source_type); }
     if (has_struct(info)) {
         if (info.is_enum) { return wir_print_enum(ref state, ref types, ref source, ref program, value.value, info); }
+        if (wir_has_display_protocol(ref source, info)) {
+            if (info.is_interface) { return wir_print_interface_display(ref state, ref types, ref source, ref program, value.value, info); }
+            if (info.is_class) { return wir_print_class_display(ref state, ref types, ref source, ref program, value.value, info); }
+        }
         if (info.name != "$Variant" && !info.is_interface) {
             return wir_print_struct(ref state, ref types, ref source, ref program, value.value, info);
         }
@@ -3869,28 +4297,14 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             state.errors.append("Generic function value could not be instantiated during WIR lowering");
             return wir_no_expr();
         }
-        let function_id: WirFuncID = wir_find_function(program, info.name);
-        if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, info); }
-        if (function_id == NO_WIR_FUNC) { return wir_no_expr(); }
-        let source_type: Int = get_func_type_id(ref source, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
-        return WirExpr(value=wir_function_value(program, function_id), source_type=source_type);
+        return wir_lower_function_value(ref state, ref types, ref source, ref program, info);
     }
     if (kind == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(source.arena, node);
         if (!wir_name_is_value(state, source, access.name_tok.value)) {
             let info: FuncInfo = wir_source_function(ref source, access.name_tok.value);
             if (has_func(info)) {
-                let function_id: WirFuncID = wir_find_function(program, info.name);
-                if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, info); }
-                if (function_id == NO_WIR_FUNC) { return wir_no_expr(); }
-                let source_type: Int = get_func_type_id(ref source, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
-                let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
-                let value: WirValueID = wir_function_value(program, function_id);
-                if (type_id == NO_WIR_TYPE || wir_value_type(program, value) != type_id) {
-                    state.errors.append("Function value '" + access.name_tok.value + "' does not match its WIR signature");
-                    return wir_no_expr();
-                }
-                return WirExpr(value=value, source_type=source_type);
+                return wir_lower_function_value(ref state, ref types, ref source, ref program, info);
             }
         }
         let address: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, node);
@@ -3926,7 +4340,9 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let owner: StructInfo = source.struct_id_map.lookup("" + owner_type);
         let field: FieldInfo = find_field(owner, access.field_name);
         if (!has_struct(owner) || owner.is_interface || owner.is_enum || !has_field(field)) {
-            state.errors.append("field '" + access.field_name + "' is not available on type " + owner_type + " during WIR lowering");
+            let owner_name: String = "type " + owner_type;
+            if (has_struct(owner)) { owner_name = "'" + owner.name + "'"; }
+            state.errors.append("field '" + access.field_name + "' is not available on " + owner_name + " during WIR lowering");
             return wir_no_expr();
         }
         if (owner.is_class || indirect) {
@@ -4130,6 +4546,11 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             if (binary.op_tok.type == TOK_NE) { opcode = WirOpcode.NotEqual; }
             return WirExpr(value=wir_binary(ref program, state.block, opcode, program.bool_type, left.value, right.value, "", no_wir_location()), source_type=TYPE_BOOL);
         }
+        let protocol_comparison: WirMemberCall = wir_lower_protocol_comparison(ref state, ref types, ref source, ref program, left, right, binary.op_tok.type);
+        if (protocol_comparison.handled) {
+            wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
+            return protocol_comparison.value;
+        }
         if (binary.op_tok.type == TOK_POW) {
             if (!wir_source_numeric(left_repr) || !wir_source_numeric(right_repr)) {
                 state.errors.append("Operator '**' reached WIR lowering with non-numeric operands");
@@ -4303,6 +4724,8 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 if (vector_append.handled) { return vector_append.value; }
                 let vector_drop: WirMemberCall = wir_lower_vector_drop(ref state, ref types, ref source, ref program, call, access);
                 if (vector_drop.handled) { return vector_drop.value; }
+                let protocol_call: WirMemberCall = wir_lower_builtin_protocol_call(ref state, ref types, ref source, ref program, call, access);
+                if (protocol_call.handled) { return protocol_call.value; }
             }
             let generic_method_call: WirMemberCall = wir_lower_generic_method_call(ref state, ref types, ref source, ref program, call);
             if (generic_method_call.handled) { return generic_method_call.value; }
@@ -4318,6 +4741,8 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let signature_info: SymbolInfo = SymbolInfo();
         let result_type: Int = TYPE_POISON;
         let callable_name: String = "function value";
+        let indirect_call: Bool = false;
+        let indirect_source_type: Int = TYPE_POISON;
         if (has_func(info)) {
             let function_id: WirFuncID = wir_find_function(program, info.name);
             if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, info); }
@@ -4342,6 +4767,8 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 return wir_no_expr();
             }
             callee_value = indirect.value;
+            indirect_call = true;
+            indirect_source_type = indirect.source_type;
             source_parameter_types = [];
             source_parameter_modes = [];
             let source_index: Int = 0;
@@ -4354,8 +4781,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             result_type = signature_info.type;
         }
 
-        let signature_type: WirTypeID = wir_value_type(program, callee_value);
-        let parameter_count: Int = program.arena.types[wir_id_index(UInt32(signature_type))].parameters.length();
+        let parameter_count: Int = source_parameter_types.length();
         let owned_start: Int = state.owned_values.length();
         let arguments: Vector(WirValueID) = [];
         let i: Int = 0;
@@ -4389,9 +4815,14 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             arguments.append(value.value);
             i++;
         }
-        let result: WirValueID = wir_call(ref program, state.block, callee_value, arguments, "", no_wir_location());
+        let result: WirValueID = NO_WIR_VALUE;
+        if (indirect_call) {
+            result = wir_call_callable(ref state, ref types, ref source, ref program, callee_value, indirect_source_type, signature_info, arguments);
+        } else {
+            result = wir_call(ref program, state.block, callee_value, arguments, "", no_wir_location());
+        }
         wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
-        if (wir_value_needs_drop(ref source, result_type)) { wir_track_owned(ref state, result, result_type); }
+        if (result != NO_WIR_VALUE && wir_value_needs_drop(ref source, result_type)) { wir_track_owned(ref state, result, result_type); }
         return WirExpr(value=result, source_type=result_type);
     }
 
@@ -4408,8 +4839,9 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     let erased_generic: Bool = source_type == TYPE_GENERIC_STRUCT || source_type == TYPE_GENERIC_CLASS || source_type == TYPE_GENERIC_FUNCTION || source_type == TYPE_GENERIC_METHOD;
     let infer_literal: Bool = has_node(node.value) && source_type == TYPE_AUTO &&
                               (node_tag(node.value) == NODE_VECTOR_LIT || node_tag(node.value) == NODE_MAP_LIT);
-    if (has_node(node.value) && (erased_generic || infer_literal)) {
-        let expression_type: Int = get_expr_type(ref source, node.value);
+    let infer_call: Bool = has_node(node.value) && source_type == TYPE_AUTO && node_tag(node.value) == NODE_CALL;
+    if (has_node(node.value) && (erased_generic || infer_literal || infer_call)) {
+        let expression_type: Int = wir_argument_type(ref state, ref source, node.value);
         if (expression_type >= 100) { source_type = expression_type; }
     }
     let value: WirExpr = wir_no_expr();

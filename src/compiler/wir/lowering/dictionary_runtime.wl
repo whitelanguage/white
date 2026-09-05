@@ -57,6 +57,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let read: WirBlockID = wir_add_block(ref program, function_id, "read", []);
     let check_float: WirBlockID = wir_add_block(ref program, function_id, "check.float", []);
+    let check_class: WirBlockID = wir_add_block(ref program, function_id, "check.class", []);
     let string_key: WirBlockID = wir_add_block(ref program, function_id, "string", []);
     let float_key: WirBlockID = wir_add_block(ref program, function_id, "float", []);
     let float_zero: WirBlockID = wir_add_block(ref program, function_id, "float.zero", []);
@@ -77,7 +78,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let is_float64: WirValueID = wir_binary(ref program, check_float, WirOpcode.Equal, program.bool_type, tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, TYPE_FLOAT))), "is.float64", no_wir_location());
     let is_float32: WirValueID = wir_binary(ref program, check_float, WirOpcode.Equal, program.bool_type, tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, TYPE_FLOAT32))), "is.float32", no_wir_location());
     let is_float: WirValueID = wir_binary(ref program, check_float, WirOpcode.BitOr, program.bool_type, is_float64, is_float32, "is.float", no_wir_location());
-    wir_append(ref program, check_float, WirOpcode.Branch, program.void_type, [is_float], [wir_edge(float_key, []), wir_edge(bits, [])], no_wir_location());
+    wir_append(ref program, check_float, WirOpcode.Branch, program.void_type, [is_float], [wir_edge(float_key, []), wir_edge(check_class, [])], no_wir_location());
 
     let string_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, TYPE_STRING);
     let string_value: WirValueID = wir_cast(ref program, string_key, low, string_type, "value", no_wir_location());
@@ -97,6 +98,33 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let mix_float: WirFuncID = wir_dict_mix_function(ref program);
     let float_result: WirValueID = wir_call(ref program, float_done, wir_function_value(program, mix_float), [tag, normalized, wir_const_int(ref program, tag_type, UInt128(0U))], "hash", no_wir_location());
     wir_return(ref program, float_done, float_result, no_wir_location());
+
+    let class_check: WirBlockID = check_class;
+    let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
+    let type_id: Int = 100;
+    while (type_id < source.type_counter) {
+        let info: StructInfo = source.struct_id_map.lookup("" + type_id);
+        let hashable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
+        if hashable {
+            let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
+            let next: WirBlockID = wir_add_block(ref program, function_id, "check.class." + type_id, []);
+            let matches: WirValueID = wir_binary(ref program, class_check, WirOpcode.Equal, program.bool_type, tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, type_id))), "matches", no_wir_location());
+            wir_append(ref program, class_check, WirOpcode.Branch, program.void_type, [matches], [wir_edge(class_key, []), wir_edge(next, [])], no_wir_location());
+
+            let class_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, type_id);
+            let class_value: WirValueID = wir_cast(ref program, class_key, low, class_type, "value", no_wir_location());
+            let class_hash: WirFuncID = wir_dict_class_hash_function(ref types, ref source, ref program, type_id, info);
+            if (class_hash != NO_WIR_FUNC) {
+                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(program, class_hash), [class_value], "hash", no_wir_location());
+                wir_return(ref program, class_key, class_result, no_wir_location());
+            } else {
+                wir_append(ref program, class_key, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
+            }
+            class_check = next;
+        }
+        type_id++;
+    }
+    wir_append(ref program, class_check, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
 
     let low_bits: WirValueID = wir_cast(ref program, bits, low, tag_type, "low.bits", no_wir_location());
     let high_bits: WirValueID = wir_cast(ref program, bits, high, tag_type, "high.bits", no_wir_location());
@@ -123,6 +151,7 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     let read: WirBlockID = wir_add_block(ref program, function_id, "read", []);
     let dispatch: WirBlockID = wir_add_block(ref program, function_id, "dispatch", []);
     let check_float: WirBlockID = wir_add_block(ref program, function_id, "check.float", []);
+    let check_class: WirBlockID = wir_add_block(ref program, function_id, "check.class", []);
     let string_key: WirBlockID = wir_add_block(ref program, function_id, "string", []);
     let float_key: WirBlockID = wir_add_block(ref program, function_id, "float", []);
     let bits: WirBlockID = wir_add_block(ref program, function_id, "bits", []);
@@ -148,7 +177,7 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     let is_float64: WirValueID = wir_binary(ref program, check_float, WirOpcode.Equal, program.bool_type, left_tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, TYPE_FLOAT))), "is.float64", no_wir_location());
     let is_float32: WirValueID = wir_binary(ref program, check_float, WirOpcode.Equal, program.bool_type, left_tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, TYPE_FLOAT32))), "is.float32", no_wir_location());
     let is_float: WirValueID = wir_binary(ref program, check_float, WirOpcode.BitOr, program.bool_type, is_float64, is_float32, "is.float", no_wir_location());
-    wir_append(ref program, check_float, WirOpcode.Branch, program.void_type, [is_float], [wir_edge(float_key, []), wir_edge(bits, [])], no_wir_location());
+    wir_append(ref program, check_float, WirOpcode.Branch, program.void_type, [is_float], [wir_edge(float_key, []), wir_edge(check_class, [])], no_wir_location());
 
     let left_low: WirValueID = wir_load(ref program, string_key, wir_field_address(ref program, string_key, left, 1, "", no_wir_location()), "left.low", no_wir_location());
     let right_low: WirValueID = wir_load(ref program, string_key, wir_field_address(ref program, string_key, right, 1, "", no_wir_location()), "right.low", no_wir_location());
@@ -166,6 +195,36 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     let right_float: WirValueID = wir_unary(ref program, float_key, WirOpcode.Bitcast, float_type, float_right_low, "right.value", no_wir_location());
     let float_result: WirValueID = wir_binary(ref program, float_key, WirOpcode.Equal, program.bool_type, left_float, right_float, "equal", no_wir_location());
     wir_return(ref program, float_key, float_result, no_wir_location());
+
+    let class_check: WirBlockID = check_class;
+    let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
+    let type_id: Int = 100;
+    while (type_id < source.type_counter) {
+        let info: StructInfo = source.struct_id_map.lookup("" + type_id);
+        let comparable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
+        if comparable {
+            let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
+            let next: WirBlockID = wir_add_block(ref program, function_id, "check.class." + type_id, []);
+            let matches: WirValueID = wir_binary(ref program, class_check, WirOpcode.Equal, program.bool_type, left_tag, wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, type_id))), "matches", no_wir_location());
+            wir_append(ref program, class_check, WirOpcode.Branch, program.void_type, [matches], [wir_edge(class_key, []), wir_edge(next, [])], no_wir_location());
+
+            let left_low: WirValueID = wir_load(ref program, class_key, wir_field_address(ref program, class_key, left, 1, "", no_wir_location()), "left.low", no_wir_location());
+            let right_low: WirValueID = wir_load(ref program, class_key, wir_field_address(ref program, class_key, right, 1, "", no_wir_location()), "right.low", no_wir_location());
+            let class_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, type_id);
+            let left_value: WirValueID = wir_cast(ref program, class_key, left_low, class_type, "left.value", no_wir_location());
+            let right_value: WirValueID = wir_cast(ref program, class_key, right_low, class_type, "right.value", no_wir_location());
+            let class_equal: WirFuncID = wir_dict_class_equal_function(ref types, ref source, ref program, type_id, info);
+            if (class_equal != NO_WIR_FUNC) {
+                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(program, class_equal), [left_value, right_value], "equal", no_wir_location());
+                wir_return(ref program, class_key, class_result, no_wir_location());
+            } else {
+                wir_append(ref program, class_key, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
+            }
+            class_check = next;
+        }
+        type_id++;
+    }
+    wir_append(ref program, class_check, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
 
     let bits_left_low: WirValueID = wir_load(ref program, bits, wir_field_address(ref program, bits, left, 1, "", no_wir_location()), "left.low", no_wir_location());
     let bits_right_low: WirValueID = wir_load(ref program, bits, wir_field_address(ref program, bits, right, 1, "", no_wir_location()), "right.low", no_wir_location());
