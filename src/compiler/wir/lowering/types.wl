@@ -177,7 +177,8 @@ func wir_lower_array_type(ref types: WirTypeMap, ref source: Compiler, ref progr
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
     let pointer: WirTypeID = wir_pointer_type(ref program, element);
     let fields: Vector(WirTypeID) = [size_type, size_type, wir_opaque_pointer(ref types, ref program), wir_pointer_type(ref program, pointer), wir_pointer_type(ref program, size_type)];
-    return wir_cache_type(ref types, source_type, wir_struct_type(ref program, fields));
+    let record: WirTypeID = wir_struct_type(ref program, fields);
+    return wir_cache_type(ref types, source_type, wir_pointer_type(ref program, record));
 }
 
 func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirTypeID {

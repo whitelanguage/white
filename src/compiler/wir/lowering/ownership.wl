@@ -46,7 +46,7 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
     let array: ArrayInfo = ArrayInfo();
     if (source.array_info_map is !null) { array = source.array_info_map.lookup("" + repr); }
     if (has_array_info(array) && array.size == -1) {
-        return wir_field(ref program, state.block, value, 2, "", no_wir_location());
+        return value;
     }
     let type_id: WirTypeID = wir_value_type(program, value);
     if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) { return value; }

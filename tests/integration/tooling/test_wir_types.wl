@@ -81,8 +81,10 @@ func main() -> Int {
         print("FAIL: named type did not use its resolved representation");
         return 1;
     }
-    if (type_kind(program, wir_lower_source_type(ref types, ref source, ref program, 106)) != WirTypeKind.Struct) {
-        print("FAIL: slice layout was not lowered");
+    let slice: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, 106);
+    let slice_pointer: WirType = program.arena.types[wir_id_index(UInt32(slice))];
+    if (slice_pointer.kind != WirTypeKind.Pointer || type_kind(program, slice_pointer.element) != WirTypeKind.Struct) {
+        print("FAIL: slice did not use its reference representation");
         return 1;
     }
     if (type_kind(program, wir_lower_source_type(ref types, ref source, ref program, 107)) != WirTypeKind.Struct) {

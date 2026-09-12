@@ -1967,14 +1967,17 @@ func wir_lower_index_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMa
 
     let info: ArrayInfo = source.array_info_map.lookup("" + target_type);
     if (has_array_info(info)) {
-        let target: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, target_node);
-        if (target.value == NO_WIR_VALUE) { return wir_no_expr(); }
         if (info.size >= 0) {
+            let target: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, target_node);
+            if (target.value == NO_WIR_VALUE) { return wir_no_expr(); }
             let length: WirValueID = wir_const_int(ref program, wir_lower_source_type(ref types, ref source, ref program, TYPE_INT), UInt128(UInt32(info.size)));
             wir_append(ref program, state.block, WirOpcode.BoundsCheck, program.void_type, [index.value, length], [], no_wir_location());
             return WirExpr(value=wir_index_address(ref program, state.block, target.value, index.value, "", no_wir_location()), source_type=info.base_type);
         }
 
+        let target: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, target_node);
+        if (target.value == NO_WIR_VALUE) { return wir_no_expr(); }
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [target.value], [], no_wir_location());
         let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
         let size_index: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, index, TYPE_UINTSIZE, false);
         if (size_index.value == NO_WIR_VALUE) { return wir_no_expr(); }
@@ -2506,9 +2509,10 @@ func wir_lower_variadic_source(ref state: WirFunctionLowering, ref types: WirTyp
 
         let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
         if (value.value == NO_WIR_VALUE) { return WirVariadicSource(value=wir_no_expr(), spread=true, length=NO_WIR_VALUE, data=NO_WIR_VALUE); }
-        let start: WirValueID = wir_field(ref program, state.block, value.value, 0, "", no_wir_location());
-        let length: WirValueID = wir_field(ref program, state.block, value.value, 1, "", no_wir_location());
-        let data_slot: WirValueID = wir_field(ref program, state.block, value.value, 3, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
+        let start: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 0, "", no_wir_location()), "", no_wir_location());
+        let length: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 1, "", no_wir_location()), "", no_wir_location());
+        let data_slot: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 3, "", no_wir_location()), "", no_wir_location());
         let data: WirValueID = wir_load(ref program, state.block, data_slot, "", no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [data], [], no_wir_location());
         data = wir_index_address(ref program, state.block, data, start, "", no_wir_location());
@@ -2648,7 +2652,7 @@ func wir_lower_variadic_pack(ref state: WirFunctionLowering, ref types: WirTypeM
         }
         i++;
     }
-    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, vector, data_slot, length_slot, zero, total, NO_WIR_VALUE, true);
+    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, vector, data_slot, length_slot, zero, total, true);
 }
 
 func wir_lower_bound_call_arguments(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, bound: BoundCallArgs, parameters: Vector(Struct), skip: Int, variadic_param: Int, name: String) -> WirCallArguments {
@@ -2723,20 +2727,71 @@ func wir_slice_range(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     return WirSliceRange(start=start_size, length=length_size);
 }
 
-func wir_make_slice(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, slice_type: Int, owner: WirValueID, data_slot: WirValueID, size_slot: WirValueID, start: WirValueID, length: WirValueID, source_value: WirValueID, owner_is_new: Bool) -> WirExpr {
+func wir_slice_drop_function(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, slice_type: Int) -> WirFuncID {
+    let name: String = "__wl_drop." + slice_type;
+    let function_id: WirFuncID = wir_find_function(program, name);
+    if (function_id != NO_WIR_FUNC) { return function_id; }
+
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    function_id = wir_add_function(ref program, name, [wir_param("object", raw_pointer)], program.void_type, false, WirLinkage.Internal, WirABI.White);
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+    let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
+    let slice_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, slice_type);
+    let slice: WirValueID = wir_cast(ref program, entry, function.parameters[0], slice_wir, "", no_wir_location());
+    let owner: WirValueID = wir_load(ref program, entry, wir_field_address(ref program, entry, slice, 2, "", no_wir_location()), "", no_wir_location());
+    wir_release(ref program, entry, owner, no_wir_location());
+    wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
+    return function_id;
+}
+
+func wir_make_slice(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, slice_type: Int, owner: WirValueID, data_slot: WirValueID, size_slot: WirValueID, start: WirValueID, length: WirValueID, owner_is_new: Bool) -> WirExpr {
     let result_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, slice_type);
     if (result_type == NO_WIR_TYPE) { return wir_no_expr(); }
+    let pointer: WirType = program.arena.types[wir_id_index(UInt32(result_type))];
+    let payload: WirTypeLayout = wir_type_layout(program, pointer.element);
+    if (pointer.kind != WirTypeKind.Pointer || !payload.valid || payload.size > UInt64(wir_max_object_size(program.data_layout)) - UInt64(WIR_OBJECT_HEADER_SIZE)) {
+        state.errors.append("slice storage layout is unavailable during WIR lowering");
+        return wir_no_expr();
+    }
+
+    let allocator: FuncInfo = wir_compiler_link_function(ref source, "memory_alloc");
+    if (!has_func(allocator)) {
+        state.errors.append("slice construction requires the memory_alloc compiler link");
+        return wir_no_expr();
+    }
+    let allocator_id: WirFuncID = wir_find_function(program, allocator.name);
+    if (allocator_id == NO_WIR_FUNC) { allocator_id = wir_lower_function_decl(ref types, ref source, ref program, allocator); }
+    if (allocator_id == NO_WIR_FUNC) { return wir_no_expr(); }
+
+    let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
+    let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+    let total_size: UInt64 = payload.size + UInt64(WIR_OBJECT_HEADER_SIZE);
+    let raw: WirValueID = wir_call(ref program, state.block, wir_function_value(program, allocator_id), [wir_const_int(ref program, size_type, UInt128(total_size))], "", no_wir_location());
+    wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [raw], [], no_wir_location());
+
+    let drop_id: WirFuncID = wir_slice_drop_function(ref types, ref source, ref program, slice_type);
+    let drop_slot: WirValueID = wir_cast(ref program, state.block, raw, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
+    wir_store(ref program, state.block, wir_const_address(ref program, raw_pointer, wir_function_value(program, drop_id), 0L), drop_slot, no_wir_location());
+    let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let refcount_slot: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE + WIR_ARC_REFCOUNT_OFFSET, wir_pointer_type(ref program, uint32_type));
+    let type_slot: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE + WIR_ARC_TYPE_OFFSET, wir_pointer_type(ref program, uint32_type));
+    wir_store(ref program, state.block, wir_const_int(ref program, uint32_type, UInt128(1U)), refcount_slot, no_wir_location());
+    wir_store(ref program, state.block, wir_const_int(ref program, uint32_type, UInt128(UInt32(slice_type))), type_slot, no_wir_location());
+
+    let slice: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE, result_type);
     let opaque: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let owner_pointer: WirValueID = owner;
     if (wir_value_type(program, owner_pointer) != opaque) {
         owner_pointer = wir_cast(ref program, state.block, owner_pointer, opaque, "", no_wir_location());
     }
-    let result: WirValueID = wir_struct_value(ref program, state.block, result_type, [start, length, owner_pointer, data_slot, size_slot], "", no_wir_location());
-    let transferred: Bool = false;
-    if (source_value != NO_WIR_VALUE) { transferred = wir_take_owned(ref state, source_value); }
-    if (!owner_is_new && !transferred) { wir_retain(ref program, state.block, owner_pointer, no_wir_location()); }
-    wir_track_owned(ref state, result, slice_type);
-    return WirExpr(value=result, source_type=slice_type);
+    if (!owner_is_new) { wir_retain(ref program, state.block, owner_pointer, no_wir_location()); }
+    wir_store(ref program, state.block, start, wir_field_address(ref program, state.block, slice, 0, "", no_wir_location()), no_wir_location());
+    wir_store(ref program, state.block, length, wir_field_address(ref program, state.block, slice, 1, "", no_wir_location()), no_wir_location());
+    wir_store(ref program, state.block, owner_pointer, wir_field_address(ref program, state.block, slice, 2, "", no_wir_location()), no_wir_location());
+    wir_store(ref program, state.block, data_slot, wir_field_address(ref program, state.block, slice, 3, "", no_wir_location()), no_wir_location());
+    wir_store(ref program, state.block, size_slot, wir_field_address(ref program, state.block, slice, 4, "", no_wir_location()), no_wir_location());
+    wir_track_owned(ref state, slice, slice_type);
+    return WirExpr(value=slice, source_type=slice_type);
 }
 
 func wir_copy_slice(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, slice_type: Int, element_type: Int, source_data: WirValueID, source_start: WirValueID, length: WirValueID) -> WirExpr {
@@ -2817,7 +2872,7 @@ func wir_copy_slice(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(condition, [])], no_wir_location());
 
     state.block = finish;
-    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, vector, data_slot, length_slot, zero, length, NO_WIR_VALUE, true);
+    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, vector, data_slot, length_slot, zero, length, true);
 }
 
 func wir_lower_slice_access(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: SliceAccessNode, shared: Bool) -> WirExpr {
@@ -2881,11 +2936,12 @@ func wir_lower_slice_access(ref state: WirFunctionLowering, ref types: WirTypeMa
         owner = target.value;
     } else if (array.size < 0) {
         element_type = array.base_type;
-        source_start = wir_field(ref program, state.block, target.value, 0, "", no_wir_location());
-        current_length = wir_field(ref program, state.block, target.value, 1, "", no_wir_location());
-        owner = wir_field(ref program, state.block, target.value, 2, "", no_wir_location());
-        data_slot = wir_field(ref program, state.block, target.value, 3, "", no_wir_location());
-        size_slot = wir_field(ref program, state.block, target.value, 4, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [target.value], [], no_wir_location());
+        source_start = wir_load(ref program, state.block, wir_field_address(ref program, state.block, target.value, 0, "", no_wir_location()), "", no_wir_location());
+        current_length = wir_load(ref program, state.block, wir_field_address(ref program, state.block, target.value, 1, "", no_wir_location()), "", no_wir_location());
+        owner = wir_load(ref program, state.block, wir_field_address(ref program, state.block, target.value, 2, "", no_wir_location()), "", no_wir_location());
+        data_slot = wir_load(ref program, state.block, wir_field_address(ref program, state.block, target.value, 3, "", no_wir_location()), "", no_wir_location());
+        size_slot = wir_load(ref program, state.block, wir_field_address(ref program, state.block, target.value, 4, "", no_wir_location()), "", no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [data_slot], [], no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [size_slot], [], no_wir_location());
         let owner_size: WirValueID = wir_load(ref program, state.block, size_slot, "", no_wir_location());
@@ -2912,7 +2968,7 @@ func wir_lower_slice_access(ref state: WirFunctionLowering, ref types: WirTypeMa
     let absolute_start: WirValueID = wir_binary(ref program, state.block, WirOpcode.Add, size_type, source_start, range.start, "", no_wir_location());
     let slice_type: Int = get_slice_type_id(ref source, element_type);
     if (!shared) { return wir_copy_slice(ref state, ref types, ref source, ref program, slice_type, element_type, source_data, absolute_start, range.length); }
-    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, owner, data_slot, size_slot, absolute_start, range.length, target.value, false);
+    return wir_make_slice(ref state, ref types, ref source, ref program, slice_type, owner, data_slot, size_slot, absolute_start, range.length, false);
 }
 
 func wir_class_drop_name(info: StructInfo) -> String {
@@ -3196,9 +3252,10 @@ func wir_lower_length_call(ref state: WirFunctionLowering, ref types: WirTypeMap
             return WirMemberCall(handled=true, value=WirExpr(value=wir_const_int(ref program, int_type, UInt128(UInt32(array.size))), source_type=TYPE_INT));
         }
         let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
-        let start: WirValueID = wir_field(ref program, state.block, value.value, 0, "", no_wir_location());
-        let length: WirValueID = wir_field(ref program, state.block, value.value, 1, "", no_wir_location());
-        let size_slot: WirValueID = wir_field(ref program, state.block, value.value, 4, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
+        let start: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 0, "", no_wir_location()), "", no_wir_location());
+        let length: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 1, "", no_wir_location()), "", no_wir_location());
+        let size_slot: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 4, "", no_wir_location()), "", no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [size_slot], [], no_wir_location());
         let owner_size: WirValueID = wir_load(ref program, state.block, size_slot, "", no_wir_location());
         let end: WirValueID = wir_binary(ref program, state.block, WirOpcode.Add, size_type, start, length, "", no_wir_location());
@@ -4504,10 +4561,11 @@ func wir_print_array(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
         data = wir_index_address(ref program, state.block, slot, wir_const_int(ref program, size_type, UInt128(0U)), "", no_wir_location());
         length = wir_const_int(ref program, size_type, UInt128(UIntSize(info.size)));
     } else {
-        let start: WirValueID = wir_field(ref program, state.block, value, 0, "", no_wir_location());
-        length = wir_field(ref program, state.block, value, 1, "", no_wir_location());
-        let data_slot: WirValueID = wir_field(ref program, state.block, value, 3, "", no_wir_location());
-        let size_slot: WirValueID = wir_field(ref program, state.block, value, 4, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value], [], no_wir_location());
+        let start: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value, 0, "", no_wir_location()), "", no_wir_location());
+        length = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value, 1, "", no_wir_location()), "", no_wir_location());
+        let data_slot: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value, 3, "", no_wir_location()), "", no_wir_location());
+        let size_slot: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value, 4, "", no_wir_location()), "", no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [data_slot], [], no_wir_location());
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [size_slot], [], no_wir_location());
         let owner_size: WirValueID = wir_load(ref program, state.block, size_slot, "", no_wir_location());
@@ -4864,14 +4922,6 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     if (kind == NODE_TYPE_LAYOUT) {
         let query: TypeLayoutNode = get_type_layout_node(source.arena, node);
         let source_type: Int = resolve_type(ref source, query.type_node);
-        let array: ArrayInfo = ArrayInfo();
-        if (source.array_info_map is !null) { array = source.array_info_map.lookup("" + get_repr_type(ref source, source_type)); }
-        if (has_array_info(array) && array.size < 0) {
-            let value: UInt128 = UInt128(program.data_layout.pointer_bits / 8);
-            if (query.is_align) { value = UInt128(program.data_layout.pointer_alignment); }
-            let result_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, TYPE_UINTSIZE);
-            return WirExpr(value=wir_const_int(ref program, result_type, value), source_type=TYPE_UINTSIZE);
-        }
         let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
         if (type_id == NO_WIR_TYPE) { return wir_no_expr(); }
         let layout: WirTypeLayout = wir_type_layout(program, type_id);
