@@ -7,7 +7,7 @@ import * from "../../../src/frontend/ast.wl"
 import * from "../../../src/frontend/arena.wl"
 import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
-import * from "../../../src/compiler/wir/print.wl"
+import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
 
 func function_value_position() -> Position {
@@ -40,7 +40,10 @@ func function_value_definition(arena: AstArena, name: String, body: NodeID, pos:
 
 func main() -> Int {
     let aliases: Dict(String, String) = Dict();
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=Dict(), func_table=Dict(), current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=Dict(), generic_bindings=Dict(), ptr_base_map=Dict(), ptr_cache=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), type_counter=200);
+    let links: Dict(String, String) = Dict();
+    links.put("memory_alloc", "memory_alloc");
+    links.put("memory_free", "memory_free");
+    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=Dict(), func_table=Dict(), compiler_link=links, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=Dict(), generic_bindings=Dict(), ptr_base_map=Dict(), ptr_cache=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), type_counter=200);
     let pos: Position = function_value_position();
     let int_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let function_type: Int = get_func_type_id(ref source, int_args, TYPE_INT, 0, ["", ""]);
@@ -51,6 +54,8 @@ func main() -> Int {
     source.func_table.put("add", add_info);
     source.func_table.put("apply", apply_info);
     source.func_table.put("main", main_info);
+    source.func_table.put("memory_alloc", FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C"));
+    source.func_table.put("memory_free", FuncInfo(name="memory_free", base_name="memory_free", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)], arg_names=["block"], is_varargs=false, abi_name="C"));
 
     let add_sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=function_value_access(source.arena, "a", pos), op_tok=function_value_token(TOK_PLUS, "+"), right=function_value_access(source.arena, "b", pos), pos=pos));
     let add_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, add_sum, pos)]));
@@ -71,15 +76,24 @@ func main() -> Int {
         return 1;
     }
 
-    let text: String = print_wir(result.program)?;
-    catch(err) {
-        print("FAIL: function value WIR could not be printed");
-        return 1;
+    let allocation_calls: Int = 0;
+    let indirect_calls: Int = 0;
+    let saw_retain: Bool = false;
+    let saw_release: Bool = false;
+    let i: Int = 0;
+    while (i < result.program.arena.instructions.length()) {
+        let instruction: WirInstruction = result.program.arena.instructions[i];
+        if (instruction.opcode == WirOpcode.Retain) { saw_retain = true; }
+        if (instruction.opcode == WirOpcode.Release) { saw_release = true; }
+        if (instruction.opcode == WirOpcode.Call) {
+            let callee: WirValue = result.program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+            if (callee.kind == WirValueKind.Function && callee.name == "memory_alloc") { allocation_calls++; }
+            if (callee.kind == WirValueKind.Instruction && instruction.call_type != NO_WIR_TYPE) { indirect_calls++; }
+        }
+        i++;
     }
-    let expected: String = "internal func @add(%a:i32, %b:i32) -> i32 {\n^entry:\n    %a.addr:ptr<i32> = alloca i32\n    store %a, %a.addr\n    %b.addr:ptr<i32> = alloca i32\n    store %b, %b.addr\n    %8:i32 = load %a.addr\n    %9:i32 = load %b.addr\n    %10:i32 = add %8, %9\n    ret %10\n}\n\ninternal func @apply(%f:func(i32, i32) -> i32) -> i32 {\n^entry:\n    %f.addr:ptr<func(i32, i32) -> i32> = alloca func(i32, i32) -> i32\n    store %f, %f.addr\n    %12:func(i32, i32) -> i32 = load %f.addr\n    %15:i32 = call %12(2, 3)\n    ret %15\n}\n\npub func @main() -> i32 {\n^entry:\n    %chosen.addr:ptr<func(i32, i32) -> i32> = alloca func(i32, i32) -> i32\n    store @add, %chosen.addr\n    %17:func(i32, i32) -> i32 = load %chosen.addr\n    %18:i32 = call @apply(%17)\n    ret %18\n}\n";
-    if (text != expected) {
-        print("FAIL: function value WIR text is not stable");
-        print(text);
+    if (allocation_calls == 0 || indirect_calls < 2 || !saw_retain || !saw_release) {
+        print("FAIL: callable lowering alloc=", allocation_calls, " indirect=", indirect_calls, " retain=", saw_retain, " release=", saw_release);
         return 1;
     }
     print("PASS: WIR function values");

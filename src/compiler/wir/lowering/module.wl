@@ -130,18 +130,22 @@ func wir_lower_class_methods(ref types: WirTypeMap, ref source: Compiler, ref pr
     }
 }
 
-func wir_generic_method_required(source: Compiler, info: StructInfo, method_name: String) -> Bool {
-    let instance_template: GenericTemplate = source.generic_instance_templates.lookup("" + info.type_id);
-    if (!has_template(instance_template)) { return true; }
-    return source.generic_methods_queued is !null && source.generic_methods_queued.lookup(info.name + "_" + method_name);
+func wir_queue_method_body(ref source: Compiler, fallback: StructInfo, method_info: FuncInfo) -> Void {
+    let owner: StructInfo = fallback;
+    if (method_info.arg_types is !null && method_info.arg_types.length() != 0) {
+        let receiver: TypeListNode = method_info.arg_types[0];
+        let declared: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, receiver.type));
+        if (has_struct(declared) && declared.is_class) { owner = declared; }
+    }
+    queue_generic_class_method(ref source, owner, method_info.base_name);
 }
 
 func wir_declare_concrete_class(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: StructInfo) -> Void {
     let i: Int = 0;
     while (info.vtable is !null && i < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[i];
-        let required: Bool = wir_generic_method_required(source, info, method_info.base_name);
-        if (required && (method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
+        if ((method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
+            wir_queue_method_body(ref source, info, method_info);
             wir_lower_function_decl(ref types, ref source, ref program, method_info);
         }
         i++;
@@ -167,18 +171,13 @@ func wir_emit_class_vtable_info(ref types: WirTypeMap, ref source: Compiler, ref
     let i: Int = 0;
     while (info.vtable is !null && i < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[i];
-        let required: Bool = wir_generic_method_required(source, info, method_info.base_name);
-        if (!required) {
-            entries.append(wir_null(ref program, raw_pointer));
-        } else {
-            let function_id: WirFuncID = wir_find_function(program, method_info.name);
-            if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, method_info); }
-            if (function_id == NO_WIR_FUNC) {
-                types.errors.append("Vtable entry '" + info.name + "." + method_info.base_name + "' has no WIR function");
-                return;
-            }
-            entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(program, function_id), 0L));
+        let function_id: WirFuncID = wir_find_function(program, method_info.name);
+        if (function_id == NO_WIR_FUNC) { function_id = wir_lower_function_decl(ref types, ref source, ref program, method_info); }
+        if (function_id == NO_WIR_FUNC) {
+            types.errors.append("Vtable entry '" + info.name + "." + method_info.base_name + "' has no WIR function");
+            return;
         }
+        entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(program, function_id), 0L));
         i++;
     }
     let table_type: WirTypeID = wir_dispatch_table_type(ref types, ref program, entries.length());
@@ -213,6 +212,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
             while (interface_info.vtable is !null && method_index < interface_info.vtable.length()) {
                 let required: MethodDefNode = interface_info.vtable[method_index];
                 let implementation: FuncInfo = find_interface_implementation(ref source, info, interface_info, required);
+                if (has_func(implementation)) { wir_queue_method_body(ref source, info, implementation); }
                 let function_id: WirFuncID = NO_WIR_FUNC;
                 if (has_func(implementation)) { function_id = wir_find_function(program, implementation.name); }
                 if (function_id == NO_WIR_FUNC && has_func(implementation)) { function_id = wir_lower_function_decl(ref types, ref source, ref program, implementation); }
@@ -318,6 +318,27 @@ func wir_lower_generic_functions(ref types: WirTypeMap, ref source: Compiler, re
         source.generic_func_key = previous_key;
         restore_generic_context(ref source, previous, previous_bindings);
         i++;
+    }
+}
+
+func wir_lower_generic_instances(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
+    while true {
+        let class_count: Int = 0;
+        let function_count: Int = 0;
+        let method_count: Int = 0;
+        if (source.generic_class_worklist is !null) { class_count = source.generic_class_worklist.length(); }
+        if (source.generic_worklist is !null) { function_count = source.generic_worklist.length(); }
+        if (source.generic_method_worklist is !null) { method_count = source.generic_method_worklist.length(); }
+        wir_declare_generic_classes(ref types, ref source, ref program);
+        wir_lower_generic_functions(ref types, ref source, ref program);
+        wir_lower_generic_methods(ref types, ref source, ref program);
+        let next_class_count: Int = 0;
+        let next_function_count: Int = 0;
+        let next_method_count: Int = 0;
+        if (source.generic_class_worklist is !null) { next_class_count = source.generic_class_worklist.length(); }
+        if (source.generic_worklist is !null) { next_function_count = source.generic_worklist.length(); }
+        if (source.generic_method_worklist is !null) { next_method_count = source.generic_method_worklist.length(); }
+        if (class_count == next_class_count && function_count == next_function_count && method_count == next_method_count) { break; }
     }
 }
 
@@ -435,8 +456,7 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
         i++;
     }
 
-    wir_lower_generic_functions(ref types, ref source, ref program);
-    wir_lower_generic_methods(ref types, ref source, ref program);
+    wir_lower_generic_instances(ref types, ref source, ref program);
     wir_refresh_generic_vtables(ref types, ref source, ref program);
 
     wir_emit_required_runtime(ref types, ref source, ref program);

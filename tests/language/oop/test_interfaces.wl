@@ -68,7 +68,7 @@ func main() -> Int {
     let r_sp: Resizable = sp;
     
     d_sp.draw();
-    r_sp.resize(2.5); // resize 10.0 -> 25.0
+    r_sp.resize(factor=2.5); // resize 10.0 -> 25.0
 
     let sprite_ok: Bool = (sp.size == 25.0);
 

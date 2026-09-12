@@ -805,7 +805,24 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
                     let argument_id: WirValueID = instruction.operands[argument_index + 1];
                     if (wir_value_valid(program, argument_id)) {
                         let argument: WirValue = program.arena.values[wir_id_index(UInt32(argument_id))];
-                        if (argument.type_id != signature.parameters[argument_index]) { wir_report(errors, "call argument type does not match the function type"); }
+                        if (argument.type_id != signature.parameters[argument_index]) {
+                            let callee_name: String = "indirect call";
+                            if (callee.kind == WirValueKind.Function && wir_func_valid(program, WirFuncID(callee.owner))) {
+                                callee_name = "call to '" + program.arena.functions[wir_id_index(callee.owner)].name + "'";
+                            }
+                            let actual_type: WirType = program.arena.types[wir_id_index(UInt32(argument.type_id))];
+                            let expected_type: WirType = program.arena.types[wir_id_index(UInt32(signature.parameters[argument_index]))];
+                            let actual_element: String = "";
+                            let expected_element: String = "";
+                            if (wir_type_valid(program, actual_type.element)) { actual_element = program.arena.types[wir_id_index(UInt32(actual_type.element))].name; }
+                            if (wir_type_valid(program, expected_type.element)) { expected_element = program.arena.types[wir_id_index(UInt32(expected_type.element))].name; }
+                            let caller_name: String = "unknown function";
+                            if (wir_block_valid(program, block_id)) {
+                                let caller: WirFuncID = program.arena.blocks[wir_id_index(UInt32(block_id))].function;
+                                if (wir_func_valid(program, caller)) { caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'"; }
+                            }
+                            wir_report(errors, callee_name + " argument " + argument_index + " in " + caller_name + " has WIR type " + Int(argument.type_id) + "/" + actual_element + ", expected " + Int(signature.parameters[argument_index]) + "/" + expected_element);
+                        }
                     }
                     argument_index++;
                 }

@@ -401,15 +401,56 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
     return 0;
 }
 
+func decimal_uint64_to_float(value: UInt64) -> Float {
+    let high: UInt32 = UInt32(value >> UInt64(32U));
+    let low: UInt32 = UInt32(value & UInt64(4294967295U));
+    return Float(high) * 4294967296.0 + Float(low);
+}
+
+func decimal_uint128_to_float(value: UInt128) -> Float {
+    let high: UInt64 = UInt64(value >> UInt128(64U));
+    let low: UInt64 = UInt64(value & UInt128(18446744073709551615UL));
+    return decimal_uint64_to_float(high) * 18446744073709551616.0 + decimal_uint64_to_float(low);
+}
+
 func parse_decimal_float_literal(raw: String) -> Float {
 // keep literal parsing self-hosted; the compiler cannot assume libc is present
     let end: Int = raw.length();
     if (raw.ends_with("f") || raw.ends_with("F")) { end -= 1; }
 
+    let significand: UInt128 = UInt128(0U);
+    let scale: UInt128 = UInt128(1U);
+    let maximum: UInt128 = 340282366920938463463374607431768211455ULL;
+    let in_fraction: Bool = false;
+    let exact: Bool = true;
+    let i: Int = 0;
+    while (i != end) {
+        let ch: Char = raw[i];
+        if (ch == '.') {
+            in_fraction = true;
+        } else if (ch != '_') {
+            let digit: UInt128 = UInt128(Int(ch) - Int('0'));
+            if (significand > (maximum - digit) / UInt128(10U)) {
+                exact = false;
+                break;
+            }
+            significand = significand * UInt128(10U) + digit;
+            if (in_fraction) {
+                if (scale > maximum / UInt128(10U)) {
+                    exact = false;
+                    break;
+                }
+                scale *= UInt128(10U);
+            }
+        }
+        i++;
+    }
+    if (exact) { return decimal_uint128_to_float(significand) / decimal_uint128_to_float(scale); }
+
     let result: Float = 0.0;
     let fraction_scale: Float = 0.1;
-    let in_fraction: Bool = false;
-    let i: Int = 0;
+    in_fraction = false;
+    i = 0;
     while (i < end) {
         let ch: Char = raw[i];
         if (ch == '.') {

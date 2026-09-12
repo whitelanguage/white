@@ -91,8 +91,8 @@ func main() -> Int {
     }
     let function_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, 108);
     let function_layout: WirType = program.arena.types[wir_id_index(UInt32(function_type))];
-    if (function_layout.kind != WirTypeKind.Function || function_layout.parameters.length() != 1 || function_layout.result != wir_lower_source_type(ref types, ref source, ref program, TYPE_INT)) {
-        print("FAIL: first-class function signature was not preserved");
+    if (function_layout.kind != WirTypeKind.Pointer || function_layout.element != program.void_type) {
+        print("FAIL: first-class function did not use the callable object representation");
         return 1;
     }
     wir_lower_source_type(ref types, ref source, ref program, TYPE_STRING);
