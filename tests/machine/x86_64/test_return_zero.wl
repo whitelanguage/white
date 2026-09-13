@@ -6,6 +6,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import * from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -25,6 +26,11 @@ func main() -> Int {
         print("FAIL: x86_64 lowering failed: ", lowered.errors[0]);
         return 1;
     }
+    let object: Vector(Byte) = coff_object_for_text("main", lowered.bytes)?;
+    catch(err) {
+        print("FAIL: could not write COFF object");
+        return 1;
+    }
 
     print("WIR-BEGIN");
     print(wir_text);
@@ -37,5 +43,13 @@ func main() -> Int {
         i++;
     }
     print("BYTES-END");
+
+    print("OBJECT-BEGIN");
+    i = 0;
+    while (i < object.length()) {
+        print(Int(object[i]));
+        i += 1;
+    }
+    print("OBJECT-END");
     return 0;
 }
