@@ -112,6 +112,24 @@ func x86_sub_register(ref output: X86CodeBuffer, destination: X86Register, sourc
     x86_emit_byte(ref output, x86_modrm_register(source, destination));
 }
 
+func x86_add_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    x86_emit_byte(ref output, Byte(129));
+    x86_emit_byte(ref output, Byte(192));
+    x86_emit_u32(ref output, value);
+}
+
+func x86_sub_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    x86_emit_byte(ref output, Byte(129));
+    x86_emit_byte(ref output, Byte(232));
+    x86_emit_u32(ref output, value);
+}
+
+func x86_imul_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    x86_emit_byte(ref output, Byte(105));
+    x86_emit_byte(ref output, Byte(192));
+    x86_emit_u32(ref output, value);
+}
+
 func x86_return(ref output: X86CodeBuffer) -> Void {
     x86_emit_byte(ref output, Byte(195));
 }

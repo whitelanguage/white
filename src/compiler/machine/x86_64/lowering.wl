@@ -68,17 +68,54 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
     }
 
     let output: X86CodeBuffer = x86_new_code_buffer();
+    let accumulator: WirValueID = NO_WIR_VALUE;
     let i = 0;
     while (i < block.instructions.length()) {
         let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
-        if (instruction.opcode == WirOpcode.Return) {
+        if (instruction.opcode == WirOpcode.Add || instruction.opcode == WirOpcode.Subtract || instruction.opcode == WirOpcode.Multiply) {
+            if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+                return x86_lowering_error("arithmetic instruction has the wrong operand count");
+            }
+
+            let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+            if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt) || result_type.bits > 32) {
+                return x86_lowering_error("the initial x86_64 lowering supports 32-bit integer arithmetic");
+            }
+
+            let left_id: WirValueID = instruction.operands[0];
+            let right_id: WirValueID = instruction.operands[1];
+            let left: WirValue = program.arena.values[wir_id_index(UInt32(left_id))];
+            let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+            if (right.kind != WirValueKind.Integer) {
+                return x86_lowering_error("the initial x86_64 lowering requires an integer arithmetic right operand");
+            }
+            if (left.kind == WirValueKind.Integer) {
+                x86_mov_eax_imm32(ref output, UInt32(left.integer));
+            } else if (left_id != accumulator) {
+                return x86_lowering_error("the initial x86_64 lowering cannot allocate this arithmetic operand");
+            }
+
+            if (instruction.opcode == WirOpcode.Add) {
+                x86_add_eax_imm32(ref output, UInt32(right.integer));
+            } else if (instruction.opcode == WirOpcode.Subtract) {
+                x86_sub_eax_imm32(ref output, UInt32(right.integer));
+            } else {
+                x86_imul_eax_imm32(ref output, UInt32(right.integer));
+            }
+
+            accumulator = instruction.result;
+        } else if (instruction.opcode == WirOpcode.Return) {
             if (!x86_lower_return(program, instruction, ref output)) {
-                return x86_lowering_error("unsupported return operand in the initial x86_64 lowering");
+                if (instruction.operands.length() == 1 && instruction.operands[0] == accumulator) {
+                    x86_return(ref output);
+                } else {
+                    return x86_lowering_error("unsupported return operand in the initial x86_64 lowering");
+                }
             }
         } else {
             return x86_lowering_error("unsupported instruction in the initial x86_64 lowering");
         }
-        i += 1;
+        i++;
     }
     return X86LoweringResult(bytes=output.bytes, errors=[]);
 }
