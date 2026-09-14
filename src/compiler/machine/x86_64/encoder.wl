@@ -20,6 +20,15 @@ func x86_emit_u32(ref output: X86CodeBuffer, value: UInt32) -> Void {
     x86_emit_byte(ref output, Byte((value >> 24U) & 255U));
 }
 
+func x86_emit_i32(ref output: X86CodeBuffer, value: Int) -> Void {
+    let encoded = Long(value);
+    if (encoded < 0L) {
+        encoded += 4294967296L;
+    }
+
+    x86_emit_u32(ref output, UInt32(encoded));
+}
+
 func x86_emit_u64(ref output: X86CodeBuffer, value: UInt64) -> Void {
     x86_emit_u32(ref output, UInt32(value & 4294967295UL));
     x86_emit_u32(ref output, UInt32((value >> 32U) & 4294967295UL));
@@ -141,6 +150,56 @@ func x86_imul_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
     x86_emit_byte(ref output, Byte(105));
     x86_emit_byte(ref output, Byte(192));
     x86_emit_u32(ref output, value);
+}
+
+func x86_push_rbp(ref output: X86CodeBuffer) -> Void {
+    x86_emit_byte(ref output, Byte(85));
+}
+
+func x86_pop_rbp(ref output: X86CodeBuffer) -> Void {
+    x86_emit_byte(ref output, Byte(93));
+}
+
+func x86_mov_rbp_rsp(ref output: X86CodeBuffer) -> Void {
+    x86_emit_byte(ref output, Byte(72));
+    x86_emit_byte(ref output, Byte(137));
+    x86_emit_byte(ref output, Byte(229));
+}
+
+func x86_mov_rsp_rbp(ref output: X86CodeBuffer) -> Void {
+    x86_emit_byte(ref output, Byte(72));
+    x86_emit_byte(ref output, Byte(137));
+    x86_emit_byte(ref output, Byte(236));
+}
+
+func x86_sub_rsp_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    x86_emit_byte(ref output, Byte(72));
+    x86_emit_byte(ref output, Byte(129));
+    x86_emit_byte(ref output, Byte(236));
+    x86_emit_u32(ref output, value);
+}
+
+func x86_store_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> Void {
+    x86_emit_byte(ref output, Byte(137));
+    x86_emit_byte(ref output, Byte(133));
+    x86_emit_i32(ref output, displacement);
+}
+
+func x86_load_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> Void {
+    x86_emit_byte(ref output, Byte(139));
+    x86_emit_byte(ref output, Byte(133));
+    x86_emit_i32(ref output, displacement);
+}
+
+func x86_frame_enter(ref output: X86CodeBuffer, size: Int) -> Void {
+    x86_push_rbp(ref output);
+    x86_mov_rbp_rsp(ref output);
+    if (size > 0) { x86_sub_rsp_imm32(ref output, UInt32(size)); }
+}
+
+func x86_frame_leave(ref output: X86CodeBuffer) -> Void {
+    x86_mov_rsp_rbp(ref output);
+    x86_pop_rbp(ref output);
 }
 
 func x86_return(ref output: X86CodeBuffer) -> Void {
