@@ -1,6 +1,7 @@
 // compiler/machine/x86_64/lowering.wl
 import * from "model.wl"
 import * from "encoder.wl"
+import * from "abi.wl"
 import * from "../../wir/model.wl"
 
 struct X86LoweringResult(
@@ -38,6 +39,24 @@ func x86_lower_return(program: WirModule, instruction: WirInstruction, ref outpu
     }
 
     x86_return(ref output);
+    return true;
+}
+
+func x86_parameter_index(function: WirFunction, value_id: WirValueID) -> Int {
+    let i: Int = 0;
+    while (i < function.parameters.length()) {
+        if (function.parameters[i] == value_id) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+func x86_lower_parameter_to_eax(function: WirFunction, value_id: WirValueID, ref output: X86CodeBuffer) -> Bool {
+    let index: Int = x86_parameter_index(function, value_id);
+    if (index < 0 || index >= 4) { return false; }
+    let register: X86Register = x86_win64_argument_register(index, false);
+    if (register == X86Register.None) { return false; }
+    x86_mov_eax_register32(ref output, register);
     return true;
 }
 
@@ -91,6 +110,10 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
             }
             if (left.kind == WirValueKind.Integer) {
                 x86_mov_eax_imm32(ref output, UInt32(left.integer));
+            } else if (left.kind == WirValueKind.FunctionParameter) {
+                if (!x86_lower_parameter_to_eax(function, left_id, ref output)) {
+                    return x86_lowering_error("the initial x86_64 lowering cannot pass this function parameter");
+                }
             } else if (left_id != accumulator) {
                 return x86_lowering_error("the initial x86_64 lowering cannot allocate this arithmetic operand");
             }
@@ -105,12 +128,21 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
 
             accumulator = instruction.result;
         } else if (instruction.opcode == WirOpcode.Return) {
-            if (!x86_lower_return(program, instruction, ref output)) {
-                if (instruction.operands.length() == 1 && instruction.operands[0] == accumulator) {
+            if (instruction.operands.length() == 1) {
+                let returned_id: WirValueID = instruction.operands[0];
+                let returned: WirValue = program.arena.values[wir_id_index(UInt32(returned_id))];
+                if (returned_id == accumulator) {
                     x86_return(ref output);
-                } else {
+                } else if (returned.kind == WirValueKind.FunctionParameter) {
+                    if (!x86_lower_parameter_to_eax(function, returned_id, ref output)) {
+                        return x86_lowering_error("the initial x86_64 lowering cannot return this function parameter");
+                    }
+                    x86_return(ref output);
+                } else if (!x86_lower_return(program, instruction, ref output)) {
                     return x86_lowering_error("unsupported return operand in the initial x86_64 lowering");
                 }
+            } else if (!x86_lower_return(program, instruction, ref output)) {
+                return x86_lowering_error("unsupported return operand in the initial x86_64 lowering");
             }
         } else {
             return x86_lowering_error("unsupported instruction in the initial x86_64 lowering");

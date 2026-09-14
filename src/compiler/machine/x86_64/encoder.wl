@@ -26,19 +26,24 @@ func x86_emit_u64(ref output: X86CodeBuffer, value: UInt64) -> Void {
 }
 
 func x86_register_code(register: X86Register) -> Int {
-    let value: Int = Int(register);
-    if (value >= Int(X86Register.RAX) && value <= Int(X86Register.RSP)) {
-        return value - 1;
-    }
-    if (value >= Int(X86Register.R8) && value <= Int(X86Register.R15)) {
-        return value - Int(X86Register.R8);
+    if (register == X86Register.RAX) { return 0; }
+    if (register == X86Register.RBX) { return 3; }
+    if (register == X86Register.RCX) { return 1; }
+    if (register == X86Register.RDX) { return 2; }
+    if (register == X86Register.RSI) { return 6; }
+    if (register == X86Register.RDI) { return 7; }
+    if (register == X86Register.RBP) { return 5; }
+    if (register == X86Register.RSP) { return 4; }
+    if (register == X86Register.R8 || register == X86Register.R9 || register == X86Register.R10 || register == X86Register.R11 ||
+        register == X86Register.R12 || register == X86Register.R13 || register == X86Register.R14 || register == X86Register.R15) {
+        return Int(register) - Int(X86Register.R8);
     }
     return -1;
 }
 
 func x86_register_extended(register: X86Register) -> Bool {
-    let value: Int = Int(register);
-    return value >= Int(X86Register.R8) && value <= Int(X86Register.R15);
+    return register == X86Register.R8 || register == X86Register.R9 || register == X86Register.R10 || register == X86Register.R11 ||
+           register == X86Register.R12 || register == X86Register.R13 || register == X86Register.R14 || register == X86Register.R15;
 }
 
 func x86_rex(ref output: X86CodeBuffer, wide: Bool, reg: X86Register, index: X86Register, base: X86Register) -> Void {
@@ -80,6 +85,14 @@ func x86_mov_rax_imm64(ref output: X86CodeBuffer, value: UInt64) -> Void {
     x86_emit_byte(ref output, Byte(72));
     x86_emit_byte(ref output, Byte(184));
     x86_emit_u64(ref output, value);
+}
+
+func x86_mov_eax_register32(ref output: X86CodeBuffer, source: X86Register) -> Void {
+    if (x86_register_code(source) < 0) { return; }
+
+    x86_rex(ref output, false, source, X86Register.None, X86Register.RAX);
+    x86_emit_byte(ref output, Byte(137));
+    x86_emit_byte(ref output, x86_modrm_register(source, X86Register.RAX));
 }
 
 func x86_mov_register(ref output: X86CodeBuffer, destination: X86Register, source: X86Register) -> Void? {
