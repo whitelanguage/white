@@ -29,6 +29,25 @@ func x86_emit_i32(ref output: X86CodeBuffer, value: Int) -> Void {
     x86_emit_u32(ref output, UInt32(encoded));
 }
 
+func x86_patch_i32(ref output: X86CodeBuffer, offset: Int, value: Int) -> Bool {
+    if (offset < 0 || offset + 4 > output.bytes.length()) {
+        return false;
+    }
+
+    let encoded = Long(value);
+    if (encoded < 0L) {
+        encoded += 4294967296L;
+    }
+
+    let bits = UInt32(encoded);
+    output.bytes[offset] = Byte(bits & 255U);
+    output.bytes[offset + 1] = Byte((bits >> 8U) & 255U);
+    output.bytes[offset + 2] = Byte((bits >> 16U) & 255U);
+    output.bytes[offset + 3] = Byte((bits >> 24U) & 255U);
+
+    return true;
+}
+
 func x86_emit_u64(ref output: X86CodeBuffer, value: UInt64) -> Void {
     x86_emit_u32(ref output, UInt32(value & 4294967295UL));
     x86_emit_u32(ref output, UInt32((value >> 32U) & 4294967295UL));
@@ -150,6 +169,41 @@ func x86_imul_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
     x86_emit_byte(ref output, Byte(105));
     x86_emit_byte(ref output, Byte(192));
     x86_emit_u32(ref output, value);
+}
+
+func x86_cmp_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    x86_emit_byte(ref output, Byte(61));
+    x86_emit_u32(ref output, value);
+}
+
+func x86_jump_rel32(ref output: X86CodeBuffer) -> Int {
+    x86_emit_byte(ref output, Byte(233));
+    let patch_offset: Int = output.bytes.length();
+    x86_emit_u32(ref output, 0U);
+
+    return patch_offset;
+}
+
+func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {
+    let code: Byte = Byte(0);
+    if (opcode == X86Opcode.Je) { code = Byte(132); }
+    else if (opcode == X86Opcode.Jne) { code = Byte(133); }
+    else if (opcode == X86Opcode.Jl) { code = Byte(140); }
+    else if (opcode == X86Opcode.Jle) { code = Byte(142); }
+    else if (opcode == X86Opcode.Jg) { code = Byte(143); }
+    else if (opcode == X86Opcode.Jge) { code = Byte(141); }
+    else if (opcode == X86Opcode.Ja) { code = Byte(135); }
+    else if (opcode == X86Opcode.Jae) { code = Byte(131); }
+    else if (opcode == X86Opcode.Jb) { code = Byte(130); }
+    else if (opcode == X86Opcode.Jbe) { code = Byte(134); }
+    else { return -1; }
+
+    x86_emit_byte(ref output, Byte(15));
+    x86_emit_byte(ref output, code);
+    let patch_offset: Int = output.bytes.length();
+    x86_emit_u32(ref output, 0U);
+
+    return patch_offset;
 }
 
 func x86_push_rbp(ref output: X86CodeBuffer) -> Void {
