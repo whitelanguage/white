@@ -2,13 +2,10 @@
 import * from "model.wl"
 import * from "encoder.wl"
 import * from "abi.wl"
+import * from "allocator.wl"
 import * from "../../wir/model.wl"
 import wir_type_layout from "../../wir/layout.wl"
 
-struct X86LoweringResult(
-    bytes: Vector(Byte),
-    errors: Vector(String)
-)
 
 struct X86StackSlot(
     value: WirValueID,
@@ -26,15 +23,50 @@ struct X86BranchFixup(
     target: WirBlockID
 )
 
+struct X86CallFixup(
+    offset: Int,
+    target: WirFuncID
+)
+
+struct X86LoweringResult(
+    bytes: Vector(Byte),
+    errors: Vector(String),
+    calls: Vector(X86CallFixup)
+)
+
+struct X86FunctionCode(
+    function: WirFuncID,
+    offset: Int,
+    bytes: Vector(Byte),
+    calls: Vector(X86CallFixup)
+)
+
+struct X86ModuleResult(
+    bytes: Vector(Byte),
+    errors: Vector(String)
+)
+
 struct X86BlockState(
     accumulator: WirValueID,
     flags_value: WirValueID,
     flags_opcode: X86Opcode,
+    registers: X86RegisterPlan,
+    spills: X86SpillPlan,
+    position: Int,
+    message: String
+)
+
+struct X86RegisterResult(
+    register: X86Register,
     message: String
 )
 
 func x86_lowering_error(message: String) -> X86LoweringResult {
-    return X86LoweringResult(bytes=[], errors=[message]);
+    return X86LoweringResult(bytes=[], errors=[message], calls=[]);
+}
+
+func x86_module_error(message: String) -> X86ModuleResult {
+    return X86ModuleResult(bytes=[], errors=[message]);
 }
 
 func x86_lower_return(program: WirModule, instruction: WirInstruction, frame_size: Int, ref output: X86CodeBuffer) -> Bool {
@@ -234,7 +266,29 @@ func x86_edge_scratch(slots: Vector(X86StackSlot), count: Int) -> Vector(Int) {
     return offsets;
 }
 
-func x86_stack_frame_size(slots: Vector(X86StackSlot), scratch: Vector(Int)) -> Int {
+func x86_spill_locations(slots: Vector(X86StackSlot), scratch: Vector(Int), count: Int) -> Vector(Int) {
+    let offsets: Vector(Int) = [];
+    let offset: Int = 0;
+
+    if (slots.length() != 0) {
+        offset = slots[slots.length() - 1].offset;
+    }
+
+    if (scratch.length() != 0 && 0 - scratch[scratch.length() - 1] > offset) {
+        offset = 0 - scratch[scratch.length() - 1];
+    }
+
+    let i = 0;
+    while (i < count) {
+        offset = x86_align_frame_offset(offset + 4, 4);
+        offsets.append(0 - offset);
+        i++;
+    }
+
+    return offsets;
+}
+
+func x86_stack_frame_size(slots: Vector(X86StackSlot), scratch: Vector(Int), spills: Vector(Int)) -> Int {
     let size: Int = 0;
     if (slots.length() != 0) {
         size = slots[slots.length() - 1].offset;
@@ -243,8 +297,48 @@ func x86_stack_frame_size(slots: Vector(X86StackSlot), scratch: Vector(Int)) -> 
     if (scratch.length() != 0 && 0 - scratch[scratch.length() - 1] > size) {
         size = 0 - scratch[scratch.length() - 1];
     }
-
+    if (spills.length() != 0 && 0 - spills[spills.length() - 1] > size) {
+        size = 0 - spills[spills.length() - 1];
+    }
     return x86_align_frame_offset(size, 16);
+}
+
+func x86_func_has_call(program: WirModule, function: WirFunction) -> Bool {
+    let block_index = 0;
+    while (block_index < function.blocks.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[block_index]))];
+        let instruction_index = 0;
+        while (instruction_index < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
+            if (instruction.opcode == WirOpcode.Call) {
+                return true;
+            }
+
+            instruction_index++;
+        }
+        block_index++;
+    }
+    return false;
+}
+
+func x86_save_live_registers(program: WirModule, state: X86BlockState, ref output: X86CodeBuffer) -> String {
+    let i: Int = 0;
+    while (i < state.registers.bindings.length()) {
+        let binding: X86RegisterBinding = state.registers.bindings[i];
+        if (binding.value != NO_WIR_VALUE && x86_next_use(state.registers.uses, binding.value, state.position) != X86_NO_NEXT_USE) {
+            if (x86_rematerializable(program, binding.value)) {
+                x86_clear_register(state.registers, binding.register);
+            } else {
+                let offset: Int = x86_claim_spill(state.spills, binding.value);
+                if (offset == 0) { return "x86_64 spill storage is exhausted before a call"; }
+                x86_store_register32_rbp_disp32(ref output, binding.register, offset);
+                x86_clear_register(state.registers, binding.register);
+            }
+        }
+        i += 1;
+    }
+
+    return "";
 }
 
 func x86_lower_value_to_eax(program: WirModule, function: WirFunction, value_id: WirValueID, accumulator: WirValueID, slots: Vector(X86StackSlot), ref output: X86CodeBuffer) -> Bool {
@@ -278,6 +372,91 @@ func x86_lower_value_to_eax(program: WirModule, function: WirFunction, value_id:
         return true;
     }
     return false;
+}
+
+func x86_prepare_register(program: WirModule, state: X86BlockState, choice: X86RegisterChoice, ref output: X86CodeBuffer) -> String {
+    if (choice.register == X86Register.None) {
+        return "no x86_64 register is available for this value";
+    }
+
+    if (choice.evicted == NO_WIR_VALUE) {
+        return "";
+    }
+
+    let next_use: Int = x86_next_use(state.registers.uses, choice.evicted, state.position);
+    if (next_use == X86_NO_NEXT_USE || x86_rematerializable(program, choice.evicted)) {
+        x86_clear_register(state.registers, choice.register);
+        return "";
+    }
+
+    if (x86_spill_offset(state.spills, choice.evicted) != 0) {
+        x86_clear_register(state.registers, choice.register);
+        return "";
+    }
+
+    let offset: Int = x86_claim_spill(state.spills, choice.evicted);
+    if (offset == 0) {
+        return "x86_64 spill storage is exhausted";
+    }
+
+    x86_store_register32_rbp_disp32(ref output, choice.register, offset);
+    x86_clear_register(state.registers, choice.register);
+
+    return "";
+}
+
+func x86_materialize_register_except(program: WirModule, function: WirFunction, value_id: WirValueID, slots: Vector(X86StackSlot), state: X86BlockState, avoid: X86Register, ref output: X86CodeBuffer) -> X86RegisterResult {
+    let allocated: X86Register = x86_register_for(state.registers, value_id);
+    if (allocated != X86Register.None) {
+        return X86RegisterResult(register=allocated, message="");
+    }
+
+    let choice: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, avoid);
+    let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+    if (prepare_error.length() != 0) {
+        return X86RegisterResult(register=X86Register.None, message=prepare_error);
+    }
+
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    let spill: Int = x86_spill_offset(state.spills, value_id);
+    if (spill != 0) {
+
+        x86_load_register32_rbp_disp32(ref output, choice.register, spill);
+
+    } else if (value.kind == WirValueKind.Integer) {
+        if (!x86_is_i32_integer(program, value.type_id)) {
+            return X86RegisterResult(register=X86Register.None, message="the initial x86_64 allocator supports 32-bit integer values");
+        }
+
+        x86_mov_register_imm32(ref output, choice.register, UInt32(value.integer));
+
+    } else if (value.kind == WirValueKind.FunctionParameter) {
+        let index: Int = x86_parameter_index(function, value_id);
+        let incoming: X86Register = x86_win64_argument_register(index, false);
+        if (incoming == X86Register.None || !x86_is_i32_integer(program, value.type_id)) {
+            return X86RegisterResult(register=X86Register.None, message="the initial x86_64 allocator cannot load this function parameter");
+        }
+
+        x86_mov_register32(ref output, choice.register, incoming);
+
+    } else if (value.kind == WirValueKind.BlockParameter) {
+        let offset: Int = x86_stack_offset(slots, value_id);
+        if (offset == 0) {
+            return X86RegisterResult(register=X86Register.None, message="block parameter has no assigned stack location");
+        }
+
+        x86_load_register32_rbp_disp32(ref output, choice.register, offset);
+
+    } else {
+        return X86RegisterResult(register=X86Register.None, message="the x86_64 allocator cannot restore this value");
+    }
+
+    x86_bind_register(state.registers, choice.register, value_id);
+    return X86RegisterResult(register=choice.register, message="");
+}
+
+func x86_materialize_register(program: WirModule, function: WirFunction, value_id: WirValueID, slots: Vector(X86StackSlot), state: X86BlockState, ref output: X86CodeBuffer) -> X86RegisterResult {
+    return x86_materialize_register_except(program, function, value_id, slots, state, X86Register.None, ref output);
 }
 
 func x86_comparison_opcode(opcode: WirOpcode) -> X86Opcode {
@@ -330,12 +509,58 @@ func x86_patch_branches(ref output: X86CodeBuffer, offsets: Vector(X86BlockOffse
     return true;
 }
 
+func x86_function_code_offset(codes: Vector(X86FunctionCode), function: WirFuncID) -> Int {
+    let i: Int = 0;
+    while (i < codes.length()) {
+        if (codes[i].function == function) { return codes[i].offset; }
+        i += 1;
+    }
+
+    return -1;
+}
+
+func x86_patch_calls(ref output: X86CodeBuffer, codes: Vector(X86FunctionCode)) -> Bool {
+    let code_index: Int = 0;
+    while (code_index < codes.length()) {
+        let code: X86FunctionCode = codes[code_index];
+
+        let call_index: Int = 0;
+        while (call_index < code.calls.length()) {
+            let call: X86CallFixup = code.calls[call_index];
+            let target_offset: Int = x86_function_code_offset(codes, call.target);
+            if (target_offset < 0) {
+                return false;
+            }
+
+            let patch_offset: Int = code.offset + call.offset;
+            let displacement: Int = target_offset - (patch_offset + 4);
+            if (displacement < -2147483648 || displacement > 2147483647) {
+                return false;
+            }
+
+            if (!x86_patch_i32(ref output, patch_offset, displacement)) {
+                return false;
+            }
+
+            call_index++;
+        }
+
+        code_index++;
+    }
+
+    return true;
+}
+
 func x86_instruction_error(state: X86BlockState, message: String) -> X86BlockState {
     state.message = message;
     return state;
 }
 
-func x86_emit_edge_moves(program: WirModule, function: WirFunction, edge: WirEdge, slots: Vector(X86StackSlot), scratch: Vector(Int), accumulator: WirValueID, ref output: X86CodeBuffer) -> String {
+func x86_emit_edge_moves(program: WirModule, function: WirFunction, 
+                        edge: WirEdge, slots: Vector(X86StackSlot), 
+                        scratch: Vector(Int), state: X86BlockState, 
+                        ref output: X86CodeBuffer) -> String {
+
     let target_index: Int = wir_id_index(UInt32(edge.target));
     if (target_index < 0 || target_index >= program.arena.blocks.length()) {
         return "edge refers to an unknown basic block";
@@ -353,10 +578,21 @@ func x86_emit_edge_moves(program: WirModule, function: WirFunction, edge: WirEdg
     // stage every source before writing a target, this keeps swaps and loop-carried values correct
     let i = 0;
     while (i < edge.arguments.length()) {
-        if (!x86_lower_value_to_eax(program, function, edge.arguments[i], accumulator, slots, ref output)) {
-            return "the x86_64 lowering cannot move this edge argument";
+        let source: X86RegisterResult = x86_materialize_register(
+            program, 
+            function, 
+            edge.arguments[i], 
+            slots, 
+            state, 
+            ref output
+        );
+
+        if (source.message.length() != 0) {
+            return source.message;
         }
-        x86_store_eax_rbp_disp32(ref output, scratch[i]);
+
+        x86_store_register32_rbp_disp32(ref output, source.register, scratch[i]);
+
         i++;
     }
 
@@ -398,11 +634,12 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         if (!x86_is_i32_integer(program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id)) {
             return x86_instruction_error(state, "the initial x86_64 lowering supports 32-bit integer stores");
         }
-        if (!x86_lower_value_to_eax(program, function, instruction.operands[0], state.accumulator, slots, ref output)) {
-            return x86_instruction_error(state, "the initial x86_64 lowering cannot store this value");
+        let stored: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (stored.message.length() != 0) {
+            return x86_instruction_error(state, stored.message);
         }
 
-        x86_store_eax_rbp_disp32(ref output, offset);
+        x86_store_register32_rbp_disp32(ref output, stored.register, offset);
         state.accumulator = instruction.operands[0];
         return state;
     }
@@ -421,7 +658,14 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
             return x86_instruction_error(state, "the initial x86_64 lowering supports 32-bit integer loads");
         }
 
-        x86_load_eax_rbp_disp32(ref output, offset);
+        let choice: X86RegisterChoice = x86_choose_register(program, state.registers, state.position);
+        let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+        if (prepare_error.length() != 0) {
+            return x86_instruction_error(state, prepare_error);
+        }
+
+        x86_load_register32_rbp_disp32(ref output, choice.register, offset);
+        x86_bind_register(state.registers, choice.register, instruction.result);
         state.accumulator = instruction.result;
         return state;
     }
@@ -437,22 +681,66 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         }
 
         let left_id: WirValueID = instruction.operands[0];
-        let right: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
+        let right_id: WirValueID = instruction.operands[1];
+        let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+        let left: X86RegisterResult = x86_materialize_register(program, function, left_id, slots, state, ref output);
+        if (left.message.length() != 0) {
+            return x86_instruction_error(state, left.message);
+        }
 
+        let right_register: X86Register = X86Register.None;
         if (right.kind != WirValueKind.Integer) {
-            return x86_instruction_error(state, "the initial x86_64 lowering requires an integer arithmetic right operand");
-        }
-        if (!x86_lower_value_to_eax(program, function, left_id, state.accumulator, slots, ref output)) {
-            return x86_instruction_error(state, "the initial x86_64 lowering cannot load this arithmetic operand");
-        }
-        if (instruction.opcode == WirOpcode.Add) {
-            x86_add_eax_imm32(ref output, UInt32(right.integer));
-        } else if (instruction.opcode == WirOpcode.Subtract) {
-            x86_sub_eax_imm32(ref output, UInt32(right.integer));
-        } else {
-            x86_imul_eax_imm32(ref output, UInt32(right.integer));
+            let loaded_right: X86RegisterResult = x86_materialize_register_except(program, function, right_id, slots, state, left.register, ref output);
+            if (loaded_right.message.length() != 0) {
+                return x86_instruction_error(state, loaded_right.message);
+            }
+
+            right_register = loaded_right.register;
         }
 
+        let destination: X86Register = left.register;
+        if (x86_next_use(state.registers.uses, left_id, state.position) != X86_NO_NEXT_USE) {
+            let reuse_right: Bool = instruction.opcode != WirOpcode.Subtract && 
+                                    right_register != X86Register.None &&
+                                    x86_next_use(state.registers.uses, right_id, state.position) == X86_NO_NEXT_USE;
+            if reuse_right {
+                destination = right_register;
+            } else {
+                let choice: X86RegisterChoice = x86_choose_register_avoiding(program, state.registers, state.position, left.register, right_register);
+                let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+                if (prepare_error.length() != 0) {
+                    return x86_instruction_error(state, prepare_error);
+                }
+
+                destination = choice.register;
+                x86_mov_register32(ref output, destination, left.register);
+            }
+        }
+
+        if (right.kind == WirValueKind.Integer) {
+            if (instruction.opcode == WirOpcode.Add) {
+                x86_add_register_imm32(ref output, destination, UInt32(right.integer));
+            } else if (instruction.opcode == WirOpcode.Subtract) {
+                x86_sub_register_imm32(ref output, destination, UInt32(right.integer));
+            } else {
+                x86_imul_register_imm32(ref output, destination, UInt32(right.integer));
+            }
+        } else {
+            let source: X86Register = right_register;
+            if (destination == right_register) {
+                source = left.register;
+            }
+
+            if (instruction.opcode == WirOpcode.Add) {
+                x86_add_register32(ref output, destination, source);
+            } else if (instruction.opcode == WirOpcode.Subtract) {
+                x86_sub_register32(ref output, destination, source);
+            } else {
+                x86_imul_register32(ref output, destination, source);
+            }
+        }
+
+        x86_bind_register(state.registers, destination, instruction.result);
         state.accumulator = instruction.result;
         return state;
     }
@@ -462,18 +750,81 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE || instruction.type_id != program.bool_type) {
             return x86_instruction_error(state, "comparison instruction has an invalid result or operand count");
         }
-        let right: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
-        if (right.kind != WirValueKind.Integer) {
-            return x86_instruction_error(state, "the initial x86_64 comparison lowering requires an integer constant on the right");
+        let right_id: WirValueID = instruction.operands[1];
+        let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+        let left: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (left.message.length() != 0) {
+            return x86_instruction_error(state, left.message);
         }
-        if (!x86_lower_value_to_eax(program, function, instruction.operands[0], state.accumulator, slots, ref output)) {
-            return x86_instruction_error(state, "the initial x86_64 lowering cannot load this comparison operand");
+        if (right.kind == WirValueKind.Integer) {
+            x86_cmp_register_imm32(ref output, left.register, UInt32(right.integer));
+        } else {
+            let loaded_right: X86RegisterResult = x86_materialize_register_except(program, function, right_id, slots, state, left.register, ref output);
+            if (loaded_right.message.length() != 0) { return x86_instruction_error(state, loaded_right.message); }
+            x86_cmp_register32(ref output, left.register, loaded_right.register);
         }
-        x86_cmp_eax_imm32(ref output, UInt32(right.integer));
 
         state.accumulator = instruction.operands[0];
         state.flags_value = instruction.result;
         state.flags_opcode = comparison;
+        return state;
+    }
+
+    if (instruction.opcode == WirOpcode.Call) {
+        if (instruction.operands.length() == 0 || instruction.call_type == NO_WIR_TYPE || instruction.result != NO_WIR_VALUE && !x86_is_i32_integer(program, instruction.type_id)) {
+            return x86_instruction_error(state, "the initial x86_64 call lowering requires a direct 32-bit call result");
+        }
+
+        let callee: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+        if (callee.kind != WirValueKind.Function) {
+            return x86_instruction_error(state, "the initial x86_64 call lowering requires a direct function value");
+        }
+
+        let signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
+        if (signature.kind != WirTypeKind.Function || signature.variadic || instruction.operands.length() - 1 != signature.parameters.length()) {
+            return x86_instruction_error(state, "the initial x86_64 call lowering requires a fixed-arity function signature");
+        }
+
+        if (signature.parameters.length() > 4) {
+            return x86_instruction_error(state, "the initial x86_64 call lowering supports at most four integer arguments");
+        }
+
+        let save_error: String = x86_save_live_registers(program, state, ref output);
+        if (save_error.length() != 0) {
+            return x86_instruction_error(state, save_error);
+        }
+    
+        let argument_index: Int = 0;
+        while (argument_index < signature.parameters.length()) {
+            if (!x86_is_i32_integer(program, signature.parameters[argument_index])) {
+                return x86_instruction_error(state, "the initial x86_64 call lowering supports 32-bit integer arguments");
+            }
+
+            let argument: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[argument_index + 1], slots, state, ref output);
+            if (argument.message.length() != 0) {
+                return x86_instruction_error(state, argument.message);
+            }
+
+            let destination: X86Register = x86_win64_argument_register(argument_index, false);
+            if (destination == X86Register.None) {
+                return x86_instruction_error(state, "the x86_64 ABI has no register for this argument");
+            }
+
+            if (argument.register != destination) {
+                x86_mov_register32(ref output, destination, argument.register);
+            }
+
+            argument_index +=1;
+        }
+
+        let target_function: WirFuncID = WirFuncID(callee.owner);
+        calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target_function));
+
+        if (instruction.result != NO_WIR_VALUE) {
+            x86_bind_register(state.registers, X86Register.RAX, instruction.result);
+        }
+
+        state.accumulator = instruction.result;
         return state;
     }
 
@@ -482,7 +833,7 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
             return x86_instruction_error(state, "jump instruction has an unsupported edge shape");
         }
 
-        let move_error: String = x86_emit_edge_moves(program, function, instruction.edges[0], slots, scratch, state.accumulator, ref output);
+        let move_error: String = x86_emit_edge_moves(program, function, instruction.edges[0], slots, scratch, state, ref output);
         if (move_error.length() != 0) {
             return x86_instruction_error(state, move_error);
         }
@@ -503,7 +854,7 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
                 edge = 0;
             }
 
-            let move_error: String = x86_emit_edge_moves(program, function, instruction.edges[edge], slots, scratch, state.accumulator, ref output);
+            let move_error: String = x86_emit_edge_moves(program, function, instruction.edges[edge], slots, scratch, state, ref output);
             if (move_error.length() != 0) {
                 return x86_instruction_error(state, move_error);
             }
@@ -531,7 +882,7 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
             return x86_instruction_error(state, "the x86_64 encoder rejected the branch condition");
         }
 
-        let false_move_error: String = x86_emit_edge_moves(program, function, instruction.edges[1], slots, scratch, state.accumulator, ref output);
+        let false_move_error: String = x86_emit_edge_moves(program, function, instruction.edges[1], slots, scratch, state, ref output);
         if (false_move_error.length() != 0) {
             return x86_instruction_error(state, false_move_error);
         }
@@ -542,8 +893,7 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         if (!x86_patch_i32(ref output, true_patch, true_offset - (true_patch + 4))) {
             return x86_instruction_error(state, "the x86_64 lowering could not resolve the true edge transfer");
         }
-
-        let true_move_error: String = x86_emit_edge_moves(program, function, instruction.edges[0], slots, scratch, state.accumulator, ref output);
+        let true_move_error: String = x86_emit_edge_moves(program, function, instruction.edges[0], slots, scratch, state, ref output);
         if (true_move_error.length() != 0) {
             return x86_instruction_error(state, true_move_error);
         }
@@ -553,8 +903,21 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
     }
 
     if (instruction.opcode == WirOpcode.Return) {
-        if (instruction.operands.length() == 1 &&
-            x86_lower_value_to_eax(program, function, instruction.operands[0], state.accumulator, slots, ref output)) {
+        if (instruction.operands.length() == 1) {
+            let returned: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+            if (returned.message.length() == 0) {
+                if (returned.register != X86Register.RAX) {
+                    x86_mov_eax_register32(ref output, returned.register);
+                }
+                if (frame_size > 0) {
+                    x86_frame_leave(ref output);
+                }
+
+                x86_return(ref output);
+                return state;
+            }
+        }
+        if (instruction.operands.length() == 0) {
             if (frame_size > 0) {
                 x86_frame_leave(ref output);
             }
@@ -624,10 +987,23 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
     }
 
     let scratch: Vector(Int) = x86_edge_scratch(slots, x86_edge_scratch_count(program, order));
-    let frame_size: Int = x86_stack_frame_size(slots, scratch);
+    let uses: X86UseTable = x86_collect_uses(program, order);
+    let register_plan: X86RegisterPlan = x86_register_plan(uses);
+
+    let spill_count: Int = x86_spill_capacity(program, order, uses, register_plan.bindings.length());
+    let spill_locations: Vector(Int) = x86_spill_locations(slots, scratch, spill_count);
+    let spill_plan: X86SpillPlan = x86_new_spill_plan(spill_locations);
+
+    let frame_size: Int = x86_stack_frame_size(slots, scratch, spill_locations);
+    if (x86_func_has_call(program, function)) {
+        frame_size = x86_align_frame_offset(frame_size + 32, 16);
+    }
+
     let output: X86CodeBuffer = x86_new_code_buffer();
     let offsets: Vector(X86BlockOffset) = [];
     let fixups: Vector(X86BranchFixup) = [];
+    let calls: Vector(X86CallFixup) = [];
+    let position: Int = 0;
     if (frame_size > 0) {
         x86_frame_enter(ref output, frame_size);
     }
@@ -637,19 +1013,28 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
         let block_id: WirBlockID = order[block_index];
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
         offsets.append(X86BlockOffset(block=block_id, offset=output.bytes.length()));
+        x86_reset_registers(register_plan);
+        x86_reset_spills(spill_plan);
 
-        let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, message="");
+        let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=register_plan, spills=spill_plan, position=position, message="");
         let instruction_index: Int = 0;
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
-            state = x86_lower_instruction(program, function, instruction, slots, scratch, frame_size, state, ref output, ref fixups);
+            state = x86_lower_instruction(program, function, instruction, slots, scratch, frame_size, state, ref output, ref fixups, ref calls);
+
             if (state.message.length() != 0) {
                 return x86_lowering_error(state.message);
             }
 
+            x86_consume_instruction(state.registers.uses, instruction, state.position);
+            x86_release_dead_registers(state.registers, state.position);
+            x86_release_dead_spills(state.spills, state.registers.uses, state.position);
+
+            state.position += 1;
             instruction_index += 1;
         }
 
+        position = state.position;
         block_index += 1;
     }
 
@@ -657,5 +1042,38 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
         return x86_lowering_error("the x86_64 lowering could not resolve a branch target");
     }
 
-    return X86LoweringResult(bytes=output.bytes, errors=[]);
+    return X86LoweringResult(bytes=output.bytes, errors=[], calls=calls);
+}
+
+func x86_lower_module(program: WirModule) -> X86ModuleResult {
+    let codes: Vector(X86FunctionCode) = [];
+    let output: X86CodeBuffer = x86_new_code_buffer();
+    let function_index = 0;
+    while (function_index < program.arena.functions.length()) {
+        let function: WirFunction = program.arena.functions[function_index];
+        if (function.linkage != WirLinkage.External) {
+            let function_id: WirFuncID = WirFuncID(UInt32(function_index + 1));
+            let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+            if (lowered.errors.length() != 0) {
+                return x86_module_error(lowered.errors[0]);
+            }
+
+            let offset: Int = output.bytes.length();
+            let i: Int = 0;
+            while (i < lowered.bytes.length()) {
+                output.bytes.append(lowered.bytes[i]);
+                i++;
+            }
+
+            codes.append(X86FunctionCode(function=function_id, offset=offset, bytes=lowered.bytes, calls=lowered.calls));
+        }
+
+        function_index++;
+    }
+
+    if (!x86_patch_calls(ref output, codes)) {
+        return x86_module_error("the x86_64 lowering could not resolve a direct call target");
+    }
+
+    return X86ModuleResult(bytes=output.bytes, errors=[]);
 }
