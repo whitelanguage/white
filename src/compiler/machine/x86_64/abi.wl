@@ -54,6 +54,28 @@ func x86_win64_argument_register(index: Int, floating: Bool) -> X86Register {
     return abi.integer_arguments[index];
 }
 
+func x86_win64_stack_arg_offset(index: Int) -> Int {
+    if (index < 4) {
+        return -1;
+    }
+
+    return 32 + (index - 4) * 8;
+}
+
+func x86_win64_stack_param_offset(index: Int) -> Int {
+    if (index < 4) {
+        return -1;
+    }
+
+    return 48 + (index - 4) * 8;
+}
+
+func x86_win64_call_frame(argument_count: Int) -> Int {
+    let size: Int = 32;
+    if (argument_count > 4) { size += (argument_count - 4) * 8; }
+    return (size + 15) & -16;
+}
+
 func x86_win64_is_callee_saved(register: X86Register) -> Bool {
     let abi: X86Win64ABI = x86_win64_abi();
 

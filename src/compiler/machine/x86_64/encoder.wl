@@ -309,10 +309,7 @@ func x86_store_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> V
 }
 
 func x86_store_register32_rbp_disp32(ref output: X86CodeBuffer, source: X86Register, displacement: Int) -> Void {
-    x86_rex(ref output, false, source, X86Register.None, X86Register.RBP);
-    x86_emit_byte(ref output, Byte(137));
-    x86_emit_byte(ref output, Byte(128 | ((x86_register_code(source) & 7) << 3) | 5));
-    x86_emit_i32(ref output, displacement);
+    x86_store_register32_base_disp32(ref output, source, X86Register.RBP, displacement);
 }
 
 func x86_load_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> Void {
@@ -320,9 +317,42 @@ func x86_load_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> Vo
 }
 
 func x86_load_register32_rbp_disp32(ref output: X86CodeBuffer, destination: X86Register, displacement: Int) -> Void {
-    x86_rex(ref output, false, destination, X86Register.None, X86Register.RBP);
+    x86_load_register32_base_disp32(ref output, destination, X86Register.RBP, displacement);
+}
+
+func x86_store_register32_base_disp32(ref output: X86CodeBuffer, source: X86Register, base: X86Register, displacement: Int) -> Void {
+    let base_code: Int = x86_register_code(base);
+    let source_code: Int = x86_register_code(source);
+    if (base_code < 0 || source_code < 0) {
+        return;
+    }
+
+    x86_rex(ref output, false, source, X86Register.None, base);
+    x86_emit_byte(ref output, Byte(137));
+    x86_emit_byte(ref output, Byte(128 | ((source_code & 7) << 3) | (base_code & 7)));
+
+    if ((base_code & 7) == 4) {
+        x86_emit_byte(ref output, Byte(36));
+    }
+
+    x86_emit_i32(ref output, displacement);
+}
+
+func x86_load_register32_base_disp32(ref output: X86CodeBuffer, destination: X86Register, base: X86Register, displacement: Int) -> Void {
+    let base_code: Int = x86_register_code(base);
+    let destination_code: Int = x86_register_code(destination);
+    if (base_code < 0 || destination_code < 0) {
+        return;
+    }
+
+    x86_rex(ref output, false, destination, X86Register.None, base);
     x86_emit_byte(ref output, Byte(139));
-    x86_emit_byte(ref output, Byte(128 | ((x86_register_code(destination) & 7) << 3) | 5));
+    x86_emit_byte(ref output, Byte(128 | ((destination_code & 7) << 3) | (base_code & 7)));
+
+    if ((base_code & 7) == 4) {
+        x86_emit_byte(ref output, Byte(36));
+    }
+
     x86_emit_i32(ref output, displacement);
 }
 

@@ -84,7 +84,9 @@ func x86_collect_uses(program: WirModule, order: Vector(WirBlockID)) -> X86UseTa
 
         let instruction_index = 0;
         while (instruction_index < block.instructions.length()) {
-            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
+            let instruction: WirInstruction = program.arena.instructions[
+                wir_id_index(UInt32(block.instructions[instruction_index]))
+            ];
 
             let operand_index = 0;
             while (operand_index < instruction.operands.length()) {
@@ -321,8 +323,23 @@ func x86_reset_spills(plan: X86SpillPlan) -> Void {
 }
 
 func x86_register_value(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Load     || opcode == WirOpcode.Add || 
-           opcode == WirOpcode.Subtract || opcode == WirOpcode.Multiply;
+    return opcode == WirOpcode.Load     || opcode == WirOpcode.Add      || 
+           opcode == WirOpcode.Subtract || opcode == WirOpcode.Multiply || 
+           opcode == WirOpcode.Call;
+}
+
+func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
+    if (start >= last) {
+        return;
+    }
+
+    if (start + 1 <= last) {
+        before_changes[start + 1] = before_changes[start + 1] + 1;
+        before_changes[last + 1] = before_changes[last + 1] - 1;
+    }
+
+    after_changes[start] = after_changes[start] + 1;
+    after_changes[last] = after_changes[last] - 1;
 }
 
 func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86UseTable, register_count: Int) -> Int {
@@ -343,11 +360,30 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
 
     let before_changes: Vector(Int) = [];
     let after_changes: Vector(Int) = [];
-
+    let call_changes: Vector(Int) = [];
     let i = 0;
     while (i <= instruction_count) {
         before_changes.append(0);
         after_changes.append(0);
+        call_changes.append(0);
+        i++;
+    }
+
+    let function_id: WirFuncID = program.arena.blocks[wir_id_index(UInt32(order[0]))].function;
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+    i = 0;
+    while (i < function.parameters.length()) {
+        let value_index: Int = wir_id_index(UInt32(function.parameters[i]));
+        if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(program, function.parameters[i])) {
+            let queue: X86UseQueue = uses.queues[value_index];
+            if (queue.positions.length() != 0) {
+                let last: Int = queue.positions[queue.positions.length() - 1];
+                x86_mark_live_interval(ref before_changes, ref after_changes, 0, last);
+                call_changes[0] = call_changes[0] + 1;
+                call_changes[last + 1] = call_changes[last + 1] - 1;
+            }
+        }
+
         i++;
     }
 
@@ -355,26 +391,37 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
     block_index = 0;
     while (block_index < order.length()) {
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        let block_start: Int = position;
+        i = 0;
+        while (i < block.parameters.length()) {
+            let value_index: Int = wir_id_index(UInt32(block.parameters[i]));
+            if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(program, block.parameters[i])) {
+                let queue: X86UseQueue = uses.queues[value_index];
+                if (queue.positions.length() != 0) {
+                    let last: Int = queue.positions[queue.positions.length() - 1];
+                    x86_mark_live_interval(ref before_changes, ref after_changes, block_start, last);
+                    call_changes[block_start] = call_changes[block_start] + 1;
+                    call_changes[last + 1] = call_changes[last + 1] - 1;
+                }
+            }
 
+            i++;
+        }
         let instruction_index = 0;
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[
                 wir_id_index(UInt32(block.instructions[instruction_index]))
             ];
-
-            if (instruction.result != NO_WIR_VALUE && x86_register_value(instruction.opcode)) {
+            if (instruction.result != NO_WIR_VALUE && x86_register_value(instruction.opcode) && !x86_rematerializable(program, instruction.result)) {
                 let value_index: Int = wir_id_index(UInt32(instruction.result));
                 if (value_index >= 0 && value_index < uses.queues.length()) {
                     let queue: X86UseQueue = uses.queues[value_index];
                     if (queue.positions.length() != 0) {
                         let last: Int = queue.positions[queue.positions.length() - 1];
-                        if (position+1 <= last) {
-                            before_changes[position+1] = before_changes[position+1] + 1;
-                            before_changes[last+1] = before_changes[last+1] - 1;
-                        }
+                        x86_mark_live_interval(ref before_changes, ref after_changes, position, last);
                         if (position < last) {
-                            after_changes[position] = after_changes[position] + 1;
-                            after_changes[last] = after_changes[last] - 1;
+                            call_changes[position + 1] = call_changes[position + 1] + 1;
+                            call_changes[last + 1] = call_changes[last + 1] - 1;
                         }
                     }
                 }
@@ -388,20 +435,44 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
     let before = 0;
     let after = 0;
     let peak = 0;
+    let live_before_call = 0;
+    let call_peak = 0;
+    let scan_position = 0;
+    block_index = 0;
     i = 0;
     while (i < instruction_count) {
         before += before_changes[i];
         after += after_changes[i];
+        live_before_call += call_changes[i];
         if (before > peak) { peak = before; }
         if (after > peak) { peak = after; }
+        while (block_index < order.length()) {
+            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+            if (i < scan_position + block.instructions.length()) {
+                let instruction: WirInstruction = program.arena.instructions[
+                    wir_id_index(UInt32(block.instructions[i - scan_position]))
+                ];
+                if (instruction.opcode == WirOpcode.Call && live_before_call > call_peak) {
+                    call_peak = live_before_call;
+                }
+
+                break;
+            }
+            scan_position += block.instructions.length();
+            block_index++;
+        }
         i++;
     }
-
-    if (peak <= register_count) {
-        return 0;
+    let required = 0;
+    if (peak > register_count) {
+        required = peak - register_count;
     }
 
-    return peak - register_count;
+    if (call_peak > required) {
+        required = call_peak;
+    }
+
+    return required;
 }
 
 func x86_rematerializable(program: WirModule, value: WirValueID) -> Bool {
