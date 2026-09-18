@@ -333,7 +333,11 @@ func x86_register_value(opcode: WirOpcode) -> Bool {
            opcode == WirOpcode.Equal                || opcode == WirOpcode.NotEqual          || opcode == WirOpcode.SignedLess         ||
            opcode == WirOpcode.SignedLessEqual      || opcode == WirOpcode.SignedGreater     || opcode == WirOpcode.SignedGreaterEqual ||
            opcode == WirOpcode.UnsignedLess         || opcode == WirOpcode.UnsignedLessEqual || opcode == WirOpcode.UnsignedGreater    ||
-           opcode == WirOpcode.UnsignedGreaterEqual || opcode == WirOpcode.Call;
+           opcode == WirOpcode.UnsignedGreaterEqual || opcode == WirOpcode.Call              ||
+
+           opcode == WirOpcode.Truncate             || opcode == WirOpcode.SignExtend        || opcode == WirOpcode.ZeroExtend         ||
+           opcode == WirOpcode.Bitcast              || opcode == WirOpcode.PointerToInt      || opcode == WirOpcode.IntToPointer       ||
+           opcode == WirOpcode.FieldAddress         || opcode == WirOpcode.IndexAddress;
 }
 
 func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
@@ -490,6 +494,10 @@ func x86_rematerializable(program: WirModule, value: WirValueID) -> Bool {
     }
 
     let kind: WirValueKind = program.arena.values[index].kind;
+    if (kind == WirValueKind.Instruction) {
+        let owner: Int = wir_id_index(program.arena.values[index].owner);
+        return owner >= 0 && owner < program.arena.instructions.length() && program.arena.instructions[owner].opcode == WirOpcode.StackAlloc;
+    }
     return kind == WirValueKind.Integer || kind == WirValueKind.FloatValue || kind == WirValueKind.BoolValue ||
            kind == WirValueKind.Null    || kind == WirValueKind.Global     || kind == WirValueKind.Function;
 }

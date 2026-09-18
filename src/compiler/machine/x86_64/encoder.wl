@@ -140,6 +140,44 @@ func x86_mov_register64(ref output: X86CodeBuffer, destination: X86Register, sou
     x86_emit_byte(ref output, x86_modrm_register(source, destination));
 }
 
+func x86_sign_extend32(ref output: X86CodeBuffer, destination: X86Register, source: X86Register) -> Void {
+    x86_rex(ref output, true, destination, X86Register.None, source);
+    x86_emit_byte(ref output, Byte(99));
+    x86_emit_byte(ref output, x86_modrm_register(destination, source));
+}
+
+func x86_lea(ref output: X86CodeBuffer, destination: X86Register, base: X86Register, index: X86Register, scale: Int, displacement: Int) -> Bool {
+    let base_code: Int = x86_register_code(base);
+    let destination_code: Int = x86_register_code(destination);
+    if (base_code < 0 || destination_code < 0) { return false; }
+    let shift: Int = 0;
+    if (scale == 2) { shift = 1; }
+    else if (scale == 4) { shift = 2; }
+    else if (scale == 8) { shift = 3; }
+    else if (scale != 1) { return false; }
+    let index_code: Int = 4;
+    if (index != X86Register.None) {
+        index_code = x86_register_code(index);
+        if (index_code < 0 || index == X86Register.RSP) { return false; }
+    }
+    x86_rex(ref output, true, destination, index, base);
+    x86_emit_byte(ref output, Byte(141));
+    let sib: Bool = index != X86Register.None || base_code == 4;
+    let rm: Int = base_code;
+    if (sib) { rm = 4; }
+    x86_emit_byte(ref output, Byte(128 | (destination_code << 3) | rm));
+    if (sib) { x86_emit_byte(ref output, Byte((shift << 6) | (index_code << 3) | base_code)); }
+    x86_emit_i32(ref output, displacement);
+    return true;
+}
+
+func x86_multiply_imm32(ref output: X86CodeBuffer, register: X86Register, value: UInt32, wide: Bool) -> Void {
+    x86_rex(ref output, wide, register, X86Register.None, register);
+    x86_emit_byte(ref output, Byte(105));
+    x86_emit_byte(ref output, x86_modrm_register(register, register));
+    x86_emit_u32(ref output, value);
+}
+
 func x86_extend_register(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, size: Int, signed: Bool) -> Void {
     if (size != 1 && size != 2) { return; }
     x86_rex(ref output, false, destination, X86Register.None, source);
