@@ -87,10 +87,11 @@ func x86_scalar_size(program: WirModule, type_id: WirTypeID) -> Int {
     if (type.kind == WirTypeKind.Pointer) { return 8; }
     if (type.kind == WirTypeKind.BoolType) { return 1; }
     if ((type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) || type.bits <= 0 || type.bits > 64) { return 0; }
-    if (type.bits <= 8) { return 1; }
-    if (type.bits <= 16) { return 2; }
-    if (type.bits <= 32) { return 4; }
-    return 8;
+    if (type.bits == 8) { return 1; }
+    if (type.bits == 16) { return 2; }
+    if (type.bits == 32) { return 4; }
+    if (type.bits == 64) { return 8; }
+    return 0;
 }
 
 func x86_scalar_signed(program: WirModule, type_id: WirTypeID) -> Bool {
@@ -319,19 +320,44 @@ func x86_stack_frame_size(slots: Vector(X86StackSlot), scratch: Vector(Int), spi
     return x86_align_frame_offset(size, 16);
 }
 
-func x86_func_has_call(program: WirModule, function: WirFunction) -> Bool {
+func x86_function_needs_parameter_homes(program: WirModule, function: WirFunction) -> Bool {
     let block_index = 0;
     while (block_index < function.blocks.length()) {
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[block_index]))];
         let instruction_index = 0;
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
-            if (instruction.opcode == WirOpcode.Call) {
+            if (instruction.opcode == WirOpcode.Call              || instruction.opcode == WirOpcode.SignedDivide       ||
+                instruction.opcode == WirOpcode.UnsignedDivide    || instruction.opcode == WirOpcode.SignedRemainder    ||
+                instruction.opcode == WirOpcode.UnsignedRemainder || instruction.opcode == WirOpcode.ShiftLeft          ||
+                instruction.opcode == WirOpcode.SignedShiftRight  || instruction.opcode == WirOpcode.UnsignedShiftRight
+                ) {
+                return true;
+            }
+            instruction_index++;
+        }
+        block_index++;
+    }
+
+    return false;
+}
+
+func x86_function_has_integer_division(program: WirModule, function: WirFunction) -> Bool {
+    let block_index = 0;
+    while (block_index < function.blocks.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[block_index]))];
+        let instruction_index = 0;
+
+        while (instruction_index < block.instructions.length()) {
+            let opcode: WirOpcode = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))].opcode;
+            if (opcode == WirOpcode.SignedDivide || opcode == WirOpcode.UnsignedDivide ||
+                opcode == WirOpcode.SignedRemainder || opcode == WirOpcode.UnsignedRemainder) {
                 return true;
             }
 
             instruction_index++;
         }
+
         block_index++;
     }
     return false;
@@ -456,6 +482,19 @@ func x86_prepare_register(program: WirModule, state: X86BlockState, choice: X86R
     x86_clear_register(state.registers, choice.register);
 
     return "";
+}
+
+func x86_bound_value(plan: X86RegisterPlan, register: X86Register) -> WirValueID {
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        if (plan.bindings[i].register == register) { return plan.bindings[i].value; }
+        i += 1;
+    }
+    return NO_WIR_VALUE;
+}
+
+func x86_prepare_fixed_register(program: WirModule, state: X86BlockState, register: X86Register, ref output: X86CodeBuffer) -> String {
+    return x86_prepare_register(program, state, X86RegisterChoice(register=register, evicted=x86_bound_value(state.registers, register)), ref output);
 }
 
 func x86_materialize_register_except(program: WirModule, function: WirFunction, value_id: WirValueID, slots: Vector(X86StackSlot), state: X86BlockState, avoid: X86Register, ref output: X86CodeBuffer) -> X86RegisterResult {
@@ -703,11 +742,21 @@ func x86_emit_edge_moves(program: WirModule, function: WirFunction,
     return "";
 }
 
-func x86_lower_instruction(program: WirModule, function: WirFunction, 
+func x86_lower_instruction(program: WirModule, 
+                           function: WirFunction, 
                            instruction: WirInstruction, slots: Vector(X86StackSlot), 
-                           scratch: Vector(Int), frame_size: Int, state: X86BlockState, 
-                           ref output: X86CodeBuffer, ref fixups: Vector(X86BranchFixup)) -> X86BlockState {
+                           scratch: Vector(Int), frame_size: Int, 
+                           state: X86BlockState, 
+                           ref output: X86CodeBuffer, 
+                           ref fixups: Vector(X86BranchFixup), 
+                           ref calls: Vector(X86CallFixup)
+                        ) -> X86BlockState {
 
+    // only an immediately preceding comparison may supply branch flags
+    if (instruction.opcode != WirOpcode.Branch) {
+        state.flags_value = NO_WIR_VALUE;
+        state.flags_opcode = X86Opcode.Invalid;
+    }
     if (instruction.opcode == WirOpcode.StackAlloc) {
         state.accumulator = NO_WIR_VALUE;
         return state;
@@ -850,6 +899,165 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         return state;
     }
 
+    if (instruction.opcode == WirOpcode.BitAnd || instruction.opcode == WirOpcode.BitOr || instruction.opcode == WirOpcode.BitXor) {
+        if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+            return x86_instruction_error(state, "bitwise instruction has the wrong operand count");
+        }
+        let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let size: Int = x86_scalar_size(program, instruction.type_id);
+        if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt) || size == 0) {
+            return x86_instruction_error(state, "the x86_64 lowering supports integer bitwise operations up to 64 bits");
+        }
+        let left_id: WirValueID = instruction.operands[0];
+        let right_id: WirValueID = instruction.operands[1];
+        let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+        let immediate: Bool = right.kind == WirValueKind.Integer && size <= 4;
+        let left: X86RegisterResult = x86_materialize_register(program, function, left_id, slots, state, ref output);
+        if (left.message.length() != 0) { return x86_instruction_error(state, left.message); }
+
+        let right_register: X86Register = X86Register.None;
+        if (!immediate) {
+            let loaded_right: X86RegisterResult = x86_materialize_register_except(program, function, right_id, slots, state, left.register, ref output);
+            if (loaded_right.message.length() != 0) { return x86_instruction_error(state, loaded_right.message); }
+            right_register = loaded_right.register;
+        }
+
+        let destination: X86Register = left.register;
+        if (x86_next_use(state.registers.uses, left_id, state.position) != X86_NO_NEXT_USE) {
+            let choice: X86RegisterChoice = x86_choose_register_avoiding(program, state.registers, state.position, left.register, right_register);
+            let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+            if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+            destination = choice.register;
+            x86_move_scalar(ref output, destination, left.register, size);
+        }
+
+        if (immediate) {
+            let group: Int = 4;
+            if (instruction.opcode == WirOpcode.BitOr) { group = 1; }
+            else if (instruction.opcode == WirOpcode.BitXor) { group = 6; }
+            x86_bitwise_register_imm32(ref output, destination, UInt32(right.integer), group);
+        } else if (instruction.opcode == WirOpcode.BitAnd) {
+            x86_and_register_width(ref output, destination, right_register, size == 8);
+        } else if (instruction.opcode == WirOpcode.BitOr) {
+            x86_or_register_width(ref output, destination, right_register, size == 8);
+        } else {
+            x86_xor_register_width(ref output, destination, right_register, size == 8);
+        }
+        x86_normalize_scalar(ref output, destination, size, result_type.kind == WirTypeKind.SignedInt);
+        x86_bind_register(state.registers, destination, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
+    if (instruction.opcode == WirOpcode.ShiftLeft || instruction.opcode == WirOpcode.SignedShiftRight || instruction.opcode == WirOpcode.UnsignedShiftRight) {
+        if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+            return x86_instruction_error(state, "shift instruction has the wrong operand count");
+        }
+        let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let size: Int = x86_scalar_size(program, instruction.type_id);
+        if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt) || size == 0) {
+            return x86_instruction_error(state, "the x86_64 lowering supports integer shifts up to 64 bits");
+        }
+        let left_id: WirValueID = instruction.operands[0];
+        let right_id: WirValueID = instruction.operands[1];
+        let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+        let left: X86RegisterResult = x86_materialize_register(program, function, left_id, slots, state, ref output);
+        if (left.message.length() != 0) { return x86_instruction_error(state, left.message); }
+
+        let right_register: X86Register = X86Register.None;
+        if (right.kind != WirValueKind.Integer) {
+            let loaded_right: X86RegisterResult = x86_materialize_register_except(program, function, right_id, slots, state, left.register, ref output);
+            if (loaded_right.message.length() != 0) { return x86_instruction_error(state, loaded_right.message); }
+            right_register = loaded_right.register;
+            x86_mov_register32(ref output, X86Register.RCX, right_register);
+        }
+
+        let destination: X86Register = left.register;
+        if (x86_next_use(state.registers.uses, left_id, state.position) != X86_NO_NEXT_USE) {
+            let choice: X86RegisterChoice = x86_choose_register_avoiding(program, state.registers, state.position, left.register, right_register);
+            let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+            if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+            destination = choice.register;
+            x86_move_scalar(ref output, destination, left.register, size);
+        }
+
+        let group: Int = 4;
+        if (instruction.opcode == WirOpcode.UnsignedShiftRight) { group = 5; }
+        else if (instruction.opcode == WirOpcode.SignedShiftRight) { group = 7; }
+        if (right.kind == WirValueKind.Integer) {
+            x86_shift_register_imm8(ref output, destination, Byte(UInt32(right.integer) & 255U), group, size == 8);
+        } else {
+            x86_shift_register_cl(ref output, destination, group, size == 8);
+        }
+        x86_normalize_scalar(ref output, destination, size, result_type.kind == WirTypeKind.SignedInt);
+        x86_bind_register(state.registers, destination, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
+    if (instruction.opcode == WirOpcode.SignedDivide || instruction.opcode == WirOpcode.UnsignedDivide ||
+        instruction.opcode == WirOpcode.SignedRemainder || instruction.opcode == WirOpcode.UnsignedRemainder) {
+        if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+            return x86_instruction_error(state, "division instruction has the wrong operand count");
+        }
+        let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let size: Int = x86_scalar_size(program, instruction.type_id);
+        if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt) || size == 0) {
+            return x86_instruction_error(state, "the x86_64 lowering supports integer division up to 64 bits");
+        }
+        let right: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[1], slots, state, ref output);
+        if (right.message.length() != 0) { return x86_instruction_error(state, right.message); }
+        x86_move_scalar(ref output, X86Register.RCX, right.register, size);
+
+        let left: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (left.message.length() != 0) { return x86_instruction_error(state, left.message); }
+        let prepare_error: String = x86_prepare_fixed_register(program, state, X86Register.RAX, ref output);
+        if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        if (left.register != X86Register.RAX) { x86_move_scalar(ref output, X86Register.RAX, left.register, size); }
+
+        let signed: Bool = instruction.opcode == WirOpcode.SignedDivide || instruction.opcode == WirOpcode.SignedRemainder;
+        x86_prepare_dividend(ref output, size == 8, signed);
+        x86_div_register_width(ref output, X86Register.RCX, size == 8, signed);
+        if (instruction.opcode == WirOpcode.SignedRemainder || instruction.opcode == WirOpcode.UnsignedRemainder) {
+            x86_move_scalar(ref output, X86Register.RAX, X86Register.RDX, size);
+        }
+        x86_normalize_scalar(ref output, X86Register.RAX, size, result_type.kind == WirTypeKind.SignedInt);
+        x86_bind_register(state.registers, X86Register.RAX, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
+    if (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not) {
+        if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+            return x86_instruction_error(state, "unary instruction has the wrong operand count");
+        }
+        let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let size: Int = x86_scalar_size(program, instruction.type_id);
+        let integer: Bool = result_type.kind == WirTypeKind.SignedInt || result_type.kind == WirTypeKind.UnsignedInt;
+        if (size == 0 || (!integer && result_type.kind != WirTypeKind.BoolType) ||
+            (instruction.opcode == WirOpcode.Negate && !integer)) {
+            return x86_instruction_error(state, "the x86_64 lowering cannot apply this unary operation to the result type");
+        }
+        let source_id: WirValueID = instruction.operands[0];
+        let source: X86RegisterResult = x86_materialize_register(program, function, source_id, slots, state, ref output);
+        if (source.message.length() != 0) { return x86_instruction_error(state, source.message); }
+        let destination: X86Register = source.register;
+        if (x86_next_use(state.registers.uses, source_id, state.position) != X86_NO_NEXT_USE) {
+            let choice: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, source.register);
+            let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+            if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+            destination = choice.register;
+            x86_move_scalar(ref output, destination, source.register, size);
+        }
+        if (instruction.opcode == WirOpcode.Negate) { x86_unary_register(ref output, destination, 3, size == 8); }
+        else if (result_type.kind == WirTypeKind.BoolType) { x86_bitwise_register_imm32(ref output, destination, 1U, 6); }
+        else { x86_unary_register(ref output, destination, 2, size == 8); }
+        x86_normalize_scalar(ref output, destination, size, result_type.kind == WirTypeKind.SignedInt);
+        x86_bind_register(state.registers, destination, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
     let comparison: X86Opcode = x86_comparison_opcode(instruction.opcode);
     if (comparison != X86Opcode.Invalid) {
         if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE || instruction.type_id != program.bool_type) {
@@ -866,15 +1074,35 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         }
         
         if (right.kind == WirValueKind.Integer && size <= 4) {
-            x86_cmp_register_imm32(ref output, left.register, UInt32(right.integer));
+            // narrow registers are extended to 32 bits; compare constants in the same form
+            let immediate: UInt32 = UInt32(right.integer);
+            if (size == 1) {
+                immediate &= 255U;
+                if (x86_scalar_signed(program, right.type_id) && (immediate & 128U) != 0U) { immediate |= 4294967040U; }
+            } else if (size == 2) {
+                immediate &= 65535U;
+                if (x86_scalar_signed(program, right.type_id) && (immediate & 32768U) != 0U) { immediate |= 4294901760U; }
+            }
+            x86_cmp_register_imm32(ref output, left.register, immediate);
         } else {
             let loaded_right: X86RegisterResult = x86_materialize_register_except(program, function, right_id, slots, state, left.register, ref output);
             if (loaded_right.message.length() != 0) { return x86_instruction_error(state, loaded_right.message); }
             if (size == 8) { x86_cmp_register64(ref output, left.register, loaded_right.register); }
             else { x86_cmp_register32(ref output, left.register, loaded_right.register); }
         }
+        let choice: X86RegisterChoice = x86_choose_register(program, state.registers, state.position);
+        let prepare_error: String = x86_prepare_register(program, state, choice, ref output);
+        if (prepare_error.length() != 0) {
+            return x86_instruction_error(state, prepare_error);
+        }
 
-        state.accumulator = instruction.operands[0];
+        if (!x86_set_condition_register(ref output, choice.register, comparison)) {
+            return x86_instruction_error(state, "the x86_64 encoder rejected the comparison condition");
+        }
+
+        x86_bind_register(state.registers, choice.register, instruction.result);
+
+        state.accumulator = instruction.result;
         state.flags_value = instruction.result;
         state.flags_opcode = comparison;
         return state;
@@ -937,6 +1165,7 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target_function));
 
         if (instruction.result != NO_WIR_VALUE) {
+            x86_normalize_scalar(ref output, X86Register.RAX, x86_scalar_size(program, instruction.type_id), x86_scalar_signed(program, instruction.type_id));
             x86_bind_register(state.registers, X86Register.RAX, instruction.result);
         }
 
@@ -980,7 +1209,12 @@ func x86_lower_instruction(program: WirModule, function: WirFunction,
         }
 
         if (instruction.operands[0] != state.flags_value || state.flags_opcode == X86Opcode.Invalid) {
-            return x86_instruction_error(state, "the initial x86_64 branch lowering requires a local comparison result");
+            let condition_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+            if (condition_value.type_id != program.bool_type) { return x86_instruction_error(state, "branch condition is not Bool"); }
+            let condition_register: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+            if (condition_register.message.length() != 0) { return x86_instruction_error(state, condition_register.message); }
+            x86_test_register_width(ref output, condition_register.register, condition_register.register, false);
+            state.flags_opcode = X86Opcode.Jne;
         }
         if (instruction.edges[0].arguments.length() == 0 && instruction.edges[1].arguments.length() == 0) {
             let direct_patch: Int = x86_jump_if_rel32(ref output, state.flags_opcode);
@@ -1100,7 +1334,7 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
         block_index += 1;
     }
 
-    let home_parameters: Bool = x86_function_has_call(program, function);
+    let home_parameters: Bool = x86_function_needs_parameter_homes(program, function);
     let slots: Vector(X86StackSlot) = x86_collect_stack_slots(program, function, order, home_parameters);
     if home_parameters {
         located_values += function.parameters.length();
@@ -1114,6 +1348,8 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
     let register_plan: X86RegisterPlan = x86_register_plan(uses);
 
     let spill_count: Int = x86_spill_capacity(program, order, uses, register_plan.bindings.length());
+    // div/idiv need RAX even when all allocatable registers already hold live values
+    if (x86_function_has_integer_division(program, function)) { spill_count += 1; }
     let spill_locations: Vector(Int) = x86_spill_locations(slots, scratch, spill_count);
     let spill_plan: X86SpillPlan = x86_new_spill_plan(spill_locations);
 

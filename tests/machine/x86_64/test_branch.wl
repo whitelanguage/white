@@ -34,9 +34,8 @@ func main() -> Int {
         print("FAIL: x86_64 branch lowering failed: ", lowered.errors[0]);
         return 1;
     }
-
-    if (lowered.bytes.length() != 64 || lowered.bytes[33] != Byte(15) || lowered.bytes[34] != Byte(140)) {
-        print("FAIL: unexpected conditional branch encoding: ", lowered.bytes.length(), " bytes, opcode ", Int(lowered.bytes[33]), " ", Int(lowered.bytes[34]));
+    if (lowered.bytes.length() != 72 || lowered.bytes[41] != Byte(15) || lowered.bytes[42] != Byte(140)) {
+        print("FAIL: unexpected conditional branch encoding: ", lowered.bytes.length(), " bytes, opcode ", Int(lowered.bytes[41]), " ", Int(lowered.bytes[42]));
         return 1;
     }
 

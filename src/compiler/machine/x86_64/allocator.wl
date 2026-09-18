@@ -323,9 +323,17 @@ func x86_reset_spills(plan: X86SpillPlan) -> Void {
 }
 
 func x86_register_value(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Load     || opcode == WirOpcode.Add      || 
-           opcode == WirOpcode.Subtract || opcode == WirOpcode.Multiply || 
-           opcode == WirOpcode.Call;
+    return opcode == WirOpcode.Load                 || opcode == WirOpcode.Add               || 
+           opcode == WirOpcode.Subtract             || opcode == WirOpcode.Multiply          || 
+
+           opcode == WirOpcode.SignedDivide         || opcode == WirOpcode.UnsignedDivide    || opcode == WirOpcode.SignedRemainder    ||
+           opcode == WirOpcode.UnsignedRemainder    || opcode == WirOpcode.BitAnd            || opcode == WirOpcode.BitOr              ||
+           opcode == WirOpcode.BitXor               || opcode == WirOpcode.ShiftLeft         || opcode == WirOpcode.SignedShiftRight   ||
+           opcode == WirOpcode.UnsignedShiftRight   || opcode == WirOpcode.Negate            || opcode == WirOpcode.Not                ||
+           opcode == WirOpcode.Equal                || opcode == WirOpcode.NotEqual          || opcode == WirOpcode.SignedLess         ||
+           opcode == WirOpcode.SignedLessEqual      || opcode == WirOpcode.SignedGreater     || opcode == WirOpcode.SignedGreaterEqual ||
+           opcode == WirOpcode.UnsignedLess         || opcode == WirOpcode.UnsignedLessEqual || opcode == WirOpcode.UnsignedGreater    ||
+           opcode == WirOpcode.UnsignedGreaterEqual || opcode == WirOpcode.Call;
 }
 
 func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
