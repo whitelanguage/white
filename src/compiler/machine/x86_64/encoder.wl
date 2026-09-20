@@ -416,6 +416,8 @@ func x86_set_condition_register(ref output: X86CodeBuffer, destination: X86Regis
     else if (opcode == X86Opcode.Jae) { code = Byte(147); }
     else if (opcode == X86Opcode.Jb) { code = Byte(146); }
     else if (opcode == X86Opcode.Jbe) { code = Byte(150); }
+    else if (opcode == X86Opcode.Jp) { code = Byte(154); }
+    else if (opcode == X86Opcode.Jnp) { code = Byte(155); }
     else { return false; }
     x86_rex(ref output, false, X86Register.None, X86Register.None, destination);
     if (!x86_register_extended(destination) && x86_register_code(destination) >= 4) {
@@ -465,6 +467,8 @@ func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {
     else if (opcode == X86Opcode.Jae) { code = Byte(131); }
     else if (opcode == X86Opcode.Jb)  { code = Byte(130); }
     else if (opcode == X86Opcode.Jbe) { code = Byte(134); }
+    else if (opcode == X86Opcode.Jp) { code = Byte(138); }
+    else if (opcode == X86Opcode.Jnp) { code = Byte(139); }
     else { return -1; }
 
     x86_emit_byte(ref output, Byte(15));

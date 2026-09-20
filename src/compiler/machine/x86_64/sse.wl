@@ -57,3 +57,37 @@ func x86_sse_bits(ref output: X86CodeBuffer, xmm: X86Register, integer: X86Regis
     x86_emit_byte(ref output, Byte(192 | ((reg & 7) << 3) | (rm & 7)));
     return true;
 }
+
+func x86_sse_compare(ref output: X86CodeBuffer, left: X86Register, right: X86Register, size: Int) -> Bool {
+    let reg: Int = x86_xmm_code(left);
+    let rm: Int = x86_xmm_code(right);
+    if (reg < 0 || rm < 0 || (size != 4 && size != 8)) { return false; }
+    let prefix = 0;
+    if (size == 8) { prefix = 102; }
+    x86_sse_prefix(ref output, prefix, false, reg, rm);
+    x86_emit_byte(ref output, Byte(46));
+    x86_emit_byte(ref output, Byte(192 | ((reg & 7) << 3) | (rm & 7)));
+    return true;
+}
+
+func x86_sse_convert(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, float_size: Int, integer_size: Int, to_float: Bool) -> Bool {
+    // CVTT truncates independently of MXCSR; integer inputs have already been extended
+    let reg: Int = x86_register_code(destination);
+    let rm = x86_xmm_code(source);
+    let opcode = 44;
+    if (to_float) {
+        reg = x86_xmm_code(destination);
+        rm = x86_register_code(source);
+        opcode = 42;
+        if (x86_register_extended(source)) { rm += 8; }
+    } else if (x86_register_extended(destination)) {
+        reg += 8;
+    }
+    if (reg < 0 || rm < 0 || (float_size != 4 && float_size != 8) || (integer_size != 4 && integer_size != 8)) { return false; }
+    let prefix = 243;
+    if (float_size == 8) { prefix = 242; }
+    x86_sse_prefix(ref output, prefix, integer_size == 8, reg, rm);
+    x86_emit_byte(ref output, Byte(opcode));
+    x86_emit_byte(ref output, Byte(192 | ((reg & 7) << 3) | (rm & 7)));
+    return true;
+}

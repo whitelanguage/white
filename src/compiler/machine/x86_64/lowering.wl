@@ -1002,6 +1002,47 @@ func x86_lower_instruction(program: WirModule,
         return state;
     }
 
+    if (instruction.opcode == WirOpcode.SignedIntToFloat || instruction.opcode == WirOpcode.UnsignedIntToFloat ||
+        instruction.opcode == WirOpcode.FloatToSignedInt || instruction.opcode == WirOpcode.FloatToUnsignedInt) {
+        if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+            return x86_instruction_error(state, "numeric conversion has the wrong operand count");
+        }
+        let to_float = instruction.opcode == WirOpcode.SignedIntToFloat || instruction.opcode == WirOpcode.UnsignedIntToFloat;
+        let unsigned = instruction.opcode == WirOpcode.UnsignedIntToFloat || instruction.opcode == WirOpcode.FloatToUnsignedInt;
+        let source_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+        let integer_type: WirTypeID = instruction.type_id;
+        let float_type: WirTypeID = source_value.type_id;
+        if (to_float) {
+            integer_type = source_value.type_id;
+            float_type = instruction.type_id;
+        }
+        let integer_size = x86_scalar_size(program, integer_type);
+        let float_size = x86_scalar_size(program, float_type);
+        let kind = program.arena.types[wir_id_index(UInt32(integer_type))].kind;
+        if (integer_size == 0 || !x86_scalar_float(program, float_type) ||
+            (unsigned && kind != WirTypeKind.UnsignedInt) || (!unsigned && kind != WirTypeKind.SignedInt)) {
+            return x86_instruction_error(state, "numeric conversion requires a scalar integer and f32 or f64");
+        }
+        if (unsigned && integer_size == 8) {
+            return x86_instruction_error(state, "64-bit unsigned floating-point conversions are not yet supported by the machine backend");
+        }
+        let source: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (source.message.length() != 0) { return x86_instruction_error(state, source.message); }
+        let choice: X86RegisterChoice = x86_choose_register_class(program, state.registers, state.position, source.register, to_float);
+        let prepare_error = x86_prepare_register(program, state, choice, ref output);
+        if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        // u32 needs a signed 64-bit conversion to retain its upper half
+        let conversion_size = 4;
+        if (unsigned || integer_size == 8) { conversion_size = 8; }
+        if (!x86_sse_convert(ref output, choice.register, source.register, float_size, conversion_size, to_float)) {
+            return x86_instruction_error(state, "the x86_64 encoder rejected the numeric conversion");
+        }
+        if (!to_float) { x86_normalize_scalar(ref output, choice.register, integer_size, !unsigned); }
+        x86_bind_register(state.registers, choice.register, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
     if (instruction.opcode == WirOpcode.FloatExtend || instruction.opcode == WirOpcode.FloatTruncate ||
         (instruction.opcode == WirOpcode.Bitcast && instruction.operands.length() == 1 &&
          (x86_scalar_float(program, instruction.type_id) || x86_scalar_float(program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id)))) {
@@ -1374,6 +1415,55 @@ func x86_lower_instruction(program: WirModule,
         x86_normalize_scalar(ref output, destination, size, result_type.kind == WirTypeKind.SignedInt);
         x86_bind_register(state.registers, destination, instruction.result);
         state.accumulator = instruction.result;
+        return state;
+    }
+
+    if (instruction.opcode == WirOpcode.FloatLess || instruction.opcode == WirOpcode.FloatLessEqual ||
+        instruction.opcode == WirOpcode.FloatGreater || instruction.opcode == WirOpcode.FloatGreaterEqual ||
+        ((instruction.opcode == WirOpcode.Equal || instruction.opcode == WirOpcode.NotEqual) && instruction.operands.length() == 2 &&
+         x86_scalar_float(program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id))) {
+        if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE || instruction.type_id != program.bool_type) {
+            return x86_instruction_error(state, "floating comparison has an invalid result or operand count");
+        }
+        let left_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+        let right_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
+        if (left_value.type_id != right_value.type_id || !x86_scalar_float(program, left_value.type_id)) {
+            return x86_instruction_error(state, "floating comparison requires matching f32 or f64 operands");
+        }
+        let left: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (left.message.length() != 0) { return x86_instruction_error(state, left.message); }
+        let right: X86RegisterResult = x86_materialize_register_except(program, function, instruction.operands[1], slots, state, left.register, ref output);
+        if (right.message.length() != 0) { return x86_instruction_error(state, right.message); }
+        let choice: X86RegisterChoice = x86_choose_register(program, state.registers, state.position);
+        let prepare_error = x86_prepare_register(program, state, choice, ref output);
+        if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        let comparison: X86Opcode = X86Opcode.Je;
+        if (instruction.opcode == WirOpcode.NotEqual) { comparison = X86Opcode.Jne; }
+        else if (instruction.opcode == WirOpcode.FloatLess) { comparison = X86Opcode.Jb; }
+        else if (instruction.opcode == WirOpcode.FloatLessEqual) { comparison = X86Opcode.Jbe; }
+        else if (instruction.opcode == WirOpcode.FloatGreater) { comparison = X86Opcode.Ja; }
+        else if (instruction.opcode == WirOpcode.FloatGreaterEqual) { comparison = X86Opcode.Jae; }
+        let parity: X86RegisterChoice = X86RegisterChoice(register=X86Register.None, evicted=NO_WIR_VALUE);
+        if (comparison != X86Opcode.Ja && comparison != X86Opcode.Jae) {
+            parity = x86_choose_register_except(program, state.registers, state.position, choice.register);
+            prepare_error = x86_prepare_register(program, state, parity, ref output);
+            if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        }
+        if (!x86_sse_compare(ref output, left.register, right.register, x86_scalar_size(program, left_value.type_id)) ||
+            !x86_set_condition_register(ref output, choice.register, comparison)) {
+            return x86_instruction_error(state, "the x86_64 encoder rejected the floating comparison");
+        }
+        // unordered sets ZF, CF and PF; only != accepts that result
+        if (parity.register != X86Register.None) {
+            let condition: X86Opcode = X86Opcode.Jnp;
+            if (comparison == X86Opcode.Jne) { condition = X86Opcode.Jp; }
+            x86_set_condition_register(ref output, parity.register, condition);
+            if (comparison == X86Opcode.Jne) { x86_or_register_width(ref output, choice.register, parity.register, false); }
+            else { x86_and_register_width(ref output, choice.register, parity.register, false); }
+        }
+        x86_bind_register(state.registers, choice.register, instruction.result);
+        state.accumulator = instruction.result;
+        // branch lowering tests the materialized Bool, not the unordered SSE flags
         return state;
     }
 

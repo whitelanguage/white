@@ -52,7 +52,39 @@ func check_float(ref program: WirModule, function: WirFuncID, block: WirBlockID,
     return check_float_carry(ref program, function, block, value, expected, code, []);
 }
 
+func check_bool(ref program: WirModule, function: WirFuncID, block: WirBlockID, value: WirValueID, expected: Bool, code: Int) -> WirBlockID {
+    let next: WirBlockID = wir_add_block(ref program, function, "bool_next_" + code, []);
+    let fail: WirBlockID = wir_add_block(ref program, function, "bool_fail_" + code, []);
+    let yes: WirBlockID = next;
+    let no: WirBlockID = fail;
+    if (!expected) {
+        yes = fail;
+        no = next;
+    }
+    wir_append(ref program, block, WirOpcode.Branch, program.void_type, [value], [wir_edge(yes, []), wir_edge(no, [])], no_wir_location());
+    wir_return(ref program, fail, wir_const_int(ref program, wir_signed_int_type(ref program, 32), UInt128(UInt32(code))), no_wir_location());
+    return next;
+}
+
 func main() -> Int {
+    let conversions: X86CodeBuffer = x86_new_code_buffer();
+    if (!x86_sse_convert(ref conversions, X86Register.XMM12, X86Register.R11, 8, 8, true) ||
+        conversions.bytes.length() != 5 || conversions.bytes[1] != Byte(77) || conversions.bytes[3] != Byte(42) || conversions.bytes[4] != Byte(227)) {
+        print("FAIL: extended integer-to-float encoding");
+        return 1;
+    }
+    conversions = x86_new_code_buffer();
+    if (!x86_sse_convert(ref conversions, X86Register.R11, X86Register.XMM12, 8, 8, false) ||
+        conversions.bytes.length() != 5 || conversions.bytes[1] != Byte(77) || conversions.bytes[3] != Byte(44) || conversions.bytes[4] != Byte(220)) {
+        print("FAIL: extended float-to-integer encoding");
+        return 1;
+    }
+    conversions = x86_new_code_buffer();
+    if (!x86_sse_compare(ref conversions, X86Register.XMM12, X86Register.XMM15, 8) ||
+        conversions.bytes.length() != 5 || conversions.bytes[0] != Byte(102) || conversions.bytes[1] != Byte(69) || conversions.bytes[4] != Byte(231)) {
+        print("FAIL: extended unordered comparison encoding");
+        return 1;
+    }
     let encoded: X86CodeBuffer = x86_new_code_buffer();
     if (!x86_sse_register(ref encoded, 88, X86Register.XMM12, X86Register.XMM15, 8) || encoded.bytes.length() != 5 || encoded.bytes[0] != Byte(242) || encoded.bytes[1] != Byte(69) || encoded.bytes[4] != Byte(231)) {
         print("FAIL: SSE extended register encoding");
@@ -65,6 +97,30 @@ func main() -> Int {
     if (x86_sse_register(ref encoded, 88, X86Register.RAX, X86Register.XMM0, 8) || x86_sse_memory(ref encoded, 16, X86Register.XMM0, X86Register.RAX, 0, 2)) {
         print("FAIL: SSE encoder accepted invalid operands");
         return 1;
+    }
+
+    let unsupported: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let unsupported_float: WirTypeID = wir_float_type(ref unsupported, 64);
+    let unsupported_integer: WirTypeID = wir_unsigned_int_type(ref unsupported, 64);
+    let unsupported_ops: Vector(WirOpcode) = [WirOpcode.UnsignedIntToFloat, WirOpcode.FloatToUnsignedInt];
+    let unsupported_index = 0;
+    while (unsupported_index < unsupported_ops.length()) {
+        let result_type: WirTypeID = unsupported_float;
+        let source: WirValueID = wir_const_int(ref unsupported, unsupported_integer, UInt128(1U));
+        if (unsupported_index == 1) {
+            result_type = unsupported_integer;
+            source = wir_const_float(ref unsupported, unsupported_float, 1.0);
+        }
+        let function: WirFuncID = wir_add_function(ref unsupported, "unsigned_" + unsupported_index, [], result_type, false, WirLinkage.Internal, WirABI.White);
+        let block: WirBlockID = wir_add_block(ref unsupported, function, "entry", []);
+        let result: WirValueID = wir_append(ref unsupported, block, unsupported_ops[unsupported_index], result_type, [source], [], no_wir_location());
+        wir_return(ref unsupported, block, result, no_wir_location());
+        let lowered: X86LoweringResult = x86_lower_function(unsupported, function);
+        if (lowered.errors.length() == 0) {
+            print("FAIL: unsupported u64 conversion silently accepted");
+            return 1;
+        }
+        unsupported_index++;
     }
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -155,6 +211,87 @@ func main() -> Int {
     block = check_float(ref program, main_id, block, wir_call(ref program, block, wir_function_value(program, host_float), float_args, "host_float", no_wir_location()), 15.0, 14);
     let roundtrip: WirFuncID = wir_add_function(ref program, "host_roundtrip", [], i32, false, WirLinkage.External, WirABI.C);
     block = check(ref program, main_id, block, wir_call(ref program, block, wir_function_value(program, roundtrip), [], "roundtrip", no_wir_location()), wir_const_int(ref program, i32, UInt128(0U)), 15);
+    // relational predicates are ordered; != alone accepts NaN on either side
+    let predicates: Vector(WirOpcode) = [WirOpcode.Equal, WirOpcode.NotEqual, WirOpcode.FloatLess, WirOpcode.FloatLessEqual, WirOpcode.FloatGreater, WirOpcode.FloatGreaterEqual];
+    let code: Int = 20;
+    i = 0;
+    while (i < sizes.length()) {
+        let type_id: WirTypeID = sizes[i];
+        let finite: WirValueID = wir_const_float(ref program, type_id, 1.0);
+        let larger: WirValueID = wir_const_float(ref program, type_id, 2.0);
+        let zero: WirValueID = wir_const_float(ref program, type_id, 0.0);
+        let negative_zero: UInt64 = 9223372036854775808UL;
+        let nan_bits: UInt64 = 9221120237041095220UL;
+        let inf_bits: UInt64 = 9218868437227405312UL;
+        if (i == 0) {
+            negative_zero = 2147483648UL;
+            nan_bits = 2143289345UL;
+            inf_bits = 2139095040UL;
+        }
+        let nan_value: WirValueID = wir_const_float_bits(ref program, type_id, nan_bits);
+        let inf_value: WirValueID = wir_const_float_bits(ref program, type_id, inf_bits);
+        let left_values: Vector(WirValueID) = [finite, finite, larger, zero, inf_value, nan_value, finite, nan_value];
+        let right_values: Vector(WirValueID) = [finite, larger, finite, wir_const_float_bits(ref program, type_id, negative_zero), inf_value, finite, nan_value, nan_value];
+        let pair = 0;
+        while (pair < left_values.length()) {
+            let expected: Vector(Bool) = [true, false, false, true, false, true];
+            if (pair == 1) { expected = [false, true, true, true, false, false]; }
+            else if (pair == 2) { expected = [false, true, false, false, true, true]; }
+            else if (pair >= 5) { expected = [false, true, false, false, false, false]; }
+            let p = 0;
+            while (p < predicates.length()) {
+                let condition: WirValueID = wir_append(ref program, block, predicates[p], program.bool_type, [left_values[pair], right_values[pair]], [], no_wir_location());
+                block = check_bool(ref program, main_id, block, condition, expected[p], code);
+                code++;
+                p++;
+            }
+            pair++;
+        }
+        let true_value: WirValueID = wir_append(ref program, block, WirOpcode.FloatLess, program.bool_type, [finite, larger], [], no_wir_location());
+        let false_value: WirValueID = wir_append(ref program, block, WirOpcode.Equal, program.bool_type, [nan_value, finite], [], no_wir_location());
+        block = check_bool(ref program, main_id, block, true_value, true, code);
+        code++;
+        block = check_bool(ref program, main_id, block, false_value, false, code);
+        code++;
+        i++;
+    }
+
+    let integers: Vector(WirTypeID) = [wir_signed_int_type(ref program, 8), wir_signed_int_type(ref program, 16), i32, wir_signed_int_type(ref program, 64), wir_unsigned_int_type(ref program, 8), wir_unsigned_int_type(ref program, 16), u32];
+    let raw_integers: Vector(UInt64) = [128UL, 32768UL, 2147483648UL, 9223372036854775808UL, 255UL, 65535UL, 4294967295UL];
+    let float_values: Vector(Float) = [-128.0, -32768.0, -2147483648.0, -9223372036854775808.0, 255.0, 65535.0, 4294967295.0];
+    i = 0;
+    while (i < sizes.length()) {
+        let j = 0;
+        while (j < integers.length()) {
+            let opcode: WirOpcode = WirOpcode.SignedIntToFloat;
+            if (j >= 4) { opcode = WirOpcode.UnsignedIntToFloat; }
+            let result: WirValueID = wir_append(ref program, block, opcode, sizes[i], [wir_const_int(ref program, integers[j], UInt128(raw_integers[j]))], [], no_wir_location());
+            block = check_float(ref program, main_id, block, result, float_values[j], code);
+            code++;
+            j++;
+        }
+        j = 0;
+        while (j < integers.length()) {
+            let opcode: WirOpcode = WirOpcode.FloatToSignedInt;
+            if (j >= 4) { opcode = WirOpcode.FloatToUnsignedInt; }
+            let source: Float = float_values[j];
+            let expected: UInt64 = raw_integers[j];
+            if (j == 4 || j == 5) { source += 0.5; }
+            // f32 cannot represent UINT32_MAX; use the exactly representable high bit
+            if (i == 0 && j == 6) {
+                source = 2147483648.0;
+                expected = 2147483648UL;
+            }
+            let result: WirValueID = wir_append(ref program, block, opcode, integers[j], [wir_const_float(ref program, sizes[i], source)], [], no_wir_location());
+            block = check(ref program, main_id, block, result, wir_const_int(ref program, integers[j], UInt128(expected)), code);
+            code++;
+            j++;
+        }
+        let negative: WirValueID = wir_append(ref program, block, WirOpcode.FloatToSignedInt, i32, [wir_const_float(ref program, sizes[i], -123.75)], [], no_wir_location());
+        block = check(ref program, main_id, block, negative, wir_const_int(ref program, i32, UInt128(4294967173U)), code);
+        code++;
+        i++;
+    }
     wir_return(ref program, block, wir_const_int(ref program, i32, UInt128(0U)), no_wir_location());
 
     let exit_id: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
@@ -178,7 +315,7 @@ func main() -> Int {
         print("FAIL: floating COFF output");
         return 1;
     }
-    print("PASS: x86_64 floating arithmetic and calls");
+    print("PASS: x86_64 floating arithmetic, comparisons, conversions, and calls");
     print("OBJECT-BEGIN");
     i = 0;
     while (i < object.length()) {

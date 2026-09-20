@@ -77,6 +77,8 @@ enum X86Opcode {
     Jae,
     Jb,
     Jbe,
+    Jp,
+    Jnp,
     Syscall
 }
 
