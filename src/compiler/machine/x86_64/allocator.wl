@@ -179,7 +179,9 @@ func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
         bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE));
         i++;
     }
-
+    // XMM0..3 remain reserved for incoming and outgoing arguments
+    bindings.append(X86RegisterBinding(register=X86Register.XMM4, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM5, value=NO_WIR_VALUE));
     return X86RegisterPlan(uses=uses, bindings=bindings);
 }
 
@@ -337,7 +339,9 @@ func x86_register_value(opcode: WirOpcode) -> Bool {
 
            opcode == WirOpcode.Truncate             || opcode == WirOpcode.SignExtend        || opcode == WirOpcode.ZeroExtend         ||
            opcode == WirOpcode.Bitcast              || opcode == WirOpcode.PointerToInt      || opcode == WirOpcode.IntToPointer       ||
-           opcode == WirOpcode.FieldAddress         || opcode == WirOpcode.IndexAddress;
+           opcode == WirOpcode.FieldAddress         || opcode == WirOpcode.IndexAddress      ||
+
+           opcode == WirOpcode.FloatDivide          || opcode == WirOpcode.FloatExtend       || opcode == WirOpcode.FloatTruncate;
 }
 
 func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
@@ -494,6 +498,12 @@ func x86_rematerializable(program: WirModule, value: WirValueID) -> Bool {
     }
 
     let kind: WirValueKind = program.arena.values[index].kind;
+    if (kind == WirValueKind.Constant) {
+        let owner: Int = wir_id_index(program.arena.values[index].owner);
+        if (owner < 0 || owner >= program.arena.constants.length()) { return false; }
+        let constant: WirConstant = program.arena.constants[owner];
+        return constant.kind == WirConstKind.Zero || constant.kind == WirConstKind.Address;
+    }
     if (kind == WirValueKind.Instruction) {
         let owner: Int = wir_id_index(program.arena.values[index].owner);
         return owner >= 0 && owner < program.arena.instructions.length() && program.arena.instructions[owner].opcode == WirOpcode.StackAlloc;
@@ -507,9 +517,13 @@ func x86_choose_register(program: WirModule, plan: X86RegisterPlan, position: In
 }
 
 func x86_choose_register_except(program: WirModule, plan: X86RegisterPlan, position: Int, avoid: X86Register) -> X86RegisterChoice {
-    let i = 0;
+    return x86_choose_register_class(program, plan, position, avoid, false);
+}
+
+func x86_choose_register_class(program: WirModule, plan: X86RegisterPlan, position: Int, avoid: X86Register, floating: Bool) -> X86RegisterChoice {
+    let i: Int = 0;
     while (i < plan.bindings.length()) {
-        if (plan.bindings[i].register != avoid && plan.bindings[i].value == NO_WIR_VALUE) {
+        if (plan.bindings[i].register != avoid && x86_is_xmm(plan.bindings[i].register) == floating && plan.bindings[i].value == NO_WIR_VALUE) {
             return X86RegisterChoice(register=plan.bindings[i].register, evicted=NO_WIR_VALUE);
         }
 
@@ -521,8 +535,8 @@ func x86_choose_register_except(program: WirModule, plan: X86RegisterPlan, posit
     let selected_remat: Bool = false;
     i = 0;
     while (i < plan.bindings.length()) {
-        if (plan.bindings[i].register == avoid) {
-            i++;
+        if (plan.bindings[i].register == avoid || x86_is_xmm(plan.bindings[i].register) != floating) {
+            i += 1;
             continue;
         }
 
@@ -549,7 +563,7 @@ func x86_choose_register_avoiding(program: WirModule, plan: X86RegisterPlan, pos
     let i = 0;
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
-        if (binding.register != first && binding.register != second && binding.value == NO_WIR_VALUE) {
+        if (!x86_is_xmm(binding.register) && binding.register != first && binding.register != second && binding.value == NO_WIR_VALUE) {
             return X86RegisterChoice(register=binding.register, evicted=NO_WIR_VALUE);
         }
 
@@ -562,7 +576,7 @@ func x86_choose_register_avoiding(program: WirModule, plan: X86RegisterPlan, pos
     i = 0;
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
-        if (binding.register != first && binding.register != second) {
+        if (!x86_is_xmm(binding.register) && binding.register != first && binding.register != second) {
             let next_use: Int = x86_next_use(plan.uses, binding.value, position);
             let remat: Bool = x86_rematerializable(program, binding.value);
             if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {

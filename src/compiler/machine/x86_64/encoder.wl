@@ -2,11 +2,21 @@
 import * from "model.wl"
 
 
-struct X86CodeBuffer(bytes: Vector(Byte))
+struct X86CodeBuffer(bytes: Vector(Byte), relocations: Vector(X86Relocation))
 
 
 func x86_new_code_buffer() -> X86CodeBuffer {
-    return X86CodeBuffer(bytes=[]);
+    return X86CodeBuffer(bytes=[], relocations=[]);
+}
+
+func x86_lea_symbol(ref output: X86CodeBuffer, destination: X86Register, symbol: String, addend: Long) -> Bool {
+    if (x86_register_code(destination) < 0 || symbol.length() == 0 || addend < -2147483648L || addend > 2147483647L) { return false; }
+    x86_rex(ref output, true, destination, X86Register.None, X86Register.None);
+    x86_emit_byte(ref output, Byte(141));
+    x86_emit_byte(ref output, Byte(5 | (x86_register_code(destination) << 3)));
+    output.relocations.append(X86Relocation(section=".text", offset=UInt32(output.bytes.length()), kind=X86RelocationKind.Rel32, symbol=symbol, addend=addend));
+    x86_emit_i32(ref output, Int(addend));
+    return true;
 }
 
 func x86_emit_byte(ref output: X86CodeBuffer, value: Byte) -> Void {
@@ -432,6 +442,15 @@ func x86_call_rel32(ref output: X86CodeBuffer) -> Int {
     x86_emit_u32(ref output, 0U);
 
     return patch_offset;
+}
+
+func x86_call_register(ref output: X86CodeBuffer, target: X86Register) -> Bool {
+    if (x86_register_code(target) < 0) { return false; }
+    // near indirect calls use a 64-bit target without a REX.W prefix
+    x86_rex(ref output, false, X86Register.None, X86Register.None, target);
+    x86_emit_byte(ref output, Byte(255));
+    x86_emit_byte(ref output, x86_modrm_group(2, target));
+    return true;
 }
 
 func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {

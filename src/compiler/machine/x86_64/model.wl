@@ -140,3 +140,8 @@ struct X86Object(
     symbols: Vector(X86Symbol),
     relocations: Vector(X86Relocation)
 )
+
+
+func x86_is_xmm(register: X86Register) -> Bool {
+    return Int(register) >= Int(X86Register.XMM0) && Int(register) <= Int(X86Register.XMM15);
+}
