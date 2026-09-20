@@ -66,6 +66,45 @@ func check_bool(ref program: WirModule, function: WirFuncID, block: WirBlockID, 
     return next;
 }
 
+func conversion_func(ref program: WirModule, name: String, input_type: WirTypeID, output_type: WirTypeID, opcode: WirOpcode) -> Void {
+    let function: WirFuncID = wir_add_function(ref program, name, [WirParam(name="value", type_id=input_type)], output_type, false, WirLinkage.Exported, WirABI.White);
+    let entry: WirBlockID = wir_add_block(ref program, function, "entry", []);
+    let parameter: WirValueID = program.arena.functions[wir_id_index(UInt32(function))].parameters[0];
+    let value: WirValueID = wir_append(ref program, entry, opcode, output_type, [parameter], [], no_wir_location());
+    wir_return(ref program, entry, value, no_wir_location());
+}
+
+func conversion_pressure(ref program: WirModule, name: String, float_type: WirTypeID, integer_type: WirTypeID, result_type: WirTypeID) -> Void {
+    let function: WirFuncID = wir_add_function(ref program, name, [WirParam(name="input", type_id=float_type), WirParam(name="expected", type_id=integer_type), WirParam(name="expected_next", type_id=integer_type)], result_type, false, WirLinkage.Exported, WirABI.White);
+    let entry: WirBlockID = wir_add_block(ref program, function, "entry", []);
+    let params: Vector(WirValueID) = program.arena.functions[wir_id_index(UInt32(function))].parameters;
+    let value: WirValueID = wir_binary(ref program, entry, WirOpcode.Add, float_type, params[0], wir_const_float(ref program, float_type, 0.0), "value", no_wir_location());
+    let next: WirValueID = wir_binary(ref program, entry, WirOpcode.Add, float_type, params[0], wir_const_float(ref program, float_type, 1.0), "next", no_wir_location());
+    let integers: Vector(WirValueID) = [];
+    let i = 1;
+    while (i <= 3) {
+        integers.append(wir_binary(ref program, entry, WirOpcode.Add, integer_type, wir_const_int(ref program, integer_type, UInt128(UInt32(i * 10))), wir_const_int(ref program, integer_type, UInt128(0U)), "integer", no_wir_location()));
+        i++;
+    }
+    // keep both XMM values and all three integer registers live through the split cast
+    let first: WirValueID = wir_append(ref program, entry, WirOpcode.FloatToUnsignedInt, integer_type, [value], [], no_wir_location());
+    let second: WirValueID = wir_append(ref program, entry, WirOpcode.FloatToUnsignedInt, integer_type, [value], [], no_wir_location());
+    let third: WirValueID = wir_append(ref program, entry, WirOpcode.FloatToUnsignedInt, integer_type, [next], [], no_wir_location());
+    let sum: WirValueID = wir_binary(ref program, entry, WirOpcode.Add, integer_type, integers[0], integers[1], "sum", no_wir_location());
+    sum = wir_binary(ref program, entry, WirOpcode.Add, integer_type, sum, integers[2], "sum", no_wir_location());
+    let valid: WirValueID = wir_append(ref program, entry, WirOpcode.Equal, program.bool_type, [sum, wir_const_int(ref program, integer_type, UInt128(60U))], [], no_wir_location());
+    let actual: Vector(WirValueID) = [first, second, third];
+    let expected: Vector(WirValueID) = [params[1], params[1], params[2]];
+    i = 0;
+    while (i < actual.length()) {
+        let equal: WirValueID = wir_append(ref program, entry, WirOpcode.Equal, program.bool_type, [actual[i], expected[i]], [], no_wir_location());
+        valid = wir_append(ref program, entry, WirOpcode.BitAnd, program.bool_type, [valid, equal], [], no_wir_location());
+        i++;
+    }
+    let done: WirBlockID = check_bool(ref program, function, entry, valid, true, 7);
+    wir_return(ref program, done, wir_const_int(ref program, result_type, UInt128(0U)), no_wir_location());
+}
+
 func main() -> Int {
     let conversions: X86CodeBuffer = x86_new_code_buffer();
     if (!x86_sse_convert(ref conversions, X86Register.XMM12, X86Register.R11, 8, 8, true) ||
@@ -99,29 +138,6 @@ func main() -> Int {
         return 1;
     }
 
-    let unsupported: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
-    let unsupported_float: WirTypeID = wir_float_type(ref unsupported, 64);
-    let unsupported_integer: WirTypeID = wir_unsigned_int_type(ref unsupported, 64);
-    let unsupported_ops: Vector(WirOpcode) = [WirOpcode.UnsignedIntToFloat, WirOpcode.FloatToUnsignedInt];
-    let unsupported_index = 0;
-    while (unsupported_index < unsupported_ops.length()) {
-        let result_type: WirTypeID = unsupported_float;
-        let source: WirValueID = wir_const_int(ref unsupported, unsupported_integer, UInt128(1U));
-        if (unsupported_index == 1) {
-            result_type = unsupported_integer;
-            source = wir_const_float(ref unsupported, unsupported_float, 1.0);
-        }
-        let function: WirFuncID = wir_add_function(ref unsupported, "unsigned_" + unsupported_index, [], result_type, false, WirLinkage.Internal, WirABI.White);
-        let block: WirBlockID = wir_add_block(ref unsupported, function, "entry", []);
-        let result: WirValueID = wir_append(ref unsupported, block, unsupported_ops[unsupported_index], result_type, [source], [], no_wir_location());
-        wir_return(ref unsupported, block, result, no_wir_location());
-        let lowered: X86LoweringResult = x86_lower_function(unsupported, function);
-        if (lowered.errors.length() == 0) {
-            print("FAIL: unsupported u64 conversion silently accepted");
-            return 1;
-        }
-        unsupported_index++;
-    }
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let i32: WirTypeID = wir_signed_int_type(ref program, 32);
@@ -129,6 +145,14 @@ func main() -> Int {
     let u64: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let f32: WirTypeID = wir_float_type(ref program, 32);
     let f64: WirTypeID = wir_float_type(ref program, 64);
+    conversion_func(ref program, "u64_to_f32", u64, f32, WirOpcode.UnsignedIntToFloat);
+    conversion_func(ref program, "u64_to_f64", u64, f64, WirOpcode.UnsignedIntToFloat);
+    conversion_func(ref program, "f32_to_u64", f32, u64, WirOpcode.FloatToUnsignedInt);
+    conversion_func(ref program, "f64_to_u64", f64, u64, WirOpcode.FloatToUnsignedInt);
+    conversion_func(ref program, "negate_f32", f32, f32, WirOpcode.FloatNegate);
+    conversion_func(ref program, "negate_f64", f64, f64, WirOpcode.FloatNegate);
+    conversion_pressure(ref program, "cast_pressure_f32", f32, u64, i32);
+    conversion_pressure(ref program, "cast_pressure_f64", f64, u64, i32);
     let params: Vector(WirParam) = [WirParam(name="a", type_id=i32), WirParam(name="b", type_id=f64), WirParam(name="c", type_id=i32), WirParam(name="d", type_id=f32), WirParam(name="e", type_id=f64), WirParam(name="f", type_id=f32)];
     let mixed: WirFuncID = wir_add_function(ref program, "mixed", params, f64, false, WirLinkage.Exported, WirABI.White);
     let block: WirBlockID = wir_add_block(ref program, mixed, "entry", []);
@@ -290,6 +314,36 @@ func main() -> Int {
         let negative: WirValueID = wir_append(ref program, block, WirOpcode.FloatToSignedInt, i32, [wir_const_float(ref program, sizes[i], -123.75)], [], no_wir_location());
         block = check(ref program, main_id, block, negative, wir_const_int(ref program, i32, UInt128(4294967173U)), code);
         code++;
+        i++;
+    }
+    i = 0;
+    while (i < sizes.length()) {
+        let sign: UInt64 = 2147483648UL;
+        let patterns: Vector(UInt64) = [0UL, 2147483648UL, 1065353216UL, 3212836864UL, 2139095040UL, 4286578688UL, 2143289345UL, 4290772993UL, 2139095041UL, 4286578689UL, 1UL];
+        if (i == 1) {
+            sign = 9223372036854775808UL;
+            patterns = [0UL, 9223372036854775808UL, 4607182418800017408UL, 13830554455654793216UL, 9218868437227405312UL, 18442240474082181120UL, 9221120237041090561UL, 18444492273895866369UL, 9218868437227405313UL, 18442240474082181121UL, 1UL];
+        }
+        let integer: WirTypeID = wir_unsigned_int_type(ref program, program.arena.types[wir_id_index(UInt32(sizes[i]))].bits);
+        let j = 0;
+        while (j < patterns.length()) {
+            // use an SSA source, then check it after two negations as well as the result
+            let original: WirValueID = wir_append(ref program, block, WirOpcode.Bitcast, sizes[i], [wir_const_int(ref program, integer, UInt128(patterns[j]))], [], no_wir_location());
+            let negated: WirValueID = wir_append(ref program, block, WirOpcode.FloatNegate, sizes[i], [original], [], no_wir_location());
+            let restored: WirValueID = wir_append(ref program, block, WirOpcode.FloatNegate, sizes[i], [negated], [], no_wir_location());
+            let original_bits: WirValueID = bits(ref program, block, original, integer);
+            let negated_bits: WirValueID = bits(ref program, block, negated, integer);
+            let restored_bits: WirValueID = bits(ref program, block, restored, integer);
+            block = check_carry(ref program, main_id, block, original_bits, wir_const_int(ref program, integer, UInt128(patterns[j])), code, [negated_bits, restored_bits]);
+            code++;
+            let carried: Vector(WirValueID) = program.arena.blocks[wir_id_index(UInt32(block))].parameters;
+            block = check_carry(ref program, main_id, block, carried[0], wir_const_int(ref program, integer, UInt128(patterns[j] ^ sign)), code, [carried[1]]);
+            code++;
+            carried = program.arena.blocks[wir_id_index(UInt32(block))].parameters;
+            block = check(ref program, main_id, block, carried[0], wir_const_int(ref program, integer, UInt128(patterns[j])), code);
+            code++;
+            j++;
+        }
         i++;
     }
     wir_return(ref program, block, wir_const_int(ref program, i32, UInt128(0U)), no_wir_location());

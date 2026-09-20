@@ -492,6 +492,21 @@ func x86_function_has_float(program: WirModule, function: WirFunction) -> Bool {
     return false;
 }
 
+func x86_function_has_u64_cast(program: WirModule, function: WirFunction) -> Bool {
+    let block_index = 0;
+    while (block_index < function.blocks.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[block_index]))];
+        let i = 0;
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            if (instruction.opcode == WirOpcode.FloatToUnsignedInt && x86_scalar_size(program, instruction.type_id) == 8) { return true; }
+            i++;
+        }
+        block_index++;
+    }
+    return false;
+}
+
 func x86_function_call_frame(program: WirModule, function: WirFunction) -> Int {
     let frame_size: Int = 0;
     let block_index: Int = 0;
@@ -1023,14 +1038,40 @@ func x86_lower_instruction(program: WirModule,
             (unsigned && kind != WirTypeKind.UnsignedInt) || (!unsigned && kind != WirTypeKind.SignedInt)) {
             return x86_instruction_error(state, "numeric conversion requires a scalar integer and f32 or f64");
         }
-        if (unsigned && integer_size == 8) {
-            return x86_instruction_error(state, "64-bit unsigned floating-point conversions are not yet supported by the machine backend");
-        }
         let source: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
         if (source.message.length() != 0) { return x86_instruction_error(state, source.message); }
         let choice: X86RegisterChoice = x86_choose_register_class(program, state.registers, state.position, source.register, to_float);
         let prepare_error = x86_prepare_register(program, state, choice, ref output);
         if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        if (unsigned && integer_size == 8) {
+            if (to_float) {
+                let half: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, source.register);
+                prepare_error = x86_prepare_register(program, state, half, ref output);
+                if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+                let low_bit: X86RegisterChoice = x86_choose_register_avoiding(program, state.registers, state.position, source.register, half.register);
+                prepare_error = x86_prepare_register(program, state, low_bit, ref output);
+                if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+                if (!x86_uint64_to_float(ref output, choice.register, source.register, half.register, low_bit.register, float_size)) {
+                    return x86_instruction_error(state, "the x86_64 encoder rejected the u64-to-float conversion");
+                }
+            } else {
+                let temporary: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, choice.register);
+                prepare_error = x86_prepare_register(program, state, temporary, ref output);
+                if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+                let threshold: X86RegisterChoice = x86_choose_register_class(program, state.registers, state.position, source.register, true);
+                prepare_error = x86_prepare_register(program, state, threshold, ref output);
+                if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+                // the upper-half path subtracts from source; preserve it before either path
+                prepare_error = x86_prepare_fixed_register(program, state, source.register, ref output);
+                if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+                if (!x86_float_to_uint64(ref output, choice.register, source.register, threshold.register, temporary.register, float_size)) {
+                    return x86_instruction_error(state, "the x86_64 encoder rejected the float-to-u64 conversion");
+                }
+            }
+            x86_bind_register(state.registers, choice.register, instruction.result);
+            state.accumulator = instruction.result;
+            return state;
+        }
         // u32 needs a signed 64-bit conversion to retain its upper half
         let conversion_size = 4;
         if (unsigned || integer_size == 8) { conversion_size = 8; }
@@ -1154,6 +1195,39 @@ func x86_lower_instruction(program: WirModule,
         return state;
     }
 
+    if (instruction.opcode == WirOpcode.FloatNegate) {
+        if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE || !x86_scalar_float(program, instruction.type_id)) {
+            return x86_instruction_error(state, "floating negate requires one f32 or f64 operand and a result");
+        }
+        if (program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id != instruction.type_id) {
+            return x86_instruction_error(state, "floating negate operand and result must have the same type");
+        }
+        let size = x86_scalar_size(program, instruction.type_id);
+        let source: X86RegisterResult = x86_materialize_register(program, function, instruction.operands[0], slots, state, ref output);
+        if (source.message.length() != 0) { return x86_instruction_error(state, source.message); }
+        let destination: X86RegisterChoice = x86_choose_register_class(program, state.registers, state.position, source.register, true);
+        let prepare_error = x86_prepare_register(program, state, destination, ref output);
+        if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        let bits: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, X86Register.None);
+        prepare_error = x86_prepare_register(program, state, bits, ref output);
+        if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+        // flip the sign bit without floating arithmetic; keep -0 and NaN payloads intact
+        x86_move_scalar(ref output, bits.register, source.register, size);
+        if (size == 4) {
+            x86_bitwise_register_imm32(ref output, bits.register, 2147483648U, 6);
+        } else {
+            let mask: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, bits.register);
+            prepare_error = x86_prepare_register(program, state, mask, ref output);
+            if (prepare_error.length() != 0) { return x86_instruction_error(state, prepare_error); }
+            x86_mov_register_imm64(ref output, mask.register, 9223372036854775808UL);
+            x86_xor_register_width(ref output, bits.register, mask.register, true);
+        }
+        x86_move_scalar(ref output, destination.register, bits.register, size);
+        x86_bind_register(state.registers, destination.register, instruction.result);
+        state.accumulator = instruction.result;
+        return state;
+    }
+
     if (x86_scalar_float(program, instruction.type_id) && (instruction.opcode == WirOpcode.Add || instruction.opcode == WirOpcode.Subtract || instruction.opcode == WirOpcode.Multiply || instruction.opcode == WirOpcode.FloatDivide)) {
         if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) { return x86_instruction_error(state, "floating arithmetic requires two operands and a result"); }
         let size: Int = x86_scalar_size(program, instruction.type_id);
@@ -1265,8 +1339,8 @@ func x86_lower_instruction(program: WirModule,
         }
         let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
         let size: Int = x86_scalar_size(program, instruction.type_id);
-        if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt) || size == 0) {
-            return x86_instruction_error(state, "the x86_64 lowering supports integer bitwise operations up to 64 bits");
+        if ((result_type.kind != WirTypeKind.SignedInt && result_type.kind != WirTypeKind.UnsignedInt && result_type.kind != WirTypeKind.BoolType) || size == 0) {
+            return x86_instruction_error(state, "the x86_64 lowering supports scalar integer and Bool bitwise operations up to 64 bits");
         }
         let left_id: WirValueID = instruction.operands[0];
         let right_id: WirValueID = instruction.operands[1];
@@ -1818,6 +1892,8 @@ func x86_lower_function(program: WirModule, function_id: WirFuncID) -> X86Loweri
 
     // div/idiv need RAX even when all allocatable registers already hold live values
     if (x86_function_has_integer_division(program, function)) { spill_count += 1; }
+    // the split u64 cast may need to preserve its source while both XMM registers are scratch
+    if (x86_function_has_u64_cast(program, function)) { spill_count += 1; }
     let spill_locations: Vector(Int) = x86_spill_locations(slots, scratch, spill_count);
     let spill_plan: X86SpillPlan = x86_new_spill_plan(spill_locations);
 

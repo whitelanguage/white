@@ -324,25 +324,6 @@ func x86_reset_spills(plan: X86SpillPlan) -> Void {
     }
 }
 
-func x86_register_value(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Load                 || opcode == WirOpcode.Add               || 
-           opcode == WirOpcode.Subtract             || opcode == WirOpcode.Multiply          || 
-
-           opcode == WirOpcode.SignedDivide         || opcode == WirOpcode.UnsignedDivide    || opcode == WirOpcode.SignedRemainder    ||
-           opcode == WirOpcode.UnsignedRemainder    || opcode == WirOpcode.BitAnd            || opcode == WirOpcode.BitOr              ||
-           opcode == WirOpcode.BitXor               || opcode == WirOpcode.ShiftLeft         || opcode == WirOpcode.SignedShiftRight   ||
-           opcode == WirOpcode.UnsignedShiftRight   || opcode == WirOpcode.Negate            || opcode == WirOpcode.Not                ||
-           opcode == WirOpcode.Equal                || opcode == WirOpcode.NotEqual          || opcode == WirOpcode.SignedLess         ||
-           opcode == WirOpcode.SignedLessEqual      || opcode == WirOpcode.SignedGreater     || opcode == WirOpcode.SignedGreaterEqual ||
-           opcode == WirOpcode.UnsignedLess         || opcode == WirOpcode.UnsignedLessEqual || opcode == WirOpcode.UnsignedGreater    ||
-           opcode == WirOpcode.UnsignedGreaterEqual || opcode == WirOpcode.Call              ||
-
-           opcode == WirOpcode.Truncate             || opcode == WirOpcode.SignExtend        || opcode == WirOpcode.ZeroExtend         ||
-           opcode == WirOpcode.Bitcast              || opcode == WirOpcode.PointerToInt      || opcode == WirOpcode.IntToPointer       ||
-           opcode == WirOpcode.FieldAddress         || opcode == WirOpcode.IndexAddress      ||
-
-           opcode == WirOpcode.FloatDivide          || opcode == WirOpcode.FloatExtend       || opcode == WirOpcode.FloatTruncate;
-}
 
 func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
     if (start >= last) {
@@ -428,7 +409,9 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
             let instruction: WirInstruction = program.arena.instructions[
                 wir_id_index(UInt32(block.instructions[instruction_index]))
             ];
-            if (instruction.result != NO_WIR_VALUE && x86_register_value(instruction.opcode) && !x86_rematerializable(program, instruction.result)) {
+
+            // count SSA results, not an opcode whitelist that can miss new conversions
+            if (instruction.result != NO_WIR_VALUE && !x86_rematerializable(program, instruction.result)) {
                 let value_index: Int = wir_id_index(UInt32(instruction.result));
                 if (value_index >= 0 && value_index < uses.queues.length()) {
                     let queue: X86UseQueue = uses.queues[value_index];
@@ -521,7 +504,7 @@ func x86_choose_register_except(program: WirModule, plan: X86RegisterPlan, posit
 }
 
 func x86_choose_register_class(program: WirModule, plan: X86RegisterPlan, position: Int, avoid: X86Register, floating: Bool) -> X86RegisterChoice {
-    let i: Int = 0;
+    let i = 0;
     while (i < plan.bindings.length()) {
         if (plan.bindings[i].register != avoid && x86_is_xmm(plan.bindings[i].register) == floating && plan.bindings[i].value == NO_WIR_VALUE) {
             return X86RegisterChoice(register=plan.bindings[i].register, evicted=NO_WIR_VALUE);
@@ -536,7 +519,7 @@ func x86_choose_register_class(program: WirModule, plan: X86RegisterPlan, positi
     i = 0;
     while (i < plan.bindings.length()) {
         if (plan.bindings[i].register == avoid || x86_is_xmm(plan.bindings[i].register) != floating) {
-            i += 1;
+            i++;
             continue;
         }
 
