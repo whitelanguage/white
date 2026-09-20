@@ -1913,6 +1913,21 @@ func wir_field_const(state: WirFunctionLowering, source: Compiler, object: NodeI
     return has_field(field) && field.is_const;
 }
 
+func wir_addressable_node(source: Compiler, node: NodeID) -> Bool {
+    while (has_node(node)) {
+        let kind: Int = node_tag(node);
+        if (kind == NODE_VAR_ACCESS) { return true; }
+        if (kind == NODE_FIELD_ACCESS) {
+            node = get_field_access_node(source.arena, node).obj;
+        } else if (kind == NODE_INDEX_ACCESS) {
+            node = get_index_access_node(source.arena, node).target;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
 func wir_lower_field_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, object_node: NodeID, name: String) -> WirExpr {
     let object_type: Int = get_repr_type(ref source, wir_lvalue_type(state, source, object_node));
     let indirect: Bool = false;
@@ -4983,9 +4998,17 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let bound_method: WirMemberCall = wir_lower_bound_method(ref state, ref types, ref source, ref program, access);
         if (bound_method.handled) { return bound_method.value; }
-        let object: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, access.obj);
-        if (object.value == NO_WIR_VALUE) { return wir_no_expr(); }
-        let owner_type: Int = get_repr_type(ref source, object.source_type);
+        let addressable: Bool = wir_addressable_node(source, access.obj);
+        let object: WirExpr = wir_no_expr();
+        let object_source_type: Int = TYPE_POISON;
+        if (addressable) {
+            object_source_type = wir_lvalue_type(state, source, access.obj);
+        } else {
+            object = wir_lower_expr(ref state, ref types, ref source, ref program, access.obj);
+            if (object.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            object_source_type = object.source_type;
+        }
+        let owner_type: Int = get_repr_type(ref source, object_source_type);
         let indirect: Bool = false;
         let pointer: SymbolInfo = source.ptr_base_map.lookup("" + owner_type);
         if (has_symbol(pointer)) {
@@ -4999,6 +5022,15 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             if (has_struct(owner)) { owner_name = "'" + owner.name + "'"; }
             state.errors.append("field '" + access.field_name + "' is not available on " + owner_name + " during WIR lowering");
             return wir_no_expr();
+        }
+        if (!owner.is_class && !indirect && addressable) {
+            let address: WirExpr = wir_lower_field_lvalue(ref state, ref types, ref source, ref program, access.obj, access.field_name);
+            if (address.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            return WirExpr(value=wir_load(ref program, state.block, address.value, "", no_wir_location()), source_type=field.type);
+        }
+        if (object.value == NO_WIR_VALUE) {
+            object = wir_lower_expr(ref state, ref types, ref source, ref program, access.obj);
+            if (object.value == NO_WIR_VALUE) { return wir_no_expr(); }
         }
         if (owner.is_class || indirect) {
             wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [object.value], [], no_wir_location());
