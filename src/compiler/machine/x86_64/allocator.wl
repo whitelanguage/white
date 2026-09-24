@@ -5,17 +5,9 @@ import * from "../../wir/model.wl"
 
 const X86_NO_NEXT_USE: Int = 2147483647;
 
-/*
-this is a next-use allocator, not graph coloring. Uses are collected in emission
-order and every register remembers the SSA value it currently holds. When all
-registers are occupied, the value used farthest in the future is the cheapest one
-to evict. Dead bindings and spill slots are returned immediately.
-
-the important property here is compile time: use collection is linear and each
-queue only moves forward. It will miss some coalescing opportunities that a graph
-allocator can find, but it does not build an interference graph or iterate over
-one. That trade is intentional for the normal White build path.
-*/
+// next-use allocation keeps this pass cheap. Record every use once, then spill
+// the value needed farthest in the future. This loses some opportunities that a
+// graph allocator would find, but it does not build or color an interference graph.
 
 
 struct X86UseQueue(
@@ -24,8 +16,13 @@ struct X86UseQueue(
 )
 
 struct X86UseTable(
+    base: Int,
+    dense_count: Int,
+    sparse: Vector(WirValueID),
     queues: Vector(X86UseQueue)
 )
+
+struct X86ValueRange(base: Int, count: Int)
 
 struct X86RegisterBinding(
     register: X86Register,
@@ -51,32 +48,132 @@ struct X86SpillPlan(
     bindings: Vector(X86SpillBinding)
 )
 
+func x86_include_value(value: WirValueID, ref first: Int, ref last: Int) -> Void {
+    let index: Int = wir_id_index(UInt32(value));
+    if (index < 0) {
+        return;
+    }
+    if (first < 0 || index < first) {
+        first = index;
+    }
+    if (index > last) {
+        last = index; 
+    }
+}
 
-func x86_new_use_table(value_count: Int) -> X86UseTable {
+func x86_function_value_range(program: WirModule, order: Vector(WirBlockID)) -> X86ValueRange {
+    if (order.length() == 0) {
+        return X86ValueRange(base=0, count=0);
+    }
+    let first: Int = -1;
+    let last: Int = -1;
+    let i: Int = 0;
+    let block_index: Int = 0;
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        i = 0;
+        while (i < block.parameters.length()) {
+            x86_include_value(block.parameters[i], ref first, ref last);
+            i++;
+        }
+        i = 0;
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            if (instruction.result != NO_WIR_VALUE) {
+                x86_include_value(instruction.result, ref first, ref last);
+            }
+            i++;
+        }
+        block_index++;
+    }
+    if (first < 0) {
+        return X86ValueRange(base=0, count=0);
+    }
+    return X86ValueRange(base=first, count=last - first + 1);
+}
+
+func x86_sparse_add(ref sparse: Vector(WirValueID), range: X86ValueRange, value: WirValueID) -> Void {
+    let index: Int = wir_id_index(UInt32(value));
+    if (index < 0 || (index >= range.base && index < range.base + range.count)) { return; }
+    let i: Int = 0;
+    while (i < sparse.length()) {
+        if (sparse[i] == value) { return; }
+        i++;
+    }
+    sparse.append(value);
+}
+
+func x86_function_sparse_values(program: WirModule, order: Vector(WirBlockID), range: X86ValueRange) -> Vector(WirValueID) {
+    let sparse: Vector(WirValueID) = [];
+    if (order.length() == 0) { return sparse; }
+    let function_id: WirFuncID = program.arena.blocks[wir_id_index(UInt32(order[0]))].function;
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+    let i: Int = 0;
+    while (i < function.parameters.length()) {
+        x86_sparse_add(ref sparse, range, function.parameters[i]);
+        i++;
+    }
+    let block_index: Int = 0;
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        i = 0;
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            let operand_index: Int = 0;
+            while (operand_index < instruction.operands.length()) {
+                x86_sparse_add(ref sparse, range, instruction.operands[operand_index]);
+                operand_index++;
+            }
+            let edge_index: Int = 0;
+            while (edge_index < instruction.edges.length()) {
+                let argument_index: Int = 0;
+                while (argument_index < instruction.edges[edge_index].arguments.length()) {
+                    x86_sparse_add(ref sparse, range, instruction.edges[edge_index].arguments[argument_index]);
+                    argument_index++;
+                }
+                edge_index++;
+            }
+            i++;
+        }
+        block_index++;
+    }
+    return sparse;
+}
+
+func x86_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) -> X86UseTable {
     let queues: Vector(X86UseQueue) = [];
-
-    let i = 0;
-    while (i < value_count) {
+    let i: Int = 0;
+    while (i < dense_count + sparse.length()) {
         queues.append(X86UseQueue(positions=[], cursor=0));
         i++;
     }
 
-    return X86UseTable(queues=queues);
+    return X86UseTable(base=base, dense_count=dense_count, sparse=sparse, queues=queues);
+}
+
+func x86_use_index(table: X86UseTable, value: WirValueID) -> Int {
+    let index: Int = wir_id_index(UInt32(value));
+    if (index >= table.base && index < table.base + table.dense_count) { return index - table.base; }
+    let i: Int = 0;
+    while (i < table.sparse.length()) {
+        if (table.sparse[i] == value) { return table.dense_count + i; }
+        i++;
+    }
+    return -1;
 }
 
 func x86_record_use(table: X86UseTable, value: WirValueID, position: Int) -> Void {
-    let index: Int = wir_id_index(UInt32(value));
-    if (index < 0 || index >= table.queues.length()) {
-        return;
-    }
-
+    let index: Int = x86_use_index(table, value);
+    if (index < 0 || index >= table.queues.length()) { return; }
     let queue: X86UseQueue = table.queues[index];
     queue.positions.append(position);
     table.queues[index] = queue;
 }
 
 func x86_collect_uses(program: WirModule, order: Vector(WirBlockID)) -> X86UseTable {
-    let table: X86UseTable = x86_new_use_table(program.arena.values.length());
+    let range: X86ValueRange = x86_function_value_range(program, order);
+    let sparse: Vector(WirValueID) = x86_function_sparse_values(program, order, range);
+    let table: X86UseTable = x86_new_use_table(range.base, range.count, sparse);
     let position = 0;
     let block_index = 0;
     while (block_index < order.length()) {
@@ -113,7 +210,7 @@ func x86_collect_uses(program: WirModule, order: Vector(WirBlockID)) -> X86UseTa
 }
 
 func x86_next_use(table: X86UseTable, value: WirValueID, position: Int) -> Int {
-    let index: Int = wir_id_index(UInt32(value));
+    let index: Int = x86_use_index(table, value);
     if (index < 0 || index >= table.queues.length()) {
         return X86_NO_NEXT_USE;
     }
@@ -133,8 +230,13 @@ func x86_next_use(table: X86UseTable, value: WirValueID, position: Int) -> Int {
     return queue.positions[cursor];
 }
 
+func x86_pending_use(table: X86UseTable, value: WirValueID, position: Int) -> Int {
+    // an operand stays live until the whole instruction has consumed it
+    return x86_next_use(table, value, position - 1);
+}
+
 func x86_consume_uses(table: X86UseTable, value: WirValueID, position: Int) -> Void {
-    let index: Int = wir_id_index(UInt32(value));
+    let index: Int = x86_use_index(table, value);
     if (index < 0 || index >= table.queues.length()) {
         return;
     }
@@ -229,6 +331,18 @@ func x86_clear_register(plan: X86RegisterPlan, register: X86Register) -> Void {
     x86_bind_register(plan, register, NO_WIR_VALUE);
 }
 
+func x86_forget_register_value(plan: X86RegisterPlan, value: WirValueID) -> Void {
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        let binding: X86RegisterBinding = plan.bindings[i];
+        if (binding.value == value) {
+            binding.value = NO_WIR_VALUE;
+            plan.bindings[i] = binding;
+        }
+        i++;
+    }
+}
+
 func x86_reset_registers(plan: X86RegisterPlan) -> Void {
     let i = 0;
     while (i < plan.bindings.length()) {
@@ -313,6 +427,18 @@ func x86_release_dead_spills(plan: X86SpillPlan, uses: X86UseTable, position: In
     }
 }
 
+func x86_forget_spill_value(plan: X86SpillPlan, value: WirValueID) -> Void {
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        let binding: X86SpillBinding = plan.bindings[i];
+        if (binding.value == value) {
+            binding.value = NO_WIR_VALUE;
+            plan.bindings[i] = binding;
+        }
+        i++;
+    }
+}
+
 func x86_reset_spills(plan: X86SpillPlan) -> Void {
     let i = 0;
     while (i < plan.bindings.length()) {
@@ -370,7 +496,7 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     i = 0;
     while (i < function.parameters.length()) {
-        let value_index: Int = wir_id_index(UInt32(function.parameters[i]));
+        let value_index: Int = x86_use_index(uses, function.parameters[i]);
         if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(program, function.parameters[i])) {
             let queue: X86UseQueue = uses.queues[value_index];
             if (queue.positions.length() != 0) {
@@ -391,7 +517,7 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
         let block_start: Int = position;
         i = 0;
         while (i < block.parameters.length()) {
-            let value_index: Int = wir_id_index(UInt32(block.parameters[i]));
+            let value_index: Int = x86_use_index(uses, block.parameters[i]);
             if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(program, block.parameters[i])) {
                 let queue: X86UseQueue = uses.queues[value_index];
                 if (queue.positions.length() != 0) {
@@ -412,7 +538,7 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
 
             // count SSA results, not an opcode whitelist that can miss new conversions
             if (instruction.result != NO_WIR_VALUE && !x86_rematerializable(program, instruction.result)) {
-                let value_index: Int = wir_id_index(UInt32(instruction.result));
+                let value_index: Int = x86_use_index(uses, instruction.result);
                 if (value_index >= 0 && value_index < uses.queues.length()) {
                     let queue: X86UseQueue = uses.queues[value_index];
                     if (queue.positions.length() != 0) {
@@ -451,8 +577,27 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
                 let instruction: WirInstruction = program.arena.instructions[
                     wir_id_index(UInt32(block.instructions[i - scan_position]))
                 ];
-                if (instruction.opcode == WirOpcode.Call && live_before_call > call_peak) {
+                let saves_register_bank: Bool = instruction.opcode == WirOpcode.Call || instruction.opcode == WirOpcode.Retain ||
+                                                instruction.opcode == WirOpcode.Release ||
+                                                (instruction.opcode == WirOpcode.AtomicRmw &&
+                                                (instruction.atomic_op == WirAtomicOp.BitAnd || instruction.atomic_op == WirAtomicOp.BitOr ||
+                                                instruction.atomic_op == WirAtomicOp.BitXor));
+                if (saves_register_bank && live_before_call > call_peak) {
                     call_peak = live_before_call;
+                }
+
+                // memory operations and edge staging need a temporary before their inputs die
+                let temporary = instruction.opcode == WirOpcode.Store || instruction.opcode == WirOpcode.Load ||
+                                instruction.opcode == WirOpcode.StructValue || instruction.opcode == WirOpcode.ArrayValue ||
+                                instruction.opcode == WirOpcode.Field || instruction.opcode == WirOpcode.Index;
+                let edge_index = 0;
+                while (!temporary && edge_index < instruction.edges.length()) {
+                    temporary = instruction.edges[edge_index].arguments.length() != 0;
+                    edge_index++;
+                }
+
+                if (temporary && before + 1 > peak) {
+                    peak = before + 1;
                 }
 
                 break;
@@ -524,7 +669,7 @@ func x86_choose_register_class(program: WirModule, plan: X86RegisterPlan, positi
         }
 
         let value: WirValueID = plan.bindings[i].value;
-        let next_use: Int = x86_next_use(plan.uses, value, position);
+        let next_use: Int = x86_pending_use(plan.uses, value, position);
         let remat: Bool = x86_rematerializable(program, value);
         if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {
             selected = i;
@@ -560,7 +705,7 @@ func x86_choose_register_avoiding(program: WirModule, plan: X86RegisterPlan, pos
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
         if (!x86_is_xmm(binding.register) && binding.register != first && binding.register != second) {
-            let next_use: Int = x86_next_use(plan.uses, binding.value, position);
+            let next_use: Int = x86_pending_use(plan.uses, binding.value, position);
             let remat: Bool = x86_rematerializable(program, binding.value);
             if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {
                 selected = i;

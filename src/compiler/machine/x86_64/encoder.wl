@@ -262,6 +262,18 @@ func x86_sub_register64(ref output: X86CodeBuffer, destination: X86Register, sou
     x86_emit_byte(ref output, x86_modrm_register(source, destination));
 }
 
+func x86_adc_register64(ref output: X86CodeBuffer, destination: X86Register, source: X86Register) -> Void {
+    x86_rex(ref output, true, source, X86Register.None, destination);
+    x86_emit_byte(ref output, Byte(17));
+    x86_emit_byte(ref output, x86_modrm_register(source, destination));
+}
+
+func x86_sbb_register64(ref output: X86CodeBuffer, destination: X86Register, source: X86Register) -> Void {
+    x86_rex(ref output, true, source, X86Register.None, destination);
+    x86_emit_byte(ref output, Byte(25));
+    x86_emit_byte(ref output, x86_modrm_register(source, destination));
+}
+
 func x86_imul_register32(ref output: X86CodeBuffer, destination: X86Register, source: X86Register) -> Void {
     x86_rex(ref output, false, destination, X86Register.None, source);
     x86_emit_byte(ref output, Byte(15));
@@ -274,6 +286,12 @@ func x86_imul_register64(ref output: X86CodeBuffer, destination: X86Register, so
     x86_emit_byte(ref output, Byte(15));
     x86_emit_byte(ref output, Byte(175));
     x86_emit_byte(ref output, x86_modrm_register(destination, source));
+}
+
+func x86_mul_register64(ref output: X86CodeBuffer, source: X86Register) -> Void {
+    x86_rex(ref output, true, X86Register.None, X86Register.None, source);
+    x86_emit_byte(ref output, Byte(247));
+    x86_emit_byte(ref output, x86_modrm_group(4, source));
 }
 
 func x86_and_register_width(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, wide: Bool) -> Void {
@@ -312,6 +330,25 @@ func x86_shift_register_cl(ref output: X86CodeBuffer, register: X86Register, gro
     x86_rex(ref output, wide, X86Register.None, X86Register.None, register);
     x86_emit_byte(ref output, Byte(211));
     x86_emit_byte(ref output, x86_modrm_group(group, register));
+}
+
+func x86_shift_double_imm8(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, amount: Byte, left: Bool) -> Void {
+    x86_rex(ref output, true, source, X86Register.None, destination);
+    x86_emit_byte(ref output, Byte(15));
+    let opcode: Byte = Byte(172);
+    if (left) { opcode = Byte(164); }
+    x86_emit_byte(ref output, opcode);
+    x86_emit_byte(ref output, x86_modrm_register(source, destination));
+    x86_emit_byte(ref output, amount);
+}
+
+func x86_shift_double_cl(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, left: Bool) -> Void {
+    x86_rex(ref output, true, source, X86Register.None, destination);
+    x86_emit_byte(ref output, Byte(15));
+    let opcode: Byte = Byte(173);
+    if (left) { opcode = Byte(165); }
+    x86_emit_byte(ref output, opcode);
+    x86_emit_byte(ref output, x86_modrm_register(source, destination));
 }
 
 func x86_unary_register(ref output: X86CodeBuffer, register: X86Register, group: Int, wide: Bool) -> Void {
@@ -455,6 +492,55 @@ func x86_call_register(ref output: X86CodeBuffer, target: X86Register) -> Bool {
     return true;
 }
 
+func x86_atomic_xadd(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
+    if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
+        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+    x86_emit_byte(ref output, Byte(240));
+    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    x86_rex(ref output, size == 8, value, X86Register.None, address);
+    if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
+        x86_emit_byte(ref output, Byte(64));
+    }
+    x86_emit_byte(ref output, Byte(15));
+    if (size == 1) { x86_emit_byte(ref output, Byte(192)); }
+    else { x86_emit_byte(ref output, Byte(193)); }
+    x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
+    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    return true;
+}
+
+func x86_atomic_exchange(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
+    if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
+        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    x86_rex(ref output, size == 8, value, X86Register.None, address);
+    if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
+        x86_emit_byte(ref output, Byte(64));
+    }
+    if (size == 1) { x86_emit_byte(ref output, Byte(134)); }
+    else { x86_emit_byte(ref output, Byte(135)); }
+    x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
+    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    return true;
+}
+
+func x86_atomic_compare_exchange(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
+    if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
+        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+    x86_emit_byte(ref output, Byte(240));
+    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    x86_rex(ref output, size == 8, value, X86Register.None, address);
+    if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
+        x86_emit_byte(ref output, Byte(64));
+    }
+    x86_emit_byte(ref output, Byte(15));
+    if (size == 1) { x86_emit_byte(ref output, Byte(176)); }
+    else { x86_emit_byte(ref output, Byte(177)); }
+    x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
+    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    return true;
+}
+
 func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {
     let code: Byte = Byte(0);
     if (opcode == X86Opcode.Je)       { code = Byte(132); }
@@ -477,6 +563,11 @@ func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {
     x86_emit_u32(ref output, 0U);
 
     return patch_offset;
+}
+
+func x86_trap(ref output: X86CodeBuffer) -> Void {
+    x86_emit_byte(ref output, Byte(15));
+    x86_emit_byte(ref output, Byte(11));
 }
 
 func x86_push_rbp(ref output: X86CodeBuffer) -> Void {
@@ -504,6 +595,14 @@ func x86_sub_rsp_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
     x86_emit_byte(ref output, Byte(129));
     x86_emit_byte(ref output, Byte(236));
     x86_emit_u32(ref output, value);
+}
+
+func x86_touch_rsp(ref output: X86CodeBuffer) -> Void {
+    // test byte ptr [rsp], 0; the read commits each guard page without changing stack data
+    x86_emit_byte(ref output, Byte(246));
+    x86_emit_byte(ref output, Byte(4));
+    x86_emit_byte(ref output, Byte(36));
+    x86_emit_byte(ref output, Byte(0));
 }
 
 func x86_store_eax_rbp_disp32(ref output: X86CodeBuffer, displacement: Int) -> Void {
@@ -598,11 +697,45 @@ func x86_load_register_base_disp32(ref output: X86CodeBuffer, destination: X86Re
     x86_emit_i32(ref output, displacement);
 }
 
+func x86_memory_indexed(ref output: X86CodeBuffer, register: X86Register, base: X86Register, index: X86Register, displacement: Int, size: Int, store: Bool) -> Bool {
+    let reg_code = x86_register_code(register);
+    let base_code = x86_register_code(base);
+    let index_code = x86_register_code(index);
+    if (reg_code < 0 || base_code < 0 || index_code < 0 || index == X86Register.RSP ||
+        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+    if (store && size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    x86_rex(ref output, size == 8, register, index, base);
+    if (store && size == 1 && reg_code >= 4 && !x86_register_extended(register) &&
+        !x86_register_extended(index) && !x86_register_extended(base)) {
+        x86_emit_byte(ref output, Byte(64));
+    }
+    if (store) {
+        if (size == 1) { x86_emit_byte(ref output, Byte(136)); }
+        else { x86_emit_byte(ref output, Byte(137)); }
+    } else if (size == 1 || size == 2) {
+        x86_emit_byte(ref output, Byte(15));
+        if (size == 1) { x86_emit_byte(ref output, Byte(182)); }
+        else { x86_emit_byte(ref output, Byte(183)); }
+    } else {
+        x86_emit_byte(ref output, Byte(139));
+    }
+    x86_emit_byte(ref output, Byte(132 | ((reg_code & 7) << 3)));
+    x86_emit_byte(ref output, Byte(((index_code & 7) << 3) | (base_code & 7)));
+    x86_emit_i32(ref output, displacement);
+    return true;
+}
+
 func x86_frame_enter(ref output: X86CodeBuffer, size: Int) -> Void {
     x86_push_rbp(ref output);
     x86_mov_rbp_rsp(ref output);
-    if (size > 0) {
-        x86_sub_rsp_imm32(ref output, UInt32(size));
+    let remaining: Int = size;
+    while (remaining > 4096) {
+        x86_sub_rsp_imm32(ref output, 4096U);
+        x86_touch_rsp(ref output);
+        remaining -= 4096;
+    }
+    if (remaining > 0) {
+        x86_sub_rsp_imm32(ref output, UInt32(remaining));
     }
 }
 

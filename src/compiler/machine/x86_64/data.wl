@@ -79,13 +79,17 @@ func x86_write_initializer(program: WirModule, ref section: X86CodeSection, ref 
     return "";
 }
 
-func x86_emit_globals(program: WirModule, ref object: X86Object) -> String {
+func x86_emit_globals(program: WirModule, reachable: Vector(Bool), ref object: X86Object) -> String {
     let readonly_data: X86CodeSection = X86CodeSection(name=".rdata", bytes=[], alignment=1, executable=false, writable=false);
     let writable_data: X86CodeSection = X86CodeSection(name=".data", bytes=[], alignment=1, executable=false, writable=true);
     let has_readonly: Bool = false;
     let has_writable: Bool = false;
     let i: Int = 0;
     while (i < program.arena.globals.length()) {
+        if (!reachable[i]) {
+            i++;
+            continue;
+        }
         let global: WirGlobal = program.arena.globals[i];
         if (global.linkage == WirLinkage.External) {
             object.symbols.append(X86Symbol(name=global.name, section="", offset=0U, external=true));

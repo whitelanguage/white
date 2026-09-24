@@ -88,10 +88,8 @@ enum X86RelocationKind {
     Abs64
 }
 
-// these are machine-side records, not another IR. Instructions only live long
-// enough to be encoded; sections, symbols and relocations are the object writer's
-// input. Keeping the records plain also makes it possible to replace COFF without
-// teaching WIR about an object format.
+// these records are encoder input, not another IR. WIR should not know which
+// object format receives the finished bytes.
 
 struct X86Memory(
     base: X86Register,

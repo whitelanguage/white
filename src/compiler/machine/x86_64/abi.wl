@@ -1,5 +1,17 @@
 // compiler/machine/x86_64/abi.wl
 import * from "model.wl"
+import WirTypeLayout from "../../wir/model.wl"
+
+func x86_win64_aggregate_size(layout: WirTypeLayout) -> Int {
+    // small POD aggregates use integer registers, even when their fields are floats
+    if (!layout.valid) {
+        return 0;
+    }
+    if (layout.size == 1UL || layout.size == 2UL || layout.size == 4UL || layout.size == 8UL) {
+        return Int(layout.size);
+    }
+    return 0;
+}
 
 
 struct X86Win64ABI(
@@ -13,11 +25,8 @@ struct X86Win64ABI(
 
 
 func x86_win64_abi() -> X86Win64ABI {
-    // keep this table in one place. Lowering uses it for both incoming values and
-    // calls, and a disagreement there usually survives until link or runtime.
-    //
-    // Win64 has four argument positions, not two independent banks of four. The
-    // type of an argument decides whether its position names RCX..R9 or XMM0..3.
+    // Win64 has four argument positions, not four integer plus four float args.
+    // Keep both lists together, callers and callees must count positions the same way.
     return X86Win64ABI(
         pointer_bits=64,
         stack_alignment=16,
@@ -59,6 +68,7 @@ func x86_win64_stack_arg_offset(index: Int) -> Int {
         return -1;
     }
 
+    // the first 32 bytes belong to the four register arguments
     return 32 + (index - 4) * 8;
 }
 
@@ -67,12 +77,15 @@ func x86_win64_stack_param_offset(index: Int) -> Int {
         return -1;
     }
 
+    // return address and saved RBP put the same argument 16 bytes farther away
     return 48 + (index - 4) * 8;
 }
 
 func x86_win64_call_frame(argument_count: Int) -> Int {
     let size: Int = 32;
-    if (argument_count > 4) { size += (argument_count - 4) * 8; }
+    if (argument_count > 4) {
+        size += (argument_count - 4) * 8;
+    }
     return (size + 15) & -16;
 }
 

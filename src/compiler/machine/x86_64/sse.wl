@@ -33,6 +33,21 @@ func x86_sse_memory(ref output: X86CodeBuffer, opcode: Int, xmm: X86Register, ba
     return true;
 }
 
+func x86_sse_vector_memory(ref output: X86CodeBuffer, xmm: X86Register, base: X86Register, offset: Int, load: Bool) -> Bool {
+    let reg: Int = x86_xmm_code(xmm);
+    let rm: Int = x86_register_code(base);
+    if (reg < 0 || rm < 0) { return false; }
+    if (x86_register_extended(base)) { rm += 8; }
+    x86_sse_prefix(ref output, 243, false, reg, rm);
+    let opcode = 127;
+    if (load) { opcode = 111; }
+    x86_emit_byte(ref output, Byte(opcode));
+    x86_emit_byte(ref output, Byte(128 | ((reg & 7) << 3) | (rm & 7)));
+    if ((rm & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    x86_emit_i32(ref output, offset);
+    return true;
+}
+
 func x86_sse_register(ref output: X86CodeBuffer, opcode: Int, destination: X86Register, source: X86Register, size: Int) -> Bool {
     let reg: Int = x86_xmm_code(destination);
     let rm: Int = x86_xmm_code(source);
@@ -54,6 +69,16 @@ func x86_sse_bits(ref output: X86CodeBuffer, xmm: X86Register, integer: X86Regis
     let opcode: Int = 126;
     if (to_xmm) { opcode = 110; }
     x86_emit_byte(ref output, Byte(opcode));
+    x86_emit_byte(ref output, Byte(192 | ((reg & 7) << 3) | (rm & 7)));
+    return true;
+}
+
+func x86_sse_pair(ref output: X86CodeBuffer, destination: X86Register, high: X86Register) -> Bool {
+    let reg: Int = x86_xmm_code(destination);
+    let rm: Int = x86_xmm_code(high);
+    if (reg < 0 || rm < 0) { return false; }
+    x86_sse_prefix(ref output, 102, false, reg, rm);
+    x86_emit_byte(ref output, Byte(108));
     x86_emit_byte(ref output, Byte(192 | ((reg & 7) << 3) | (rm & 7)));
     return true;
 }
