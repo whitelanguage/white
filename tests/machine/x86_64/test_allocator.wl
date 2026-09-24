@@ -44,6 +44,16 @@ func main() -> Int {
         return 1;
     }
 
+    if (x86_pending_use(plan.uses, near, 2) != 2 || x86_next_use(plan.uses, near, 2) != X86_NO_NEXT_USE) {
+        print("FAIL: allocator treated an unread current operand as dead");
+        return 1;
+    }
+    x86_consume_uses(plan.uses, near, 2);
+    if (x86_pending_use(plan.uses, near, 2) != X86_NO_NEXT_USE) {
+        print("FAIL: allocator kept a consumed operand live");
+        return 1;
+    }
+
     print("PASS: x86_64 register allocator");
     return 0;
 }
