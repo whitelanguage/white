@@ -13,6 +13,7 @@ import "compiler/pipeline.wl" as WhitelangCompiler
 import "compiler/context.wl" as WhitelangUtils
 import "compiler/target.wl" as WhitelangTarget
 import "compiler/wir/pipeline.wl" as WhitelangWIR
+import "compiler/machine/pipeline.wl" as WhitelangMachine
 
 
 const VERSION      : String = "devel";
@@ -63,7 +64,7 @@ func print_usage() -> Void {
     print("  --dump-ir              Dump LLVM IR to stdout");
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
-    print("  --backend <name>       Select the compiler backend (llvm or wir)");
+    print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -311,14 +312,24 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("Error: No input file.");
         return 1;
     }
-    if (cfg.backend != "llvm" && cfg.backend != "wir") {
-        print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm' or 'wir'.");
+    if (cfg.backend != "llvm" && cfg.backend != "wir" && cfg.backend != "machine") {
+        print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm', 'wir', or 'machine'.");
         return 1;
     }
     if (!WhitelangTarget.select_target(cfg.target_triple)) {
         print("Error: Unsupported target '" + cfg.target_triple + "'.");
         print("Run 'wlc --target-help' to list supported targets.");
         return 1;
+    }
+    if (cfg.backend == "machine") {
+        if (WhitelangTarget.get_target_triple() != "x86_64-pc-windows-msvc") {
+            print("Error: The machine backend currently supports only x86_64-pc-windows-msvc.");
+            return 1;
+        }
+        if (cfg.is_emit_llvm || cfg.is_asm_only || cfg.dump_ir || cfg.debug_info) {
+            print("Error: The machine backend does not support -S, --emit-llvm, --dump-ir, or -g yet.");
+            return 1;
+        }
     }
 
     let base_name: String = get_base_name(cfg.source_file);
@@ -387,6 +398,13 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
     }
 
+    let machine_file: String = "";
+    if (cfg.backend == "machine") {
+        if (cfg.is_compile_only) { machine_file = cfg.output_file; }
+        else if (cfg.keep_temps) { machine_file = base_name + ".obj"; }
+        else { machine_file = ll_file.slice(0, ll_file.length() - 3) + ".obj"; }
+    }
+
     log_stage(cfg, "Frontend & Middle-end");
     let f_in: file.File = file.open(cfg.source_file)?;
     catch(err) {
@@ -439,6 +457,38 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
         compiler.output_file.write(result.text);
         compiler.output_file.close();
+    } else if (cfg.backend == "machine") {
+        WhitelangCompiler.prepare_program(ref compiler, ast);
+        WhitelangExceptions.check_errors_and_abort();
+
+        let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits())?;
+        catch(err) {
+            compiler.output_file.close();
+            print("Build Failed: Machine backend ran out of memory while producing the object file.");
+            return 1;
+        }
+        if (result.errors.length() != 0) {
+            compiler.output_file.close();
+            let error_index: Int = 0;
+            while (error_index < result.errors.length()) {
+                print("InternalCompilerError: " + result.errors[error_index]);
+                error_index++;
+            }
+            return 1;
+        }
+        compiler.output_file.close();
+        let object_file: file.File = file.create(machine_file)?;
+        catch(err) {
+            print("Build Failed: Could not create machine object file " + machine_file + ".");
+            return 1;
+        }
+        object_file.write_bytes(result.bytes)?;
+        catch(err) {
+            object_file.close();
+            print("Build Failed: Could not write machine object file " + machine_file + ".");
+            return 1;
+        }
+        object_file.close();
     } else {
         WhitelangCompiler.compile(ref compiler, ast);
     }
@@ -448,6 +498,16 @@ func main(argc: Int, ptr argv: String) -> Int {
     if (compiler.output_file.last_error() != file.Error.None) {
         print("Error: Could not write temporary IR file " + ll_file);
         return 1;
+    }
+
+    if (cfg.backend == "machine" && cfg.is_compile_only) {
+        if (!cfg.keep_temps && WhitelangUtils.file_exists(ll_file)) {
+            file.remove(ll_file)?;
+            catch(err) {}
+            WhitelangExceptions.CLEAN_TMP_LL = "";
+        }
+        print("Build success: " + cfg.output_file);
+        return 0;
     }
 
     if (cfg.dump_ir) {
@@ -493,22 +553,25 @@ func main(argc: Int, ptr argv: String) -> Int {
     let clang_args: Vector(String) = [];
     let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
     if (cfg.debug_info) { clang_args.append("-g"); }
-    if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
+    if (cfg.backend == "machine" || cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
-    clang_args.append("-Wno-override-module");
-    clang_args.append(cfg.opt_level);
-    if (cfg.opt_level == "-Oz") {
-        clang_args.append("-mllvm");
-        clang_args.append("-inline-threshold=0");
-        clang_args.append("-fno-vectorize");
-        clang_args.append("-fno-slp-vectorize");
-        clang_args.append("-fno-unroll-loops");
+    if (cfg.backend != "machine") {
+        clang_args.append("-Wno-override-module");
+        clang_args.append(cfg.opt_level);
+        if (cfg.opt_level == "-Oz") {
+            clang_args.append("-mllvm");
+            clang_args.append("-inline-threshold=0");
+            clang_args.append("-fno-vectorize");
+            clang_args.append("-fno-slp-vectorize");
+            clang_args.append("-fno-unroll-loops");
+        }
     }
     if size_opt {
         clang_args.append("-ffunction-sections");
         clang_args.append("-fdata-sections");
     }
-    clang_args.append(ll_file);
+    if (cfg.backend == "machine") { clang_args.append(machine_file); }
+    else { clang_args.append(ll_file); }
 
     let extra_idx: Int = 0;
     while (extra_idx < cfg.extra_files.length()) {
@@ -629,6 +692,13 @@ func main(argc: Int, ptr argv: String) -> Int {
             if (cfg.verbose) { print("Warning: Could not remove temporary file " + ll_file + "."); }
         }
         WhitelangExceptions.CLEAN_TMP_LL = "";
+    }
+    if (cfg.backend == "machine" && !cfg.keep_temps && cfg.output_file != machine_file && WhitelangUtils.file_exists(machine_file)) {
+        if (cfg.verbose) { print("Cleaning up: " + machine_file); }
+        file.remove(machine_file)?;
+        catch(err) {
+            if (cfg.verbose) { print("Warning: Could not remove temporary file " + machine_file + "."); }
+        }
     }
 
     if (ret != 0) {

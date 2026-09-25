@@ -878,7 +878,7 @@ func x86_home_parameters(program: WirModule, function: WirFunction, stack: X86St
                 return false;
             }
         } else {
-            let incoming_offset: Int = x86_win64_stack_parameter_offset(position);
+            let incoming_offset: Int = x86_win64_stack_param_offset(position);
             if (incoming_offset < 0) {
                 return false;
             }
@@ -2852,7 +2852,7 @@ func x86_lower_instruction(program: WirModule,
                 return x86_instruction_error(state, argument.message);
             }
 
-            let position = argument_index;
+            let position: Int = argument_index;
             if hidden {
                 position++;
             }
@@ -2865,7 +2865,7 @@ func x86_lower_instruction(program: WirModule,
                     x86_move_scalar(ref output, destination, argument.register, size);
                 }
             } else {
-                let offset: Int = x86_win64_stack_argument_offset(position);
+                let offset: Int = x86_win64_stack_arg_offset(position);
                 if (offset < 0) {
                     return x86_instruction_error(state, "the x86_64 ABI has no stack location for this argument");
                 }
