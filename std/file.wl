@@ -249,6 +249,37 @@ class File {
         return Int(written);
     }
 
+    func write_bytes(content: Vector(Byte)) -> Int? {
+        if (self.handle is nullptr) {
+            if (self.__last_error == Error.None) { throw Error.InvalidState; }
+            throw self.__last_error;
+        }
+        if (!self.__flush_write_buffer()) { throw self.__last_error; }
+        let length: Int = content.length();
+        if (length == 0) { return 0; }
+        let data: AnyPtr = ref content[0];
+        if (sys.OS == sys.Os.Windows) {
+            let bytes_written: Int = 0;
+            if (windows.WriteFile(self.handle, data, length, ref bytes_written, nullptr) == 0) {
+                self.__last_error = __last_error();
+                throw self.__last_error;
+            }
+            if (bytes_written != length) {
+                self.__last_error = Error.StorageFull;
+                throw self.__last_error;
+            }
+            self.__last_error = Error.None;
+            return bytes_written;
+        }
+        let written: UIntSize = posix.fwrite(data, UIntSize(1), UIntSize(length), self.handle);
+        if (written != UIntSize(length)) {
+            self.__last_error = __last_error();
+            throw self.__last_error;
+        }
+        self.__last_error = Error.None;
+        return Int(written);
+    }
+
     func write(content: String) -> Void {
         if (self.handle is nullptr) { return; }
         let length: Long = content.length();
