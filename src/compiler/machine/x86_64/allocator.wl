@@ -19,6 +19,7 @@ struct X86UseTable(
     base: Int,
     dense_count: Int,
     sparse: Vector(WirValueID),
+    sparse_indices: Dict(UInt32, Int),
     queues: Vector(X86UseQueue)
 )
 
@@ -92,25 +93,23 @@ func x86_function_value_range(program: WirModule, order: Vector(WirBlockID)) -> 
     return X86ValueRange(base=first, count=last - first + 1);
 }
 
-func x86_sparse_add(ref sparse: Vector(WirValueID), range: X86ValueRange, value: WirValueID) -> Void {
+func x86_sparse_add(ref sparse: Vector(WirValueID), seen: Dict(UInt32, Int), range: X86ValueRange, value: WirValueID) -> Void {
     let index: Int = wir_id_index(UInt32(value));
     if (index < 0 || (index >= range.base && index < range.base + range.count)) { return; }
-    let i: Int = 0;
-    while (i < sparse.length()) {
-        if (sparse[i] == value) { return; }
-        i++;
-    }
+    if (seen.lookup(UInt32(value)) != 0) { return; }
     sparse.append(value);
+    seen.put(UInt32(value), sparse.length());
 }
 
 func x86_function_sparse_values(program: WirModule, order: Vector(WirBlockID), range: X86ValueRange) -> Vector(WirValueID) {
     let sparse: Vector(WirValueID) = [];
+    let seen: Dict(UInt32, Int) = Dict();
     if (order.length() == 0) { return sparse; }
     let function_id: WirFuncID = program.arena.blocks[wir_id_index(UInt32(order[0]))].function;
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let i: Int = 0;
     while (i < function.parameters.length()) {
-        x86_sparse_add(ref sparse, range, function.parameters[i]);
+        x86_sparse_add(ref sparse, seen, range, function.parameters[i]);
         i++;
     }
     let block_index: Int = 0;
@@ -121,14 +120,14 @@ func x86_function_sparse_values(program: WirModule, order: Vector(WirBlockID), r
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
             let operand_index: Int = 0;
             while (operand_index < instruction.operands.length()) {
-                x86_sparse_add(ref sparse, range, instruction.operands[operand_index]);
+                x86_sparse_add(ref sparse, seen, range, instruction.operands[operand_index]);
                 operand_index++;
             }
             let edge_index: Int = 0;
             while (edge_index < instruction.edges.length()) {
                 let argument_index: Int = 0;
                 while (argument_index < instruction.edges[edge_index].arguments.length()) {
-                    x86_sparse_add(ref sparse, range, instruction.edges[edge_index].arguments[argument_index]);
+                    x86_sparse_add(ref sparse, seen, range, instruction.edges[edge_index].arguments[argument_index]);
                     argument_index++;
                 }
                 edge_index++;
@@ -148,18 +147,20 @@ func x86_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) 
         i++;
     }
 
-    return X86UseTable(base=base, dense_count=dense_count, sparse=sparse, queues=queues);
+    let indices: Dict(UInt32, Int) = Dict();
+    i = 0;
+    while (i < sparse.length()) {
+        indices.put(UInt32(sparse[i]), dense_count + i + 1);
+        i++;
+    }
+
+    return X86UseTable(base=base, dense_count=dense_count, sparse=sparse, sparse_indices=indices, queues=queues);
 }
 
 func x86_use_index(table: X86UseTable, value: WirValueID) -> Int {
     let index: Int = wir_id_index(UInt32(value));
     if (index >= table.base && index < table.base + table.dense_count) { return index - table.base; }
-    let i: Int = 0;
-    while (i < table.sparse.length()) {
-        if (table.sparse[i] == value) { return table.dense_count + i; }
-        i++;
-    }
-    return -1;
+    return table.sparse_indices.lookup(UInt32(value)) - 1;
 }
 
 func x86_record_use(table: X86UseTable, value: WirValueID, position: Int) -> Void {
@@ -598,6 +599,23 @@ func x86_spill_capacity(program: WirModule, order: Vector(WirBlockID), uses: X86
 
                 if (temporary && before + 1 > peak) {
                     peak = before + 1;
+                }
+                if (instruction.opcode == WirOpcode.IndexAddress || instruction.opcode == WirOpcode.FieldAddress) {
+                    // LEA keeps its inputs alive while claiming a separate destination
+                    let extra = 1;
+                    let inputs = 1;
+                    if (instruction.opcode == WirOpcode.IndexAddress) {
+                        inputs = instruction.operands.length();
+                    }
+
+                    let operand_index = 0;
+                    while (operand_index < inputs) {
+                        if (x86_rematerializable(program, instruction.operands[operand_index])) { extra++; }
+                        operand_index++;
+                    }
+                    if (before + extra > peak) {
+                        peak = before + extra;
+                    }
                 }
 
                 break;

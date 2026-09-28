@@ -119,8 +119,8 @@ func main() -> Int {
         print("FAIL: cross-block WIR: ", errors[0]);
         return 1;
     }
-    let cross: Vector(Bool) = x86_cross_block_values(program, x86_block_order(program.arena.functions[wir_id_index(UInt32(reordered))]));
-    if (!cross[wir_id_index(UInt32(late))]) {
+    let cross: X86ValueFlags = x86_cross_block_values(program, x86_block_order(program.arena.functions[wir_id_index(UInt32(reordered))]));
+    if (!x86_flag(cross, late)) {
         print("FAIL: cross-block classification depends on block order");
         return 1;
     }

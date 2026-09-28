@@ -17,7 +17,10 @@ func string_data(value: String) -> AnyPtr {
 func main() -> Int {
     let source: String = "ABCDEF";
     let value: String = "......"[:];
-    memcpy(string_data(value), string_data(source), UIntSize(6));
+    if (memcpy(string_data(value), string_data(source), UIntSize(6)) != string_data(value)) {
+        print("FAIL: memcpy did not return its destination");
+        return 1;
+    }
 
     let ptr value_bytes: Byte = string_data(value);
     memmove(string_data(value), ref value_bytes[1], UIntSize(5));
@@ -37,6 +40,25 @@ func main() -> Int {
     memset(string_data(filled), Int('x'), UIntSize(4));
     if (filled != "xxxx") {
         print("FAIL: Backend memset returned corrupted data");
+        return 1;
+    }
+
+    let backward: String = "ABCDEF"[:];
+    let ptr bytes: Byte = string_data(backward);
+    if (memmove(ref bytes[1], bytes, UIntSize(5)) != AnyPtr(ref bytes[1]) || backward != "AABCDE") {
+        print("FAIL: backward overlapping copy was corrupted");
+        return 1;
+    }
+    if (memmove(bytes, bytes, UIntSize(6)) != AnyPtr(bytes) || backward != "AABCDE") {
+        print("FAIL: self copy was corrupted");
+        return 1;
+    }
+    if (memcpy(nullptr, nullptr, UIntSize(0)) is !nullptr || memmove(nullptr, nullptr, UIntSize(0)) is !nullptr || memset(nullptr, 0, UIntSize(0)) is !nullptr) {
+        print("FAIL: zero-length memory operation changed its destination");
+        return 1;
+    }
+    if (memset(bytes, 511, UIntSize(1)) != AnyPtr(bytes) || bytes[0] != Byte(255) || bytes[1] != Byte('A')) {
+        print("FAIL: memset did not use the low byte of its value");
         return 1;
     }
 

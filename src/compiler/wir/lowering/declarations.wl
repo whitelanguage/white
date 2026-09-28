@@ -68,12 +68,7 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
 }
 
 func wir_find_function(program: WirModule, name: String) -> WirFuncID {
-    let i: Int = 0;
-    while (i < program.arena.functions.length()) {
-        if (program.arena.functions[i].name == name) { return WirFuncID(UInt32(i + 1)); }
-        i++;
-    }
-    return NO_WIR_FUNC;
+    return program.arena.function_names.lookup(name);
 }
 
 func wir_compiler_link_function(ref source: Compiler, name: String) -> FuncInfo {

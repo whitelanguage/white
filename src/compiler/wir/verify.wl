@@ -1,7 +1,7 @@
 // compiler/wir/verify.wl
 import * from "model.wl"
 import wir_value_type from "builder.wl"
-import wir_type_layout from "layout.wl"
+import wir_type_layouts from "layout.wl"
 
 func wir_type_valid(program: WirModule, id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(id));
@@ -578,7 +578,7 @@ func wir_check_aggregate_value(program: WirModule, instruction: WirInstruction, 
     }
 }
 
-func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_id: WirBlockID, errors: Vector(String)) -> Void {
+func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_id: WirBlockID, layouts: Vector(WirTypeLayout), errors: Vector(String)) -> Void {
     let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
     wir_check_location(program, instruction.location, errors);
 
@@ -696,7 +696,7 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
             }
             let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
             if (pointer.element == program.void_type) { wir_report(errors, "stack allocation has no storage type"); }
-            else if (!wir_type_layout(program, pointer.element).valid) { wir_report(errors, "stack allocation has an unsized storage type"); }
+            else if (!wir_type_valid(program, pointer.element) || !layouts[wir_id_index(UInt32(pointer.element))].valid) { wir_report(errors, "stack allocation has an unsized storage type"); }
         }
     } else if (opcode == WirOpcode.Load) {
         if (instruction.operands.length() != 1 || !wir_value_valid(program, instruction.operands[0])) {
@@ -884,7 +884,7 @@ func wir_check_instruction(program: WirModule, instruction_id: WirInstID, block_
     }
 }
 
-func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
+func wir_check_functions(program: WirModule, layouts: Vector(WirTypeLayout), errors: Vector(String)) -> Void {
     let seen_instructions: Vector(Bool) = [];
     let i: Int = 0;
     while (i < program.arena.instructions.length()) { seen_instructions.append(false); i++; }
@@ -970,7 +970,7 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
                 let terminator: Bool = wir_is_terminator(program.arena.instructions[instruction_index].opcode);
                 if (terminator && k + 1 != block.instructions.length()) { wir_report(errors, "terminator is not the last instruction in its block"); }
                 if (!terminator && k + 1 == block.instructions.length()) { wir_report(errors, "block does not end in a terminator"); }
-                wir_check_instruction(program, instruction_id, block_id, errors);
+                wir_check_instruction(program, instruction_id, block_id, layouts, errors);
                 k++;
             }
             j++;
@@ -986,7 +986,7 @@ func wir_check_functions(program: WirModule, errors: Vector(String)) -> Void {
     }
 }
 
-func wir_check_globals(program: WirModule, errors: Vector(String)) -> Void {
+func wir_check_globals(program: WirModule, layouts: Vector(WirTypeLayout), errors: Vector(String)) -> Void {
     let i: Int = 0;
     while (i < program.arena.globals.length()) {
         let global: WirGlobal = program.arena.globals[i];
@@ -998,7 +998,7 @@ func wir_check_globals(program: WirModule, errors: Vector(String)) -> Void {
         if (!wir_type_valid(program, global.type_id)) {
             wir_report(errors, "global has an unknown type");
         } else {
-            let layout: WirTypeLayout = wir_type_layout(program, global.type_id);
+            let layout: WirTypeLayout = layouts[wir_id_index(UInt32(global.type_id))];
             if (!layout.valid) { wir_report(errors, "global has an unsized type"); }
             else if (global.alignment != 0 && global.alignment < layout.alignment) { wir_report(errors, "global alignment is smaller than the type alignment"); }
         }
@@ -1073,52 +1073,59 @@ func wir_check_symbols(program: WirModule, errors: Vector(String)) -> Void {
     }
 }
 
-func wir_function_block_index(function: WirFunction, block_id: WirBlockID) -> Int {
+func wir_block_indices(program: WirModule) -> Vector(Int) {
+    let indices: Vector(Int) = [];
     let i: Int = 0;
-    while (i < function.blocks.length()) {
-        if (function.blocks[i] == block_id) { return i; }
+    while (i < program.arena.blocks.length()) {
+        indices.append(-1);
         i++;
     }
-    return -1;
-}
-
-func wir_block_reaches(program: WirModule, source_id: WirBlockID, target_id: WirBlockID) -> Bool {
-    if (!wir_block_valid(program, source_id)) { return false; }
-    let source: WirBlock = program.arena.blocks[wir_id_index(UInt32(source_id))];
-    if (source.instructions.length() == 0) { return false; }
-    let terminator_id: WirInstID = source.instructions[source.instructions.length() - 1];
-    if (!wir_inst_valid(program, terminator_id)) { return false; }
-    let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(terminator_id))];
-    let i: Int = 0;
-    while (i < terminator.edges.length()) {
-        if (terminator.edges[i].target == target_id) { return true; }
+    i = 0;
+    while (i < program.arena.functions.length()) {
+        let function: WirFunction = program.arena.functions[i];
+        let j = 0;
+        while (j < function.blocks.length()) {
+            indices[wir_id_index(UInt32(function.blocks[j]))] = j;
+            j++;
+        }
         i++;
     }
-    return false;
+    return indices;
 }
 
-func wir_bool_row(length: Int, value: Bool) -> Vector(Bool) {
-    let row: Vector(Bool) = [];
-    let i: Int = 0;
-    while (i < length) {
-        row.append(value);
-        i++;
-    }
-    return row;
-}
-
-func wir_dominators(program: WirModule, function: WirFunction) -> Vector(Vector(Bool)) {
+func wir_dominators(program: WirModule, function: WirFunction, indices: Vector(Int)) -> Vector(Vector(UInt64)) {
+    // intersect actual predecessor sets, 64 blocks at a time
     let count: Int = function.blocks.length();
-    let entry: Int = wir_function_block_index(function, function.entry);
-    let dominators: Vector(Vector(Bool)) = [];
+    let entry: Int = indices[wir_id_index(UInt32(function.entry))];
+    let words: Int = (count + 63) / 64;
+    let dominators: Vector(Vector(UInt64)) = [];
+    let predecessors: Vector(Vector(Int)) = [];
     let i: Int = 0;
     while (i < count) {
-        if (i == entry) {
-            let row: Vector(Bool) = wir_bool_row(count, false);
-            row[i] = true;
-            dominators.append(row);
-        } else {
-            dominators.append(wir_bool_row(count, true));
+        predecessors.append([]);
+        let row: Vector(UInt64) = [];
+        let word = 0;
+        while (word < words) {
+            let bits: UInt64 = ~0UL;
+            if (i == entry) {
+                bits = 0UL;
+                if (word == i / 64) { bits = 1UL << UInt64(i % 64); }
+            }
+            row.append(bits);
+            word++;
+        }
+        dominators.append(row);
+        i++;
+    }
+    i = 0;
+    while (i < count) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[i]))];
+        let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+        let edge = 0;
+        while (edge < terminator.edges.length()) {
+            let target: Int = indices[wir_id_index(UInt32(terminator.edges[edge].target))];
+            predecessors[target].append(i);
+            edge++;
         }
         i++;
     }
@@ -1129,29 +1136,24 @@ func wir_dominators(program: WirModule, function: WirFunction) -> Vector(Vector(
         i = 0;
         while (i < count) {
             if (i == entry) { i++; continue; }
-            let next: Vector(Bool) = wir_bool_row(count, true);
-            let has_predecessor: Bool = false;
-            let predecessor: Int = 0;
-            while (predecessor < count) {
-                if (wir_block_reaches(program, function.blocks[predecessor], function.blocks[i])) {
-                    has_predecessor = true;
-                    let bit: Int = 0;
-                    while (bit < count) {
-                        next[bit] = next[bit] && dominators[predecessor][bit];
-                        bit++;
-                    }
+            let row: Vector(UInt64) = dominators[i];
+            let incoming: Vector(Int) = predecessors[i];
+            let word = 0;
+            while (word < words) {
+                let next: UInt64 = 0UL;
+                if (incoming.length() != 0) { next = dominators[incoming[0]][word]; }
+                let predecessor = 1;
+                while (predecessor < incoming.length()) {
+                    next &= dominators[incoming[predecessor]][word];
+                    predecessor++;
                 }
-                predecessor++;
+                if (word == i / 64) { next |= 1UL << UInt64(i % 64); }
+                if (row[word] != next) {
+                    changed = true;
+                    row[word] = next;
+                }
+                word++;
             }
-            if (!has_predecessor) { next = wir_bool_row(count, false); }
-            next[i] = true;
-
-            let bit: Int = 0;
-            while (bit < count) {
-                if (dominators[i][bit] != next[bit]) { changed = true; }
-                bit++;
-            }
-            dominators[i] = next;
             i++;
         }
     }
@@ -1179,16 +1181,24 @@ func wir_instruction_blocks(program: WirModule) -> Vector(WirBlockID) {
     return blocks;
 }
 
-func wir_instruction_position(block: WirBlock, instruction_id: WirInstID) -> Int {
+func wir_instruction_positions(program: WirModule) -> Vector(Int) {
+    let positions: Vector(Int) = [];
     let i: Int = 0;
-    while (i < block.instructions.length()) {
-        if (block.instructions[i] == instruction_id) { return i; }
+    while (i < program.arena.instructions.length()) { positions.append(-1); i++; }
+    i = 0;
+    while (i < program.arena.blocks.length()) {
+        let block: WirBlock = program.arena.blocks[i];
+        let j = 0;
+        while (j < block.instructions.length()) {
+            positions[wir_id_index(UInt32(block.instructions[j]))] = j;
+            j++;
+        }
         i++;
     }
-    return -1;
+    return positions;
 }
 
-func wir_value_in_scope(program: WirModule, function_id: WirFuncID, function: WirFunction, block_id: WirBlockID, instruction_id: WirInstID, value_id: WirValueID, instruction_blocks: Vector(WirBlockID), dominators: Vector(Vector(Bool))) -> Bool {
+func wir_value_in_scope(program: WirModule, function_id: WirFuncID, block_id: WirBlockID, instruction_id: WirInstID, value_id: WirValueID, instruction_blocks: Vector(WirBlockID), positions: Vector(Int), indices: Vector(Int), dominators: Vector(Vector(UInt64))) -> Bool {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
     if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Constant || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) { return true; }
     if (value.kind == WirValueKind.FunctionParameter) { return value.owner == UInt32(function_id); }
@@ -1207,22 +1217,24 @@ func wir_value_in_scope(program: WirModule, function_id: WirFuncID, function: Wi
     if (definition.function != function_id) { return false; }
     if (definition_block == block_id) {
         if (value.kind == WirValueKind.BlockParameter) { return true; }
-        return wir_instruction_position(definition, WirInstID(value.owner)) < wir_instruction_position(definition, instruction_id);
+        return positions[wir_id_index(value.owner)] < positions[wir_id_index(UInt32(instruction_id))];
     }
 
-    let definition_index: Int = wir_function_block_index(function, definition_block);
-    let use_index: Int = wir_function_block_index(function, block_id);
-    return definition_index >= 0 && use_index >= 0 && dominators[use_index][definition_index];
+    let definition_index: Int = indices[wir_id_index(UInt32(definition_block))];
+    let use_index: Int = indices[wir_id_index(UInt32(block_id))];
+    return definition_index >= 0 && use_index >= 0 && (dominators[use_index][definition_index / 64] & (1UL << UInt64(definition_index % 64))) != 0UL;
 }
 
 func wir_check_value_scopes(program: WirModule, errors: Vector(String)) -> Void {
     let instruction_blocks: Vector(WirBlockID) = wir_instruction_blocks(program);
+    let positions: Vector(Int) = wir_instruction_positions(program);
+    let indices: Vector(Int) = wir_block_indices(program);
     let function_index: Int = 0;
     while (function_index < program.arena.functions.length()) {
         let function_id: WirFuncID = WirFuncID(UInt32(function_index + 1));
         let function: WirFunction = program.arena.functions[function_index];
         if (function.linkage == WirLinkage.External) { function_index++; continue; }
-        let dominators: Vector(Vector(Bool)) = wir_dominators(program, function);
+        let dominators: Vector(Vector(UInt64)) = wir_dominators(program, function, indices);
         let block_index: Int = 0;
         while (block_index < function.blocks.length()) {
             let block_id: WirBlockID = function.blocks[block_index];
@@ -1233,7 +1245,7 @@ func wir_check_value_scopes(program: WirModule, errors: Vector(String)) -> Void 
                 let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
                 let operand_index: Int = 0;
                 while (operand_index < instruction.operands.length()) {
-                    if (!wir_value_in_scope(program, function_id, function, block_id, instruction_id, instruction.operands[operand_index], instruction_blocks, dominators)) {
+                    if (!wir_value_in_scope(program, function_id, block_id, instruction_id, instruction.operands[operand_index], instruction_blocks, positions, indices, dominators)) {
                         wir_report(errors, "instruction uses a value outside its SSA scope");
                     }
                     operand_index++;
@@ -1243,7 +1255,7 @@ func wir_check_value_scopes(program: WirModule, errors: Vector(String)) -> Void 
                     let argument_index: Int = 0;
                     while (argument_index < instruction.edges[edge_index].arguments.length()) {
                         let argument: WirValueID = instruction.edges[edge_index].arguments[argument_index];
-                        if (!wir_value_in_scope(program, function_id, function, block_id, instruction_id, argument, instruction_blocks, dominators)) {
+                        if (!wir_value_in_scope(program, function_id, block_id, instruction_id, argument, instruction_blocks, positions, indices, dominators)) {
                             wir_report(errors, "branch uses a value outside its SSA scope");
                         }
                         argument_index++;
@@ -1258,7 +1270,7 @@ func wir_check_value_scopes(program: WirModule, errors: Vector(String)) -> Void 
     }
 }
 
-func verify_wir(program: WirModule) -> Vector(String) {
+func verify_wir(program: WirModule, verbose: Bool = false) -> Vector(String) {
     let errors: Vector(String) = [];
     if (program.target.length() == 0) { wir_report(errors, "module has no target triple"); }
     if (program.pointer_bits != 32 && program.pointer_bits != 64) { wir_report(errors, "module has an unsupported pointer width"); }
@@ -1271,8 +1283,11 @@ func verify_wir(program: WirModule) -> Vector(String) {
     wir_check_values(program, errors);
     wir_check_constants(program, errors);
     wir_check_symbols(program, errors);
-    wir_check_globals(program, errors);
-    wir_check_functions(program, errors);
+    if (verbose) { print("Verifying WIR globals and functions"); }
+    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
+    wir_check_globals(program, layouts, errors);
+    wir_check_functions(program, layouts, errors);
+    if (verbose) { print("Verifying WIR SSA scopes"); }
     if (errors.length() == 0) { wir_check_value_scopes(program, errors); }
     return errors;
 }

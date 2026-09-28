@@ -1,7 +1,6 @@
 // compiler/machine/x86_64/data.wl
 import * from "model.wl"
 import * from "../../wir/model.wl"
-import wir_type_layout from "../../wir/layout.wl"
 
 func x86_address_symbol(program: WirModule, value_id: WirValueID) -> String {
     let index: Int = wir_id_index(UInt32(value_id));
@@ -13,13 +12,13 @@ func x86_address_symbol(program: WirModule, value_id: WirValueID) -> String {
     return "";
 }
 
-func x86_write_initializer(program: WirModule, ref section: X86CodeSection, ref relocations: Vector(X86Relocation), value_id: WirValueID, offset: Int, depth: Int) -> String {
+func x86_write_initializer(program: WirModule, layouts: Vector(WirTypeLayout), ref section: X86CodeSection, ref relocations: Vector(X86Relocation), value_id: WirValueID, offset: Int, depth: Int) -> String {
     // storage is zero-filled first, including aggregate padding
     if (depth > 256) { return "global initializer nesting exceeds 256 levels"; }
     let index: Int = wir_id_index(UInt32(value_id));
     if (index < 0 || index >= program.arena.values.length()) { return "global initializer refers to an unknown value"; }
     let value: WirValue = program.arena.values[index];
-    let layout: WirTypeLayout = wir_type_layout(program, value.type_id);
+    let layout: WirTypeLayout = layouts[wir_id_index(UInt32(value.type_id))];
     if (!layout.valid || layout.size > 2147483647UL || offset < 0 || Long(offset) + Long(layout.size) > Long(section.bytes.length())) { return "global initializer does not fit its storage"; }
     if (value.kind == WirValueKind.Null) { return ""; }
     if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.FloatValue) {
@@ -65,21 +64,21 @@ func x86_write_initializer(program: WirModule, ref section: X86CodeSection, ref 
     if (type.kind == WirTypeKind.Array) {
         if (type.length > UIntSize(2147483647)) { return "array initializer exceeds the object size limit"; }
         count = Int(type.length);
-        stride = wir_type_layout(program, type.element).size;
+        stride = layouts[wir_id_index(UInt32(type.element))].size;
     } else if (type.kind != WirTypeKind.Struct) { return "aggregate initializer requires an array or struct"; }
     if (constant.elements.length() != count) { return "aggregate initializer element count does not match its type"; }
     let i: Int = 0;
     while (i < count) {
         let member_offset: UInt64 = UInt64(i) * stride;
         if (type.kind == WirTypeKind.Struct) { member_offset = layout.field_offsets[i]; }
-        let message: String = x86_write_initializer(program, ref section, ref relocations, constant.elements[i], offset + Int(member_offset), depth + 1);
+        let message: String = x86_write_initializer(program, layouts, ref section, ref relocations, constant.elements[i], offset + Int(member_offset), depth + 1);
         if (message.length() != 0) { return message; }
         i++;
     }
     return "";
 }
 
-func x86_emit_globals(program: WirModule, reachable: Vector(Bool), ref object: X86Object) -> String {
+func x86_emit_globals(program: WirModule, layouts: Vector(WirTypeLayout), reachable: Vector(Bool), ref object: X86Object) -> String {
     let readonly_data: X86CodeSection = X86CodeSection(name=".rdata", bytes=[], alignment=1, executable=false, writable=false);
     let writable_data: X86CodeSection = X86CodeSection(name=".data", bytes=[], alignment=1, executable=false, writable=true);
     let has_readonly: Bool = false;
@@ -94,7 +93,7 @@ func x86_emit_globals(program: WirModule, reachable: Vector(Bool), ref object: X
         if (global.linkage == WirLinkage.External) {
             object.symbols.append(X86Symbol(name=global.name, section="", offset=0U, external=true));
         } else {
-            let layout: WirTypeLayout = wir_type_layout(program, global.type_id);
+            let layout: WirTypeLayout = layouts[wir_id_index(UInt32(global.type_id))];
             if (!layout.valid || layout.size > 2147483647UL) { return "global '" + global.name + "' has an unsupported storage layout"; }
             let alignment: Int = layout.alignment;
             if (global.alignment > alignment) { alignment = global.alignment; }
@@ -110,7 +109,7 @@ func x86_emit_globals(program: WirModule, reachable: Vector(Bool), ref object: X
                 section.bytes.append(Byte(0));
                 j++;
             }
-            let message: String = x86_write_initializer(program, ref section, ref object.relocations, global.initializer, offset, 0);
+            let message: String = x86_write_initializer(program, layouts, ref section, ref object.relocations, global.initializer, offset, 0);
             if (message.length() != 0) { return message; }
             object.symbols.append(X86Symbol(name=global.name, section=section.name, offset=UInt32(offset), external=global.linkage == WirLinkage.Exported));
             if (global.is_const) {

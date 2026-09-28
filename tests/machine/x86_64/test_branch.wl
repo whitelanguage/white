@@ -34,8 +34,14 @@ func main() -> Int {
         print("FAIL: x86_64 branch lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.bytes.length() != 72 || lowered.bytes[41] != Byte(15) || lowered.bytes[42] != Byte(140)) {
-        print("FAIL: unexpected conditional branch encoding: ", lowered.bytes.length(), " bytes, opcode ", Int(lowered.bytes[41]), " ", Int(lowered.bytes[42]));
+    if (lowered.bytes.length() != 70 || lowered.bytes[39] != Byte(15) || lowered.bytes[40] != Byte(140)) {
+        print("FAIL: unexpected conditional branch encoding");
+        return 1;
+    }
+    if (lowered.bytes[41] != Byte(5) || lowered.bytes[42] != Byte(0) || lowered.bytes[43] != Byte(0) || lowered.bytes[44] != Byte(0) ||
+        lowered.bytes[45] != Byte(233) || lowered.bytes[46] != Byte(10) || lowered.bytes[47] != Byte(0) ||
+        lowered.bytes[48] != Byte(0) || lowered.bytes[49] != Byte(0)) {
+        print("FAIL: forward rel32 fixup is incorrect");
         return 1;
     }
 

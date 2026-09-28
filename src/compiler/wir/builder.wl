@@ -3,15 +3,32 @@ import * from "model.wl"
 import wir_layout_for_target from "layout.wl"
 
 func new_wir_arena() -> WirArena {
-    return WirArena(types=[], values=[], instructions=[], blocks=[], functions=[], globals=[], constants=[]);
+    return WirArena(types=[], type_revision=0, pointer_types=[], scalar_types=[], values=[], instructions=[], blocks=[], functions=[], function_names=Dict(), globals=[], constants=[]);
 }
 
 func wir_add_type(ref program: WirModule, value: WirType) -> WirTypeID {
     program.arena.types.append(value);
-    return WirTypeID(UInt32(program.arena.types.length()));
+    let id: WirTypeID = WirTypeID(UInt32(program.arena.types.length()));
+    program.arena.pointer_types.append(NO_WIR_TYPE);
+    if (value.kind == WirTypeKind.Pointer) {
+        let element: Int = wir_id_index(UInt32(value.element));
+        if (element >= 0 && element < program.arena.pointer_types.length() && program.arena.pointer_types[element] == NO_WIR_TYPE) {
+            program.arena.pointer_types[element] = id;
+        }
+    } else if ((value.kind == WirTypeKind.SignedInt || value.kind == WirTypeKind.UnsignedInt || value.kind == WirTypeKind.FloatType) && value.bits >= 0 && value.bits <= 128) {
+        let key: Int = Int(value.kind) * 129 + value.bits;
+        while (program.arena.scalar_types.length() <= key) { program.arena.scalar_types.append(NO_WIR_TYPE); }
+        if (program.arena.scalar_types[key] == NO_WIR_TYPE) { program.arena.scalar_types[key] = id; }
+    }
+    return id;
 }
 
 func wir_scalar_type(ref program: WirModule, kind: WirTypeKind, bits: Int) -> WirTypeID {
+    if ((kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt || kind == WirTypeKind.FloatType) && bits >= 0 && bits <= 128) {
+        let key: Int = Int(kind) * 129 + bits;
+        if (key < program.arena.scalar_types.length() && program.arena.scalar_types[key] != NO_WIR_TYPE) { return program.arena.scalar_types[key]; }
+        return wir_add_type(ref program, WirType(kind=kind, name="", complete=true, bits=bits, element=NO_WIR_TYPE, length=UIntSize(0U), fields=[], parameters=[], result=NO_WIR_TYPE, variadic=false, abi=WirABI.White));
+    }
     let i: Int = 0;
     while (i < program.arena.types.length()) {
         let current: WirType = program.arena.types[i];
@@ -34,6 +51,12 @@ func wir_float_type(ref program: WirModule, bits: Int) -> WirTypeID {
 }
 
 func wir_pointer_type(ref program: WirModule, element: WirTypeID) -> WirTypeID {
+    let index: Int = wir_id_index(UInt32(element));
+    if (index >= 0 && index < program.arena.pointer_types.length()) {
+        let cached: WirTypeID = program.arena.pointer_types[index];
+        if (cached != NO_WIR_TYPE) { return cached; }
+        return wir_add_type(ref program, WirType(kind=WirTypeKind.Pointer, name="", complete=true, bits=0, element=element, length=UIntSize(0U), fields=[], parameters=[], result=NO_WIR_TYPE, variadic=false, abi=WirABI.White));
+    }
     let i: Int = 0;
     while (i < program.arena.types.length()) {
         let current: WirType = program.arena.types[i];
@@ -63,6 +86,7 @@ func wir_define_struct(ref program: WirModule, type_id: WirTypeID, fields: Vecto
     value.fields = fields;
     value.complete = true;
     program.arena.types[index] = value;
+    program.arena.type_revision++;
 }
 
 func wir_struct_type(ref program: WirModule, fields: Vector(WirTypeID)) -> WirTypeID {
@@ -199,6 +223,7 @@ func wir_add_function(ref program: WirModule, name: String, parameters: Vector(W
     }
     let address: WirValueID = wir_add_value(ref program, WirValue(name=name, type_id=type_id, kind=WirValueKind.Function, owner=UInt32(function_id), index=-1, integer=UInt128(0U), float_bits=UInt64(0)));
     program.arena.functions.append(WirFunction(name=name, type_id=type_id, address=address, parameters=values, blocks=[], entry=NO_WIR_BLOCK, linkage=linkage, export_symbol=false, abi=abi));
+    if (!program.arena.function_names.contains_key(name)) { program.arena.function_names.put(name, function_id); }
     return function_id;
 }
 

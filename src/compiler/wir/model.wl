@@ -268,10 +268,14 @@ struct WirTypeLayout(
 
 struct WirArena(
     types: Vector(WirType),
+    type_revision: Int,
+    pointer_types: Vector(WirTypeID),
+    scalar_types: Vector(WirTypeID),
     values: Vector(WirValue),
     instructions: Vector(WirInstruction),
     blocks: Vector(WirBlock),
     functions: Vector(WirFunction),
+    function_names: Dict(String, WirFuncID),
     globals: Vector(WirGlobal),
     constants: Vector(WirConstant)
 )

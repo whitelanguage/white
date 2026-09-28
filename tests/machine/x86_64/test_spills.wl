@@ -8,6 +8,7 @@ import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
 import * from "../../../src/compiler/machine/x86_64/allocator.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
+import X86Register, X86Opcode from "../../../src/compiler/machine/x86_64/model.wl"
 
 func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -28,6 +29,21 @@ func main() -> Int {
     let uses: X86UseTable = x86_collect_uses(program, order);
     if (x86_spill_capacity(program, order, uses, 3) < 1) {
         print("FAIL: x86_64 spill planner did not detect register pressure");
+        return 1;
+    }
+
+    let registers: X86RegisterPlan = x86_register_plan(uses);
+    let spills: X86SpillPlan = x86_new_spill_plan([-8, -16]);
+    x86_claim_spill(spills, a);
+    x86_claim_spill(spills, b);
+    x86_bind_register(registers, X86Register.RAX, a);
+    let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=registers, spills=spills, stack=X86StackIndex(base=0, dense_count=0, sparse=[], offsets=[], sizes=[]), layouts=[], retain_function=NO_WIR_FUNC, release_function=NO_WIR_FUNC, return_pointer=0, position=0, message="");
+    if (x86_claim_register_spill(ref state, c) != -8 || x86_spill_offset(spills, b) != -16 || x86_spill_offset(spills, a) != 0) {
+        print("FAIL: reloaded spill copy was not reclaimed");
+        return 1;
+    }
+    if (x86_claim_register_spill(ref state, d) != 0 || x86_claim_register_spill(ref state, c) != -8) {
+        print("FAIL: spill allocation discarded a value without a register copy");
         return 1;
     }
 

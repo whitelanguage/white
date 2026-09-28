@@ -7,14 +7,14 @@ import * from "backend/llvm.wl"
 
 struct WirPipelineResult(text: String, errors: Vector(String))
 
-func lower_program_to_wir(ref source: Compiler, erased_modules: Vector(Struct), target: String, pointer_bits: Int) -> WirLoweringResult {
+func lower_program_to_wir(ref source: Compiler, erased_modules: Vector(Struct), target: String, pointer_bits: Int, verbose: Bool = false) -> WirLoweringResult {
     let modules: Vector(ParsedModule) = [];
     let i: Int = 0;
     while (i < erased_modules.length()) {
         modules.append(erased_modules[i]);
         i++;
     }
-    return wir_lower_program(ref source, modules, target, pointer_bits);
+    return wir_lower_program(ref source, modules, target, pointer_bits, verbose);
 }
 
 func lower_program_to_llvm(ref source: Compiler, erased_modules: Vector(Struct), target: String, pointer_bits: Int) -> WirPipelineResult? {

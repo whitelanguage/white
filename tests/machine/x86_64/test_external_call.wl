@@ -20,7 +20,7 @@ func main() -> Int {
     wir_return(ref program, main_entry, value, no_wir_location());
 
     let caller_params: Vector(WirParam) = [WirParam(name="input", type_id=int_type)];
-    let caller_id: WirFuncID = wir_add_function(ref program, "caller", caller_params, int_type, false, WirLinkage.Internal, WirABI.White);
+    let caller_id: WirFuncID = wir_add_function(ref program, "caller", caller_params, int_type, false, WirLinkage.Exported, WirABI.White);
     let caller_entry: WirBlockID = wir_add_block(ref program, caller_id, "entry", []);
     let caller_value: WirValueID = wir_call(ref program, caller_entry, host_address, [], "value", no_wir_location());
     let caller_sum: WirValueID = wir_binary(ref program, caller_entry, WirOpcode.Add, int_type, program.arena.functions[wir_id_index(UInt32(caller_id))].parameters[0], caller_value, "sum", no_wir_location());

@@ -103,7 +103,7 @@ func wir_closure_environment_drop(ref types: WirTypeMap, ref source: Compiler, r
 }
 
 func wir_alloc_closure_environment(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, env_type: WirTypeID, captures: Vector(WirBinding), drop_id: WirFuncID, type_tag: Int) -> WirValueID {
-    let layout: WirTypeLayout = wir_type_layout(program, env_type);
+    let layout: WirTypeLayout = wir_lowering_layout(ref types, program, env_type);
     if (!layout.valid || layout.size > UInt64(wir_max_object_size(program.data_layout)) - UInt64(WIR_OBJECT_HEADER_SIZE)) {
         state.errors.append("Closure environment is too large for the target address space");
         return NO_WIR_VALUE;

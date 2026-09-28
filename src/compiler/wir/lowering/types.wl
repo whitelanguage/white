@@ -1,11 +1,15 @@
 // compiler/wir/lowering/types.wl
 import * from "../model.wl"
 import * from "../builder.wl"
+import wir_layout_type, wir_invalid_type_layout from "../layout.wl"
 import * from "../../context.wl"
 import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
 struct WirTypeMap(
     cache: Vector(WirTypeID),
+    layout_states: Vector(Int),
+    layouts: Vector(WirTypeLayout),
+    layout_revision: Int,
     errors: Vector(String),
     opaque_pointer: WirTypeID,
     string_type: WirTypeID,
@@ -20,7 +24,24 @@ struct WirTypeMap(
 struct WirEnumValue(source_type: Int, value: Long)
 
 func new_wir_type_map() -> WirTypeMap {
-    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE, enum_values=Dict());
+    return WirTypeMap(cache=[], layout_states=[], layouts=[], layout_revision=-1, errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE, enum_values=Dict());
+}
+
+func wir_lowering_layout(ref types: WirTypeMap, program: WirModule, type_id: WirTypeID) -> WirTypeLayout {
+    // completing a forward declaration invalidates layouts that depend on it
+    if (types.layout_revision != program.arena.type_revision) {
+        let i = 0;
+        while (i < types.layout_states.length()) {
+            types.layout_states[i] = 0;
+            i++;
+        }
+        types.layout_revision = program.arena.type_revision;
+    }
+    while (types.layouts.length() < program.arena.types.length()) {
+        types.layout_states.append(0);
+        types.layouts.append(wir_invalid_type_layout());
+    }
+    return wir_layout_type(program, type_id, types.layout_states, types.layouts);
 }
 
 func wir_prepare_type_slot(ref types: WirTypeMap, source_type: Int) -> Void {

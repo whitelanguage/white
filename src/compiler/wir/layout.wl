@@ -106,6 +106,24 @@ func wir_layout_type(program: WirModule, type_id: WirTypeID, states: Vector(Int)
     return result;
 }
 
+func wir_type_layouts(program: WirModule) -> Vector(WirTypeLayout) {
+    // one cache per immutable type table; callers keep it for the whole pass
+    let states: Vector(Int) = [];
+    let layouts: Vector(WirTypeLayout) = [];
+    let i = 0;
+    while (i < program.arena.types.length()) {
+        states.append(0);
+        layouts.append(wir_invalid_type_layout());
+        i++;
+    }
+    i = 0;
+    while (i < layouts.length()) {
+        wir_layout_type(program, WirTypeID(UInt32(i + 1)), states, layouts);
+        i++;
+    }
+    return layouts;
+}
+
 func wir_type_layout(program: WirModule, type_id: WirTypeID) -> WirTypeLayout {
     let states: Vector(Int) = [];
     let cache: Vector(WirTypeLayout) = [];

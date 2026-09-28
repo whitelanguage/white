@@ -400,9 +400,9 @@ func wir_lower_root_items(ref types: WirTypeMap, ref source: Compiler, ref progr
     }
 }
 
-func wir_verify_lowering(ref types: WirTypeMap, program: WirModule) -> Void {
+func wir_verify_lowering(ref types: WirTypeMap, program: WirModule, verbose: Bool = false) -> Void {
     if (types.errors.length() != 0) { return; }
-    let verify_errors: Vector(String) = verify_wir(program);
+    let verify_errors: Vector(String) = verify_wir(program, verbose);
     let i: Int = 0;
     while (i < verify_errors.length()) {
         types.errors.append(verify_errors[i]);
@@ -423,7 +423,7 @@ func wir_emit_required_runtime(ref types: WirTypeMap, ref source: Compiler, ref 
     wir_emit_ownership_runtime(ref program, deallocator_id, TYPE_STRING);
 }
 
-func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), target: String, pointer_bits: Int) -> WirLoweringResult {
+func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), target: String, pointer_bits: Int, verbose: Bool = false) -> WirLoweringResult {
     let program: WirModule = new_wir_module(target, pointer_bits);
     program.is_shared = source.is_shared;
     let types: WirTypeMap = new_wir_type_map();
@@ -461,7 +461,8 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
 
     wir_emit_required_runtime(ref types, ref source, ref program);
     wir_emit_target_runtime(ref source, ref program, types.errors);
-    wir_verify_lowering(ref types, program);
+    if (verbose) { print("Verifying WIR"); }
+    wir_verify_lowering(ref types, program, verbose);
     return WirLoweringResult(program=program, errors=types.errors);
 }
 
