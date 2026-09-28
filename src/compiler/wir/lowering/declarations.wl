@@ -60,6 +60,20 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     let abi: WirABI = wir_function_abi(ref types, info);
     let linkage: WirLinkage = wir_function_linkage(info, abi);
     if (linkage == WirLinkage.External && abi == WirABI.White) { return NO_WIR_FUNC; }
+    let parameter_types: Vector(WirTypeID) = [];
+    i = 0;
+    while (i < parameters.length()) {
+        parameter_types.append(parameters[i].type_id);
+        i++;
+    }
+    let signature: WirTypeID = wir_function_type(ref program, parameter_types, result, info.is_varargs, abi);
+    let existing_id: WirFuncID = program.arena.function_names.lookup(info.name);
+    if (existing_id != NO_WIR_FUNC && linkage == WirLinkage.External) {
+        let existing: WirFunction = program.arena.functions[wir_id_index(UInt32(existing_id))];
+        if (existing.linkage == WirLinkage.External && existing.type_id == signature && existing.abi == abi) { return existing_id; }
+        types.errors.append("Conflicting extern declaration for symbol '" + info.name + "'.");
+        return NO_WIR_FUNC;
+    }
     let function_id: WirFuncID = wir_add_function(ref program, info.name, parameters, result, info.is_varargs, linkage, abi);
     if (source.is_shared && (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
         program.arena.functions[wir_id_index(UInt32(function_id))].export_symbol = true;

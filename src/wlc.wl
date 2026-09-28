@@ -446,6 +446,7 @@ func main(argc: Int, ptr argv: String) -> Int {
             print("Build Failed: WIR backend ran out of memory while producing LLVM IR.");
             return 1;
         }
+        WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
             compiler.output_file.close();
             let error_index: Int = 0;
@@ -467,6 +468,7 @@ func main(argc: Int, ptr argv: String) -> Int {
             print("Build Failed: Machine backend ran out of memory while producing the object file.");
             return 1;
         }
+        WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
             compiler.output_file.close();
             let error_index: Int = 0;

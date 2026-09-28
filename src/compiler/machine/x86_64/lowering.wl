@@ -741,6 +741,20 @@ func x86_function_has_u64_cast(program: WirModule, function: WirFunction) -> Boo
     return false;
 }
 
+func x86_function_has_float_negate(program: WirModule, function: WirFunction) -> Bool {
+    let block_index = 0;
+    while (block_index < function.blocks.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(function.blocks[block_index]))];
+        let i = 0;
+        while (i < block.instructions.length()) {
+            if (program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))].opcode == WirOpcode.FloatNegate) { return true; }
+            i++;
+        }
+        block_index++;
+    }
+    return false;
+}
+
 func x86_function_has_wide_operation(program: WirModule, function: WirFunction) -> Bool {
     let i = 0;
     let block_index = 0;
@@ -2365,10 +2379,10 @@ func x86_lower_instruction(ref program: WirModule,
         if (source.message.length() != 0) { return source.message; }
         let destination: X86RegisterChoice = x86_choose_register_class(program, state.registers, state.position, source.register, true);
         let prepare_error = x86_prepare_register(program, ref state, destination, ref output);
-        if (prepare_error.length() != 0) { return prepare_error; }
+        if (prepare_error.length() != 0) { return "floating negate destination: " + prepare_error; }
         let bits: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, X86Register.None);
         prepare_error = x86_prepare_register(program, ref state, bits, ref output);
-        if (prepare_error.length() != 0) { return prepare_error; }
+        if (prepare_error.length() != 0) { return "floating negate bits: " + prepare_error; }
         // flip the sign bit without floating arithmetic; keep -0 and NaN payloads intact
         x86_move_scalar(ref output, bits.register, source.register, size);
         if (size == 4) {
@@ -2376,7 +2390,7 @@ func x86_lower_instruction(ref program: WirModule,
         } else {
             let mask: X86RegisterChoice = x86_choose_register_except(program, state.registers, state.position, bits.register);
             prepare_error = x86_prepare_register(program, ref state, mask, ref output);
-            if (prepare_error.length() != 0) { return prepare_error; }
+            if (prepare_error.length() != 0) { return "floating negate mask: " + prepare_error; }
             x86_mov_register_imm64(ref output, mask.register, 9223372036854775808UL);
             x86_xor_register_width(ref output, bits.register, mask.register, true);
         }
@@ -3126,13 +3140,15 @@ func x86_lower_function_with_layouts(program: WirModule, function_id: WirFuncID,
     }
     let spill_count: Int = x86_spill_capacity(program, order, uses, register_count);
 
-    // these instructions borrow fixed scratch registers. Leave room for the old
-    // values even when ordinary next-use allocation already filled the register bank.
+    // fixed scratch registers may still contain live values, reserve their spills too
     if (x86_function_has_integer_division(program, function)) {
         spill_count += 1;
     }
     if (x86_function_has_u64_cast(program, function)) {
         spill_count += 1;
+    }
+    if (x86_function_has_float_negate(program, function)) {
+        spill_count += 3;
     }
     if (x86_function_has_wide_operation(program, function)) {
         spill_count += 3;

@@ -15,6 +15,7 @@ import select_target from "../../target.wl"
 import register_extern_library from "../../validation.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+import throw_extern_error from "../../../frontend/diagnostics.wl"
 
 struct WirLoweringResult(
     program: WirModule,
@@ -58,7 +59,12 @@ func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program
         types.errors.append("Extern function '" + node.name_tok.value + "' was not registered before WIR lowering");
         return;
     }
-    wir_lower_function_decl(ref types, ref source, ref program, info);
+    let previous_errors: Int = types.errors.length();
+    let function_id: WirFuncID = wir_lower_function_decl(ref types, ref source, ref program, info);
+    if (function_id == NO_WIR_FUNC && types.errors.length() > previous_errors) {
+        let message: String = types.errors.drop();
+        throw_extern_error(node.pos, message);
+    }
 }
 
 func wir_class_name(source: Compiler, node: ClassDefNode) -> String {
