@@ -26,8 +26,8 @@ func main() -> Int {
     wir_return(ref program, entry, sum, no_wir_location());
 
     let order: Vector(WirBlockID) = [entry];
-    let uses: X86UseTable = x86_collect_uses(program, order);
-    if (x86_spill_capacity(program, order, uses, 3) < 1) {
+    let uses: X86UseTable = x86_collect_uses(ref program, order);
+    if (x86_spill_capacity(ref program, order, uses, 3) < 1) {
         print("FAIL: x86_64 spill planner did not detect register pressure");
         return 1;
     }
@@ -47,7 +47,7 @@ func main() -> Int {
         return 1;
     }
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 spill lowering failed: ", lowered.errors[0]);
         return 1;

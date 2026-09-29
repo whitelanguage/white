@@ -23,7 +23,7 @@ func main() -> Int {
         print("FAIL: could not print WIR");
         return 1;
     }
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 lowering failed: ", lowered.errors[0]);
         return 1;

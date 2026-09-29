@@ -48,7 +48,7 @@ func main() -> Int {
         print("FAIL: invalid integer test WIR: ", errors[0]);
         return 1;
     }
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 integer operation lowering failed: ", lowered.errors[0]);
         return 1;

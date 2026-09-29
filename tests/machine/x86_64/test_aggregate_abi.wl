@@ -93,7 +93,7 @@ func main() -> Int {
     let rejected_function: WirFuncID = wir_add_function(ref rejected, "indirect_result", [], large, false, WirLinkage.Internal, WirABI.C);
     let rejected_entry: WirBlockID = wir_add_block(ref rejected, rejected_function, "entry", []);
     wir_return(ref rejected, rejected_entry, wir_const_zero(ref rejected, large), no_wir_location());
-    let rejected_result: X86LoweringResult = x86_lower_function(rejected, rejected_function);
+    let rejected_result: X86LoweringResult = x86_lower_function(ref rejected, rejected_function);
     if (rejected_result.errors.length() != 0 || rejected_result.bytes.length() == 0) {
         print("FAIL: indirect aggregate return lowering");
         return 1;
@@ -102,7 +102,7 @@ func main() -> Int {
     let discarded_entry: WirBlockID = wir_add_block(ref rejected, discarded, "entry", []);
     wir_call(ref rejected, discarded_entry, wir_function_value(rejected, rejected_function), [], "unused", no_wir_location());
     wir_return(ref rejected, discarded_entry, NO_WIR_VALUE, no_wir_location());
-    rejected_result = x86_lower_function(rejected, discarded);
+    rejected_result = x86_lower_function(ref rejected, discarded);
     if (rejected_result.errors.length() != 0 || rejected_result.bytes.length() == 0) {
         print("FAIL: discarded indirect return lowering");
         return 1;
@@ -150,7 +150,7 @@ func main() -> Int {
         print("FAIL: aggregate ABI WIR: ", errors[0]);
         return 1;
     }
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: aggregate ABI lowering: ", lowered.errors[0]);
         return 1;

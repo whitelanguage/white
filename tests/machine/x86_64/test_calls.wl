@@ -22,7 +22,7 @@ func main() -> Int {
     let answer: WirValueID = wir_binary(ref program, main_entry, WirOpcode.Add, int_type, value, wir_const_int(ref program, int_type, UInt128(35U)), "answer", no_wir_location());
     wir_return(ref program, main_entry, answer, no_wir_location());
 
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 direct call lowering failed: ", lowered.errors[0]);
         return 1;

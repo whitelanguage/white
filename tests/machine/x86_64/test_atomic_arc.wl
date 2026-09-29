@@ -65,7 +65,7 @@ func main() -> Int {
         print("FAIL: atomic ARC WIR: ", errors[0]);
         return 1;
     }
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: atomic ARC lowering: ", lowered.errors[0]);
         return 1;

@@ -21,8 +21,8 @@ func main() -> Int {
     wir_return(ref program, entry, far, no_wir_location());
 
     let order: Vector(WirBlockID) = [entry];
-    let plan: X86RegisterPlan = x86_new_register_plan(program, order);
-    let free: X86RegisterChoice = x86_choose_register(program, plan, 0);
+    let plan: X86RegisterPlan = x86_new_register_plan(ref program, order);
+    let free: X86RegisterChoice = x86_choose_register(ref program, plan, 0);
     if (free.register != X86Register.RAX || free.evicted != NO_WIR_VALUE) {
         print("FAIL: allocator did not select the first free register");
         return 1;
@@ -31,14 +31,14 @@ func main() -> Int {
     x86_bind_register(plan, X86Register.RAX, near);
     x86_bind_register(plan, X86Register.R10, far);
     x86_bind_register(plan, X86Register.R11, third);
-    let victim: X86RegisterChoice = x86_choose_register(program, plan, 0);
+    let victim: X86RegisterChoice = x86_choose_register(ref program, plan, 0);
     if (victim.register != X86Register.R10 || victim.evicted != far) {
         print("FAIL: allocator did not evict the farthest next use");
         return 1;
     }
 
     x86_clear_register(plan, X86Register.R11);
-    let reused: X86RegisterChoice = x86_choose_register(program, plan, 1);
+    let reused: X86RegisterChoice = x86_choose_register(ref program, plan, 1);
     if (reused.register != X86Register.R11 || reused.evicted != NO_WIR_VALUE) {
         print("FAIL: allocator did not reuse a free register");
         return 1;

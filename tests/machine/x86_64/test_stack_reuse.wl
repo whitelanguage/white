@@ -25,15 +25,15 @@ func main() -> Int {
 
     let current: WirFunction = program.arena.functions[wir_id_index(UInt32(function))];
     let order: Vector(WirBlockID) = x86_block_order(current);
-    let layouts: Vector(WirTypeLayout) = x86_type_layouts(program);
-    let cross: X86ValueFlags = x86_cross_block_values(program, order);
-    let slots: Vector(X86StackSlot) = x86_collect_stack_slots(program, current, order, false, cross, layouts);
+    let layouts: Vector(WirTypeLayout) = x86_type_layouts(ref program);
+    let cross: X86ValueFlags = x86_cross_block_values(ref program, order);
+    let slots: Vector(X86StackSlot) = x86_collect_stack_slots(ref program, current, order, false, cross, layouts);
     if (x86_stack_slots_end(slots) > 64) {
         print("FAIL: short-lived aggregate stack homes were not reused");
         return 1;
     }
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function);
     if (lowered.errors.length() != 0) {
         print("FAIL: stack reuse lowering: ", lowered.errors[0]);
         return 1;

@@ -98,7 +98,7 @@ func main() -> Int {
     wir_return(ref program, success, wir_const_int(ref program, i32, UInt128(0U)), no_wir_location());
     wir_return(ref program, failure, wir_const_int(ref program, i32, UInt128(1U)), no_wir_location());
 
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 scalar lowering failed: ", lowered.errors[0]);
         return 1;

@@ -15,7 +15,7 @@ func main() -> Int {
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     wir_append(ref program, entry, WirOpcode.Return, program.void_type, [function.parameters[0]], [], no_wir_location());
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 parameter lowering failed: ", lowered.errors[0]);
         return 1;

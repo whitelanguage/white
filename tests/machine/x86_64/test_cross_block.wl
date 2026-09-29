@@ -119,12 +119,12 @@ func main() -> Int {
         print("FAIL: cross-block WIR: ", errors[0]);
         return 1;
     }
-    let cross: X86ValueFlags = x86_cross_block_values(program, x86_block_order(program.arena.functions[wir_id_index(UInt32(reordered))]));
+    let cross: X86ValueFlags = x86_cross_block_values(ref program, x86_block_order(program.arena.functions[wir_id_index(UInt32(reordered))]));
     if (!x86_flag(cross, late)) {
         print("FAIL: cross-block classification depends on block order");
         return 1;
     }
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: cross-block lowering: ", lowered.errors[0]);
         return 1;

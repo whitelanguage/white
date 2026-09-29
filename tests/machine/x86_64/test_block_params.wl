@@ -25,7 +25,7 @@ func main() -> Int {
     wir_return(ref program, less, program.arena.blocks[wir_id_index(UInt32(less))].parameters[0], no_wir_location());
     wir_return(ref program, greater_equal, program.arena.blocks[wir_id_index(UInt32(greater_equal))].parameters[0], no_wir_location());
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 block parameter lowering failed: ", lowered.errors[0]);
         return 1;
@@ -38,7 +38,7 @@ func main() -> Int {
     wir_append(ref program, loop_entry, WirOpcode.Jump, program.void_type, [], [wir_edge(loop_body, [left, right])], no_wir_location());
     let loop_block: WirBlock = program.arena.blocks[wir_id_index(UInt32(loop_body))];
     wir_append(ref program, loop_body, WirOpcode.Jump, program.void_type, [], [wir_edge(loop_body, [loop_block.parameters[1], loop_block.parameters[0]])], no_wir_location());
-    let loop_lowered: X86LoweringResult = x86_lower_function(program, loop_id);
+    let loop_lowered: X86LoweringResult = x86_lower_function(ref program, loop_id);
     if (loop_lowered.errors.length() != 0) {
         print("FAIL: cyclic block parameter transfer failed: ", loop_lowered.errors[0]);
         return 1;

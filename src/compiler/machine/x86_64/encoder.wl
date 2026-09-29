@@ -10,7 +10,12 @@ func x86_new_code_buffer() -> X86CodeBuffer {
 }
 
 func x86_lea_symbol(ref output: X86CodeBuffer, destination: X86Register, symbol: String, addend: Long) -> Bool {
-    if (x86_register_code(destination) < 0 || symbol.length() == 0 || addend < -2147483648L || addend > 2147483647L) { return false; }
+    if (x86_register_code(destination) < 0 || symbol.length() == 0 ||
+        addend < -2147483648L || addend > 2147483647L) {
+        return false;
+    }
+
+    // LEA with RIP-relative addressing leaves the linker one signed rel32 field to fix.
     x86_rex(ref output, true, destination, X86Register.None, X86Register.None);
     x86_emit_byte(ref output, Byte(141));
     x86_emit_byte(ref output, Byte(5 | (x86_register_code(destination) << 3)));
@@ -24,6 +29,7 @@ func x86_emit_byte(ref output: X86CodeBuffer, value: Byte) -> Void {
 }
 
 func x86_emit_u32(ref output: X86CodeBuffer, value: UInt32) -> Void {
+    // x86 immediates and displacements are little endian.
     x86_emit_byte(ref output, Byte(value & 255U));
     x86_emit_byte(ref output, Byte((value >> 8U) & 255U));
     x86_emit_byte(ref output, Byte((value >> 16U) & 255U));
@@ -64,6 +70,8 @@ func x86_emit_u64(ref output: X86CodeBuffer, value: UInt64) -> Void {
 }
 
 func x86_register_code(register: X86Register) -> Int {
+    // the low three bits come from the original eight-register encoding. R8-R15
+    // reuse 0-7 and are selected by the matching REX bit.
     if (register == X86Register.RAX) { return 0; }
     if (register == X86Register.RBX) { return 3; }
     if (register == X86Register.RCX) { return 1; }
@@ -85,6 +93,8 @@ func x86_register_extended(register: X86Register) -> Bool {
 }
 
 func x86_rex(ref output: X86CodeBuffer, wide: Bool, reg: X86Register, index: X86Register, base: X86Register) -> Void {
+    // REX is 0100WRXB. A bare 0x40 prefix is emitted elsewhere only when an
+    // 8-bit instruction must select SIL/DIL/BPL/SPL instead of AH/CH/DH/BH.
     let bits: Int = 0;
 
     if wide {
@@ -104,7 +114,6 @@ func x86_rex(ref output: X86CodeBuffer, wide: Bool, reg: X86Register, index: X86
     if (prefix != Byte(64)) {
         x86_emit_byte(ref output, prefix);
     }
-
 }
 
 func x86_modrm_register(reg: X86Register, rm: X86Register) -> Byte {
@@ -159,24 +168,38 @@ func x86_sign_extend32(ref output: X86CodeBuffer, destination: X86Register, sour
 func x86_lea(ref output: X86CodeBuffer, destination: X86Register, base: X86Register, index: X86Register, scale: Int, displacement: Int) -> Bool {
     let base_code: Int = x86_register_code(base);
     let destination_code: Int = x86_register_code(destination);
-    if (base_code < 0 || destination_code < 0) { return false; }
+    if (base_code < 0 || destination_code < 0) {
+        return false;
+    }
+
     let shift: Int = 0;
     if (scale == 2) { shift = 1; }
     else if (scale == 4) { shift = 2; }
     else if (scale == 8) { shift = 3; }
-    else if (scale != 1) { return false; }
+    else if (scale != 1) {
+        return false;
+    }
+
+    // SIB index 4 means no index. RSP has the same low code, so it cannot be used
+    // as an index here. A base with code 4 needs a SIB byte even without an index.
     let index_code: Int = 4;
     if (index != X86Register.None) {
         index_code = x86_register_code(index);
-        if (index_code < 0 || index == X86Register.RSP) { return false; }
+        if (index_code < 0 || index == X86Register.RSP) {
+            return false;
+        }
     }
     x86_rex(ref output, true, destination, index, base);
     x86_emit_byte(ref output, Byte(141));
     let sib: Bool = index != X86Register.None || base_code == 4;
     let rm: Int = base_code;
-    if (sib) { rm = 4; }
+    if (sib) {
+        rm = 4;
+    }
     x86_emit_byte(ref output, Byte(128 | (destination_code << 3) | rm));
-    if (sib) { x86_emit_byte(ref output, Byte((shift << 6) | (index_code << 3) | base_code)); }
+    if (sib) {
+        x86_emit_byte(ref output, Byte((shift << 6) | (index_code << 3) | base_code));
+    }
     x86_emit_i32(ref output, displacement);
     return true;
 }
@@ -455,7 +478,12 @@ func x86_set_condition_register(ref output: X86CodeBuffer, destination: X86Regis
     else if (opcode == X86Opcode.Jbe) { code = Byte(150); }
     else if (opcode == X86Opcode.Jp) { code = Byte(154); }
     else if (opcode == X86Opcode.Jnp) { code = Byte(155); }
-    else { return false; }
+    else {
+        return false;
+    }
+
+    // SETcc writes one byte. For register codes 4-7 a REX prefix changes the old
+    // high-byte registers into SPL, BPL, SIL and DIL, which is what the allocator uses.
     x86_rex(ref output, false, X86Register.None, X86Register.None, destination);
     if (!x86_register_extended(destination) && x86_register_code(destination) >= 4) {
         x86_emit_byte(ref output, Byte(64));
@@ -484,8 +512,10 @@ func x86_call_rel32(ref output: X86CodeBuffer) -> Int {
 }
 
 func x86_call_register(ref output: X86CodeBuffer, target: X86Register) -> Bool {
-    if (x86_register_code(target) < 0) { return false; }
-    // near indirect calls use a 64-bit target without a REX.W prefix
+    if (x86_register_code(target) < 0) {
+        return false;
+    }
+    // near indirect calls use a 64-bit target without a REX.W prefix.
     x86_rex(ref output, false, X86Register.None, X86Register.None, target);
     x86_emit_byte(ref output, Byte(255));
     x86_emit_byte(ref output, x86_modrm_group(2, target));
@@ -494,50 +524,84 @@ func x86_call_register(ref output: X86CodeBuffer, target: X86Register) -> Bool {
 
 func x86_atomic_xadd(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
     if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
-        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+        (size != 1 && size != 2 && size != 4 && size != 8)) {
+        return false;
+    }
+
+    // LOCK is required for read-modify-write operations shared between cores.
     x86_emit_byte(ref output, Byte(240));
-    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    if (size == 2) {
+        x86_emit_byte(ref output, Byte(102));
+    }
     x86_rex(ref output, size == 8, value, X86Register.None, address);
     if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
         x86_emit_byte(ref output, Byte(64));
     }
     x86_emit_byte(ref output, Byte(15));
-    if (size == 1) { x86_emit_byte(ref output, Byte(192)); }
-    else { x86_emit_byte(ref output, Byte(193)); }
+    if (size == 1) {
+        x86_emit_byte(ref output, Byte(192));
+    } else {
+        x86_emit_byte(ref output, Byte(193));
+    }
     x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
-    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    if ((x86_register_code(address) & 7) == 4) {
+        x86_emit_byte(ref output, Byte(36));
+    }
     return true;
 }
 
 func x86_atomic_exchange(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
     if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
-        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
-    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+        (size != 1 && size != 2 && size != 4 && size != 8)) {
+        return false;
+    }
+
+    // XCHG with a memory operand is atomic without an explicit LOCK prefix.
+    if (size == 2) {
+        x86_emit_byte(ref output, Byte(102));
+    }
     x86_rex(ref output, size == 8, value, X86Register.None, address);
     if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
         x86_emit_byte(ref output, Byte(64));
     }
-    if (size == 1) { x86_emit_byte(ref output, Byte(134)); }
-    else { x86_emit_byte(ref output, Byte(135)); }
+    if (size == 1) {
+        x86_emit_byte(ref output, Byte(134));
+    } else {
+        x86_emit_byte(ref output, Byte(135));
+    }
     x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
-    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    if ((x86_register_code(address) & 7) == 4) {
+        x86_emit_byte(ref output, Byte(36));
+    }
     return true;
 }
 
 func x86_atomic_compare_exchange(ref output: X86CodeBuffer, address: X86Register, value: X86Register, size: Int) -> Bool {
     if (x86_register_code(address) < 0 || x86_register_code(value) < 0 ||
-        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
+        (size != 1 && size != 2 && size != 4 && size != 8)) {
+        return false;
+    }
+
+    // CMPXCHG has an implicit accumulator input, lowering is responsible for
+    // placing the expected value in RAX before calling this encoder.
     x86_emit_byte(ref output, Byte(240));
-    if (size == 2) { x86_emit_byte(ref output, Byte(102)); }
+    if (size == 2) {
+        x86_emit_byte(ref output, Byte(102));
+    }
     x86_rex(ref output, size == 8, value, X86Register.None, address);
     if (size == 1 && !x86_register_extended(value) && !x86_register_extended(address) && x86_register_code(value) >= 4) {
         x86_emit_byte(ref output, Byte(64));
     }
     x86_emit_byte(ref output, Byte(15));
-    if (size == 1) { x86_emit_byte(ref output, Byte(176)); }
-    else { x86_emit_byte(ref output, Byte(177)); }
+    if (size == 1) {
+        x86_emit_byte(ref output, Byte(176));
+    } else {
+        x86_emit_byte(ref output, Byte(177));
+    }
     x86_emit_byte(ref output, Byte(((x86_register_code(value) & 7) << 3) | (x86_register_code(address) & 7)));
-    if ((x86_register_code(address) & 7) == 4) { x86_emit_byte(ref output, Byte(36)); }
+    if ((x86_register_code(address) & 7) == 4) {
+        x86_emit_byte(ref output, Byte(36));
+    }
     return true;
 }
 
@@ -598,7 +662,7 @@ func x86_sub_rsp_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
 }
 
 func x86_touch_rsp(ref output: X86CodeBuffer) -> Void {
-    // test byte ptr [rsp], 0; the read commits each guard page without changing stack data
+    // test byte ptr [rsp], 0, the read commits a guard page without changing stack data.
     x86_emit_byte(ref output, Byte(246));
     x86_emit_byte(ref output, Byte(4));
     x86_emit_byte(ref output, Byte(36));
@@ -653,6 +717,7 @@ func x86_store_register_base_disp32(ref output: X86CodeBuffer, source: X86Regist
 
     x86_emit_byte(ref output, Byte(128 | ((source_code & 7) << 3) | (base_code & 7)));
 
+    // an RSP/R12 base always requires a SIB byte, even when no index is present.
     if ((base_code & 7) == 4) {
         x86_emit_byte(ref output, Byte(36));
     }
@@ -702,20 +767,30 @@ func x86_memory_indexed(ref output: X86CodeBuffer, register: X86Register, base: 
     let base_code = x86_register_code(base);
     let index_code = x86_register_code(index);
     if (reg_code < 0 || base_code < 0 || index_code < 0 || index == X86Register.RSP ||
-        (size != 1 && size != 2 && size != 4 && size != 8)) { return false; }
-    if (store && size == 2) { x86_emit_byte(ref output, Byte(102)); }
+        (size != 1 && size != 2 && size != 4 && size != 8)) {
+        return false;
+    }
+    if (store && size == 2) {
+        x86_emit_byte(ref output, Byte(102));
+    }
     x86_rex(ref output, size == 8, register, index, base);
     if (store && size == 1 && reg_code >= 4 && !x86_register_extended(register) &&
         !x86_register_extended(index) && !x86_register_extended(base)) {
         x86_emit_byte(ref output, Byte(64));
     }
     if (store) {
-        if (size == 1) { x86_emit_byte(ref output, Byte(136)); }
-        else { x86_emit_byte(ref output, Byte(137)); }
+        if (size == 1) {
+            x86_emit_byte(ref output, Byte(136));
+        } else {
+            x86_emit_byte(ref output, Byte(137));
+        }
     } else if (size == 1 || size == 2) {
         x86_emit_byte(ref output, Byte(15));
-        if (size == 1) { x86_emit_byte(ref output, Byte(182)); }
-        else { x86_emit_byte(ref output, Byte(183)); }
+        if (size == 1) {
+            x86_emit_byte(ref output, Byte(182));
+        } else {
+            x86_emit_byte(ref output, Byte(183));
+        }
     } else {
         x86_emit_byte(ref output, Byte(139));
     }
@@ -728,6 +803,9 @@ func x86_memory_indexed(ref output: X86CodeBuffer, register: X86Register, base: 
 func x86_frame_enter(ref output: X86CodeBuffer, size: Int) -> Void {
     x86_push_rbp(ref output);
     x86_mov_rbp_rsp(ref output);
+
+    // Windows grows the stack through guard pages. Touch every 4 KiB while moving
+    // RSP so a large frame cannot jump over the guard page.
     let remaining: Int = size;
     while (remaining > 4096) {
         x86_sub_rsp_imm32(ref output, 4096U);

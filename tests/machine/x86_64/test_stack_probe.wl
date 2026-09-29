@@ -16,7 +16,7 @@ func main() -> Int {
     wir_stack_alloc(ref program, entry, array_type, "large", no_wir_location());
     wir_return(ref program, entry, wir_const_int(ref program, int_type, UInt128(0U)), no_wir_location());
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 large stack frame lowering failed: ", lowered.errors[0]);
         return 1;

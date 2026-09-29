@@ -26,7 +26,7 @@ func main() -> Int {
     let caller_sum: WirValueID = wir_binary(ref program, caller_entry, WirOpcode.Add, int_type, program.arena.functions[wir_id_index(UInt32(caller_id))].parameters[0], caller_value, "sum", no_wir_location());
     wir_return(ref program, caller_entry, caller_sum, no_wir_location());
 
-    let lowered: X86ModuleResult = x86_lower_module(program);
+    let lowered: X86ModuleResult = x86_lower_module(ref program);
     if (lowered.errors.length() != 0 || lowered.relocations.length() != 2 || lowered.symbols.length() != 3) {
         print("FAIL: external call relocation was not produced");
         return 1;

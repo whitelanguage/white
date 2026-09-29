@@ -19,7 +19,7 @@ func lower_program_to_machine(ref source: Compiler, erased_modules: Vector(Struc
     }
 
     if (verbose) { print("Lowering WIR to x86-64"); }
-    let machine: X86ModuleResult = x86_lower_module(lowered.program, verbose);
+    let machine: X86ModuleResult = x86_lower_module(ref lowered.program, verbose);
     if (machine.errors.length() != 0) { return MachinePipelineResult(bytes=[], errors=machine.errors); }
     if (verbose) { print("Encoding COFF object"); }
     let object: Vector(Byte) = coff_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;

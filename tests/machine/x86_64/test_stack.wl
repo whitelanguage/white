@@ -20,7 +20,7 @@ func main() -> Int {
     let loaded: WirValueID = wir_load(ref program, entry, slot, "loaded", no_wir_location());
     wir_return(ref program, entry, loaded, no_wir_location());
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
 
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 stack lowering failed: ", lowered.errors[0]);

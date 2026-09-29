@@ -29,7 +29,7 @@ func main() -> Int {
     wir_return(ref program, less, wir_const_int(ref program, int_type, UInt128(42U)), no_wir_location());
     wir_return(ref program, greater_equal, wir_const_int(ref program, int_type, UInt128(1U)), no_wir_location());
 
-    let lowered: X86LoweringResult = x86_lower_function(program, function_id);
+    let lowered: X86LoweringResult = x86_lower_function(ref program, function_id);
     if (lowered.errors.length() != 0) {
         print("FAIL: x86_64 branch lowering failed: ", lowered.errors[0]);
         return 1;
@@ -51,7 +51,7 @@ func main() -> Int {
     wir_append(ref program, loop_entry, WirOpcode.Jump, program.void_type, [], [wir_edge(loop_body, [])], no_wir_location());
     wir_append(ref program, loop_body, WirOpcode.Jump, program.void_type, [], [wir_edge(loop_entry, [])], no_wir_location());
 
-    let loop_lowered: X86LoweringResult = x86_lower_function(program, loop_id);
+    let loop_lowered: X86LoweringResult = x86_lower_function(ref program, loop_id);
     if (loop_lowered.errors.length() != 0 || loop_lowered.bytes.length() != 10 ||
         loop_lowered.bytes[6] != Byte(246) || loop_lowered.bytes[7] != Byte(255) ||
         loop_lowered.bytes[8] != Byte(255) || loop_lowered.bytes[9] != Byte(255)) {

@@ -4,6 +4,7 @@
 
 import * from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
+import WirModule from "../../../src/compiler/wir/model.wl"
 import new_wir_module from "../../../src/compiler/wir/builder.wl"
 import X86ModuleResult, x86_lower_module from "../../../src/compiler/machine/x86_64/lowering.wl"
 
@@ -18,8 +19,10 @@ func rejected(object: X86Object) -> Bool {
 }
 
 func main() -> Int {
-    let win32: X86ModuleResult = x86_lower_module(new_wir_module("i686-pc-windows-msvc", 32));
-    let linux: X86ModuleResult = x86_lower_module(new_wir_module("x86_64-unknown-linux-gnu", 64));
+    let win32_program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
+    let linux_program: WirModule = new_wir_module("x86_64-unknown-linux-gnu", 64);
+    let win32: X86ModuleResult = x86_lower_module(ref win32_program);
+    let linux: X86ModuleResult = x86_lower_module(ref linux_program);
     if (win32.errors.length() == 0 || linux.errors.length() == 0) {
         print("FAIL: the Win64 machine backend accepted an incompatible target");
         return 1;
