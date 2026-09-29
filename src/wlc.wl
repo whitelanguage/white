@@ -537,6 +537,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     let system_clang: String = "clang";
     if (sys.OS == sys.Os.Windows) { system_clang = "clang.exe"; }
     let using_portable_clang: Bool = clang_cmd != system_clang;
+    let using_mingw_linker: Bool = cfg.backend == "machine" && using_portable_clang && WhitelangTarget.get_target_os() == sys.Os.Windows;
     if (cfg.verbose && using_portable_clang) { print("Using portable LLVM: " + clang_cmd); }
     else if (cfg.verbose) { print("Portable LLVM not found, falling back to system " + clang_cmd + "."); }
 
@@ -555,7 +556,8 @@ func main(argc: Int, ptr argv: String) -> Int {
     let clang_args: Vector(String) = [];
     let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
     if (cfg.debug_info) { clang_args.append("-g"); }
-    if (cfg.backend == "machine" || cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
+    if (using_mingw_linker) { clang_args.append("--target=x86_64-w64-windows-gnu"); }
+    else if (cfg.backend == "machine" || cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
     if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
     if (cfg.backend != "machine") {
         clang_args.append("-Wno-override-module");
@@ -596,11 +598,15 @@ func main(argc: Int, ptr argv: String) -> Int {
     else {
         if size_opt {
             clang_args.append("-Xlinker");
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
+            if (using_mingw_linker) { clang_args.append("--gc-sections"); }
+            else if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
             else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) { clang_args.append("-dead_strip"); }
             else { clang_args.append("--gc-sections"); }
 
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+            if (using_mingw_linker) {
+                clang_args.append("-Xlinker");
+                clang_args.append("--icf=all");
+            } else if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
                 clang_args.append("-Xlinker");
                 clang_args.append("/opt:icf");
             }
@@ -614,7 +620,8 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             if (WhitelangTarget.get_target_os() == sys.Os.Windows && using_portable_clang) {
                 clang_args.append("-Xlinker");
-                if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
+                if (using_mingw_linker) { clang_args.append("--out-implib=" + import_lib); }
+                else if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
                 else { clang_args.append("--out-implib=" + import_lib); }
             }
             if (WhitelangTarget.get_target_os() != sys.Os.Windows) { clang_args.append("-fPIC"); }
@@ -623,7 +630,13 @@ func main(argc: Int, ptr argv: String) -> Int {
         if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
             clang_args.append("-nostdlib");
             clang_args.append("-Xlinker");
-            if (cfg.is_shared) {
+            if (using_mingw_linker && cfg.is_shared) {
+                clang_args.append("--entry=DllMainCRTStartup");
+            } else if (using_mingw_linker) {
+                clang_args.append("--entry=mainCRTStartup");
+                clang_args.append("-Xlinker");
+                clang_args.append("--subsystem=console");
+            } else if (cfg.is_shared) {
                 clang_args.append("/entry:DllMainCRTStartup");
             } else {
                 clang_args.append("/entry:mainCRTStartup");
