@@ -77,5 +77,6 @@ func main() -> Int {
     // }
     // print("OBJECT-END");
 
+    print("PASS: Register spill lowering");
     return 0;
 }

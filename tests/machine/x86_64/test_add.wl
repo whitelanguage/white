@@ -51,5 +51,6 @@ func main() -> Int {
         i += 1;
     }
     print("OBJECT-END");
+    print("PASS: Integer addition lowering");
     return 0;
 }

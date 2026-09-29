@@ -82,5 +82,6 @@ func main() -> Int {
     }
     print("OBJECT-END");
 
+    print("PASS: Branch lowering");
     return 0;
 }

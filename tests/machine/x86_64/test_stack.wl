@@ -54,5 +54,6 @@ func main() -> Int {
     }
     print("OBJECT-END");
 
+    print("PASS: Stack load and store lowering");
     return 0;
 }

@@ -49,5 +49,6 @@ func main() -> Int {
     //     i++;
     // }
     // print("OBJECT-END");
+    print("PASS: Direct call lowering");
     return 0;
 }

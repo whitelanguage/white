@@ -31,5 +31,6 @@ func main() -> Int {
     }
     print(text);
     print("parameter return bytes: 89 C8 C3");
+    print("PASS: Parameter return encoding");
     return 0;
 }

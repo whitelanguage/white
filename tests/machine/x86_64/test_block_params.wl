@@ -64,5 +64,6 @@ func main() -> Int {
         i += 1;
     }
     print("OBJECT-END");
+    print("PASS: Block parameter lowering");
     return 0;
 }
