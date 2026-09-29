@@ -251,7 +251,7 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
 
     let base: Int = node_tag(node);
     if (base == NODE_BLOCK) {
-        let block: BlockNode = get_block_node(c.arena, node);
+        let block: BlockNode = get_block_node(ref c.arena, node);
         let old_scope: Scope = c.hoist_scope;
         c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
 
@@ -266,18 +266,18 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
 
         c.hoist_scope = old_scope;
     } else if (base == NODE_IF) {
-        let if_n: IfNode = get_if_node(c.arena, node);
+        let if_n: IfNode = get_if_node(ref c.arena, node);
         hoist_allocas(ref c, if_n.body);
         hoist_allocas(ref c, if_n.else_body);
     } else if (base == NODE_WHILE) {
-        let w_n: WhileNode = get_while_node(c.arena, node);
+        let w_n: WhileNode = get_while_node(ref c.arena, node);
         hoist_allocas(ref c, w_n.body);
     } else if (base == NODE_FOR) {
-        let f_n: ForNode = get_for_node(c.arena, node);
+        let f_n: ForNode = get_for_node(ref c.arena, node);
         hoist_allocas(ref c, f_n.init);
         hoist_allocas(ref c, f_n.body);
     } else if (base == NODE_CATCH) {
-        let c_node: CatchNode = get_catch_node(c.arena, node);
+        let c_node: CatchNode = get_catch_node(ref c.arena, node);
         let err_reg: String = next_reg(ref c);
         c_node.alloc_id = c.alloc_regs.length();
         c.alloc_regs.append(err_reg);
@@ -287,7 +287,7 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
         hoist_allocas(ref c, c_node.stmt);
         hoist_allocas(ref c, c_node.body);
     } else if (base == NODE_VAR_DECL) {
-        let v_node: VarDeclareNode = get_var_decl_node(c.arena, node);
+        let v_node: VarDeclareNode = get_var_decl_node(ref c.arena, node);
         if (c.scope_depth > 0) {
             let target_type_id: Int = resolve_type(ref c, v_node.type_node);
 

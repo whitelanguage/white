@@ -8,7 +8,7 @@ import * from "modules.wl"
 import * from "analysis.wl"
 import compile_ast_pass, init_compiler_intrinsics, emit_llvm_prelude, emit_pending_generics, compile_end from "lowering/core.wl"
 
-func register_program(ref c: Compiler, node: NodeID) -> Void {
+func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> Void {
     // discover every module before lowering; import order must not change symbol visibility
     let fake_path: Token = Token(type=TOK_STR_LIT, value="dict", line=0, col=0);
     let fake_pos: Position = Position(idx=0, ln=0, col=0, text="", fn="<prelude>");
@@ -17,6 +17,7 @@ func register_program(ref c: Compiler, node: NodeID) -> Void {
     let fake_syms: Vector(ImportSymbolNode) = [];
     fake_syms.append(star_sym);
 
+    if (verbose) { print("Loading compiler prelude"); }
     // error is a language-level prelude item, not part of the builtin namespace
     let error_path: Token = Token(type=TOK_STR_LIT, value="errors", line=0, col=0);
     compile_import(ref c, ImportNode(type=NODE_IMPORT, path_tok=error_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos));
@@ -31,7 +32,9 @@ func register_program(ref c: Compiler, node: NodeID) -> Void {
         return;
     }
 
+    if (verbose) { print("Discovering source modules"); }
     precompile_ast(ref c, node, "<main>", "", c.current_dir);
+    if (verbose) { print("Binding module preludes"); }
     let i: Int = 0;
     while (i < c.all_modules.length()) {
         let module: ParsedModule = c.all_modules[i];
@@ -40,13 +43,14 @@ func register_program(ref c: Compiler, node: NodeID) -> Void {
         i++;
     }
 
+    if (verbose) { print("Analyzing declarations"); }
     analyze_declarations(ref c);
     c.is_precompile_phase = false;
 }
 
-func prepare_program(ref c: Compiler, node: NodeID) -> Void {
+func prepare_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> Void {
     init_compiler_intrinsics(ref c);
-    register_program(ref c, node);
+    register_program(ref c, node, verbose);
 }
 
 func lower_llvm_program(ref c: Compiler) -> Void {

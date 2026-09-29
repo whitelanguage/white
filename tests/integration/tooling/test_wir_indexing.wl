@@ -23,28 +23,28 @@ func indexing_token(value: String) -> Token {
 }
 
 func indexing_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=indexing_token(name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=indexing_token(name), pos=pos));
 }
 
 func indexing_body(arena: AstArena, target: String, pos: Position) -> NodeID {
-    let access: NodeID = add_index_access_node(arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=indexing_access(arena, target, pos), index_node=indexing_access(arena, "index", pos), pos=pos));
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=access, pos=pos));
-    return add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let access: NodeID = add_index_access_node(ref arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=indexing_access(arena, target, pos), index_node=indexing_access(arena, "index", pos), pos=pos));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=access, pos=pos));
+    return add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 }
 
 func indexing_length_body(arena: AstArena, target: String, pos: Position) -> NodeID {
-    let member: NodeID = add_field_access_node(arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=indexing_access(arena, target, pos), field_name="length", pos=pos));
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=member, args=[], type_args=[], pos=pos, preserve_fallible=false));
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    return add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let member: NodeID = add_field_access_node(ref arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=indexing_access(arena, target, pos), field_name="length", pos=pos));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=member, args=[], type_args=[], pos=pos, preserve_fallible=false));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    return add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 }
 
 func literal_length_body(arena: AstArena, pos: Position) -> NodeID {
-    let literal: NodeID = add_string_node(arena, StringNode(type=NODE_STRING, tok=Token(type=TOK_STR_LIT, value="White", line=1, col=1), pos=pos));
-    let member: NodeID = add_field_access_node(arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=literal, field_name="length", pos=pos));
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=member, args=[], type_args=[], pos=pos, preserve_fallible=false));
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    return add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let literal: NodeID = add_string_node(ref arena, StringNode(type=NODE_STRING, tok=Token(type=TOK_STR_LIT, value="White", line=1, col=1), pos=pos));
+    let member: NodeID = add_field_access_node(ref arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=literal, field_name="length", pos=pos));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=member, args=[], type_args=[], pos=pos, preserve_fallible=false));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    return add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 }
 
 func indexing_info(name: String, target_type: Int, result_type: Int) -> FuncInfo {

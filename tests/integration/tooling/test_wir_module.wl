@@ -19,16 +19,16 @@ func module_token(kind: Int, value: String) -> Token {
 }
 
 func module_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=module_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=module_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func module_return(arena: AstArena, value: NodeID, pos: Position) -> NodeID {
-    return add_return_node(arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
+    return add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
 }
 
 func module_function(arena: AstArena, name: String, body: NodeID, pos: Position) -> NodeID {
     let return_type: NodeID = module_access(arena, "Int", pos);
-    return add_func_def_node(arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=module_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=return_type, body=body, annotations=[], pos=pos));
+    return add_func_def_node(ref arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=module_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=return_type, body=body, annotations=[], pos=pos));
 }
 
 func main() -> Int {
@@ -47,16 +47,16 @@ func main() -> Int {
     let pos: Position = module_position();
 
     let global_type: NodeID = module_access(source.arena, "Int", pos);
-    let global_value: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=module_token(TOK_INT, "3"), pos=pos));
-    let global: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=module_token(TOK_IDENTIFIER, "counter"), type_node=global_type, value=global_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let global_value: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=module_token(TOK_INT, "3"), pos=pos));
+    let global: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=module_token(TOK_IDENTIFIER, "counter"), type_node=global_type, value=global_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
 
     let helper_callee: NodeID = module_access(source.arena, "helper", pos);
-    let helper_call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=helper_callee, args=[], type_args=[], pos=pos, preserve_fallible=false));
-    let main_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[module_return(source.arena, helper_call, pos)]));
+    let helper_call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=helper_callee, args=[], type_args=[], pos=pos, preserve_fallible=false));
+    let main_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[module_return(source.arena, helper_call, pos)]));
     let main_node: NodeID = module_function(source.arena, "main", main_body, pos);
-    let helper_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[module_return(source.arena, module_access(source.arena, "counter", pos), pos)]));
+    let helper_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[module_return(source.arena, module_access(source.arena, "counter", pos), pos)]));
     let helper_node: NodeID = module_function(source.arena, "helper", helper_body, pos);
-    let root: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[global, main_node, helper_node]));
+    let root: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[global, main_node, helper_node]));
 
     let result: WirLoweringResult = wir_lower_module(ref source, root, "x86_64-pc-windows-msvc", 64);
     if (result.errors.length() != 0) {

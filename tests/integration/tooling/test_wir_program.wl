@@ -20,14 +20,14 @@ func program_token(kind: Int, value: String) -> Token {
 }
 
 func program_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=program_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=program_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func program_function(arena: AstArena, name: String, value: NodeID, pos: Position) -> NodeID {
-    let return_node: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
-    let body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[return_node]));
+    let return_node: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
+    let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[return_node]));
     let return_type: NodeID = program_access(arena, "Int", pos);
-    return add_func_def_node(arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=program_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=return_type, body=body, annotations=[], pos=pos));
+    return add_func_def_node(ref arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=program_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=return_type, body=body, annotations=[], pos=pos));
 }
 
 func empty_visible() -> Dict(String, String) {
@@ -61,12 +61,12 @@ func main() -> Int {
     let source: Compiler = Compiler(arena=arena, symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=Dict(), func_table=functions, current_package_prefix="", current_file_global_aliases=Dict(), global_var_aliases=Dict(), named_type_ids=Dict(), generic_bindings=Dict());
     let pos: Position = program_position();
 
-    let answer_value: NodeID = add_int_node(arena, IntNode(type=NODE_INT, tok=program_token(TOK_INT, "42"), pos=pos));
-    let answer_root: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[program_function(arena, "answer", answer_value, pos)]));
+    let answer_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=program_token(TOK_INT, "42"), pos=pos));
+    let answer_root: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[program_function(arena, "answer", answer_value, pos)]));
 
     let callee: NodeID = program_access(arena, "answer", pos);
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=callee, args=[], type_args=[], pos=pos, preserve_fallible=false));
-    let main_root: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[program_function(arena, "main", call, pos)]));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=callee, args=[], type_args=[], pos=pos, preserve_fallible=false));
+    let main_root: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[program_function(arena, "main", call, pos)]));
 
     let modules: Vector(ParsedModule) = [
         ParsedModule(path="lib.wl", prefix="lib.", dir="", is_package=false, ast=answer_root, visible=empty_visible(), namespaces=empty_namespaces(), types=Dict(), funcs=Dict(), globals=Dict(), imports=[]),

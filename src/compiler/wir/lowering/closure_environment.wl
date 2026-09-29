@@ -17,7 +17,7 @@ func wir_reference_parameter(program: WirModule, binding: WirBinding) -> Bool {
     return program.arena.values[wir_id_index(UInt32(binding.address))].kind == WirValueKind.FunctionParameter;
 }
 
-func wir_capture_binding(state: WirFunctionLowering, name: String) -> WirBinding? {
+func wir_capture_binding(ref state: WirFunctionLowering, name: String) -> WirBinding? {
     let i: Int = state.bindings.length() - 1;
     while (i >= 0) {
         if (state.bindings[i].name == name) { return state.bindings[i]; }
@@ -45,7 +45,7 @@ func wir_closure_captures(ref state: WirFunctionLowering, ref source: Compiler, 
     i = 0;
     while (i < scope.captured_list.length()) {
         let name: String = scope.captured_list[i];
-        let binding: WirBinding = wir_capture_binding(state, name)?;
+        let binding: WirBinding = wir_capture_binding(ref state, name)?;
         catch(err) {
             i++;
             continue;

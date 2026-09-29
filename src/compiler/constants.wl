@@ -30,16 +30,16 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
     let base: Int = node_tag(node);
     
     if (base == NODE_INT) {
-        let n: IntNode = get_int_node(c.arena, node);
+        let n: IntNode = get_int_node(ref c.arena, node);
         return string_to_long(n.tok.value, n.pos);
     }
 
     if (base == NODE_VAR_ACCESS) {
-        return get_const_integer(ref c, get_var_access_node(c.arena, node), pos);
+        return get_const_integer(ref c, get_var_access_node(ref c.arena, node), pos);
     }
 
     if (base == NODE_TYPE_LAYOUT) {
-        let layout: TypeLayoutNode = get_type_layout_node(c.arena, node);
+        let layout: TypeLayoutNode = get_type_layout_node(ref c.arena, node);
         let type_id: Int = resolve_type(ref c, layout.type_node);
         if (!check_layout_type(ref c, type_id, layout.is_align, layout.pos)) { return 0L; }
         if (layout.is_align) { return Long(get_type_align_bytes(ref c, type_id)); }
@@ -47,7 +47,7 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
     }
 
     if (base == NODE_UNARYOP) {
-        let u: UnaryOpNode = get_unary_node(c.arena, node);
+        let u: UnaryOpNode = get_unary_node(ref c.arena, node);
         let op_str: String = u.op_tok.value;
         let val: Long = eval_const_long(ref c, u.node, pos);
         if (op_str == "-") { return 0L - val; }
@@ -57,7 +57,7 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
     }
 
     if (base == NODE_BINOP) {
-        let b: BinOpNode = get_binop_node(c.arena, node);
+        let b: BinOpNode = get_binop_node(ref c.arena, node);
         let op_str: String = b.op_tok.value;
         let left: Long = eval_const_long(ref c, b.left, pos);
         let right: Long = eval_const_long(ref c, b.right, pos);
@@ -136,7 +136,7 @@ func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
     if (!has_node(node)) { return 0.0; }
     let base: Int = node_tag(node);
     if (base == NODE_FLOAT) {
-        let value: FloatNode = get_float_node(c.arena, node);
+        let value: FloatNode = get_float_node(ref c.arena, node);
         return parse_decimal_float_literal(value.tok.value);
     }
     if (base == NODE_INT) {
@@ -148,18 +148,18 @@ func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
         return Float(eval_const_long(ref c, node, pos));
     }
     if (base == NODE_CHAR) {
-        let value: CharNode = get_char_node(c.arena, node);
+        let value: CharNode = get_char_node(ref c.arena, node);
         return Float(string_to_int(value.tok.value, value.pos));
     }
     if (base == NODE_BOOL) {
-        let value: BooleanNode = get_bool_node(c.arena, node);
+        let value: BooleanNode = get_bool_node(ref c.arena, node);
         return Float(value.value);
     }
     if (base == NODE_VAR_ACCESS) {
-        return get_const_num(ref c, get_var_access_node(c.arena, node), pos);
+        return get_const_num(ref c, get_var_access_node(ref c.arena, node), pos);
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let value: Float = eval_const_float(ref c, unary.node, pos);
         if (unary.op_tok.type == TOK_PLUS) { return value; }
         if (unary.op_tok.type == TOK_SUB) { return 0.0 - value; }
@@ -167,7 +167,7 @@ func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
         return 0.0;
     }
     if (base == NODE_BINOP) {
-        let binary: BinOpNode = get_binop_node(c.arena, node);
+        let binary: BinOpNode = get_binop_node(ref c.arena, node);
         let left: Float = eval_const_float(ref c, binary.left, pos);
         let right: Float = eval_const_float(ref c, binary.right, pos);
         let op: Int = binary.op_tok.type;
@@ -254,7 +254,7 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
     let base: Int = node_tag(node);
 
     if (base == NODE_INT) {
-        let value: IntNode = get_int_node(c.arena, node);
+        let value: IntNode = get_int_node(ref c.arena, node);
         let parsed: UInt128 = parse_const_uint128(value.tok.value, value.pos);
         if (!is_unsigned && parsed > 170141183460469231731687303715884105727ULL) {
             throw_overflow_error(value.pos, "Literal '" + value.tok.value + "' overflows Int128 valid range.");
@@ -263,13 +263,13 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
         return parsed;
     }
     if (base == NODE_VAR_ACCESS) {
-        return get_const_wide_integer(ref c, get_var_access_node(c.arena, node), pos);
+        return get_const_wide_integer(ref c, get_var_access_node(ref c.arena, node), pos);
     }
     if (base == NODE_TYPE_LAYOUT) {
         return UInt128(eval_const_long(ref c, node, pos));
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let value: UInt128 = eval_const_wide(ref c, unary.node, pos, is_unsigned);
         if (unary.op_tok.value == "-") { return UInt128(0) - value; }
         if (unary.op_tok.value == "~") { return value ^ 340282366920938463463374607431768211455ULL; }
@@ -277,7 +277,7 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
         return UInt128(0);
     }
     if (base == NODE_BINOP) {
-        let binary: BinOpNode = get_binop_node(c.arena, node);
+        let binary: BinOpNode = get_binop_node(ref c.arena, node);
         let op: String = binary.op_tok.value;
         let left: UInt128 = eval_const_wide(ref c, binary.left, pos, is_unsigned);
         let right: UInt128 = eval_const_wide(ref c, binary.right, pos, is_unsigned);
@@ -325,18 +325,18 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
     let base: Int = node_tag(node);
 
     if (base == NODE_BOOL) {
-        let b: BooleanNode = get_bool_node(c.arena, node);
+        let b: BooleanNode = get_bool_node(ref c.arena, node);
         return b.value;
     }
     if (base == NODE_VAR_ACCESS) {
-        let value: Long = get_const_integer(ref c, get_var_access_node(c.arena, node), pos);
+        let value: Long = get_const_integer(ref c, get_var_access_node(ref c.arena, node), pos);
         if (value == 0L) { return 0; }
         if (value == 1L) { return 1; }
         throw_type_error(pos, "Boolean constant expression requires a Bool value.");
         return 0;
     }
     if (base == NODE_UNARYOP) {
-        let u: UnaryOpNode = get_unary_node(c.arena, node);
+        let u: UnaryOpNode = get_unary_node(ref c.arena, node);
         let op_str: String = u.op_tok.value;
         if (op_str == "!") {
             let val: Int = eval_const_bool(ref c, u.node, pos);
@@ -346,7 +346,7 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
         return 0;
     }
     if (base == NODE_BINOP) {
-        let b: BinOpNode = get_binop_node(c.arena, node);
+        let b: BinOpNode = get_binop_node(ref c.arena, node);
         let op_str: String = b.op_tok.value;
 
         if (op_str == "&&") {

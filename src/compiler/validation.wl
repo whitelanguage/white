@@ -33,23 +33,23 @@ func expr_root_name(ref c: Compiler, node: NodeID) -> String {
     if (!has_node(node)) { return ""; }
     let base: Int = node_tag(node);
     if (base == NODE_VAR_ACCESS) {
-        let value: VarAccessNode = get_var_access_node(c.arena, node);
+        let value: VarAccessNode = get_var_access_node(ref c.arena, node);
         return value.name_tok.value;
     }
     if (base == NODE_FIELD_ACCESS) {
-        let value: FieldAccessNode = get_field_access_node(c.arena, node);
+        let value: FieldAccessNode = get_field_access_node(ref c.arena, node);
         return expr_root_name(ref c, value.obj);
     }
     if (base == NODE_INDEX_ACCESS) {
-        let value: IndexAccessNode = get_index_access_node(c.arena, node);
+        let value: IndexAccessNode = get_index_access_node(ref c.arena, node);
         return expr_root_name(ref c, value.target);
     }
     if (base == NODE_SLICE_ACCESS) {
-        let value: SliceAccessNode = get_slice_access_node(c.arena, node);
+        let value: SliceAccessNode = get_slice_access_node(ref c.arena, node);
         return expr_root_name(ref c, value.target);
     }
     if (base == NODE_DEREF) {
-        let value: DerefNode = get_deref_node(c.arena, node);
+        let value: DerefNode = get_deref_node(ref c.arena, node);
         return expr_root_name(ref c, value.node);
     }
     return "";
@@ -74,38 +74,38 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let base: Int = node_tag(node);
     if (base == NODE_FIELD_ASSIGN) {
-        let value: FieldAssignNode = get_field_assign_node(c.arena, node);
+        let value: FieldAssignNode = get_field_assign_node(ref c.arena, node);
         return expr_root_name(ref c, value.obj) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_INDEX_ASSIGN) {
-        let value: IndexAssignNode = get_index_assign_node(c.arena, node);
+        let value: IndexAssignNode = get_index_assign_node(ref c.arena, node);
         return expr_root_name(ref c, value.target) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_PTR_ASSIGN) {
-        let value: PtrAssignNode = get_ptr_assign_node(c.arena, node);
+        let value: PtrAssignNode = get_ptr_assign_node(ref c.arena, node);
         return expr_root_name(ref c, value.pointer) == "self" || expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_POSTFIX) {
-        let value: PostfixOpNode = get_postfix_node(c.arena, node);
+        let value: PostfixOpNode = get_postfix_node(ref c.arena, node);
         return expr_root_name(ref c, value.node) == "self";
     }
     if (base == NODE_REF) {
-        let value: RefNode = get_ref_node(c.arena, node);
+        let value: RefNode = get_ref_node(ref c.arena, node);
         return expr_root_name(ref c, value.node) == "self";
     }
     if (base == NODE_VAR_DECL) {
-        let value: VarDeclareNode = get_var_decl_node(c.arena, node);
+        let value: VarDeclareNode = get_var_decl_node(ref c.arena, node);
         return expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_VAR_ASSIGN) {
-        let value: VarAssignNode = get_var_assign_node(c.arena, node);
+        let value: VarAssignNode = get_var_assign_node(ref c.arena, node);
         return expr_root_name(ref c, value.value) == "self";
     }
     if (base == NODE_CALL) {
-        let call: CallNode = get_call_node(c.arena, node);
+        let call: CallNode = get_call_node(ref c.arena, node);
         let callee: Int = node_tag(call.callee);
         if (callee == NODE_FIELD_ACCESS) {
-            let field: FieldAccessNode = get_field_access_node(c.arena, call.callee);
+            let field: FieldAccessNode = get_field_access_node(ref c.arena, call.callee);
             if (expr_root_name(ref c, field.obj) == "self") { return true; }
         }
         let i: Int = 0;
@@ -116,11 +116,11 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
         }
     }
     if (base == NODE_FUNC_DEF) {
-        let value: FunctionDefNode = get_func_def_node(c.arena, node);
+        let value: FunctionDefNode = get_func_def_node(ref c.arena, node);
         return method_mutates_self(ref c, value.body);
     }
     if (base == NODE_BLOCK) {
-        let block: BlockNode = get_block_node(c.arena, node);
+        let block: BlockNode = get_block_node(ref c.arena, node);
         let i: Int = 0;
         while (block.stmts is !null && i < block.stmts.length()) {
             if (method_mutates_self(ref c, block.stmts[i])) { return true; }
@@ -128,19 +128,19 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
         }
     }
     if (base == NODE_IF) {
-        let value: IfNode = get_if_node(c.arena, node);
+        let value: IfNode = get_if_node(ref c.arena, node);
         return method_mutates_self(ref c, value.body) || method_mutates_self(ref c, value.else_body);
     }
     if (base == NODE_WHILE) {
-        let value: WhileNode = get_while_node(c.arena, node);
+        let value: WhileNode = get_while_node(ref c.arena, node);
         return method_mutates_self(ref c, value.body);
     }
     if (base == NODE_FOR) {
-        let value: ForNode = get_for_node(c.arena, node);
+        let value: ForNode = get_for_node(ref c.arena, node);
         return method_mutates_self(ref c, value.init) || method_mutates_self(ref c, value.step) || method_mutates_self(ref c, value.body);
     }
     if (base == NODE_CATCH) {
-        let value: CatchNode = get_catch_node(c.arena, node);
+        let value: CatchNode = get_catch_node(ref c.arena, node);
         return method_mutates_self(ref c, value.stmt) || method_mutates_self(ref c, value.body);
     }
     return false;
@@ -220,7 +220,7 @@ func is_unsuffix_int_literal(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let base: Int = node_tag(node);
     if (base != NODE_INT) { return false; }
-    let value: IntNode = get_int_node(c.arena, node);
+    let value: IntNode = get_int_node(ref c.arena, node);
     let text: String = value.tok.value;
     return !text.ends_with("u") && !text.ends_with("U") && !text.ends_with("ul") && !text.ends_with("UL") && !text.ends_with("ull") && !text.ends_with("ULL");
 }

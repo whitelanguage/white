@@ -9,7 +9,7 @@ func wir_value_needs_drop(ref source: Compiler, source_type: Int) -> Bool {
     return needs_drop(ref source, source_type);
 }
 
-func wir_owned_value_index(state: WirFunctionLowering, value: WirValueID) -> Int {
+func wir_owned_value_index(ref state: WirFunctionLowering, value: WirValueID) -> Int {
     let i: Int = state.owned_values.length() - 1;
     while (i >= 0) {
         if (state.owned_values[i].value == value) { return i; }
@@ -19,12 +19,12 @@ func wir_owned_value_index(state: WirFunctionLowering, value: WirValueID) -> Int
 }
 
 func wir_track_owned(ref state: WirFunctionLowering, value: WirValueID, source_type: Int) -> Void {
-    if (value == NO_WIR_VALUE || wir_owned_value_index(state, value) >= 0) { return; }
+    if (value == NO_WIR_VALUE || wir_owned_value_index(ref state, value) >= 0) { return; }
     state.owned_values.append(WirOwnedValue(value=value, source_type=source_type));
 }
 
 func wir_take_owned(ref state: WirFunctionLowering, value: WirValueID) -> Bool {
-    let index: Int = wir_owned_value_index(state, value);
+    let index: Int = wir_owned_value_index(ref state, value);
     if (index < 0) { return false; }
     let values: Vector(WirOwnedValue) = [];
     let i: Int = 0;

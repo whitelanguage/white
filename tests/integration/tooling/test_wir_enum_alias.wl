@@ -26,11 +26,11 @@ func main() -> Int {
     structs.put("100", StructInfo(name="errors.Kind", type_id=100, is_enum=true));
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=structs, current_file_visible_prefixes=visible, current_file_type_aliases=Dict(), global_type_aliases=Dict());
 
-    let root: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=enum_alias_token("platform_errors"), pos=pos));
-    let owner: NodeID = add_field_access_node(source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=root, field_name="Kind", pos=pos));
-    let member: NodeID = add_field_access_node(source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Interrupted", pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=member, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let root: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=enum_alias_token("platform_errors"), pos=pos));
+    let owner: NodeID = add_field_access_node(ref source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=root, field_name="Kind", pos=pos));
+    let member: NodeID = add_field_access_node(ref source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Interrupted", pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=member, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let info: FuncInfo = FuncInfo(name="interrupt_kind", base_name="interrupt_kind", ret_type=100, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

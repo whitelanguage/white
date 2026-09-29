@@ -13,12 +13,12 @@ func is_builtin_type_name(name: String) -> Bool {
 }
 
 func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
     while (stmts is !null && i < stmts.length()) {
         if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
-            let decl: TypeDeclNode = get_type_decl_node(c.arena, stmts[i]);
+            let decl: TypeDeclNode = get_type_decl_node(ref c.arena, stmts[i]);
             let raw_name: String = decl.name_tok.value;
             let name: String = c.current_package_prefix + raw_name;
             if (is_builtin_type_name(raw_name) || has_named_type(c.named_types.lookup(name)) ||
@@ -44,12 +44,12 @@ func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
 }
 
 func resolve_named_types(ref c: Compiler, node: NodeID) -> Void {
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let i: Int = 0;
     while (stmts is !null && i < stmts.length()) {
         if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
-            let decl: TypeDeclNode = get_type_decl_node(c.arena, stmts[i]);
+            let decl: TypeDeclNode = get_type_decl_node(ref c.arena, stmts[i]);
             let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
             resolve_named_type(ref c, info);
         }
@@ -92,7 +92,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
 
     stack.append(TypeListNode(type=info.type_id));
     info.interfaces = [];
-    let node: InterfaceDefNode = get_interface_def_node(c.arena, info.init_body);
+    let node: InterfaceDefNode = get_interface_def_node(ref c.arena, info.init_body);
     let methods: Vector(Struct) = [];
     let names: Dict(String, StringConstant) = Dict();
 
@@ -128,7 +128,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
 
     i = 0;
     while (node.methods is !null && i < node.methods.length()) {
-        let declared: MethodDefNode = get_method_def_node(c.arena, node.methods[i]);
+        let declared: MethodDefNode = get_method_def_node(ref c.arena, node.methods[i]);
         if (!append_interface_method(methods, names, declared, info.name)) {
             stack.drop();
             return false;
@@ -142,7 +142,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
 }
 
 func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
@@ -151,7 +151,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_STRUCT_DEF) {
-            let n: StructDefNode = get_struct_def_node(c.arena, stmts[i]);
+            let n: StructDefNode = get_struct_def_node(ref c.arena, stmts[i]);
             let raw_name: String = n.name_tok.value;
             let s_name: String = c.current_package_prefix + raw_name;
 
@@ -212,7 +212,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             c.struct_id_map.put("" + new_id, info);
             
         } else if (base == NODE_CLASS_DEF) {
-            let c_node: ClassDefNode = get_class_def_node(c.arena, stmts[i]);
+            let c_node: ClassDefNode = get_class_def_node(ref c.arena, stmts[i]);
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
@@ -254,7 +254,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             c.struct_table.put(c_name, info);
             c.struct_id_map.put("" + new_id, info);
         } else if (base == NODE_INTERFACE_DEF) {
-            let i_node: InterfaceDefNode = get_interface_def_node(c.arena, stmts[i]);
+            let i_node: InterfaceDefNode = get_interface_def_node(ref c.arena, stmts[i]);
             let raw_name: String = i_node.name_tok.value;
             let i_name: String = c.current_package_prefix + raw_name;
             if (has_struct(c.struct_table.lookup(i_name)) || has_template(c.generic_structs.lookup(i_name)) || has_named_type(c.named_types.lookup(i_name))) {
@@ -270,7 +270,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let method_names: Dict(String, StringConstant) = Dict();
             let method_index: Int = 0;
             while (i_node.methods is !null && method_index < i_node.methods.length()) {
-                let iface_method: MethodDefNode = get_method_def_node(c.arena, i_node.methods[method_index]);
+                let iface_method: MethodDefNode = get_method_def_node(ref c.arena, i_node.methods[method_index]);
                 let method_name: String = iface_method.name_tok.value;
                 if (iface_method.type_params is !null && iface_method.type_params.length() > 0) {
                     throw_type_error(iface_method.pos, "Interface methods cannot declare type parameters.");
@@ -314,7 +314,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             c.struct_table.put(i_name, info);
             c.struct_id_map.put("" + new_id, info);
         } else if (base == NODE_ENUM_DEF) {
-            let e_node: EnumDefNode = get_enum_def_node(c.arena, stmts[i]);
+            let e_node: EnumDefNode = get_enum_def_node(ref c.arena, stmts[i]);
             let raw_name: String = e_node.name_tok.value;
             let e_name: String = c.current_package_prefix + raw_name;
             if (has_struct(c.struct_table.lookup(e_name)) || 
@@ -357,7 +357,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_INTERFACE_DEF) {
-            let node: InterfaceDefNode = get_interface_def_node(c.arena, stmts[i]);
+            let node: InterfaceDefNode = get_interface_def_node(ref c.arena, stmts[i]);
             if (node.type_params is null || node.type_params.length() == 0) {
                 let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
                 if (has_struct(info) && !resolve_interface_info(ref c, info, [], node.pos)) { return; }
@@ -367,7 +367,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
     }
 }
 func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
@@ -376,7 +376,7 @@ func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_VAR_DECL) {
-            let var_decl: VarDeclareNode = get_var_decl_node(c.arena, stmts[i]);
+            let var_decl: VarDeclareNode = get_var_decl_node(ref c.arena, stmts[i]);
             let var_name: String = var_decl.name_tok.value;
             let full_var_name: String = var_name;
             if (c.current_package_prefix != "") {
@@ -395,7 +395,7 @@ func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
     }
 }
 func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
@@ -404,7 +404,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_FUNC_DEF) {
-            let f_node: FunctionDefNode = get_func_def_node(c.arena, stmts[i]);
+            let f_node: FunctionDefNode = get_func_def_node(ref c.arena, stmts[i]);
             let raw_name: String = f_node.name_tok.value;
 
             if (f_node.type_params is !null && f_node.type_params.length() > 0) {
@@ -515,7 +515,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
             }
 
         } else if (base == NODE_CLASS_DEF) {
-            let c_node: ClassDefNode = get_class_def_node(c.arena, stmts[i]);
+            let c_node: ClassDefNode = get_class_def_node(ref c.arena, stmts[i]);
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
                 i += 1;
                 continue;
@@ -531,7 +531,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
 
             let m_idx: Int = 0;
             while (m_idx < m_len) {
-                let m_node: MethodDefNode = get_method_def_node(c.arena, m_vec[m_idx]);
+                let m_node: MethodDefNode = get_method_def_node(ref c.arena, m_vec[m_idx]);
                 let m_raw_name: String = method_base_name(ref c, m_node);
 
                 if (m_node.type_params is !null && m_node.type_params.length() > 0) {

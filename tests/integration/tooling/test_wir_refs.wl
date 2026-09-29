@@ -23,7 +23,7 @@ func ref_token(kind: Int, value: String) -> Token {
 }
 
 func ref_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ref_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ref_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func main() -> Int {
@@ -33,16 +33,16 @@ func main() -> Int {
     let read_info: FuncInfo = FuncInfo(name="read_ref", base_name="read_ref", ret_type=TYPE_INT, arg_types=ref_args, arg_names=["value"], is_varargs=false, abi_name="");
     source.func_table.put("read_ref", read_info);
 
-    let read_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=ref_access(source.arena, "value", pos), pos=pos));
-    let read_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[read_return]));
+    let read_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=ref_access(source.arena, "value", pos), pos=pos));
+    let read_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[read_return]));
 
-    let seven: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=ref_token(TOK_INT, "7"), pos=pos));
-    let local: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=ref_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=seven, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let reference: NodeID = add_ref_node(source.arena, RefNode(type=NODE_REF, node=ref_access(source.arena, "x", pos), pos=pos));
-    let callee: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ref_token(TOK_IDENTIFIER, "read_ref"), pos=pos));
-    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=reference, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let caller_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    let caller_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, caller_return]));
+    let seven: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=ref_token(TOK_INT, "7"), pos=pos));
+    let local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=ref_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=seven, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let reference: NodeID = add_ref_node(ref source.arena, RefNode(type=NODE_REF, node=ref_access(source.arena, "x", pos), pos=pos));
+    let callee: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ref_token(TOK_IDENTIFIER, "read_ref"), pos=pos));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=reference, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let caller_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let caller_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, caller_return]));
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

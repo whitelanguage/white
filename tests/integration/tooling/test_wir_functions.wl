@@ -25,17 +25,17 @@ func test_token(kind: Int, value: String) -> Token {
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = test_position();
-    let left: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
-    let right: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "b"), pos=pos));
-    let sum_value: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=test_token(TOK_PLUS, "+"), right=right, pos=pos));
-    let sum: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=test_token(TOK_IDENTIFIER, "sum"), type_node=NO_NODE, value=sum_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let current_sum: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
-    let add_again: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
-    let updated_value: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=current_sum, op_tok=test_token(TOK_PLUS, "+"), right=add_again, pos=pos));
-    let update_sum: NodeID = add_var_assign_node(source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=test_token(TOK_IDENTIFIER, "sum"), value=updated_value, pos=pos));
-    let sum_access: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
-    let return_sum: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum_access, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[sum, update_sum, return_sum]));
+    let left: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
+    let right: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "b"), pos=pos));
+    let sum_value: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=test_token(TOK_PLUS, "+"), right=right, pos=pos));
+    let sum: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=test_token(TOK_IDENTIFIER, "sum"), type_node=NO_NODE, value=sum_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let current_sum: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
+    let add_again: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
+    let updated_value: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=current_sum, op_tok=test_token(TOK_PLUS, "+"), right=add_again, pos=pos));
+    let update_sum: NodeID = add_var_assign_node(ref source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=test_token(TOK_IDENTIFIER, "sum"), value=updated_value, pos=pos));
+    let sum_access: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "sum"), pos=pos));
+    let return_sum: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum_access, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[sum, update_sum, return_sum]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");

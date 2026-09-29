@@ -25,11 +25,11 @@ func string_token(kind: Int, value: String) -> Token {
 }
 
 func string_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=string_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=string_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func string_literal(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_string_node(arena, StringNode(type=NODE_STRING, tok=string_token(TOK_STR_LIT, value), pos=pos));
+    return add_string_node(ref arena, StringNode(type=NODE_STRING, tok=string_token(TOK_STR_LIT, value), pos=pos));
 }
 
 func check_string_concat() -> Bool {
@@ -42,9 +42,9 @@ func check_string_concat() -> Bool {
     let pos: Position = string_position();
     let left: NodeID = string_access(source.arena, "left", pos);
     let right: NodeID = string_access(source.arena, "right", pos);
-    let sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=string_token(TOK_PLUS, "+"), right=right, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=string_token(TOK_PLUS, "+"), right=right, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let info: FuncInfo = FuncInfo(name="join", base_name="join", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -70,9 +70,9 @@ func check_primitive_concat() -> Bool {
     let pos: Position = string_position();
     let prefix: NodeID = string_literal(source.arena, "value=", pos);
     let value: NodeID = string_access(source.arena, "value", pos);
-    let sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=prefix, op_tok=string_token(TOK_PLUS, "+"), right=value, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=prefix, op_tok=string_token(TOK_PLUS, "+"), right=value, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let info: FuncInfo = FuncInfo(name="describe", base_name="describe", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -109,11 +109,11 @@ func main() -> Int {
     let pos: Position = string_position();
 
     let literal: NodeID = string_literal(source.arena, "White", pos);
-    let global: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=string_token(TOK_IDENTIFIER, "message"), type_node=string_access(source.arena, "String", pos), value=literal, is_const=true, annotations=[], pos=pos, alloc_id=0));
-    let returned: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=string_literal(source.arena, "White", pos), pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[returned]));
-    let function: NodeID = add_func_def_node(source.arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=string_token(TOK_IDENTIFIER, "message_text"), type_params=[], params=[], ret_type_tok=string_access(source.arena, "String", pos), body=body, annotations=[], pos=pos));
-    let root: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[global, function]));
+    let global: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=string_token(TOK_IDENTIFIER, "message"), type_node=string_access(source.arena, "String", pos), value=literal, is_const=true, annotations=[], pos=pos, alloc_id=0));
+    let returned: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=string_literal(source.arena, "White", pos), pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[returned]));
+    let function: NodeID = add_func_def_node(ref source.arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=string_token(TOK_IDENTIFIER, "message_text"), type_params=[], params=[], ret_type_tok=string_access(source.arena, "String", pos), body=body, annotations=[], pos=pos));
+    let root: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[global, function]));
 
     let result: WirLoweringResult = wir_lower_module(ref source, root, "x86_64-pc-windows-msvc", 64);
     if (result.errors.length() != 0) { print("FAIL: String literal lowering failed: ", result.errors[0]); return 1; }

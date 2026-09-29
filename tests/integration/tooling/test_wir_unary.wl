@@ -25,10 +25,10 @@ func unary_token(kind: Int, value: String) -> Token {
 func check_unary(source_type: Int, token_kind: Int, token_value: String, wir_type: String, opcode: String) -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = unary_position();
-    let access: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=unary_token(TOK_IDENTIFIER, "value"), pos=pos));
-    let unary: NodeID = add_unary_node(source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=unary_token(token_kind, token_value), node=access, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=unary, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let access: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=unary_token(TOK_IDENTIFIER, "value"), pos=pos));
+    let unary: NodeID = add_unary_node(ref source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=unary_token(token_kind, token_value), node=access, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=unary, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 
     let args: Vector(Struct) = [TypeListNode(type=source_type, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="unary", base_name="unary", ret_type=source_type, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
@@ -48,10 +48,10 @@ func check_unary(source_type: Int, token_kind: Int, token_value: String, wir_typ
 func check_unary_plus() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = unary_position();
-    let access: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=unary_token(TOK_IDENTIFIER, "value"), pos=pos));
-    let unary: NodeID = add_unary_node(source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=unary_token(TOK_PLUS, "+"), node=access, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=unary, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let access: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=unary_token(TOK_IDENTIFIER, "value"), pos=pos));
+    let unary: NodeID = add_unary_node(ref source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=unary_token(TOK_PLUS, "+"), node=access, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=unary, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="positive", base_name="positive", ret_type=TYPE_INT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

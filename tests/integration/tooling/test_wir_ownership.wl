@@ -22,22 +22,22 @@ func ownership_token(kind: Int, value: String) -> Token {
 }
 
 func ownership_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ownership_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=ownership_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func ownership_copy_body(arena: AstArena, source_name: String, pos: Position) -> NodeID {
-    let local: NodeID = add_var_decl_node(arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=ownership_token(TOK_IDENTIFIER, "copy"), type_node=NO_NODE, value=ownership_access(arena, source_name, pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let assignment: NodeID = add_var_assign_node(arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=ownership_token(TOK_IDENTIFIER, "copy"), value=ownership_access(arena, "copy", pos), pos=pos));
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=ownership_access(arena, "copy", pos), pos=pos));
-    return add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[local, assignment, result]));
+    let local: NodeID = add_var_decl_node(ref arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=ownership_token(TOK_IDENTIFIER, "copy"), type_node=NO_NODE, value=ownership_access(arena, source_name, pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let assignment: NodeID = add_var_assign_node(ref arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=ownership_token(TOK_IDENTIFIER, "copy"), value=ownership_access(arena, "copy", pos), pos=pos));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=ownership_access(arena, "copy", pos), pos=pos));
+    return add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[local, assignment, result]));
 }
 
 func ownership_discard_body(arena: AstArena, pos: Position) -> NodeID {
-    let literal: NodeID = add_string_node(arena, StringNode(type=NODE_STRING, tok=ownership_token(TOK_STR_LIT, "temporary"), pos=pos));
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=ownership_access(arena, "copy_string", pos), args=[ArgNode(val=literal, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let zero: NodeID = add_int_node(arena, IntNode(type=NODE_INT, tok=ownership_token(TOK_INT, "0"), pos=pos));
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
-    return add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
+    let literal: NodeID = add_string_node(ref arena, StringNode(type=NODE_STRING, tok=ownership_token(TOK_STR_LIT, "temporary"), pos=pos));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=ownership_access(arena, "copy_string", pos), args=[ArgNode(val=literal, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let zero: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=ownership_token(TOK_INT, "0"), pos=pos));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
+    return add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
 }
 
 func ownership_opcode_count(program: WirModule, function_id: WirFuncID, opcode: WirOpcode) -> Int {

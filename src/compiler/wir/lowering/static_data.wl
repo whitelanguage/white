@@ -55,7 +55,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
     let info: ArrayInfo = source.array_info_map.lookup("" + repr);
     if (!has_array_info(info) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) { return NO_WIR_VALUE; }
 
-    let literal: VectorLitNode = get_vector_lit_node(source.arena, node);
+    let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     if (literal.elements.length() == 0) { return wir_const_zero(ref program, type_id); }
     if (literal.elements.length() != info.size) {
@@ -86,7 +86,7 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
         return NO_WIR_VALUE;
     }
 
-    let call: CallNode = get_call_node(source.arena, node);
+    let call: CallNode = get_call_node(ref source.arena, node);
     let field_count: Int = 0;
     if (info.fields is !null) { field_count = info.fields.length(); }
     let argument_count: Int = 0;
@@ -148,7 +148,7 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     let kind: Int = node_tag(node);
 
     if (kind == NODE_CALL) {
-        let call: CallNode = get_call_node(source.arena, node);
+        let call: CallNode = get_call_node(ref source.arena, node);
         let target: Int = wir_static_cast_target(ref source, call.callee);
         if (target != 0 && call.args is !null && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
@@ -170,7 +170,7 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         return wir_const_zero(ref program, type_id);
     }
     if (repr == TYPE_STRING && kind == NODE_STRING) {
-        return wir_lower_string_constant(ref types, ref program, get_string_node(source.arena, node).tok.value);
+        return wir_lower_string_constant(ref types, ref program, get_string_node(ref source.arena, node).tok.value);
     }
     if (repr == TYPE_BOOL) { return wir_const_bool(ref program, eval_const_bool(ref source, node, pos) != 0); }
     if (repr == TYPE_CHAR) { return wir_const_int(ref program, type_id, UInt128(eval_const_long(ref source, node, pos))); }

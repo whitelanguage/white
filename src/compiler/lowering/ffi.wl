@@ -113,7 +113,7 @@ func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResu
     let len: Int = 0; if (funcs is !null) { len = funcs.length(); }
     let i: Int = 0;
     while (i < len) {
-        let f_node: ExternFuncNode = get_extern_func_node(c.arena, funcs[i]);
+        let f_node: ExternFuncNode = get_extern_func_node(ref c.arena, funcs[i]);
         compile_extern_func(ref c, f_node);
         i += 1;
     }

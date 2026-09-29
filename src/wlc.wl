@@ -437,7 +437,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
     if (cfg.backend == "wir") {
-        WhitelangCompiler.prepare_program(ref compiler, ast);
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
 
         let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_llvm(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits())?;
@@ -459,7 +459,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         compiler.output_file.write(result.text);
         compiler.output_file.close();
     } else if (cfg.backend == "machine") {
-        WhitelangCompiler.prepare_program(ref compiler, ast);
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
 
         let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits(), cfg.verbose)?;

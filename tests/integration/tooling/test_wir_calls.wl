@@ -29,11 +29,11 @@ func main() -> Int {
     let abs_info: FuncInfo = FuncInfo(name="abs", base_name="abs", ret_type=TYPE_INT, arg_types=abs_args, arg_names=["value"], is_varargs=false, abi_name="C");
     source.func_table.put("abs", abs_info);
 
-    let callee: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=call_token(TOK_IDENTIFIER, "abs"), pos=pos));
-    let seven: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=call_token(TOK_INT, "7"), pos=pos));
-    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=seven, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
+    let callee: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=call_token(TOK_IDENTIFIER, "abs"), pos=pos));
+    let seven: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=call_token(TOK_INT, "7"), pos=pos));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=seven, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
 
     let caller: FuncInfo = FuncInfo(name="call_abs", base_name="call_abs", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

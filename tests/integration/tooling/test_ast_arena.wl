@@ -18,26 +18,26 @@ func main() -> Int {
         return 1;
     }
 
-    let module: BlockNode = get_block_node(arena, root);
+    let module: BlockNode = get_block_node(ref arena, root);
     if (module.stmts.length() != 1 || node_tag(module.stmts[0]) != NODE_FUNC_DEF) {
         print("FAIL: Function handle was not stored in the module block");
         return 1;
     }
 
-    let function_node: FunctionDefNode = get_func_def_node(arena, module.stmts[0]);
-    let body: BlockNode = get_block_node(arena, function_node.body);
+    let function_node: FunctionDefNode = get_func_def_node(ref arena, module.stmts[0]);
+    let body: BlockNode = get_block_node(ref arena, function_node.body);
     if (body.stmts.length() != 2 || node_tag(body.stmts[0]) != NODE_VAR_DECL) {
         print("FAIL: Function body lost its statement handles");
         return 1;
     }
 
-    let declaration: VarDeclareNode = get_var_decl_node(arena, body.stmts[0]);
+    let declaration: VarDeclareNode = get_var_decl_node(ref arena, body.stmts[0]);
     if (node_tag(declaration.value) != NODE_IS) {
         print("FAIL: Shared binary payload lost the original node kind");
         return 1;
     }
 
-    let comparison: BinOpNode = get_binop_node(arena, declaration.value);
+    let comparison: BinOpNode = get_binop_node(ref arena, declaration.value);
     if (comparison.type != NODE_IS || node_tag(comparison.left) != NODE_INT || node_tag(comparison.right) != NODE_INT) {
         print("FAIL: Binary expression children were not stored correctly");
         return 1;

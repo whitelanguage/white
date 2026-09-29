@@ -17,7 +17,7 @@ func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> SymbolInfo {
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
         if (!has_symbol(info)) { info = c.global_symbol_table.lookup(name); }
     } else if (base == NODE_VAR_ACCESS) {
-        let access: VarAccessNode = get_var_access_node(c.arena, node);
+        let access: VarAccessNode = get_var_access_node(ref c.arena, node);
         info = find_symbol(ref c, access.name_tok.value);
     }
     if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return SymbolInfo(); }
@@ -79,7 +79,7 @@ func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
     let base: Int = node_tag(node);
 
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         if (unary.op_tok.value == "!") {
             let value: Int = fold_target_cond(ref c, unary.node);
             if (value == 0) { return 1; }
@@ -89,7 +89,7 @@ func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
     }
 
     if (base != NODE_BINOP) { return -1; }
-    let binary: BinOpNode = get_binop_node(c.arena, node);
+    let binary: BinOpNode = get_binop_node(ref c.arena, node);
     let op: String = binary.op_tok.value;
 
     if (op == "&&" || op == "||") {
@@ -119,10 +119,10 @@ func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
     let literal_base: Int = node_tag(literal_node);
     let equal: Bool = false;
     if (intrinsic == "target_pointer_bits" && literal_base != 0 && literal_base == NODE_INT) {
-        let literal: IntNode = get_int_node(c.arena, literal_node);
+        let literal: IntNode = get_int_node(ref c.arena, literal_node);
         equal = get_target_pointer_bits() == string_to_int(literal.tok.value, literal.pos);
     } else if (literal_base != 0 && literal_base == NODE_FIELD_ACCESS) {
-        let field: FieldAccessNode = get_field_access_node(c.arena, literal_node);
+        let field: FieldAccessNode = get_field_access_node(ref c.arena, literal_node);
         let enum_name: String = target_enum_name(intrinsic);
         let field_path: String = format_ast_path(ref c, literal_node);
         if (!field_path.ends_with(enum_name + "." + field.field_name)) { return -1; }

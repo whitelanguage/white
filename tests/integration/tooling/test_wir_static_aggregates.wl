@@ -23,14 +23,14 @@ func static_token(kind: Int, value: String) -> Token {
 }
 
 func static_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=static_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=static_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func static_point(arena: AstArena, value: String, pos: Position) -> NodeID {
-    let number: NodeID = add_int_node(arena, IntNode(type=NODE_INT, tok=static_token(TOK_INT, value), pos=pos));
-    let text: NodeID = add_string_node(arena, StringNode(type=NODE_STRING, tok=static_token(TOK_STR_LIT, "point"), pos=pos));
+    let number: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=static_token(TOK_INT, value), pos=pos));
+    let text: NodeID = add_string_node(ref arena, StringNode(type=NODE_STRING, tok=static_token(TOK_STR_LIT, "point"), pos=pos));
     let args: Vector(ArgNode) = [ArgNode(val=number, name="", is_spread=false), ArgNode(val=text, name="", is_spread=false)];
-    return add_call_node(arena, CallNode(type=NODE_CALL, callee=static_access(arena, "Point", pos), args=args, type_args=[], pos=pos, preserve_fallible=false));
+    return add_call_node(ref arena, CallNode(type=NODE_CALL, callee=static_access(arena, "Point", pos), args=args, type_args=[], pos=pos, preserve_fallible=false));
 }
 
 func main() -> Int {
@@ -49,7 +49,7 @@ func main() -> Int {
     arrays.put("" + buffer_type, ArrayInfo(base_type=TYPE_BYTE, size=4096, llvm_name=""));
     let source: Compiler = Compiler(arena=new_ast_arena(), struct_id_map=structs, array_info_map=arrays, named_type_ids=named);
     let pos: Position = static_position();
-    let literal: NodeID = add_vector_lit_node(source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[ArgNode(val=static_point(source.arena, "1", pos), name="", is_spread=false), ArgNode(val=static_point(source.arena, "2", pos), name="", is_spread=false)], count=2, pos=pos));
+    let literal: NodeID = add_vector_lit_node(ref source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[ArgNode(val=static_point(source.arena, "1", pos), name="", is_spread=false), ArgNode(val=static_point(source.arena, "2", pos), name="", is_spread=false)], count=2, pos=pos));
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -57,7 +57,7 @@ func main() -> Int {
     if (initializer == NO_WIR_VALUE || types.errors.length() != 0) { print("FAIL: static aggregate lowering failed"); return 1; }
     let lowered_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, array_type);
     wir_add_aligned_global(ref program, "points", lowered_type, initializer, WirLinkage.Internal, true, 8);
-    let empty: NodeID = add_vector_lit_node(source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[], count=0, pos=pos));
+    let empty: NodeID = add_vector_lit_node(ref source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[], count=0, pos=pos));
     let zero: WirValueID = wir_lower_static_value(ref types, ref source, ref program, empty, buffer_type, pos);
     if (zero == NO_WIR_VALUE || types.errors.length() != 0) { print("FAIL: empty static array lowering failed"); return 1; }
     let lowered_buffer: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, buffer_type);

@@ -118,542 +118,542 @@ func new_ast_arena() -> AstArena {
     );
 }
 
-func add_int_node(arena: AstArena, node: IntNode) -> NodeID {
+func add_int_node(ref arena: AstArena, node: IntNode) -> NodeID {
     let slot: Int = arena.int_nodes.length();
     arena.int_nodes.append(node);
     return make_node_id(NODE_INT, slot);
 }
 
-func get_int_node(arena: AstArena, id: NodeID) -> IntNode {
+func get_int_node(ref arena: AstArena, id: NodeID) -> IntNode {
     return arena.int_nodes[node_slot(id)];
 }
 
-func add_float_node(arena: AstArena, node: FloatNode) -> NodeID {
+func add_float_node(ref arena: AstArena, node: FloatNode) -> NodeID {
     let slot: Int = arena.float_nodes.length();
     arena.float_nodes.append(node);
     return make_node_id(NODE_FLOAT, slot);
 }
 
-func get_float_node(arena: AstArena, id: NodeID) -> FloatNode {
+func get_float_node(ref arena: AstArena, id: NodeID) -> FloatNode {
     return arena.float_nodes[node_slot(id)];
 }
 
-func add_binop_node(arena: AstArena, node: BinOpNode) -> NodeID {
+func add_binop_node(ref arena: AstArena, node: BinOpNode) -> NodeID {
     let slot: Int = arena.binop_nodes.length();
     arena.binop_nodes.append(node);
     return make_node_id(node.type, slot);
 }
 
-func get_binop_node(arena: AstArena, id: NodeID) -> BinOpNode {
+func get_binop_node(ref arena: AstArena, id: NodeID) -> BinOpNode {
     return arena.binop_nodes[node_slot(id)];
 }
 
-func add_unary_node(arena: AstArena, node: UnaryOpNode) -> NodeID {
+func add_unary_node(ref arena: AstArena, node: UnaryOpNode) -> NodeID {
     let slot: Int = arena.unary_nodes.length();
     arena.unary_nodes.append(node);
     return make_node_id(NODE_UNARYOP, slot);
 }
 
-func get_unary_node(arena: AstArena, id: NodeID) -> UnaryOpNode {
+func get_unary_node(ref arena: AstArena, id: NodeID) -> UnaryOpNode {
     return arena.unary_nodes[node_slot(id)];
 }
 
-func add_var_decl_node(arena: AstArena, node: VarDeclareNode) -> NodeID {
+func add_var_decl_node(ref arena: AstArena, node: VarDeclareNode) -> NodeID {
     let slot: Int = arena.var_decl_nodes.length();
     arena.var_decl_nodes.append(node);
     return make_node_id(NODE_VAR_DECL, slot);
 }
 
-func get_var_decl_node(arena: AstArena, id: NodeID) -> VarDeclareNode {
+func get_var_decl_node(ref arena: AstArena, id: NodeID) -> VarDeclareNode {
     return arena.var_decl_nodes[node_slot(id)];
 }
 
-func add_var_access_node(arena: AstArena, node: VarAccessNode) -> NodeID {
+func add_var_access_node(ref arena: AstArena, node: VarAccessNode) -> NodeID {
     let slot: Int = arena.var_access_nodes.length();
     arena.var_access_nodes.append(node);
     return make_node_id(NODE_VAR_ACCESS, slot);
 }
 
-func get_var_access_node(arena: AstArena, id: NodeID) -> VarAccessNode {
+func get_var_access_node(ref arena: AstArena, id: NodeID) -> VarAccessNode {
     return arena.var_access_nodes[node_slot(id)];
 }
 
-func add_var_assign_node(arena: AstArena, node: VarAssignNode) -> NodeID {
+func add_var_assign_node(ref arena: AstArena, node: VarAssignNode) -> NodeID {
     let slot: Int = arena.var_assign_nodes.length();
     arena.var_assign_nodes.append(node);
     return make_node_id(NODE_VAR_ASSIGN, slot);
 }
 
-func get_var_assign_node(arena: AstArena, id: NodeID) -> VarAssignNode {
+func get_var_assign_node(ref arena: AstArena, id: NodeID) -> VarAssignNode {
     return arena.var_assign_nodes[node_slot(id)];
 }
 
-func add_block_node(arena: AstArena, node: BlockNode) -> NodeID {
+func add_block_node(ref arena: AstArena, node: BlockNode) -> NodeID {
     let slot: Int = arena.block_nodes.length();
     arena.block_nodes.append(node);
     return make_node_id(NODE_BLOCK, slot);
 }
 
-func get_block_node(arena: AstArena, id: NodeID) -> BlockNode {
+func get_block_node(ref arena: AstArena, id: NodeID) -> BlockNode {
     return arena.block_nodes[node_slot(id)];
 }
 
-func add_postfix_node(arena: AstArena, node: PostfixOpNode) -> NodeID {
+func add_postfix_node(ref arena: AstArena, node: PostfixOpNode) -> NodeID {
     let slot: Int = arena.postfix_nodes.length();
     arena.postfix_nodes.append(node);
     return make_node_id(NODE_POSTFIX, slot);
 }
 
-func get_postfix_node(arena: AstArena, id: NodeID) -> PostfixOpNode {
+func get_postfix_node(ref arena: AstArena, id: NodeID) -> PostfixOpNode {
     return arena.postfix_nodes[node_slot(id)];
 }
 
-func add_bool_node(arena: AstArena, node: BooleanNode) -> NodeID {
+func add_bool_node(ref arena: AstArena, node: BooleanNode) -> NodeID {
     let slot: Int = arena.bool_nodes.length();
     arena.bool_nodes.append(node);
     return make_node_id(NODE_BOOL, slot);
 }
 
-func get_bool_node(arena: AstArena, id: NodeID) -> BooleanNode {
+func get_bool_node(ref arena: AstArena, id: NodeID) -> BooleanNode {
     return arena.bool_nodes[node_slot(id)];
 }
 
-func add_if_node(arena: AstArena, node: IfNode) -> NodeID {
+func add_if_node(ref arena: AstArena, node: IfNode) -> NodeID {
     let slot: Int = arena.if_nodes.length();
     arena.if_nodes.append(node);
     return make_node_id(NODE_IF, slot);
 }
 
-func get_if_node(arena: AstArena, id: NodeID) -> IfNode {
+func get_if_node(ref arena: AstArena, id: NodeID) -> IfNode {
     return arena.if_nodes[node_slot(id)];
 }
 
-func add_while_node(arena: AstArena, node: WhileNode) -> NodeID {
+func add_while_node(ref arena: AstArena, node: WhileNode) -> NodeID {
     let slot: Int = arena.while_nodes.length();
     arena.while_nodes.append(node);
     return make_node_id(NODE_WHILE, slot);
 }
 
-func get_while_node(arena: AstArena, id: NodeID) -> WhileNode {
+func get_while_node(ref arena: AstArena, id: NodeID) -> WhileNode {
     return arena.while_nodes[node_slot(id)];
 }
 
-func add_break_node(arena: AstArena, node: BreakNode) -> NodeID {
+func add_break_node(ref arena: AstArena, node: BreakNode) -> NodeID {
     let slot: Int = arena.break_nodes.length();
     arena.break_nodes.append(node);
     return make_node_id(NODE_BREAK, slot);
 }
 
-func get_break_node(arena: AstArena, id: NodeID) -> BreakNode {
+func get_break_node(ref arena: AstArena, id: NodeID) -> BreakNode {
     return arena.break_nodes[node_slot(id)];
 }
 
-func add_continue_node(arena: AstArena, node: ContinueNode) -> NodeID {
+func add_continue_node(ref arena: AstArena, node: ContinueNode) -> NodeID {
     let slot: Int = arena.continue_nodes.length();
     arena.continue_nodes.append(node);
     return make_node_id(NODE_CONTINUE, slot);
 }
 
-func get_continue_node(arena: AstArena, id: NodeID) -> ContinueNode {
+func get_continue_node(ref arena: AstArena, id: NodeID) -> ContinueNode {
     return arena.continue_nodes[node_slot(id)];
 }
 
-func add_for_node(arena: AstArena, node: ForNode) -> NodeID {
+func add_for_node(ref arena: AstArena, node: ForNode) -> NodeID {
     let slot: Int = arena.for_nodes.length();
     arena.for_nodes.append(node);
     return make_node_id(NODE_FOR, slot);
 }
 
-func get_for_node(arena: AstArena, id: NodeID) -> ForNode {
+func get_for_node(ref arena: AstArena, id: NodeID) -> ForNode {
     return arena.for_nodes[node_slot(id)];
 }
 
-func add_call_node(arena: AstArena, node: CallNode) -> NodeID {
+func add_call_node(ref arena: AstArena, node: CallNode) -> NodeID {
     let slot: Int = arena.call_nodes.length();
     arena.call_nodes.append(node);
     return make_node_id(NODE_CALL, slot);
 }
 
-func get_call_node(arena: AstArena, id: NodeID) -> CallNode {
+func get_call_node(ref arena: AstArena, id: NodeID) -> CallNode {
     return arena.call_nodes[node_slot(id)];
 }
 
-func add_func_def_node(arena: AstArena, node: FunctionDefNode) -> NodeID {
+func add_func_def_node(ref arena: AstArena, node: FunctionDefNode) -> NodeID {
     let slot: Int = arena.func_def_nodes.length();
     arena.func_def_nodes.append(node);
     return make_node_id(NODE_FUNC_DEF, slot);
 }
 
-func get_func_def_node(arena: AstArena, id: NodeID) -> FunctionDefNode {
+func get_func_def_node(ref arena: AstArena, id: NodeID) -> FunctionDefNode {
     return arena.func_def_nodes[node_slot(id)];
 }
 
-func add_return_node(arena: AstArena, node: ReturnNode) -> NodeID {
+func add_return_node(ref arena: AstArena, node: ReturnNode) -> NodeID {
     let slot: Int = arena.return_nodes.length();
     arena.return_nodes.append(node);
     return make_node_id(NODE_RETURN, slot);
 }
 
-func get_return_node(arena: AstArena, id: NodeID) -> ReturnNode {
+func get_return_node(ref arena: AstArena, id: NodeID) -> ReturnNode {
     return arena.return_nodes[node_slot(id)];
 }
 
-func add_string_node(arena: AstArena, node: StringNode) -> NodeID {
+func add_string_node(ref arena: AstArena, node: StringNode) -> NodeID {
     let slot: Int = arena.string_nodes.length();
     arena.string_nodes.append(node);
     return make_node_id(NODE_STRING, slot);
 }
 
-func get_string_node(arena: AstArena, id: NodeID) -> StringNode {
+func get_string_node(ref arena: AstArena, id: NodeID) -> StringNode {
     return arena.string_nodes[node_slot(id)];
 }
 
-func add_struct_def_node(arena: AstArena, node: StructDefNode) -> NodeID {
+func add_struct_def_node(ref arena: AstArena, node: StructDefNode) -> NodeID {
     let slot: Int = arena.struct_def_nodes.length();
     arena.struct_def_nodes.append(node);
     return make_node_id(NODE_STRUCT_DEF, slot);
 }
 
-func get_struct_def_node(arena: AstArena, id: NodeID) -> StructDefNode {
+func get_struct_def_node(ref arena: AstArena, id: NodeID) -> StructDefNode {
     return arena.struct_def_nodes[node_slot(id)];
 }
 
-func add_field_access_node(arena: AstArena, node: FieldAccessNode) -> NodeID {
+func add_field_access_node(ref arena: AstArena, node: FieldAccessNode) -> NodeID {
     let slot: Int = arena.field_access_nodes.length();
     arena.field_access_nodes.append(node);
     return make_node_id(NODE_FIELD_ACCESS, slot);
 }
 
-func get_field_access_node(arena: AstArena, id: NodeID) -> FieldAccessNode {
+func get_field_access_node(ref arena: AstArena, id: NodeID) -> FieldAccessNode {
     return arena.field_access_nodes[node_slot(id)];
 }
 
-func add_field_assign_node(arena: AstArena, node: FieldAssignNode) -> NodeID {
+func add_field_assign_node(ref arena: AstArena, node: FieldAssignNode) -> NodeID {
     let slot: Int = arena.field_assign_nodes.length();
     arena.field_assign_nodes.append(node);
     return make_node_id(NODE_FIELD_ASSIGN, slot);
 }
 
-func get_field_assign_node(arena: AstArena, id: NodeID) -> FieldAssignNode {
+func get_field_assign_node(ref arena: AstArena, id: NodeID) -> FieldAssignNode {
     return arena.field_assign_nodes[node_slot(id)];
 }
 
-func add_pointer_type_node(arena: AstArena, node: PointerTypeNode) -> NodeID {
+func add_pointer_type_node(ref arena: AstArena, node: PointerTypeNode) -> NodeID {
     let slot: Int = arena.pointer_type_nodes.length();
     arena.pointer_type_nodes.append(node);
     return make_node_id(NODE_PTR_TYPE, slot);
 }
 
-func get_pointer_type_node(arena: AstArena, id: NodeID) -> PointerTypeNode {
+func get_pointer_type_node(ref arena: AstArena, id: NodeID) -> PointerTypeNode {
     return arena.pointer_type_nodes[node_slot(id)];
 }
 
-func add_ref_node(arena: AstArena, node: RefNode) -> NodeID {
+func add_ref_node(ref arena: AstArena, node: RefNode) -> NodeID {
     let slot: Int = arena.ref_nodes.length();
     arena.ref_nodes.append(node);
     return make_node_id(NODE_REF, slot);
 }
 
-func get_ref_node(arena: AstArena, id: NodeID) -> RefNode {
+func get_ref_node(ref arena: AstArena, id: NodeID) -> RefNode {
     return arena.ref_nodes[node_slot(id)];
 }
 
-func add_deref_node(arena: AstArena, node: DerefNode) -> NodeID {
+func add_deref_node(ref arena: AstArena, node: DerefNode) -> NodeID {
     let slot: Int = arena.deref_nodes.length();
     arena.deref_nodes.append(node);
     return make_node_id(NODE_DEREF, slot);
 }
 
-func get_deref_node(arena: AstArena, id: NodeID) -> DerefNode {
+func get_deref_node(ref arena: AstArena, id: NodeID) -> DerefNode {
     return arena.deref_nodes[node_slot(id)];
 }
 
-func add_ptr_assign_node(arena: AstArena, node: PtrAssignNode) -> NodeID {
+func add_ptr_assign_node(ref arena: AstArena, node: PtrAssignNode) -> NodeID {
     let slot: Int = arena.ptr_assign_nodes.length();
     arena.ptr_assign_nodes.append(node);
     return make_node_id(NODE_PTR_ASSIGN, slot);
 }
 
-func get_ptr_assign_node(arena: AstArena, id: NodeID) -> PtrAssignNode {
+func get_ptr_assign_node(ref arena: AstArena, id: NodeID) -> PtrAssignNode {
     return arena.ptr_assign_nodes[node_slot(id)];
 }
 
-func add_nullptr_node(arena: AstArena, node: NullPtrNode) -> NodeID {
+func add_nullptr_node(ref arena: AstArena, node: NullPtrNode) -> NodeID {
     let slot: Int = arena.nullptr_nodes.length();
     arena.nullptr_nodes.append(node);
     return make_node_id(NODE_NULLPTR, slot);
 }
 
-func get_nullptr_node(arena: AstArena, id: NodeID) -> NullPtrNode {
+func get_nullptr_node(ref arena: AstArena, id: NodeID) -> NullPtrNode {
     return arena.nullptr_nodes[node_slot(id)];
 }
 
-func add_function_type_node(arena: AstArena, node: FunctionTypeNode) -> NodeID {
+func add_function_type_node(ref arena: AstArena, node: FunctionTypeNode) -> NodeID {
     let slot: Int = arena.function_type_nodes.length();
     arena.function_type_nodes.append(node);
     return make_node_id(NODE_FUNCTION_TYPE, slot);
 }
 
-func get_function_type_node(arena: AstArena, id: NodeID) -> FunctionTypeNode {
+func get_function_type_node(ref arena: AstArena, id: NodeID) -> FunctionTypeNode {
     return arena.function_type_nodes[node_slot(id)];
 }
 
-func add_null_node(arena: AstArena, node: NullNode) -> NodeID {
+func add_null_node(ref arena: AstArena, node: NullNode) -> NodeID {
     let slot: Int = arena.null_nodes.length();
     arena.null_nodes.append(node);
     return make_node_id(NODE_NULL, slot);
 }
 
-func get_null_node(arena: AstArena, id: NodeID) -> NullNode {
+func get_null_node(ref arena: AstArena, id: NodeID) -> NullNode {
     return arena.null_nodes[node_slot(id)];
 }
 
-func add_extern_block_node(arena: AstArena, node: ExternBlockNode) -> NodeID {
+func add_extern_block_node(ref arena: AstArena, node: ExternBlockNode) -> NodeID {
     let slot: Int = arena.extern_block_nodes.length();
     arena.extern_block_nodes.append(node);
     return make_node_id(NODE_EXTERN_BLOCK, slot);
 }
 
-func get_extern_block_node(arena: AstArena, id: NodeID) -> ExternBlockNode {
+func get_extern_block_node(ref arena: AstArena, id: NodeID) -> ExternBlockNode {
     return arena.extern_block_nodes[node_slot(id)];
 }
 
-func add_extern_func_node(arena: AstArena, node: ExternFuncNode) -> NodeID {
+func add_extern_func_node(ref arena: AstArena, node: ExternFuncNode) -> NodeID {
     let slot: Int = arena.extern_func_nodes.length();
     arena.extern_func_nodes.append(node);
     return make_node_id(NODE_EXTERN_FUNC, slot);
 }
 
-func get_extern_func_node(arena: AstArena, id: NodeID) -> ExternFuncNode {
+func get_extern_func_node(ref arena: AstArena, id: NodeID) -> ExternFuncNode {
     return arena.extern_func_nodes[node_slot(id)];
 }
 
-func add_vector_type_node(arena: AstArena, node: VectorTypeNode) -> NodeID {
+func add_vector_type_node(ref arena: AstArena, node: VectorTypeNode) -> NodeID {
     let slot: Int = arena.vector_type_nodes.length();
     arena.vector_type_nodes.append(node);
     return make_node_id(NODE_VECTOR_TYPE, slot);
 }
 
-func get_vector_type_node(arena: AstArena, id: NodeID) -> VectorTypeNode {
+func get_vector_type_node(ref arena: AstArena, id: NodeID) -> VectorTypeNode {
     return arena.vector_type_nodes[node_slot(id)];
 }
 
-func add_vector_lit_node(arena: AstArena, node: VectorLitNode) -> NodeID {
+func add_vector_lit_node(ref arena: AstArena, node: VectorLitNode) -> NodeID {
     let slot: Int = arena.vector_lit_nodes.length();
     arena.vector_lit_nodes.append(node);
     return make_node_id(NODE_VECTOR_LIT, slot);
 }
 
-func get_vector_lit_node(arena: AstArena, id: NodeID) -> VectorLitNode {
+func get_vector_lit_node(ref arena: AstArena, id: NodeID) -> VectorLitNode {
     return arena.vector_lit_nodes[node_slot(id)];
 }
 
-func add_index_access_node(arena: AstArena, node: IndexAccessNode) -> NodeID {
+func add_index_access_node(ref arena: AstArena, node: IndexAccessNode) -> NodeID {
     let slot: Int = arena.index_access_nodes.length();
     arena.index_access_nodes.append(node);
     return make_node_id(NODE_INDEX_ACCESS, slot);
 }
 
-func get_index_access_node(arena: AstArena, id: NodeID) -> IndexAccessNode {
+func get_index_access_node(ref arena: AstArena, id: NodeID) -> IndexAccessNode {
     return arena.index_access_nodes[node_slot(id)];
 }
 
-func add_index_assign_node(arena: AstArena, node: IndexAssignNode) -> NodeID {
+func add_index_assign_node(ref arena: AstArena, node: IndexAssignNode) -> NodeID {
     let slot: Int = arena.index_assign_nodes.length();
     arena.index_assign_nodes.append(node);
     return make_node_id(NODE_INDEX_ASSIGN, slot);
 }
 
-func get_index_assign_node(arena: AstArena, id: NodeID) -> IndexAssignNode {
+func get_index_assign_node(ref arena: AstArena, id: NodeID) -> IndexAssignNode {
     return arena.index_assign_nodes[node_slot(id)];
 }
 
-func add_import_node(arena: AstArena, node: ImportNode) -> NodeID {
+func add_import_node(ref arena: AstArena, node: ImportNode) -> NodeID {
     let slot: Int = arena.import_nodes.length();
     arena.import_nodes.append(node);
     return make_node_id(NODE_IMPORT, slot);
 }
 
-func get_import_node(arena: AstArena, id: NodeID) -> ImportNode {
+func get_import_node(ref arena: AstArena, id: NodeID) -> ImportNode {
     return arena.import_nodes[node_slot(id)];
 }
 
-func add_class_def_node(arena: AstArena, node: ClassDefNode) -> NodeID {
+func add_class_def_node(ref arena: AstArena, node: ClassDefNode) -> NodeID {
     let slot: Int = arena.class_def_nodes.length();
     arena.class_def_nodes.append(node);
     return make_node_id(NODE_CLASS_DEF, slot);
 }
 
-func get_class_def_node(arena: AstArena, id: NodeID) -> ClassDefNode {
+func get_class_def_node(ref arena: AstArena, id: NodeID) -> ClassDefNode {
     return arena.class_def_nodes[node_slot(id)];
 }
 
-func add_method_def_node(arena: AstArena, node: MethodDefNode) -> NodeID {
+func add_method_def_node(ref arena: AstArena, node: MethodDefNode) -> NodeID {
     let slot: Int = arena.method_def_nodes.length();
     arena.method_def_nodes.append(node);
     return make_node_id(NODE_METHOD_DEF, slot);
 }
 
-func get_method_def_node(arena: AstArena, id: NodeID) -> MethodDefNode {
+func get_method_def_node(ref arena: AstArena, id: NodeID) -> MethodDefNode {
     return arena.method_def_nodes[node_slot(id)];
 }
 
-func add_super_node(arena: AstArena, node: SuperNode) -> NodeID {
+func add_super_node(ref arena: AstArena, node: SuperNode) -> NodeID {
     let slot: Int = arena.super_nodes.length();
     arena.super_nodes.append(node);
     return make_node_id(NODE_SUPER, slot);
 }
 
-func get_super_node(arena: AstArena, id: NodeID) -> SuperNode {
+func get_super_node(ref arena: AstArena, id: NodeID) -> SuperNode {
     return arena.super_nodes[node_slot(id)];
 }
 
-func add_method_type_node(arena: AstArena, node: MethodTypeNode) -> NodeID {
+func add_method_type_node(ref arena: AstArena, node: MethodTypeNode) -> NodeID {
     let slot: Int = arena.method_type_nodes.length();
     arena.method_type_nodes.append(node);
     return make_node_id(NODE_METHOD_TYPE, slot);
 }
 
-func get_method_type_node(arena: AstArena, id: NodeID) -> MethodTypeNode {
+func get_method_type_node(ref arena: AstArena, id: NodeID) -> MethodTypeNode {
     return arena.method_type_nodes[node_slot(id)];
 }
 
-func add_array_type_node(arena: AstArena, node: ArrayTypeNode) -> NodeID {
+func add_array_type_node(ref arena: AstArena, node: ArrayTypeNode) -> NodeID {
     let slot: Int = arena.array_type_nodes.length();
     arena.array_type_nodes.append(node);
     return make_node_id(NODE_ARRAY_TYPE, slot);
 }
 
-func get_array_type_node(arena: AstArena, id: NodeID) -> ArrayTypeNode {
+func get_array_type_node(ref arena: AstArena, id: NodeID) -> ArrayTypeNode {
     return arena.array_type_nodes[node_slot(id)];
 }
 
-func add_slice_type_node(arena: AstArena, node: SliceTypeNode) -> NodeID {
+func add_slice_type_node(ref arena: AstArena, node: SliceTypeNode) -> NodeID {
     let slot: Int = arena.slice_type_nodes.length();
     arena.slice_type_nodes.append(node);
     return make_node_id(NODE_SLICE_TYPE, slot);
 }
 
-func get_slice_type_node(arena: AstArena, id: NodeID) -> SliceTypeNode {
+func get_slice_type_node(ref arena: AstArena, id: NodeID) -> SliceTypeNode {
     return arena.slice_type_nodes[node_slot(id)];
 }
 
-func add_slice_access_node(arena: AstArena, node: SliceAccessNode) -> NodeID {
+func add_slice_access_node(ref arena: AstArena, node: SliceAccessNode) -> NodeID {
     let slot: Int = arena.slice_access_nodes.length();
     arena.slice_access_nodes.append(node);
     return make_node_id(NODE_SLICE_ACCESS, slot);
 }
 
-func get_slice_access_node(arena: AstArena, id: NodeID) -> SliceAccessNode {
+func get_slice_access_node(ref arena: AstArena, id: NodeID) -> SliceAccessNode {
     return arena.slice_access_nodes[node_slot(id)];
 }
 
-func add_map_lit_node(arena: AstArena, node: MapLitNode) -> NodeID {
+func add_map_lit_node(ref arena: AstArena, node: MapLitNode) -> NodeID {
     let slot: Int = arena.map_lit_nodes.length();
     arena.map_lit_nodes.append(node);
     return make_node_id(NODE_MAP_LIT, slot);
 }
 
-func get_map_lit_node(arena: AstArena, id: NodeID) -> MapLitNode {
+func get_map_lit_node(ref arena: AstArena, id: NodeID) -> MapLitNode {
     return arena.map_lit_nodes[node_slot(id)];
 }
 
-func add_char_node(arena: AstArena, node: CharNode) -> NodeID {
+func add_char_node(ref arena: AstArena, node: CharNode) -> NodeID {
     let slot: Int = arena.char_nodes.length();
     arena.char_nodes.append(node);
     return make_node_id(NODE_CHAR, slot);
 }
 
-func get_char_node(arena: AstArena, id: NodeID) -> CharNode {
+func get_char_node(ref arena: AstArena, id: NodeID) -> CharNode {
     return arena.char_nodes[node_slot(id)];
 }
 
-func add_enum_def_node(arena: AstArena, node: EnumDefNode) -> NodeID {
+func add_enum_def_node(ref arena: AstArena, node: EnumDefNode) -> NodeID {
     let slot: Int = arena.enum_def_nodes.length();
     arena.enum_def_nodes.append(node);
     return make_node_id(NODE_ENUM_DEF, slot);
 }
 
-func get_enum_def_node(arena: AstArena, id: NodeID) -> EnumDefNode {
+func get_enum_def_node(ref arena: AstArena, id: NodeID) -> EnumDefNode {
     return arena.enum_def_nodes[node_slot(id)];
 }
 
-func add_interface_def_node(arena: AstArena, node: InterfaceDefNode) -> NodeID {
+func add_interface_def_node(ref arena: AstArena, node: InterfaceDefNode) -> NodeID {
     let slot: Int = arena.interface_def_nodes.length();
     arena.interface_def_nodes.append(node);
     return make_node_id(NODE_INTERFACE_DEF, slot);
 }
 
-func get_interface_def_node(arena: AstArena, id: NodeID) -> InterfaceDefNode {
+func get_interface_def_node(ref arena: AstArena, id: NodeID) -> InterfaceDefNode {
     return arena.interface_def_nodes[node_slot(id)];
 }
 
-func add_try_unwrap_node(arena: AstArena, node: TryUnwrapNode) -> NodeID {
+func add_try_unwrap_node(ref arena: AstArena, node: TryUnwrapNode) -> NodeID {
     let slot: Int = arena.try_unwrap_nodes.length();
     arena.try_unwrap_nodes.append(node);
     return make_node_id(NODE_TRY_UNWRAP, slot);
 }
 
-func get_try_unwrap_node(arena: AstArena, id: NodeID) -> TryUnwrapNode {
+func get_try_unwrap_node(ref arena: AstArena, id: NodeID) -> TryUnwrapNode {
     return arena.try_unwrap_nodes[node_slot(id)];
 }
 
-func add_catch_node(arena: AstArena, node: CatchNode) -> NodeID {
+func add_catch_node(ref arena: AstArena, node: CatchNode) -> NodeID {
     let slot: Int = arena.catch_nodes.length();
     arena.catch_nodes.append(node);
     return make_node_id(NODE_CATCH, slot);
 }
 
-func get_catch_node(arena: AstArena, id: NodeID) -> CatchNode {
+func get_catch_node(ref arena: AstArena, id: NodeID) -> CatchNode {
     return arena.catch_nodes[node_slot(id)];
 }
 
-func add_throw_node(arena: AstArena, node: ThrowNode) -> NodeID {
+func add_throw_node(ref arena: AstArena, node: ThrowNode) -> NodeID {
     let slot: Int = arena.throw_nodes.length();
     arena.throw_nodes.append(node);
     return make_node_id(NODE_THROW, slot);
 }
 
-func get_throw_node(arena: AstArena, id: NodeID) -> ThrowNode {
+func get_throw_node(ref arena: AstArena, id: NodeID) -> ThrowNode {
     return arena.throw_nodes[node_slot(id)];
 }
 
-func add_fallible_type_node(arena: AstArena, node: FallibleTypeNode) -> NodeID {
+func add_fallible_type_node(ref arena: AstArena, node: FallibleTypeNode) -> NodeID {
     let slot: Int = arena.fallible_type_nodes.length();
     arena.fallible_type_nodes.append(node);
     return make_node_id(NODE_FALLIBLE_TYPE, slot);
 }
 
-func get_fallible_type_node(arena: AstArena, id: NodeID) -> FallibleTypeNode {
+func get_fallible_type_node(ref arena: AstArena, id: NodeID) -> FallibleTypeNode {
     return arena.fallible_type_nodes[node_slot(id)];
 }
 
-func add_type_layout_node(arena: AstArena, node: TypeLayoutNode) -> NodeID {
+func add_type_layout_node(ref arena: AstArena, node: TypeLayoutNode) -> NodeID {
     let slot: Int = arena.type_layout_nodes.length();
     arena.type_layout_nodes.append(node);
     return make_node_id(NODE_TYPE_LAYOUT, slot);
 }
 
-func get_type_layout_node(arena: AstArena, id: NodeID) -> TypeLayoutNode {
+func get_type_layout_node(ref arena: AstArena, id: NodeID) -> TypeLayoutNode {
     return arena.type_layout_nodes[node_slot(id)];
 }
 
-func add_generic_type_node(arena: AstArena, node: GenericTypeNode) -> NodeID {
+func add_generic_type_node(ref arena: AstArena, node: GenericTypeNode) -> NodeID {
     let slot: Int = arena.generic_type_nodes.length();
     arena.generic_type_nodes.append(node);
     return make_node_id(NODE_GENERIC_TYPE, slot);
 }
 
-func get_generic_type_node(arena: AstArena, id: NodeID) -> GenericTypeNode {
+func get_generic_type_node(ref arena: AstArena, id: NodeID) -> GenericTypeNode {
     return arena.generic_type_nodes[node_slot(id)];
 }
 
-func add_type_decl_node(arena: AstArena, node: TypeDeclNode) -> NodeID {
+func add_type_decl_node(ref arena: AstArena, node: TypeDeclNode) -> NodeID {
     let slot: Int = arena.type_decl_nodes.length();
     arena.type_decl_nodes.append(node);
     return make_node_id(NODE_TYPE_DECL, slot);
 }
 
-func get_type_decl_node(arena: AstArena, id: NodeID) -> TypeDeclNode {
+func get_type_decl_node(ref arena: AstArena, id: NodeID) -> TypeDeclNode {
     return arena.type_decl_nodes[node_slot(id)];
 }

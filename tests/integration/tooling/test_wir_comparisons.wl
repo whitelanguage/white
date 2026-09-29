@@ -36,11 +36,11 @@ func comparison_contains(text: String, needle: String) -> Bool {
 func check_comparison(source_type: Int, token_kind: Int, token_value: String, wir_type: String, opcode: String) -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = comparison_position();
-    let left: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "a"), pos=pos));
-    let right: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "b"), pos=pos));
-    let comparison: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=comparison_token(token_kind, token_value), right=right, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=comparison, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let left: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "a"), pos=pos));
+    let right: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "b"), pos=pos));
+    let comparison: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=comparison_token(token_kind, token_value), right=right, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=comparison, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 
     let args: Vector(Struct) = [TypeListNode(type=source_type, pass_mode=PARAM_VALUE), TypeListNode(type=source_type, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="compare", base_name="compare", ret_type=TYPE_BOOL, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
@@ -60,11 +60,11 @@ func check_comparison(source_type: Int, token_kind: Int, token_value: String, wi
 func check_identity() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = comparison_position();
-    let value: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "value"), pos=pos));
-    let null_value: NodeID = add_nullptr_node(source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
-    let identity: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_IS_NOT, left=value, op_tok=comparison_token(TOK_IS, "is !"), right=null_value, pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=identity, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let value: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "value"), pos=pos));
+    let null_value: NodeID = add_nullptr_node(ref source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
+    let identity: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_IS_NOT, left=value, op_tok=comparison_token(TOK_IS, "is !"), right=null_value, pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=identity, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="has_value", base_name="has_value", ret_type=TYPE_BOOL, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

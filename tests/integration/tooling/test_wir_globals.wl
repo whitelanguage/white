@@ -24,11 +24,11 @@ func global_token(kind: Int, value: String) -> Token {
 }
 
 func global_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=global_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=global_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func global_int(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_int_node(arena, IntNode(type=NODE_INT, tok=global_token(TOK_INT, value), pos=pos));
+    return add_int_node(ref arena, IntNode(type=NODE_INT, tok=global_token(TOK_INT, value), pos=pos));
 }
 
 func global_decl(arena: AstArena, name: String, type_name: String, value: NodeID, is_const: Bool, pos: Position) -> VarDeclareNode {
@@ -51,7 +51,7 @@ func check_null_global() -> Bool {
     symbols.put("buffer", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=false));
     let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, current_package_prefix="", current_file_global_aliases=Dict(), global_var_aliases=Dict(), generic_bindings=Dict());
     let pos: Position = global_position();
-    let value: NodeID = add_null_node(source.arena, NullNode(type=NODE_NULL, pos=pos));
+    let value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
     let declaration: VarDeclareNode = global_decl(source.arena, "buffer", "String", value, false, pos);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -85,9 +85,9 @@ func main() -> Int {
     let types: WirTypeMap = new_wir_type_map();
 
     let counter: VarDeclareNode = global_decl(source.arena, "counter", "Int", global_int(source.arena, "1", pos), false, pos);
-    let negative: NodeID = add_unary_node(source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=global_token(TOK_SUB, "-"), node=global_int(source.arena, "2", pos), pos=pos));
+    let negative: NodeID = add_unary_node(ref source.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=global_token(TOK_SUB, "-"), node=global_int(source.arena, "2", pos), pos=pos));
     let limit: VarDeclareNode = global_decl(source.arena, "limit", "Int", negative, true, pos);
-    let ready_value: NodeID = add_bool_node(source.arena, BooleanNode(type=NODE_BOOL, tok=global_token(TOK_TRUE, "true"), value=1, pos=pos));
+    let ready_value: NodeID = add_bool_node(ref source.arena, BooleanNode(type=NODE_BOOL, tok=global_token(TOK_TRUE, "true"), value=1, pos=pos));
     let ready: VarDeclareNode = global_decl(source.arena, "ready", "Bool", ready_value, true, pos);
     let mask: VarDeclareNode = global_decl(source.arena, "mask", "UInt32", global_int(source.arena, "0x00ff_ffffU", pos), true, pos);
     wir_lower_global_decl(ref types, ref source, ref program, counter);
@@ -95,9 +95,9 @@ func main() -> Int {
     wir_lower_global_decl(ref types, ref source, ref program, ready);
     wir_lower_global_decl(ref types, ref source, ref program, mask);
 
-    let assignment: NodeID = add_var_assign_node(source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=global_token(TOK_IDENTIFIER, "counter"), value=global_int(source.arena, "7", pos), pos=pos));
-    let return_value: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=global_access(source.arena, "counter", pos), pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[assignment, return_value]));
+    let assignment: NodeID = add_var_assign_node(ref source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=global_token(TOK_IDENTIFIER, "counter"), value=global_int(source.arena, "7", pos), pos=pos));
+    let return_value: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=global_access(source.arena, "counter", pos), pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[assignment, return_value]));
     let info: FuncInfo = FuncInfo(name="use_global", base_name="use_global", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     wir_lower_function_body(ref types, ref source, ref program, info, body);
 

@@ -17,7 +17,7 @@ func analysis_token(value: String) -> Token {
 }
 
 func analysis_type(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=analysis_token(value), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=analysis_token(value), pos=pos));
 }
 
 func main() -> Int {
@@ -34,8 +34,8 @@ func main() -> Int {
         ParamNode(type=NODE_PARAM, name_tok=analysis_token("right"), type_tok=analysis_type(arena, "Long", pos), pos=pos, pass_mode=PARAM_VALUE, is_variadic=false, default_val=NO_NODE)
     ];
     let node: StructDefNode = StructDefNode(type=NODE_STRUCT_DEF, name_tok=analysis_token("Pair"), type_params=[], fields=fields, body=NO_NODE, annotations=[], pos=pos);
-    let definition: NodeID = add_struct_def_node(arena, node);
-    let root: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[definition]));
+    let definition: NodeID = add_struct_def_node(ref arena, node);
+    let root: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[definition]));
     source.all_modules.append(ParsedModule(path="memory.wl", prefix="", dir="", is_package=false, ast=root, visible=Dict(), namespaces=Dict(), types=Dict(), funcs=Dict(), globals=Dict(), imports=[]));
 
     analyze_declarations(ref source);
@@ -71,10 +71,10 @@ func main() -> Int {
     let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=null, llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=null, interfaces=null);
     source.struct_table.put("Box", class_info);
     source.struct_id_map.put("101", class_info);
-    let default_value: NodeID = add_int_node(arena, IntNode(type=NODE_INT, tok=Token(type=TOK_INT, value="1", line=1, col=1), pos=pos));
-    let class_field: NodeID = add_var_decl_node(arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=analysis_token("value"), type_node=analysis_type(arena, "Int", pos), value=default_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let class_node: NodeID = add_class_def_node(arena, ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=analysis_token("Box"), type_params=[], parent_tok=NO_NODE, interfaces=[], fields=[class_field], methods=[], annotations=[]));
-    let class_root: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[class_node]));
+    let default_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=Token(type=TOK_INT, value="1", line=1, col=1), pos=pos));
+    let class_field: NodeID = add_var_decl_node(ref arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=analysis_token("value"), type_node=analysis_type(arena, "Int", pos), value=default_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let class_node: NodeID = add_class_def_node(ref arena, ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=analysis_token("Box"), type_params=[], parent_tok=NO_NODE, interfaces=[], fields=[class_field], methods=[], annotations=[]));
+    let class_root: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[class_node]));
     source.all_modules.append(ParsedModule(path="class.wl", prefix="", dir="", is_package=false, ast=class_root, visible=Dict(), namespaces=Dict(), types=Dict(), funcs=Dict(), globals=Dict(), imports=[]));
     analyze_declarations(ref source);
 

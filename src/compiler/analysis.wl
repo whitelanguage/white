@@ -62,7 +62,7 @@ func value_struct_dependency(ref c: Compiler, type_id: Int) -> Int {
 
 func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets: Vector(TypeAnalysisTarget), stack: Vector(Int)) -> Bool {
     set_module_context(ref c, target.module);
-    let node: StructDefNode = get_struct_def_node(c.arena, target.node);
+    let node: StructDefNode = get_struct_def_node(ref c.arena, target.node);
     if (node.type_params is !null && node.type_params.length() > 0) { return true; }
 
     let struct_name: String = c.current_package_prefix + node.name_tok.value;
@@ -174,7 +174,7 @@ func validate_class_interfaces(ref c: Compiler, info: StructInfo, pos: Position)
 
 func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: Vector(TypeAnalysisTarget), stack: Vector(Int)) -> Bool {
     set_module_context(ref c, target.module);
-    let node: ClassDefNode = get_class_def_node(c.arena, target.node);
+    let node: ClassDefNode = get_class_def_node(ref c.arena, target.node);
     if (node.type_params is !null && node.type_params.length() > 0) { return true; }
 
     let class_name: String = c.current_package_prefix + node.name_tok.value;
@@ -251,7 +251,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
 
     let field_index: Int = 0;
     while (node.fields is !null && field_index < node.fields.length()) {
-        let declaration: VarDeclareNode = get_var_decl_node(c.arena, node.fields[field_index]);
+        let declaration: VarDeclareNode = get_var_decl_node(ref c.arena, node.fields[field_index]);
         let field_name: String = declaration.name_tok.value;
         if (names.contains_key(field_name)) {
             throw_name_error(declaration.pos, "Field '" + field_name + "' is already defined in class '" + class_name + "'.");
@@ -282,7 +282,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
 
     let method_index: Int = 0;
     while (node.methods is !null && method_index < node.methods.length()) {
-        let method_node: MethodDefNode = get_method_def_node(c.arena, node.methods[method_index]);
+        let method_node: MethodDefNode = get_method_def_node(ref c.arena, node.methods[method_index]);
         let method_name: String = method_base_name(ref c, method_node);
         if (!method_name.starts_with("$") && names.contains_key(method_name)) {
             throw_name_error(method_node.pos, "Class '" + class_name + "' cannot use '" + method_name + "' as both a field and a method.");
@@ -329,12 +329,12 @@ func analyze_declarations(ref c: Compiler) -> Void {
     while (module_index < c.all_modules.length()) {
         let module: ParsedModule = c.all_modules[module_index];
         set_module_context(ref c, module);
-        let root: BlockNode = get_block_node(c.arena, module.ast);
+        let root: BlockNode = get_block_node(ref c.arena, module.ast);
         let i: Int = 0;
         while (root.stmts is !null && i < root.stmts.length()) {
             let node: NodeID = root.stmts[i];
             if (node_tag(node) == NODE_STRUCT_DEF) {
-                let definition: StructDefNode = get_struct_def_node(c.arena, node);
+                let definition: StructDefNode = get_struct_def_node(ref c.arena, node);
                 if (definition.type_params is null || definition.type_params.length() == 0) {
                     let info: StructInfo = c.struct_table.lookup(module.prefix + definition.name_tok.value);
                     if (has_struct(info) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0) {
@@ -342,7 +342,7 @@ func analyze_declarations(ref c: Compiler) -> Void {
                     }
                 }
             } else if (node_tag(node) == NODE_CLASS_DEF) {
-                let definition: ClassDefNode = get_class_def_node(c.arena, node);
+                let definition: ClassDefNode = get_class_def_node(ref c.arena, node);
                 if (definition.type_params is null || definition.type_params.length() == 0) {
                     let info: StructInfo = c.struct_table.lookup(module.prefix + definition.name_tok.value);
                     if (has_struct(info)) {

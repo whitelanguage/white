@@ -24,16 +24,16 @@ func fallible_token(kind: Int, value: String) -> Token {
 }
 
 func fallible_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallible_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallible_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func fallible_integer(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_int_node(arena, IntNode(type=NODE_INT, tok=fallible_token(TOK_INT, value), pos=pos));
+    return add_int_node(ref arena, IntNode(type=NODE_INT, tok=fallible_token(TOK_INT, value), pos=pos));
 }
 
 func fallible_call(arena: AstArena, name: String, pos: Position) -> NodeID {
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=fallible_access(arena, name, pos), args=[], type_args=[], pos=pos, preserve_fallible=true));
-    return add_try_unwrap_node(arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=call, pos=pos));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=fallible_access(arena, name, pos), args=[], type_args=[], pos=pos, preserve_fallible=true));
+    return add_try_unwrap_node(ref arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=call, pos=pos));
 }
 
 func fallible_source(arena: AstArena) -> Compiler {
@@ -63,8 +63,8 @@ func check_propagation() -> Bool {
     let fallible_string: Int = get_fallible_type_id(ref source, TYPE_STRING);
     source.func_table.put("read", FuncInfo(name="read", base_name="read", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="C"));
     let pos: Position = fallible_position();
-    let result: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=fallible_call(arena, "read", pos), pos=pos));
-    let body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_call(arena, "read", pos), pos=pos));
+    let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let info: FuncInfo = FuncInfo(name="forward", base_name="forward", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -83,11 +83,11 @@ func check_catch() -> Bool {
     let fallible_void: Int = get_fallible_type_id(ref source, TYPE_VOID);
     source.func_table.put("flush", FuncInfo(name="flush", base_name="flush", ret_type=fallible_void, arg_types=[], arg_names=[], is_varargs=false, abi_name="C"));
     let pos: Position = fallible_position();
-    let caught_return: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "7", pos), pos=pos));
-    let catch_body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[caught_return]));
-    let caught: NodeID = add_catch_node(arena, CatchNode(type=NODE_CATCH, stmt=fallible_call(arena, "flush", pos), err_name=fallible_token(TOK_IDENTIFIER, "err"), body=catch_body, pos=pos, alloc_id=0));
-    let normal_return: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "0", pos), pos=pos));
-    let body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[caught, normal_return]));
+    let caught_return: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "7", pos), pos=pos));
+    let catch_body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[caught_return]));
+    let caught: NodeID = add_catch_node(ref arena, CatchNode(type=NODE_CATCH, stmt=fallible_call(arena, "flush", pos), err_name=fallible_token(TOK_IDENTIFIER, "err"), body=catch_body, pos=pos, alloc_id=0));
+    let normal_return: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "0", pos), pos=pos));
+    let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[caught, normal_return]));
     let info: FuncInfo = FuncInfo(name="recover", base_name="recover", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -109,9 +109,9 @@ func check_throw() -> Bool {
     let fallible_int: Int = get_fallible_type_id(ref source, TYPE_INT);
     let pos: Position = fallible_position();
     let owner: NodeID = fallible_access(arena, "ProbeError", pos);
-    let member: NodeID = add_field_access_node(arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Failure", pos=pos));
-    let statement: NodeID = add_throw_node(arena, ThrowNode(type=NODE_THROW, value=member, pos=pos));
-    let body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[statement]));
+    let member: NodeID = add_field_access_node(ref arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Failure", pos=pos));
+    let statement: NodeID = add_throw_node(ref arena, ThrowNode(type=NODE_THROW, value=member, pos=pos));
+    let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[statement]));
     let info: FuncInfo = FuncInfo(name="fail", base_name="fail", ret_type=fallible_int, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

@@ -754,7 +754,7 @@ func is_numeric_literal_expression(ref c: Compiler, node: NodeID) -> Bool {
         return true;
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         if (unary.op_tok.type == TOK_PLUS || unary.op_tok.type == TOK_SUB) {
             return is_numeric_literal_expression(ref c, unary.node);
         }
@@ -773,31 +773,31 @@ func validate_explicit_literal_cast(ref c: Compiler, node: NodeID, target_type: 
     let float_value: Float = 0.0;
 
     if (base == NODE_INT) {
-        let integer: IntNode = get_int_node(c.arena, node);
+        let integer: IntNode = get_int_node(ref c.arena, node);
         literal_text = integer.tok.value;
         magnitude = parse_const_uint128(integer.tok.value, integer.pos);
     } else if (base == NODE_FLOAT) {
-        let float_node: FloatNode = get_float_node(c.arena, node);
+        let float_node: FloatNode = get_float_node(ref c.arena, node);
         literal_text = float_node.tok.value;
         float_value = parse_decimal_float_literal(float_node.tok.value);
         is_float_literal = true;
     } else if (base == NODE_CHAR) {
-        let char_node: CharNode = get_char_node(c.arena, node);
+        let char_node: CharNode = get_char_node(ref c.arena, node);
         literal_text = "'" + char_node.tok.value + "'";
         magnitude = UInt128(string_to_int(char_node.tok.value, char_node.pos));
     } else if (base == NODE_BOOL) {
         return true;
     } else if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let inner_base: Int = node_tag(unary.node);
         if (unary.op_tok.type != TOK_SUB) { return true; }
         if (inner_base == NODE_INT) {
-            let integer: IntNode = get_int_node(c.arena, unary.node);
+            let integer: IntNode = get_int_node(ref c.arena, unary.node);
             literal_text = "-" + integer.tok.value;
             magnitude = parse_const_uint128(integer.tok.value, integer.pos);
             negative = magnitude != UInt128(0);
         } else if (inner_base == NODE_FLOAT) {
-            let float_node: FloatNode = get_float_node(c.arena, unary.node);
+            let float_node: FloatNode = get_float_node(ref c.arena, unary.node);
             literal_text = "-" + float_node.tok.value;
             float_value = 0.0 - parse_decimal_float_literal(float_node.tok.value);
             is_float_literal = true;

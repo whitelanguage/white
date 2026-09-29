@@ -23,7 +23,7 @@ func construction_token(kind: Int, value: String) -> Token {
 }
 
 func construction_int(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_int_node(arena, IntNode(type=NODE_INT, tok=construction_token(TOK_INT, value), pos=pos));
+    return add_int_node(ref arena, IntNode(type=NODE_INT, tok=construction_token(TOK_INT, value), pos=pos));
 }
 
 func main() -> Int {
@@ -35,15 +35,15 @@ func main() -> Int {
     source.array_info_map.put("104", ArrayInfo(base_type=TYPE_INT, size=3, llvm_name=""));
 
     let pos: Position = construction_position();
-    let point_callee: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=construction_token(TOK_IDENTIFIER, "Point"), pos=pos));
-    let point_call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=point_callee, args=[ArgNode(val=construction_int(source.arena, "7", pos), name="y", is_spread=false), ArgNode(val=construction_int(source.arena, "4", pos), name="x", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let point_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=point_call, pos=pos));
-    let point_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[point_return]));
+    let point_callee: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=construction_token(TOK_IDENTIFIER, "Point"), pos=pos));
+    let point_call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=point_callee, args=[ArgNode(val=construction_int(source.arena, "7", pos), name="y", is_spread=false), ArgNode(val=construction_int(source.arena, "4", pos), name="x", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let point_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=point_call, pos=pos));
+    let point_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[point_return]));
 
     let array_elements: Vector(ArgNode) = [ArgNode(val=construction_int(source.arena, "1", pos), name="", is_spread=false), ArgNode(val=construction_int(source.arena, "2", pos), name="", is_spread=false)];
-    let array_literal: NodeID = add_vector_lit_node(source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=array_elements, count=2, pos=pos));
-    let array_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=array_literal, pos=pos));
-    let array_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[array_return]));
+    let array_literal: NodeID = add_vector_lit_node(ref source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=array_elements, count=2, pos=pos));
+    let array_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=array_literal, pos=pos));
+    let array_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[array_return]));
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

@@ -12,7 +12,7 @@ import * from "registration.wl"
 
 func precompile_ast(ref c: Compiler, node: NodeID, final_path: String, import_prefix: String, old_dir: String) -> Void {
 // imports must be bound before this module publishes its declarations
-    let block: BlockNode = get_block_node(c.arena, node);
+    let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
@@ -22,7 +22,7 @@ func precompile_ast(ref c: Compiler, node: NodeID, final_path: String, import_pr
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_IMPORT) {
-            compile_import(ref c, get_import_node(c.arena, stmts[i]));
+            compile_import(ref c, get_import_node(ref c.arena, stmts[i]));
             imports.append(stmts[i]);
         }
         i += 1;

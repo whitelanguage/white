@@ -25,13 +25,13 @@ func loop_token(kind: Int, value: String) -> Token {
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = loop_position();
-    let condition: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=loop_token(TOK_IDENTIFIER, "flag"), pos=pos));
-    let stop: NodeID = add_break_node(source.arena, BreakNode(type=NODE_BREAK, pos=pos));
-    let loop_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[stop]));
-    let loop: NodeID = add_while_node(source.arena, WhileNode(type=NODE_WHILE, condition=condition, body=loop_body, pos=pos));
-    let zero: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=loop_token(TOK_INT, "0"), pos=pos));
-    let return_zero: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, return_zero]));
+    let condition: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=loop_token(TOK_IDENTIFIER, "flag"), pos=pos));
+    let stop: NodeID = add_break_node(ref source.arena, BreakNode(type=NODE_BREAK, pos=pos));
+    let loop_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[stop]));
+    let loop: NodeID = add_while_node(ref source.arena, WhileNode(type=NODE_WHILE, condition=condition, body=loop_body, pos=pos));
+    let zero: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=loop_token(TOK_INT, "0"), pos=pos));
+    let return_zero: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, return_zero]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="loop", base_name="loop", ret_type=TYPE_INT, arg_types=args, arg_names=["flag"], is_varargs=false, abi_name="");

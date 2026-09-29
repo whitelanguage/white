@@ -23,7 +23,7 @@ func postfix_token(kind: Int, value: String) -> Token {
 }
 
 func postfix_access(arena: AstArena, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "value"), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "value"), pos=pos));
 }
 
 func postfix_contains(text: String, needle: String) -> Bool {
@@ -40,9 +40,9 @@ func postfix_contains(text: String, needle: String) -> Bool {
 func check_postfix_expression() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = postfix_position();
-    let postfix: NodeID = add_postfix_node(source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_INC, "++"), pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let postfix: NodeID = add_postfix_node(ref source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_INC, "++"), pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="post_inc", base_name="post_inc", ret_type=TYPE_INT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -59,9 +59,9 @@ func check_postfix_expression() -> Bool {
 func check_postfix_statement() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = postfix_position();
-    let postfix: NodeID = add_postfix_node(source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_DEC, "--"), pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=postfix_access(source.arena, pos), pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[postfix, result]));
+    let postfix: NodeID = add_postfix_node(ref source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_DEC, "--"), pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix_access(source.arena, pos), pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[postfix, result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_FLOAT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="post_dec", base_name="post_dec", ret_type=TYPE_FLOAT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -80,12 +80,12 @@ func check_postfix_index() -> Bool {
     vectors.put("100", SymbolInfo(type=TYPE_INT));
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), vector_base_map=vectors, array_info_map=Dict(), struct_id_map=Dict());
     let pos: Position = postfix_position();
-    let target: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "values"), pos=pos));
-    let index: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "index"), pos=pos));
-    let access: NodeID = add_index_access_node(source.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=target, index_node=index, pos=pos));
-    let postfix: NodeID = add_postfix_node(source.arena, PostfixOpNode(type=NODE_POSTFIX, node=access, op_tok=postfix_token(TOK_INC, "++"), pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let target: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "values"), pos=pos));
+    let index: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "index"), pos=pos));
+    let access: NodeID = add_index_access_node(ref source.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=target, index_node=index, pos=pos));
+    let postfix: NodeID = add_postfix_node(ref source.arena, PostfixOpNode(type=NODE_POSTFIX, node=access, op_tok=postfix_token(TOK_INC, "++"), pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=100, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="post_index", base_name="post_index", ret_type=TYPE_INT, arg_types=args, arg_names=["values", "index"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

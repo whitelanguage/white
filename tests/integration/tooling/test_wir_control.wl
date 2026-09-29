@@ -23,17 +23,17 @@ func control_token(value: String) -> Token {
 }
 
 func control_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=control_token(name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=control_token(name), pos=pos));
 }
 
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = control_position();
-    let return_a: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=control_access(source.arena, "a", pos), pos=pos));
-    let then_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[return_a]));
-    let choose_a: NodeID = add_if_node(source.arena, IfNode(type=NODE_IF, condition=control_access(source.arena, "flag", pos), body=then_body, else_body=NO_NODE, pos=pos));
-    let return_b: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=control_access(source.arena, "b", pos), pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[choose_a, return_b]));
+    let return_a: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=control_access(source.arena, "a", pos), pos=pos));
+    let then_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[return_a]));
+    let choose_a: NodeID = add_if_node(ref source.arena, IfNode(type=NODE_IF, condition=control_access(source.arena, "flag", pos), body=then_body, else_body=NO_NODE, pos=pos));
+    let return_b: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=control_access(source.arena, "b", pos), pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[choose_a, return_b]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="select", base_name="select", ret_type=TYPE_INT, arg_types=args, arg_names=["flag", "a", "b"], is_varargs=false, abi_name="");

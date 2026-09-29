@@ -20,11 +20,11 @@ func print_token(kind: Int, value: String) -> Token {
 }
 
 func print_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=print_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=print_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func print_string(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_string_node(arena, StringNode(type=NODE_STRING, tok=print_token(TOK_STR_LIT, value), pos=pos));
+    return add_string_node(ref arena, StringNode(type=NODE_STRING, tok=print_token(TOK_STR_LIT, value), pos=pos));
 }
 
 func print_contains(text: String, needle: String) -> Bool {
@@ -57,16 +57,16 @@ func main() -> Int {
     let pos: Position = print_position();
     let arguments: Vector(ArgNode) = [
         ArgNode(name="", val=print_string(arena, "value", pos), is_spread=false),
-        ArgNode(name="", val=add_int_node(arena, IntNode(type=NODE_INT, tok=print_token(TOK_INT, "7"), pos=pos)), is_spread=false),
+        ArgNode(name="", val=add_int_node(ref arena, IntNode(type=NODE_INT, tok=print_token(TOK_INT, "7"), pos=pos)), is_spread=false),
         ArgNode(name="sep", val=print_string(arena, "|", pos), is_spread=false),
         ArgNode(name="end", val=print_string(arena, "!", pos), is_spread=false)
     ];
-    let call: NodeID = add_call_node(arena, CallNode(type=NODE_CALL, callee=print_access(arena, "print", pos), args=arguments, type_args=[], pos=pos, preserve_fallible=false));
-    let zero: NodeID = add_int_node(arena, IntNode(type=NODE_INT, tok=print_token(TOK_INT, "0"), pos=pos));
-    let returned: NodeID = add_return_node(arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
-    let body: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[call, returned]));
-    let function: NodeID = add_func_def_node(arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=print_token(TOK_IDENTIFIER, "main"), type_params=[], params=[], ret_type_tok=print_access(arena, "Int", pos), body=body, annotations=[], pos=pos));
-    let root: NodeID = add_block_node(arena, BlockNode(type=NODE_BLOCK, stmts=[function]));
+    let call: NodeID = add_call_node(ref arena, CallNode(type=NODE_CALL, callee=print_access(arena, "print", pos), args=arguments, type_args=[], pos=pos, preserve_fallible=false));
+    let zero: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=print_token(TOK_INT, "0"), pos=pos));
+    let returned: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
+    let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[call, returned]));
+    let function: NodeID = add_func_def_node(ref arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=print_token(TOK_IDENTIFIER, "main"), type_params=[], params=[], ret_type_tok=print_access(arena, "Int", pos), body=body, annotations=[], pos=pos));
+    let root: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[function]));
 
     let result: WirLoweringResult = wir_lower_module(ref source, root, "x86_64-pc-windows-msvc", 64);
     if (result.errors.length() != 0) { print("FAIL: print lowering failed: ", result.errors[0]); return 1; }

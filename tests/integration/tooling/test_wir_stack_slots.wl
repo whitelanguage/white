@@ -20,15 +20,15 @@ func stack_slot_token(kind: Int, value: String) -> Token {
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
-    let condition: NodeID = add_var_access_node(source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=stack_slot_token(TOK_IDENTIFIER, "flag"), pos=pos));
-    let one: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=stack_slot_token(TOK_INT, "1"), pos=pos));
-    let local: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=stack_slot_token(TOK_IDENTIFIER, "value"), type_node=NO_NODE, value=one, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let stop: NodeID = add_break_node(source.arena, BreakNode(type=NODE_BREAK, pos=pos));
-    let loop_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, stop]));
-    let loop: NodeID = add_while_node(source.arena, WhileNode(type=NODE_WHILE, condition=condition, body=loop_body, pos=pos));
-    let zero: NodeID = add_int_node(source.arena, IntNode(type=NODE_INT, tok=stack_slot_token(TOK_INT, "0"), pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, result]));
+    let condition: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=stack_slot_token(TOK_IDENTIFIER, "flag"), pos=pos));
+    let one: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=stack_slot_token(TOK_INT, "1"), pos=pos));
+    let local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=stack_slot_token(TOK_IDENTIFIER, "value"), type_node=NO_NODE, value=one, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let stop: NodeID = add_break_node(ref source.arena, BreakNode(type=NODE_BREAK, pos=pos));
+    let loop_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, stop]));
+    let loop: NodeID = add_while_node(ref source.arena, WhileNode(type=NODE_WHILE, condition=condition, body=loop_body, pos=pos));
+    let zero: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=stack_slot_token(TOK_INT, "0"), pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, result]));
 
     let info: FuncInfo = FuncInfo(name="stack_slots", base_name="stack_slots", ret_type=TYPE_INT, arg_types=[TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE)], arg_names=["flag"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

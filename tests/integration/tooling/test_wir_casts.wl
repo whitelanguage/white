@@ -26,7 +26,7 @@ func cast_token(kind: Int, value: String) -> Token {
 }
 
 func cast_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=cast_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=cast_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func cast_contains(text: String, needle: String) -> Bool {
@@ -43,8 +43,8 @@ func cast_contains(text: String, needle: String) -> Bool {
 func check_return_cast() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = cast_position();
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=cast_access(source.arena, "value", pos), pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=cast_access(source.arena, "value", pos), pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="widen", base_name="widen", ret_type=TYPE_LONG, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -63,9 +63,9 @@ func check_return_cast() -> Bool {
 func check_binary_cast() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
     let pos: Position = cast_position();
-    let sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=cast_access(source.arena, "a", pos), op_tok=cast_token(TOK_PLUS, "+"), right=cast_access(source.arena, "b", pos), pos=pos));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=cast_access(source.arena, "a", pos), op_tok=cast_token(TOK_PLUS, "+"), right=cast_access(source.arena, "b", pos), pos=pos));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_LONG, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="add_wide", base_name="add_wide", ret_type=TYPE_LONG, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -133,9 +133,9 @@ func check_checked_cast() -> Bool {
     let pos: Position = cast_position();
     let callee: NodeID = cast_access(source.arena, "Byte", pos);
     let argument: NodeID = cast_access(source.arena, "value", pos);
-    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let info: FuncInfo = FuncInfo(name="checked_byte", base_name="checked_byte", ret_type=TYPE_BYTE, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
@@ -167,9 +167,9 @@ func check_fallible_cast() -> Bool {
     let pos: Position = cast_position();
     let callee: NodeID = cast_access(source.arena, "Byte", pos);
     let argument: NodeID = cast_access(source.arena, "value", pos);
-    let call: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=true));
-    let result: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=true));
+    let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let return_type: Int = get_fallible_type_id(ref source, TYPE_BYTE);
     let info: FuncInfo = FuncInfo(name="fallible_byte", base_name="fallible_byte", ret_type=return_type, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
@@ -193,21 +193,21 @@ func check_pointer_casts() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict());
     let pos: Position = cast_position();
 
-    let to_size: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let size_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=to_size, pos=pos));
-    let size_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[size_return]));
+    let to_size: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let size_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_size, pos=pos));
+    let size_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[size_return]));
     let size_args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
     let size_info: FuncInfo = FuncInfo(name="pointer_bits", base_name="pointer_bits", ret_type=TYPE_INTSIZE, arg_types=size_args, arg_names=["handle"], is_varargs=false, abi_name="");
 
-    let to_pointer: NodeID = add_call_node(source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
-    let pointer_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=to_pointer, pos=pos));
-    let pointer_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[pointer_return]));
+    let to_pointer: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let pointer_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_pointer, pos=pos));
+    let pointer_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[pointer_return]));
     let pointer_args: Vector(Struct) = [TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];
     let pointer_info: FuncInfo = FuncInfo(name="from_bits", base_name="from_bits", ret_type=TYPE_ANYPTR, arg_types=pointer_args, arg_names=["bits"], is_varargs=false, abi_name="");
 
-    let null_value: NodeID = add_null_node(source.arena, NullNode(type=NODE_NULL, pos=pos));
-    let null_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
-    let null_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
+    let null_value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
+    let null_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
+    let null_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
     let null_info: FuncInfo = FuncInfo(name="empty_string", base_name="empty_string", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

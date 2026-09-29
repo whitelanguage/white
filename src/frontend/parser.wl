@@ -53,18 +53,18 @@ func nesting_fallback(ref p: Parser, pos: Position) -> NodeID {
     else if (p.current_tok.type == TOK_LBRACE) { skip_group(ref p, TOK_LBRACE, TOK_RBRACE); }
     else if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=pos.ln, col=pos.col);
-    return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=pos));
+    return add_int_node(ref p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=pos));
 }
 
 func type_nesting_fallback(ref p: Parser, pos: Position) -> NodeID {
     if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let int_tok: Token = Token(type=TOK_T_INT, value="Int", line=pos.ln, col=pos.col);
-    return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=int_tok, pos=pos));
+    return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=int_tok, pos=pos));
 }
 
 func inferred_type(ref p: Parser, pos: Position) -> NodeID {
     let auto_tok: Token = Token(type=TOK_IDENTIFIER, value="Auto", line=pos.ln, col=pos.col);
-    return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=auto_tok, pos=pos));
+    return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=auto_tok, pos=pos));
 }
 
 func is_name_token(token_type: Int) -> Bool {
@@ -175,7 +175,7 @@ func parse(ref p: Parser) -> NodeID {
         }
     }
     
-    return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
+    return add_block_node(ref p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
 func parse_type_decl(ref p: Parser) -> NodeID {
@@ -216,7 +216,7 @@ func parse_type_decl(ref p: Parser) -> NodeID {
         parser_advance(ref p);
     }
 
-    return add_type_decl_node(p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos));
+    return add_type_decl_node(ref p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos));
 }
 
 func parser_advance(ref p: Parser) -> Void {
@@ -452,7 +452,7 @@ func parse_callable_type(ref p: Parser, tok: Token, is_method: Bool) -> NodeID {
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
     if (p.current_tok.type != TOK_LPAREN) {
-        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
+        return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
     }
     parser_advance(ref p);
 
@@ -557,10 +557,10 @@ func parse_callable_type(ref p: Parser, tok: Token, is_method: Bool) -> NodeID {
 
     if is_method {
         let method_type: MethodTypeNode = MethodTypeNode(type=NODE_METHOD_TYPE, arg_types=arg_types, arg_modes=arg_modes, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
-        return add_method_type_node(p.arena, method_type);
+        return add_method_type_node(ref p.arena, method_type);
     }
     let function_type: FunctionTypeNode = FunctionTypeNode(type=NODE_FUNCTION_TYPE, arg_types=arg_types, arg_modes=arg_modes, arg_names=arg_names, return_type=return_type, variadic_param=variadic_param, pos=pos);
-    return add_function_type_node(p.arena, function_type);
+    return add_function_type_node(ref p.arena, function_type);
 }
 
 func parse_type_base_inner(ref p: Parser) -> NodeID {
@@ -582,7 +582,7 @@ func parse_type_base_inner(ref p: Parser) -> NodeID {
         }
 
         let base: NodeID = parse_type_base(ref p);
-        return add_pointer_type_node(p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=start_pos));
+        return add_pointer_type_node(ref p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=start_pos));
     }
 
     let tok: Token = p.current_tok;
@@ -614,7 +614,7 @@ func parse_type_base_inner(ref p: Parser) -> NodeID {
             parser_advance(ref p); // skip )
             
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            type_node = add_vector_type_node(p.arena, VectorTypeNode(type=NODE_VECTOR_TYPE, element_type=elem_type, pos=pos));
+            type_node = add_vector_type_node(ref p.arena, VectorTypeNode(type=NODE_VECTOR_TYPE, element_type=elem_type, pos=pos));
         }
         else if (tok.value == "Array") {
             parser_advance(ref p); // skip Array
@@ -632,12 +632,12 @@ func parse_type_base_inner(ref p: Parser) -> NodeID {
             }
             parser_advance(ref p); // skip )
             
-            type_node = add_slice_type_node(p.arena, SliceTypeNode(type=NODE_SLICE_TYPE, element_type=elem_type, pos=start_pos));
+            type_node = add_slice_type_node(ref p.arena, SliceTypeNode(type=NODE_SLICE_TYPE, element_type=elem_type, pos=start_pos));
         }
         else {
             parser_advance(ref p);
             let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            type_node = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
+            type_node = add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
 
             while (p.current_tok.type == TOK_DOT) {
                 parser_advance(ref p); // skip '.'
@@ -647,11 +647,11 @@ func parse_type_base_inner(ref p: Parser) -> NodeID {
                 }
                 let type_name: String = p.current_tok.value;
                 parser_advance(ref p); // skip type_name
-                type_node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos));
+                type_node = add_field_access_node(ref p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=type_node, field_name=type_name, pos=pos));
             }
         }
         if (p.current_tok.type == TOK_LPAREN) {
-            type_node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(ref p), pos=start_pos));
+            type_node = add_generic_type_node(ref p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=type_node, type_args=parse_type_args(ref p), pos=start_pos));
         }
         return type_node;
     }
@@ -690,7 +690,7 @@ func parse_return_type(ref p: Parser) -> NodeID {
     let s_i: Int = s_len - 1;
     while (s_i >= 0) {
         let s_tok: Token = sizes[s_i];
-        type_node = add_array_type_node(p.arena, ArrayTypeNode(
+        type_node = add_array_type_node(ref p.arena, ArrayTypeNode(
             type=NODE_ARRAY_TYPE, 
             base_type=type_node, 
             size_tok=s_tok, 
@@ -703,7 +703,7 @@ func parse_return_type(ref p: Parser) -> NodeID {
         let q_tok: Token = p.current_tok;
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=q_tok.line, col=q_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        type_node = add_fallible_type_node(p.arena, FallibleTypeNode(
+        type_node = add_fallible_type_node(ref p.arena, FallibleTypeNode(
             type=NODE_FALLIBLE_TYPE,
             base_type=type_node,
             pos=pos
@@ -777,7 +777,7 @@ func parse_typed_name(ref p: Parser, allow_inference: Bool) -> TypedIdent {
     }
 
     if is_ptr {
-        type_node = add_pointer_type_node(p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=type_node, level=level, pos=start_pos));
+        type_node = add_pointer_type_node(ref p.arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=type_node, level=level, pos=start_pos));
     }
 
     return TypedIdent(name_tok=name_tok, type_node=type_node);
@@ -790,53 +790,53 @@ func atom(ref p: Parser) -> NodeID {
     if (tok.type == TOK_INT) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_int_node(p.arena, IntNode(type=NODE_INT, tok=tok, pos=pos));
+        return add_int_node(ref p.arena, IntNode(type=NODE_INT, tok=tok, pos=pos));
     }
 
     // Floating-point literals
     if (tok.type == TOK_FLOAT) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_float_node(p.arena, FloatNode(type=NODE_FLOAT, tok=tok, pos=pos));
+        return add_float_node(ref p.arena, FloatNode(type=NODE_FLOAT, tok=tok, pos=pos));
     }
 
     // Boolean
     if (tok.type == TOK_TRUE) { 
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=1, pos=pos)); 
+        return add_bool_node(ref p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=1, pos=pos));
     }
     if (tok.type == TOK_FALSE) { 
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_bool_node(p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=0, pos=pos)); 
+        return add_bool_node(ref p.arena, BooleanNode(type=NODE_BOOL, tok=tok, value=0, pos=pos));
     }
 
     // Char
     if (tok.type == TOK_CHAR_LIT) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_char_node(p.arena, CharNode(type=NODE_CHAR, tok=tok, pos=pos));
+        return add_char_node(ref p.arena, CharNode(type=NODE_CHAR, tok=tok, pos=pos));
     }
 
     // String
     if (tok.type == TOK_STR_LIT) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_string_node(p.arena, StringNode(type=NODE_STRING, tok=tok, pos=pos));
+        return add_string_node(ref p.arena, StringNode(type=NODE_STRING, tok=tok, pos=pos));
     }
 
     // nullptr
     if (tok.type == TOK_NULLPTR) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_nullptr_node(p.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
+        return add_nullptr_node(ref p.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
     }
 
     if (tok.type == TOK_NULL) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_null_node(p.arena, NullNode(type=NODE_NULL, pos=pos));
+        return add_null_node(ref p.arena, NullNode(type=NODE_NULL, pos=pos));
     }
     
     // Variable access or Built-in Type Cast Call
@@ -853,8 +853,8 @@ func atom(ref p: Parser) -> NodeID {
                 throw_type_error(pos, "Expected 1 arguments, got 0");
                 parser_advance(ref p);
                 let fallback_tok: Token = Token(type=TOK_T_INT, value="Int", line=tok.line, col=tok.col);
-                let fallback_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallback_tok, pos=pos));
-                return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=fallback_type, is_align=tok.value == "align_of", pos=pos));
+                let fallback_type: NodeID = add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=fallback_tok, pos=pos));
+                return add_type_layout_node(ref p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=fallback_type, is_align=tok.value == "align_of", pos=pos));
             }
             let type_node: NodeID = parse_return_type(ref p);
             let arg_count: Int = 1;
@@ -872,29 +872,29 @@ func atom(ref p: Parser) -> NodeID {
             } else {
                 parser_advance(ref p);
             }
-            return add_type_layout_node(p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=type_node, is_align=tok.value == "align_of", pos=pos));
+            return add_type_layout_node(ref p.arena, TypeLayoutNode(type=NODE_TYPE_LAYOUT, type_node=type_node, is_align=tok.value == "align_of", pos=pos));
         }
-        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
+        return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=tok, pos=pos));
     }
 
     if (tok.type == TOK_THIS) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let this_tok: Token = Token(type=TOK_IDENTIFIER, value="this", line=tok.line, col=tok.col);
-        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=this_tok, pos=pos));
+        return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=this_tok, pos=pos));
     }
 
     if (tok.type == TOK_SELF) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         let self_tok: Token = Token(type=TOK_IDENTIFIER, value="self", line=tok.line, col=tok.col);
-        return add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=self_tok, pos=pos));
+        return add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=self_tok, pos=pos));
     }
 
     if (tok.type == TOK_SUPER) {
         parser_advance(ref p);
         let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        return add_super_node(p.arena, SuperNode(type=NODE_SUPER, pos=pos));
+        return add_super_node(ref p.arena, SuperNode(type=NODE_SUPER, pos=pos));
     }
 
     // Parenthesized expressions
@@ -947,7 +947,7 @@ func atom(ref p: Parser) -> NodeID {
         }
         parser_advance(ref p); // skip '}'
         
-        return add_map_lit_node(p.arena, MapLitNode(type=NODE_MAP_LIT, pairs=pairs, pos=pos));
+        return add_map_lit_node(ref p.arena, MapLitNode(type=NODE_MAP_LIT, pairs=pairs, pos=pos));
     }
 
     if (tok.type == TOK_LBRACKET) {
@@ -977,14 +977,14 @@ func atom(ref p: Parser) -> NodeID {
         }
         parser_advance(ref p); // skip ]
         
-        return add_vector_lit_node(p.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=elements, count=count, pos=pos));
+        return add_vector_lit_node(ref p.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=elements, count=count, pos=pos));
     }
 
     let err_pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     throw_invalid_syntax(err_pos, "Unexpected token '" + WhitelangTokens.get_token_name(tok.type) + "'");
     if (p.current_tok.type != TOK_EOF) { parser_advance(ref p); }
     let zero_tok: Token = Token(type=TOK_INT, value="0", line=tok.line, col=tok.col);
-    return add_int_node(p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos));
+    return add_int_node(ref p.arena, IntNode(type=NODE_INT, tok=zero_tok, pos=err_pos));
 }
 
 func parse_args(ref p: Parser) -> Vector(ArgNode) {
@@ -1029,12 +1029,12 @@ func postfix_expr(ref p: Parser) -> NodeID {
             let op_tok: Token = p.current_tok;
             parser_advance(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = add_postfix_node(p.arena, PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos));
+            node = add_postfix_node(ref p.arena, PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LT && (may_generic_call(ref p) || may_generic_value(ref p))) {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            node = add_generic_type_node(p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(ref p), pos=pos));
+            node = add_generic_type_node(ref p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(ref p), pos=pos));
         }
 
         else if (p.current_tok.type == TOK_QUESTION) {
@@ -1043,11 +1043,11 @@ func postfix_expr(ref p: Parser) -> NodeID {
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             let target_base: Int = node_tag(node);
             if (target_base == NODE_CALL) {
-                let target_call: CallNode = get_call_node(p.arena, node);
+                let target_call: CallNode = get_call_node(ref p.arena, node);
                 target_call.preserve_fallible = true;
                 p.arena.call_nodes[node_slot(node)] = target_call;
             }
-            node = add_try_unwrap_node(p.arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=node, pos=pos));
+            node = add_try_unwrap_node(ref p.arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=node, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LPAREN) {
@@ -1067,11 +1067,11 @@ func postfix_expr(ref p: Parser) -> NodeID {
             let type_args: Vector(NodeID) = null;
             let call_base: Int = node_tag(node);
             if (call_base == NODE_GENERIC_TYPE) {
-                let generic: GenericTypeNode = get_generic_type_node(p.arena, node);
+                let generic: GenericTypeNode = get_generic_type_node(ref p.arena, node);
                 type_args = generic.type_args;
             }
 
-            node = add_call_node(p.arena, CallNode(type=NODE_CALL, callee=node, args=args, type_args=type_args, pos=pos, preserve_fallible=false));
+            node = add_call_node(ref p.arena, CallNode(type=NODE_CALL, callee=node, args=args, type_args=type_args, pos=pos, preserve_fallible=false));
         }
 
         else if (p.current_tok.type == TOK_DOT) {
@@ -1084,7 +1084,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             parser_advance(ref p);
     
-            node = add_field_access_node(p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=node, field_name=field_name, pos=pos));
+            node = add_field_access_node(ref p.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=node, field_name=field_name, pos=pos));
         }
 
         else if (p.current_tok.type == TOK_LBRACKET) {
@@ -1100,7 +1100,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
                 }
                 if (p.current_tok.type == TOK_RBRACKET) { parser_advance(ref p); }
                 let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=NO_NODE, end_idx=NO_NODE, pos=pos));
+                node = add_slice_access_node(ref p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=NO_NODE, end_idx=NO_NODE, pos=pos));
             }
             else {
                 let first_idx: NodeID = expression(ref p);
@@ -1115,7 +1115,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
                     parser_advance(ref p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                    node = add_slice_access_node(p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=first_idx, end_idx=second_idx, pos=pos));
+                    node = add_slice_access_node(ref p.arena, SliceAccessNode(type=NODE_SLICE_ACCESS, target=node, start_idx=first_idx, end_idx=second_idx, pos=pos));
                 }
                 else {
                     if (p.current_tok.type != TOK_RBRACKET) {
@@ -1125,7 +1125,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
                     parser_advance(ref p); // skip ']'
 
                     let pos: Position = Position(idx=0, ln=bracket_tok.line, col=bracket_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                    node = add_index_access_node(p.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=node, index_node=first_idx, pos=pos));
+                    node = add_index_access_node(ref p.arena, IndexAccessNode(type=NODE_INDEX_ACCESS, target=node, index_node=first_idx, pos=pos));
                 }
             }
         }
@@ -1143,7 +1143,7 @@ func unary_expr(ref p: Parser) -> NodeID {
         if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
         let node: NodeID = unary_expr(ref p);
         parser_leave(ref p);
-        return add_ref_node(p.arena, RefNode(type=NODE_REF, node=node, pos=pos));
+        return add_ref_node(ref p.arena, RefNode(type=NODE_REF, node=node, pos=pos));
     }
     
     // deref x or deref*N x
@@ -1164,7 +1164,7 @@ func unary_expr(ref p: Parser) -> NodeID {
         if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
         let node: NodeID = unary_expr(ref p);
         parser_leave(ref p);
-        return add_deref_node(p.arena, DerefNode(type=NODE_DEREF, node=node, level=level, pos=pos));
+        return add_deref_node(ref p.arena, DerefNode(type=NODE_DEREF, node=node, level=level, pos=pos));
     }
     
     // -5, +3.14, !b, ~c
@@ -1174,7 +1174,7 @@ func unary_expr(ref p: Parser) -> NodeID {
         if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
         let node: NodeID = unary_expr(ref p); // recursive
         parser_leave(ref p);
-        return add_unary_node(p.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=tok, node=node, pos=pos));
+        return add_unary_node(ref p.arena, UnaryOpNode(type=NODE_UNARYOP, op_tok=tok, node=node, pos=pos));
     }
     
     return power(ref p);
@@ -1190,7 +1190,7 @@ func power(ref p: Parser) -> NodeID {
         if (!parser_enter(ref p, pos)) { return nesting_fallback(ref p, pos); }
         let right: NodeID = factor(ref p);
         parser_leave(ref p);
-        return add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        return add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
@@ -1203,7 +1203,7 @@ func shift_expr(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = arith_expr(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1231,14 +1231,14 @@ func comp_expr(ref p: Parser) -> NodeID {
             
             let right: NodeID = shift_expr(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            left = add_binop_node(p.arena, BinOpNode(type=node_type, left=left, op_tok=op_tok, right=right, pos=pos));
+            left = add_binop_node(ref p.arena, BinOpNode(type=node_type, left=left, op_tok=op_tok, right=right, pos=pos));
             
             // continue loop
         } else {
             parser_advance(ref p);
             let right: NodeID = shift_expr(ref p);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+            left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
         }
     }
     return left;
@@ -1251,7 +1251,7 @@ func bitwise_and(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = comp_expr(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1263,7 +1263,7 @@ func bitwise_xor(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = bitwise_and(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1275,7 +1275,7 @@ func bitwise_or(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = bitwise_xor(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1287,7 +1287,7 @@ func logic_and(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = bitwise_or(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1300,7 +1300,7 @@ func logic_or(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = logic_and(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     return left;
 }
@@ -1316,20 +1316,20 @@ func assignment(ref p: Parser) -> NodeID {
         
         let base: Int = node_tag(left);
         if (base == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = get_var_access_node(p.arena, left);
+            let v_node: VarAccessNode = get_var_access_node(ref p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return add_var_assign_node(p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=right, pos=pos));
+            return add_var_assign_node(ref p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=right, pos=pos));
         } else if (base == NODE_FIELD_ACCESS) {
-            let f_node: FieldAccessNode = get_field_access_node(p.arena, left);
+            let f_node: FieldAccessNode = get_field_access_node(ref p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return add_field_assign_node(p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=right, pos=pos));
+            return add_field_assign_node(ref p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=right, pos=pos));
         } else if (base == NODE_DEREF) {
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return add_ptr_assign_node(p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=right, pos=pos));
+            return add_ptr_assign_node(ref p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=right, pos=pos));
         } else if (base == NODE_INDEX_ACCESS) {
-            let idx_node: IndexAccessNode = get_index_access_node(p.arena, left);
+            let idx_node: IndexAccessNode = get_index_access_node(ref p.arena, left);
             let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-            return add_index_assign_node(p.arena, IndexAssignNode(type=NODE_INDEX_ASSIGN, target=idx_node.target, index_node=idx_node.index_node, value=right, pos=pos));
+            return add_index_assign_node(ref p.arena, IndexAssignNode(type=NODE_INDEX_ASSIGN, target=idx_node.target, index_node=idx_node.index_node, value=right, pos=pos));
         } else {
             let err_pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Invalid assignment target.");
@@ -1363,23 +1363,23 @@ func assignment(ref p: Parser) -> NodeID {
         let bin_tok: Token = Token(type=bin_op_type, value="compound_op", line=op_tok.line, col=op_tok.col);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-        let bin_node: NodeID = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=bin_tok, right=right, pos=pos));
+        let bin_node: NodeID = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=bin_tok, right=right, pos=pos));
 
         let base: Int = node_tag(left);
         
         // a += 1
         if (base == NODE_VAR_ACCESS) {
-            let v_node: VarAccessNode = get_var_access_node(p.arena, left);
-            return add_var_assign_node(p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=bin_node, pos=pos));
+            let v_node: VarAccessNode = get_var_access_node(ref p.arena, left);
+            return add_var_assign_node(ref p.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=v_node.name_tok, value=bin_node, pos=pos));
         } 
         // s.x += 1
         else if (base == NODE_FIELD_ACCESS) {
-            let f_node: FieldAccessNode = get_field_access_node(p.arena, left);
-            return add_field_assign_node(p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=bin_node, pos=pos));
+            let f_node: FieldAccessNode = get_field_access_node(ref p.arena, left);
+            return add_field_assign_node(ref p.arena, FieldAssignNode(type=NODE_FIELD_ASSIGN, obj=f_node.obj, field_name=f_node.field_name, value=bin_node, pos=pos));
         }
         // (deref p) += 1
         else if (base == NODE_DEREF) {
-            return add_ptr_assign_node(p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=bin_node, pos=pos));
+            return add_ptr_assign_node(ref p.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=left, value=bin_node, pos=pos));
         }
 
         else {
@@ -1414,7 +1414,7 @@ func term(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = factor(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
@@ -1429,7 +1429,7 @@ func arith_expr(ref p: Parser) -> NodeID {
         parser_advance(ref p);
         let right: NodeID = term(ref p);
         let pos: Position = Position(idx=0, ln=op_tok.line, col=op_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-        left = add_binop_node(p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
+        left = add_binop_node(ref p.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=op_tok, right=right, pos=pos));
     }
     
     return left;
@@ -1455,7 +1455,7 @@ func var_decl_core(ref p: Parser, is_const: Bool, anns: Vector(AnnotationNode), 
     }
     
     let declaration: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=val_node, is_const=is_const, annotations=anns, pos=start_pos, alloc_id=0);
-    return add_var_decl_node(p.arena, declaration);
+    return add_var_decl_node(ref p.arena, declaration);
 }
 
 func var_decl(ref p: Parser, anns: Vector(AnnotationNode), allow_inference: Bool) -> NodeID {
@@ -1471,7 +1471,7 @@ func parse_block(ref p: Parser) -> NodeID {
     let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     if (!parser_enter(ref p, pos)) {
         if (p.current_tok.type == TOK_LBRACE) { skip_group(ref p, TOK_LBRACE, TOK_RBRACE); }
-        return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=[]));
+        return add_block_node(ref p.arena, BlockNode(type=NODE_BLOCK, stmts=[]));
     }
     let result: NodeID = parse_block_inner(ref p);
     parser_leave(ref p);
@@ -1531,7 +1531,7 @@ func parse_block_inner(ref p: Parser) -> NodeID {
             parser_advance(ref p);
             
             let catch_body: NodeID = parse_block(ref p);
-            stmt = add_catch_node(p.arena, CatchNode(type=NODE_CATCH, stmt=stmt, err_name=err_name, body=catch_body, pos=catch_pos, alloc_id=0));
+            stmt = add_catch_node(ref p.arena, CatchNode(type=NODE_CATCH, stmt=stmt, err_name=err_name, body=catch_body, pos=catch_pos, alloc_id=0));
         }
 
         if (has_node(stmt)) {
@@ -1544,7 +1544,7 @@ func parse_block_inner(ref p: Parser) -> NodeID {
     }
     parser_advance(ref p); // skip }
 
-    return add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
+    return add_block_node(ref p.arena, BlockNode(type=NODE_BLOCK, stmts=stmts));
 }
 
 func if_stmt(ref p: Parser) -> NodeID {
@@ -1566,7 +1566,7 @@ func if_stmt(ref p: Parser) -> NodeID {
     }
     
     let pos: Position = Position(idx=0, ln=if_tok.line, col=if_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_if_node(p.arena, IfNode(type=NODE_IF, condition=cond, body=body, else_body=else_body, pos=pos));
+    return add_if_node(ref p.arena, IfNode(type=NODE_IF, condition=cond, body=body, else_body=else_body, pos=pos));
 }
 
 func while_stmt(ref p: Parser) -> NodeID {
@@ -1576,21 +1576,21 @@ func while_stmt(ref p: Parser) -> NodeID {
     let body: NodeID = parse_block(ref p);
 
     let pos: Position = Position(idx=0, ln=while_tok.line, col=while_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_while_node(p.arena, WhileNode(type=NODE_WHILE, condition=cond, body=body, pos=pos));
+    return add_while_node(ref p.arena, WhileNode(type=NODE_WHILE, condition=cond, body=body, pos=pos));
 }
 
 func break_stmt(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
     parser_advance(ref p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_break_node(p.arena, BreakNode(type=NODE_BREAK, pos=pos));
+    return add_break_node(ref p.arena, BreakNode(type=NODE_BREAK, pos=pos));
 }
 
 func continue_stmt(ref p: Parser) -> NodeID {
     let tok: Token = p.current_tok;
     parser_advance(ref p);
     let pos: Position = Position(idx=0, ln=tok.line, col=tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_continue_node(p.arena, ContinueNode(type=NODE_CONTINUE, pos=pos));
+    return add_continue_node(ref p.arena, ContinueNode(type=NODE_CONTINUE, pos=pos));
 }
 
 func for_stmt(ref p: Parser) -> NodeID {
@@ -1646,7 +1646,7 @@ func for_stmt(ref p: Parser) -> NodeID {
 
     let body: NodeID = parse_block(ref p);
     let pos: Position = Position(idx=0, ln=for_tok.line, col=for_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_for_node(p.arena, ForNode(type=NODE_FOR, init=init, cond=cond, step=step, body=body, pos=pos));
+    return add_for_node(ref p.arena, ForNode(type=NODE_FOR, init=init, cond=cond, step=step, body=body, pos=pos));
 }
 
 func statement(ref p: Parser) -> NodeID {
@@ -1689,11 +1689,11 @@ func is_default_param(arena: AstArena, node: NodeID) -> Bool {
         return true;
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref arena, node);
         return is_default_param(arena, unary.node);
     }
     if (base == NODE_BINOP) {
-        let binary: BinOpNode = get_binop_node(arena, node);
+        let binary: BinOpNode = get_binop_node(ref arena, node);
         return is_default_param(arena, binary.left) && is_default_param(arena, binary.right);
     }
     return false;
@@ -1803,7 +1803,7 @@ func func_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     
     let pos: Position = Position(idx=0, ln=func_tok.line, col=func_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     let definition: FunctionDefNode = FunctionDefNode(type=NODE_FUNC_DEF, name_tok=name_tok, type_params=type_params, params=params, ret_type_tok=ret_type_node, body=body, annotations=anns, pos=pos);
-    return add_func_def_node(p.arena, definition);
+    return add_func_def_node(ref p.arena, definition);
 }
 
 func return_stmt(ref p: Parser) -> NodeID {
@@ -1816,7 +1816,7 @@ func return_stmt(ref p: Parser) -> NodeID {
     }
     
     let pos: Position = Position(idx=0, ln=ret_tok.line, col=ret_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_return_node(p.arena, ReturnNode(type=NODE_RETURN, value=val, pos=pos));
+    return add_return_node(ref p.arena, ReturnNode(type=NODE_RETURN, value=val, pos=pos));
 }
 
 func throw_stmt(ref p: Parser) -> NodeID {
@@ -1826,7 +1826,7 @@ func throw_stmt(ref p: Parser) -> NodeID {
     let val: NodeID = expression(ref p);
     
     let pos: Position = Position(idx=0, ln=throw_tok.line, col=throw_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-    return add_throw_node(p.arena, ThrowNode(type=NODE_THROW, value=val, pos=pos));
+    return add_throw_node(ref p.arena, ThrowNode(type=NODE_THROW, value=val, pos=pos));
 }
 
 func parse_struct_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
@@ -1864,7 +1864,7 @@ func parse_struct_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     if (p.current_tok.type == TOK_LBRACE) {
         body = parse_block(ref p); // initialization
     }
-    return add_struct_def_node(p.arena, StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos));
+    return add_struct_def_node(ref p.arena, StructDefNode(type=NODE_STRUCT_DEF, name_tok=name_tok, type_params=type_params, fields=fields, body=body, annotations=anns, pos=start_pos));
 }
 
 func parse_extern_func(ref p: Parser) -> NodeID {
@@ -1936,7 +1936,7 @@ func parse_extern_func(ref p: Parser) -> NodeID {
     }
     
     let declaration: ExternFuncNode = ExternFuncNode(type=NODE_EXTERN_FUNC, name_tok=name_tok, params=params, ret_type_tok=ret_type, is_varargs=is_varargs, abi_name="", link_name="", pos=start_pos);
-    return add_extern_func_node(p.arena, declaration);
+    return add_extern_func_node(ref p.arena, declaration);
 }
 
 func parse_extern(ref p: Parser) -> NodeID {
@@ -1973,7 +1973,7 @@ func parse_extern(ref p: Parser) -> NodeID {
             }
 
             let func_node: NodeID = parse_extern_func(ref p);
-            let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
+            let f_node: ExternFuncNode = get_extern_func_node(ref p.arena, func_node);
             f_node.abi_name = abi_name;
             f_node.link_name = link_name;
             p.arena.extern_func_nodes[node_slot(func_node)] = f_node;
@@ -1991,7 +1991,7 @@ func parse_extern(ref p: Parser) -> NodeID {
             throw_invalid_syntax(err_pos, "Expected '}' to end extern block.");
         }
         parser_advance(ref p); // skip '}'
-        return add_extern_block_node(p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
+        return add_extern_block_node(ref p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
     }
 
     if (p.current_tok.type == TOK_FUNC) {
@@ -2027,12 +2027,12 @@ func parse_extern(ref p: Parser) -> NodeID {
         }
         parser_advance(ref p); // skip ';'
 
-        let f_node: ExternFuncNode = get_extern_func_node(p.arena, func_node);
+        let f_node: ExternFuncNode = get_extern_func_node(ref p.arena, func_node);
         f_node.abi_name = abi_name;
         f_node.link_name = link_name;
         p.arena.extern_func_nodes[node_slot(func_node)] = f_node;
         let funcs: Vector(NodeID) = [func_node];
-        return add_extern_block_node(p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
+        return add_extern_block_node(ref p.arena, ExternBlockNode(type=NODE_EXTERN_BLOCK, funcs=funcs, abi_name=abi_name, link_name=link_name, pos=start_pos));
     }
 
     let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2129,7 +2129,7 @@ func parse_import(ref p: Parser) -> NodeID {
         parser_advance(ref p);
     }
 
-    return add_import_node(p.arena, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=alias_tok, pos=start_pos));
+    return add_import_node(ref p.arena, ImportNode(type=NODE_IMPORT, path_tok=path_tok, symbols=symbols, alias_tok=alias_tok, pos=start_pos));
 }
 
 func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
@@ -2203,7 +2203,7 @@ func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID 
             parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=m_pos.ln, col=m_pos.col);
-            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=m_pos));
+            let ret_type: NodeID = add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=m_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(ref p);
                 ret_type = parse_return_type(ref p);
@@ -2216,7 +2216,7 @@ func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID 
             parser_advance(ref p); // skip ';'
 
             let declaration: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=NO_NODE, is_override=false, annotations=member_anns);
-            methods.append(add_method_def_node(p.arena, declaration));
+            methods.append(add_method_def_node(ref p.arena, declaration));
 
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2232,7 +2232,7 @@ func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID 
     parser_advance(ref p); // skip '}'
 
     let definition: InterfaceDefNode = InterfaceDefNode(type=NODE_INTERFACE_DEF, name_tok=name_tok, type_params=type_params, interfaces=interfaces, methods=methods, annotations=anns, pos=pos);
-    return add_interface_def_node(p.arena, definition);
+    return add_interface_def_node(ref p.arena, definition);
 }
 
 func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
@@ -2312,7 +2312,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             parser_advance(ref p); // skip ';'
 
             let field: VarDeclareNode = VarDeclareNode(type=NODE_VAR_DECL, name_tok=tid.name_tok, type_node=tid.type_node, value=default_val, is_const=false, annotations=member_anns, pos=f_pos, alloc_id=0);
-            fields.append(add_var_decl_node(p.arena, field));
+            fields.append(add_var_decl_node(ref p.arena, field));
             
         } else if (p.current_tok.type == TOK_METHOD || p.current_tok.type == TOK_FUNC) {
             let m_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2350,7 +2350,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             let body: NodeID = parse_block(ref p); 
             
             let method_def: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=m_pos, name_tok=m_name, type_params=type_params, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
-            methods.append(add_method_def_node(p.arena, method_def));
+            methods.append(add_method_def_node(ref p.arena, method_def));
 
         } else if (p.current_tok.type == TOK_TYPE) {
             let type_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2364,7 +2364,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             let body: NodeID = parse_block(ref p);
 
             let conversion: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=type_pos, name_tok=type_name_tok, type_params=null, params=[], return_type=target_type, body=body, is_override=false, annotations=null);
-            methods.append(add_method_def_node(p.arena, conversion));
+            methods.append(add_method_def_node(ref p.arena, conversion));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "init") {
             let init_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2387,7 +2387,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=init_pos.ln, col=init_pos.col);
-            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=init_pos));
+            let ret_type: NodeID = add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=init_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(ref p);
                 parse_return_type(ref p);
@@ -2396,7 +2396,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             let body: NodeID = parse_block(ref p); 
             
             let initializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=init_pos, name_tok=init_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
-            methods.append(add_method_def_node(p.arena, initializer));
+            methods.append(add_method_def_node(ref p.arena, initializer));
 
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "deinit") {
             let deinit_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2419,7 +2419,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             parser_advance(ref p); // skip ')'
 
             let void_tok: Token = Token(type=TOK_T_VOID, value="Void", line=deinit_pos.ln, col=deinit_pos.col);
-            let ret_type: NodeID = add_var_access_node(p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=deinit_pos));
+            let ret_type: NodeID = add_var_access_node(ref p.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=void_tok, pos=deinit_pos));
             if (p.current_tok.type == TOK_TYPE_ARROW) {
                 parser_advance(ref p);
                 parse_return_type(ref p);
@@ -2427,7 +2427,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
 
             let body: NodeID = parse_block(ref p); 
             let deinitializer: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=deinit_pos, name_tok=deinit_name_tok, type_params=null, params=params, return_type=ret_type, body=body, is_override=false, annotations=member_anns);
-            methods.append(add_method_def_node(p.arena, deinitializer));
+            methods.append(add_method_def_node(ref p.arena, deinitializer));
 
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
@@ -2444,7 +2444,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let field_init_stmts: Vector(NodeID) = [];
     let field_idx: Int = 0;
     while (field_idx < fields.length()) {
-        let field: VarDeclareNode = get_var_decl_node(p.arena, fields[field_idx]);
+        let field: VarDeclareNode = get_var_decl_node(ref p.arena, fields[field_idx]);
         if (has_node(field.value)) {
             let self_tok: Token = Token(
                 type=TOK_IDENTIFIER,
@@ -2452,12 +2452,12 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 line=field.name_tok.line,
                 col=field.name_tok.col
             );
-            let self_node: NodeID = add_var_access_node(p.arena, VarAccessNode(
+            let self_node: NodeID = add_var_access_node(ref p.arena, VarAccessNode(
                 type=NODE_VAR_ACCESS,
                 name_tok=self_tok,
                 pos=field.pos
             ));
-            field_init_stmts.append(add_field_assign_node(p.arena, FieldAssignNode(
+            field_init_stmts.append(add_field_assign_node(ref p.arena, FieldAssignNode(
                 type=NODE_FIELD_ASSIGN,
                 obj=self_node,
                 field_name=field.name_tok.value,
@@ -2481,26 +2481,26 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             line=pos.ln,
             col=pos.col
         );
-        let return_type: NodeID = add_var_access_node(p.arena, VarAccessNode(
+        let return_type: NodeID = add_var_access_node(ref p.arena, VarAccessNode(
             type=NODE_VAR_ACCESS,
             name_tok=void_tok,
             pos=pos
         ));
-        methods.append(add_method_def_node(p.arena, MethodDefNode(
+        methods.append(add_method_def_node(ref p.arena, MethodDefNode(
             type=NODE_METHOD_DEF,
             pos=pos,
             name_tok=field_init_tok,
             type_params=null,
             params=[],
             return_type=return_type,
-            body=add_block_node(p.arena, BlockNode(type=NODE_BLOCK, stmts=field_init_stmts)),
+            body=add_block_node(ref p.arena, BlockNode(type=NODE_BLOCK, stmts=field_init_stmts)),
             is_override=false,
             annotations=null
         )));
     }
 
     let definition: ClassDefNode = ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=name_tok, type_params=type_params, parent_tok=parent_tok, interfaces=interfaces, fields=fields, methods=methods, annotations=anns);
-    return add_class_def_node(p.arena, definition);
+    return add_class_def_node(ref p.arena, definition);
 }
 
 func parse_enum_def(ref p: Parser, anns: Vector(AnnotationNode), is_error: Bool) -> NodeID {
@@ -2560,5 +2560,5 @@ func parse_enum_def(ref p: Parser, anns: Vector(AnnotationNode), is_error: Bool)
         throw_invalid_syntax(err_pos, "expected '}' to close " + kind + " '" + name_tok.value + "'");
     }
 
-    return add_enum_def_node(p.arena, EnumDefNode(type=NODE_ENUM_DEF, name_tok=name_tok, fields=fields, pos=start_pos, annotations=anns, is_error=is_error));
+    return add_enum_def_node(ref p.arena, EnumDefNode(type=NODE_ENUM_DEF, name_tok=name_tok, fields=fields, pos=start_pos, annotations=anns, is_error=is_error));
 }

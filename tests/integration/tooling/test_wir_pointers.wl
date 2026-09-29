@@ -23,34 +23,34 @@ func pointer_token(kind: Int, value: String) -> Token {
 }
 
 func pointer_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=pointer_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=pointer_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func pointer_int(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_int_node(arena, IntNode(type=NODE_INT, tok=pointer_token(TOK_INT, value), pos=pos));
+    return add_int_node(ref arena, IntNode(type=NODE_INT, tok=pointer_token(TOK_INT, value), pos=pos));
 }
 
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), type_counter=100, ptr_cache=Dict(), ptr_base_map=Dict());
     let pos: Position = pointer_position();
 
-    let local: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=pointer_int(source.arena, "5", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let reference: NodeID = add_ref_node(source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "x", pos), pos=pos));
-    let pointer_local: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "p"), type_node=NO_NODE, value=reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let pointer_value: NodeID = add_deref_node(source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "p", pos), level=1, pos=pos));
-    let assignment: NodeID = add_ptr_assign_node(source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_value, value=pointer_int(source.arena, "7", pos), pos=pos));
-    let pointer_reference: NodeID = add_ref_node(source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "p", pos), pos=pos));
-    let pointer_pointer_local: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "pp"), type_node=NO_NODE, value=pointer_reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
-    let pointer_pointer_value: NodeID = add_deref_node(source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));
-    let pointer_pointer_assignment: NodeID = add_ptr_assign_node(source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_pointer_value, value=pointer_int(source.arena, "9", pos), pos=pos));
-    let result: NodeID = add_deref_node(source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));
-    let return_value: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=result, pos=pos));
-    let body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, pointer_local, assignment, pointer_pointer_local, pointer_pointer_assignment, return_value]));
+    let local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=pointer_int(source.arena, "5", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let reference: NodeID = add_ref_node(ref source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "x", pos), pos=pos));
+    let pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "p"), type_node=NO_NODE, value=reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let pointer_value: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "p", pos), level=1, pos=pos));
+    let assignment: NodeID = add_ptr_assign_node(ref source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_value, value=pointer_int(source.arena, "7", pos), pos=pos));
+    let pointer_reference: NodeID = add_ref_node(ref source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "p", pos), pos=pos));
+    let pointer_pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "pp"), type_node=NO_NODE, value=pointer_reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let pointer_pointer_value: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));
+    let pointer_pointer_assignment: NodeID = add_ptr_assign_node(ref source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_pointer_value, value=pointer_int(source.arena, "9", pos), pos=pos));
+    let result: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));
+    let return_value: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=result, pos=pos));
+    let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[local, pointer_local, assignment, pointer_pointer_local, pointer_pointer_assignment, return_value]));
 
     let int_pointer: Int = get_ptr_type_id(ref source, TYPE_INT);
-    let null_value: NodeID = add_nullptr_node(source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
-    let null_return: NodeID = add_return_node(source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
-    let null_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
+    let null_value: NodeID = add_nullptr_node(ref source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
+    let null_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
+    let null_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

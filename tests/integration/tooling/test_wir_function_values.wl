@@ -19,23 +19,23 @@ func function_value_token(kind: Int, value: String) -> Token {
 }
 
 func function_value_access(arena: AstArena, name: String, pos: Position) -> NodeID {
-    return add_var_access_node(arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=function_value_token(TOK_IDENTIFIER, name), pos=pos));
+    return add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=function_value_token(TOK_IDENTIFIER, name), pos=pos));
 }
 
 func function_value_int(arena: AstArena, value: String, pos: Position) -> NodeID {
-    return add_int_node(arena, IntNode(type=NODE_INT, tok=function_value_token(TOK_INT, value), pos=pos));
+    return add_int_node(ref arena, IntNode(type=NODE_INT, tok=function_value_token(TOK_INT, value), pos=pos));
 }
 
 func function_value_call(arena: AstArena, name: String, args: Vector(ArgNode), pos: Position) -> NodeID {
-    return add_call_node(arena, CallNode(type=NODE_CALL, callee=function_value_access(arena, name, pos), args=args, type_args=[], pos=pos, preserve_fallible=false));
+    return add_call_node(ref arena, CallNode(type=NODE_CALL, callee=function_value_access(arena, name, pos), args=args, type_args=[], pos=pos, preserve_fallible=false));
 }
 
 func function_value_return(arena: AstArena, value: NodeID, pos: Position) -> NodeID {
-    return add_return_node(arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
+    return add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=value, pos=pos));
 }
 
 func function_value_definition(arena: AstArena, name: String, body: NodeID, pos: Position) -> NodeID {
-    return add_func_def_node(arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=function_value_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=function_value_access(arena, "Int", pos), body=body, annotations=[], pos=pos));
+    return add_func_def_node(ref arena, FunctionDefNode(type=NODE_FUNC_DEF, name_tok=function_value_token(TOK_IDENTIFIER, name), type_params=[], params=[], ret_type_tok=function_value_access(arena, "Int", pos), body=body, annotations=[], pos=pos));
 }
 
 func main() -> Int {
@@ -57,19 +57,19 @@ func main() -> Int {
     source.func_table.put("memory_alloc", FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C"));
     source.func_table.put("memory_free", FuncInfo(name="memory_free", base_name="memory_free", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)], arg_names=["block"], is_varargs=false, abi_name="C"));
 
-    let add_sum: NodeID = add_binop_node(source.arena, BinOpNode(type=NODE_BINOP, left=function_value_access(source.arena, "a", pos), op_tok=function_value_token(TOK_PLUS, "+"), right=function_value_access(source.arena, "b", pos), pos=pos));
-    let add_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, add_sum, pos)]));
+    let add_sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=function_value_access(source.arena, "a", pos), op_tok=function_value_token(TOK_PLUS, "+"), right=function_value_access(source.arena, "b", pos), pos=pos));
+    let add_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, add_sum, pos)]));
 
     let indirect_args: Vector(ArgNode) = [ArgNode(val=function_value_int(source.arena, "2", pos), name="", is_spread=false), ArgNode(val=function_value_int(source.arena, "3", pos), name="", is_spread=false)];
     let indirect_call: NodeID = function_value_call(source.arena, "f", indirect_args, pos);
-    let apply_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, indirect_call, pos)]));
+    let apply_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, indirect_call, pos)]));
 
-    let chosen: NodeID = add_var_decl_node(source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=function_value_token(TOK_IDENTIFIER, "chosen"), type_node=NO_NODE, value=function_value_access(source.arena, "add", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let chosen: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=function_value_token(TOK_IDENTIFIER, "chosen"), type_node=NO_NODE, value=function_value_access(source.arena, "add", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
     let apply_args: Vector(ArgNode) = [ArgNode(val=function_value_access(source.arena, "chosen", pos), name="", is_spread=false)];
     let apply_call: NodeID = function_value_call(source.arena, "apply", apply_args, pos);
-    let main_body: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[chosen, function_value_return(source.arena, apply_call, pos)]));
+    let main_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[chosen, function_value_return(source.arena, apply_call, pos)]));
 
-    let root: NodeID = add_block_node(source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_definition(source.arena, "add", add_body, pos), function_value_definition(source.arena, "apply", apply_body, pos), function_value_definition(source.arena, "main", main_body, pos)]));
+    let root: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_definition(source.arena, "add", add_body, pos), function_value_definition(source.arena, "apply", apply_body, pos), function_value_definition(source.arena, "main", main_body, pos)]));
     let result: WirLoweringResult = wir_lower_module(ref source, root, "x86_64-pc-windows-msvc", 64);
     if (result.errors.length() != 0) {
         print("FAIL: function values were rejected: ", result.errors[0]);

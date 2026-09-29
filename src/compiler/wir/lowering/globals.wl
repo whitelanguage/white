@@ -26,7 +26,7 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
     if (!node.is_const || !has_node(node.value)) { return; }
     let value_node: NodeID = node.value;
     if (node_tag(value_node) == NODE_CALL) {
-        let call: CallNode = get_call_node(source.arena, value_node);
+        let call: CallNode = get_call_node(ref source.arena, value_node);
         let target: Int = wir_static_cast_target(ref source, call.callee);
         if (target != 0 && call.args is !null && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
@@ -51,7 +51,7 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
         let value: Long = 0L;
         if (repr == TYPE_BOOL) { value = Long(eval_const_bool(ref source, value_node, node.pos)); }
         else if (repr == TYPE_CHAR && node_tag(value_node) == NODE_CHAR) {
-            value = Long(string_to_int(get_char_node(source.arena, value_node).tok.value, node.pos));
+            value = Long(string_to_int(get_char_node(ref source.arena, value_node).tok.value, node.pos));
         }
         else { value = eval_const_long(ref source, value_node, node.pos); }
         if (source.constant_integers is !null) { source.constant_integers.put(name, value); }
