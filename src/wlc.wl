@@ -462,7 +462,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
 
-        let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits(), cfg.verbose)?;
+        let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits(), cfg.verbose, cfg.opt_level)?;
         catch(err) {
             compiler.output_file.close();
             print("Build Failed: Machine backend ran out of memory while producing the object file.");

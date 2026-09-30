@@ -628,6 +628,8 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), uses:
     let required = 0;
     if (peak > register_count) {
         required = peak - register_count;
+        // next-use eviction can briefly keep the old value while claiming the result register
+        required++;
     }
 
     if (call_peak > required) {
