@@ -47,6 +47,8 @@ func wir_reachable_symbols(program: WirModule) -> WirReachability {
     let value_queue: Vector(WirValueID) = [];
     let retain_function: WirFuncID = wir_find_function(program, "__wl_retain");
     let release_function: WirFuncID = wir_find_function(program, "__wl_release");
+    let null_failure: WirFuncID = wir_find_function(program, "__wl_fail_null");
+    let bounds_failure: WirFuncID = wir_find_function(program, "__wl_fail_bounds");
     let i: Int = 0;
     while (i < program.arena.functions.length()) {
         function_live.append(false);
@@ -102,6 +104,10 @@ func wir_reachable_symbols(program: WirModule) -> WirReachability {
                         wir_queue_function(program, retain_function, ref function_live, ref function_queue);
                     } else if (instruction.opcode == WirOpcode.Release) {
                         wir_queue_function(program, release_function, ref function_live, ref function_queue);
+                    } else if (instruction.opcode == WirOpcode.NullCheck) {
+                        wir_queue_function(program, null_failure, ref function_live, ref function_queue);
+                    } else if (instruction.opcode == WirOpcode.BoundsCheck) {
+                        wir_queue_function(program, bounds_failure, ref function_live, ref function_queue);
                     }
                     let operand_index: Int = 0;
                     while (operand_index < instruction.operands.length()) {

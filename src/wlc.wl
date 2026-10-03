@@ -367,7 +367,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         ll_file = temp_dir + "wlc_tmp_" + file_only + "_" + process.id() + ".ll";
     }
 
-    if (!cfg.keep_temps && !cfg.is_emit_llvm) {
+    if (cfg.backend != "machine" && !cfg.keep_temps && !cfg.is_emit_llvm) {
         WhitelangExceptions.CLEAN_TMP_LL = ll_file;
     }
 
@@ -429,9 +429,15 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     if (cfg.dump_ast) { print("[Debug] AST Dumped"); }
 
-    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info, arena)?;
+    let compiler_output: String = ll_file;
+    if (cfg.backend == "machine") { compiler_output = ""; }
+    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(compiler_output, cfg.is_shared, cfg.debug_info, arena)?;
     catch(err) {
-        print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
+        if (cfg.backend == "machine") {
+            print("Error: Could not initialize the compiler (error " + Int(err) + ")");
+        } else {
+            print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
+        }
         return 1;
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
@@ -464,13 +470,11 @@ func main(argc: Int, ptr argv: String) -> Int {
 
         let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits(), cfg.verbose, cfg.opt_level)?;
         catch(err) {
-            compiler.output_file.close();
             print("Build Failed: Machine backend ran out of memory while producing the object file.");
             return 1;
         }
         WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
-            compiler.output_file.close();
             let error_index: Int = 0;
             while (error_index < result.errors.length()) {
                 print("InternalCompilerError: " + result.errors[error_index]);
@@ -478,7 +482,6 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             return 1;
         }
-        compiler.output_file.close();
         let object_file: file.File = file.create(machine_file)?;
         catch(err) {
             print("Build Failed: Could not create machine object file " + machine_file + ".");
@@ -497,17 +500,12 @@ func main(argc: Int, ptr argv: String) -> Int {
     if (cfg.verbose) { print("Lowered source through the " + cfg.backend + " backend"); }
 
     WhitelangExceptions.check_errors_and_abort();
-    if (compiler.output_file.last_error() != file.Error.None) {
+    if (compiler.output_file is !null && compiler.output_file.last_error() != file.Error.None) {
         print("Error: Could not write temporary IR file " + ll_file);
         return 1;
     }
 
     if (cfg.backend == "machine" && cfg.is_compile_only) {
-        if (!cfg.keep_temps && WhitelangUtils.file_exists(ll_file)) {
-            file.remove(ll_file)?;
-            catch(err) {}
-            WhitelangExceptions.CLEAN_TMP_LL = "";
-        }
         print("Build success: " + cfg.output_file);
         return 0;
     }
@@ -700,7 +698,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
     }
 
-    if (!cfg.keep_temps && cfg.output_file != ll_file) {
+    if (cfg.backend != "machine" && !cfg.keep_temps && cfg.output_file != ll_file) {
         if (cfg.verbose) { print("Cleaning up: " + ll_file); }
         file.remove(ll_file)?;
         catch(err) {

@@ -102,6 +102,26 @@ func check_stack_forwarding() -> Bool {
     return program.arena.instructions[0].operands[0] == value;
 }
 
+func check_forwarded_constant() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_signed_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "forward_constant", [], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let location = no_wir_location();
+    let one = wir_const_int(ref program, i32, UInt128(1U));
+    let slot = wir_stack_alloc(ref program, entry, i32, "value", location);
+    wir_store(ref program, entry, one, slot, location);
+    let loaded = wir_load(ref program, entry, slot, "loaded", location);
+    let result = wir_append(ref program, entry, WirOpcode.Add, i32, [loaded, one], [], location);
+    wir_return(ref program, entry, result, location);
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O2");
+    if (stats.loads != 1 || stats.stores != 1 || stats.slots != 1 || stats.constants != 1 || verify_wir(program).length() != 0) { return false; }
+    if (program.arena.instructions.length() != 1) { return false; }
+    let returned = program.arena.instructions[0].operands[0];
+    return program.arena.values[wir_id_index(UInt32(returned))].integer == UInt128(2U);
+}
+
 func check_escaping_slot() -> Bool {
     let program = new_wir_module("x86_64-pc-windows-msvc", 64);
     let i32 = wir_signed_int_type(ref program, 32);
@@ -210,6 +230,84 @@ func check_block_parameters() -> Bool {
     return true;
 }
 
+func check_copy_propagation() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_unsigned_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "copies", [WirParam(name="value", type_id=i32)], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let value = program.arena.functions[wir_id_index(UInt32(function))].parameters[0];
+    let zero = wir_const_int(ref program, i32, UInt128(0U));
+    let one = wir_const_int(ref program, i32, UInt128(1U));
+    let all_bits = wir_const_int(ref program, i32, UInt128(4294967295U));
+    let location = no_wir_location();
+    let added = wir_append(ref program, entry, WirOpcode.Add, i32, [zero, value], [], location);
+    let multiplied = wir_append(ref program, entry, WirOpcode.Multiply, i32, [added, one], [], location);
+    let masked = wir_append(ref program, entry, WirOpcode.BitAnd, i32, [all_bits, multiplied], [], location);
+    let shifted = wir_append(ref program, entry, WirOpcode.ShiftLeft, i32, [masked, zero], [], location);
+    wir_return(ref program, entry, shifted, location);
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O2");
+    if (stats.copies != 4 || stats.instructions != 4 || verify_wir(program).length() != 0) { return false; }
+    if (program.arena.instructions.length() != 1 || program.arena.instructions[0].opcode != WirOpcode.Return) { return false; }
+    return program.arena.instructions[0].operands[0] == program.arena.functions[0].parameters[0];
+}
+
+func check_repeated_checks() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_signed_int_type(ref program, 32);
+    let pointer = wir_pointer_type(ref program, i32);
+    let function = wir_add_function(ref program, "checks", [WirParam(name="p", type_id=pointer), WirParam(name="index", type_id=i32), WirParam(name="length", type_id=i32)], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let other = wir_add_block(ref program, function, "other", []);
+    let parameters = program.arena.functions[wir_id_index(UInt32(function))].parameters;
+    let location = no_wir_location();
+    let local = wir_stack_alloc(ref program, entry, i32, "local", location);
+    wir_append(ref program, entry, WirOpcode.NullCheck, program.void_type, [parameters[0]], [], location);
+    wir_append(ref program, entry, WirOpcode.NullCheck, program.void_type, [parameters[0]], [], location);
+    wir_append(ref program, entry, WirOpcode.NullCheck, program.void_type, [local], [], location);
+    wir_append(ref program, entry, WirOpcode.BoundsCheck, program.void_type, [parameters[1], parameters[2]], [], location);
+    wir_append(ref program, entry, WirOpcode.BoundsCheck, program.void_type, [parameters[1], parameters[2]], [], location);
+    let one = wir_const_int(ref program, i32, UInt128(1U));
+    let two = wir_const_int(ref program, i32, UInt128(2U));
+    wir_append(ref program, entry, WirOpcode.BoundsCheck, program.void_type, [one, two], [], location);
+    wir_append(ref program, entry, WirOpcode.Jump, program.void_type, [], [wir_edge(other, [])], location);
+    wir_append(ref program, other, WirOpcode.NullCheck, program.void_type, [parameters[0]], [], location);
+    wir_return(ref program, other, parameters[1], location);
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O1");
+    if (stats.checks != 4 || verify_wir(program).length() != 0) { return false; }
+    let null_checks = 0;
+    let bounds_checks = 0;
+    let i = 0;
+    while (i < program.arena.instructions.length()) {
+        if (program.arena.instructions[i].opcode == WirOpcode.NullCheck) { null_checks++; }
+        if (program.arena.instructions[i].opcode == WirOpcode.BoundsCheck) { bounds_checks++; }
+        i++;
+    }
+    return null_checks == 2 && bounds_checks == 1;
+}
+
+func check_jump_threading() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_signed_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "jumps", [], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let bridge = wir_add_block(ref program, function, "bridge", []);
+    let exit = wir_add_block(ref program, function, "exit", [WirParam(name="result", type_id=i32)]);
+    let value = wir_const_int(ref program, i32, UInt128(42U));
+    let location = no_wir_location();
+    wir_append(ref program, entry, WirOpcode.Jump, program.void_type, [], [wir_edge(bridge, [])], location);
+    wir_append(ref program, bridge, WirOpcode.Jump, program.void_type, [], [wir_edge(exit, [value])], location);
+    wir_return(ref program, exit, program.arena.blocks[wir_id_index(UInt32(exit))].parameters[0], location);
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O2");
+    if (stats.jumps != 1 || stats.blocks != 1 || verify_wir(program).length() != 0) { return false; }
+    let first = program.arena.instructions[0];
+    let returned = program.arena.instructions[1].operands[0];
+    return first.opcode == WirOpcode.Jump && first.edges[0].target == program.arena.functions[0].blocks[1] &&
+           first.edges[0].arguments.length() == 0 && program.arena.values[wir_id_index(UInt32(returned))].integer == UInt128(42U);
+}
+
 func check_constant(op: WirOpcode, bits: Int, signed: Bool, lhs: UInt128, rhs: UInt128, expected: UInt128, comparison: Bool) -> Bool {
     let program = new_wir_module("x86_64-pc-windows-msvc", 64);
     let type = wir_unsigned_int_type(ref program, bits);
@@ -234,9 +332,13 @@ func main() -> Int {
     if (!check_effects()) { print("FAIL: WIR optimization removed observable effects"); return 1; }
     if (!check_loop()) { print("FAIL: WIR optimization changed a loop edge"); return 1; }
     if (!check_stack_forwarding()) { print("FAIL: WIR stack slot forwarding"); return 1; }
+    if (!check_forwarded_constant()) { print("FAIL: WIR forwarded constant folding"); return 1; }
     if (!check_escaping_slot()) { print("FAIL: WIR optimizer promoted an escaping stack slot"); return 1; }
     if (!check_stack_boundaries()) { print("FAIL: WIR forwarding crossed a memory or block boundary"); return 1; }
     if (!check_block_parameters()) { print("FAIL: WIR block parameter elimination"); return 1; }
+    if (!check_copy_propagation()) { print("FAIL: WIR copy propagation"); return 1; }
+    if (!check_repeated_checks()) { print("FAIL: WIR repeated safety checks"); return 1; }
+    if (!check_jump_threading()) { print("FAIL: WIR trivial jump threading"); return 1; }
     if (!check_constant(WirOpcode.Add, 8, false, UInt128(255U), UInt128(1U), UInt128(0U), false) ||
         !check_constant(WirOpcode.Subtract, 32, true, UInt128(0U), UInt128(1U), UInt128(4294967295U), false) ||
         !check_constant(WirOpcode.Multiply, 64, false, UInt128(18446744073709551615UL), UInt128(2U), UInt128(18446744073709551614UL), false) ||

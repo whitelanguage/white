@@ -452,6 +452,7 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
     }
 
     wir_declare_generic_classes(ref types, ref source, ref program);
+    wir_emit_failure_runtime(ref types, ref source, ref program);
 
     if (verbose) { print("Lowering WIR bodies"); }
     i = 0;
@@ -490,6 +491,7 @@ func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, p
 
     let root: BlockNode = get_block_node(ref source.arena, root_node);
     wir_declare_root_items(ref types, ref source, ref program, root);
+    wir_emit_failure_runtime(ref types, ref source, ref program);
     wir_lower_root_items(ref types, ref source, ref program, root);
     wir_emit_required_runtime(ref types, ref source, ref program);
     wir_emit_target_runtime(ref source, ref program, types.errors);

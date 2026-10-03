@@ -253,7 +253,9 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(ref c.arena, node);
         let old_scope: Scope = c.hoist_scope;
-        c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
+        let parent: Int = c.hoist_scope_stack.length();
+        c.hoist_scope_stack.append(old_scope);
+        c.hoist_scope = Scope(parent=parent, table=Dict(), gc_vars=[], depth=old_scope.depth + 1);
 
         let stmts: Vector(NodeID) = block.stmts;
         let len: Int = 0;

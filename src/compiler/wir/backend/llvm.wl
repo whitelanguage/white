@@ -446,7 +446,16 @@ func llvm_write_check(output: strings.Builder, program: WirModule, instruction_i
     output.write(suffix)?;
     output.write("\ncheck.trap.")?;
     output.write(suffix)?;
-    output.write(":\n  call void @llvm.trap()\n  unreachable\ncheck.cont.")?;
+    output.write(":\n  call void @")?;
+    let failure: String = "__wl_fail_bounds";
+    if (instruction.opcode == WirOpcode.NullCheck) { failure = "__wl_fail_null"; }
+    if (llvm_has_function(program, failure)) {
+        output.write(failure)?;
+        output.write("()")?;
+    } else {
+        output.write("llvm.trap()")?;
+    }
+    output.write("\n  unreachable\ncheck.cont.")?;
     output.write(suffix)?;
     output.write(":\n")?;
     return;

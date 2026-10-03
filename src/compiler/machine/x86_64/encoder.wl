@@ -336,7 +336,18 @@ func x86_xor_register_width(ref output: X86CodeBuffer, destination: X86Register,
 }
 
 func x86_bitwise_register_imm32(ref output: X86CodeBuffer, destination: X86Register, value: UInt32, group: Int) -> Void {
-    x86_rex(ref output, false, X86Register.None, X86Register.None, destination);
+    x86_bitwise_register_imm(ref output, destination, value, group, false);
+}
+
+func x86_bitwise_register_imm(ref output: X86CodeBuffer, destination: X86Register, value: UInt32, group: Int, wide: Bool) -> Void {
+    x86_rex(ref output, wide, X86Register.None, X86Register.None, destination);
+    if (value <= 127U) {
+        x86_emit_byte(ref output, Byte(131));
+        x86_emit_byte(ref output, x86_modrm_group(group, destination));
+        x86_emit_byte(ref output, Byte(value));
+        return;
+    }
+
     x86_emit_byte(ref output, Byte(129));
     x86_emit_byte(ref output, x86_modrm_group(group, destination));
     x86_emit_u32(ref output, value);
@@ -402,7 +413,17 @@ func x86_add_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
 }
 
 func x86_add_register_imm32(ref output: X86CodeBuffer, destination: X86Register, value: UInt32) -> Void {
-    x86_rex(ref output, false, X86Register.None, X86Register.None, destination);
+    x86_add_register_imm(ref output, destination, value, false);
+}
+
+func x86_add_register_imm(ref output: X86CodeBuffer, destination: X86Register, value: UInt32, wide: Bool) -> Void {
+    x86_rex(ref output, wide, X86Register.None, X86Register.None, destination);
+    if (value <= 127U) {
+        x86_emit_byte(ref output, Byte(131));
+        x86_emit_byte(ref output, x86_modrm_group(0, destination));
+        x86_emit_byte(ref output, Byte(value));
+        return;
+    }
     x86_emit_byte(ref output, Byte(129));
     x86_emit_byte(ref output, x86_modrm_group(0, destination));
     x86_emit_u32(ref output, value);
@@ -413,7 +434,17 @@ func x86_sub_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
 }
 
 func x86_sub_register_imm32(ref output: X86CodeBuffer, destination: X86Register, value: UInt32) -> Void {
-    x86_rex(ref output, false, X86Register.None, X86Register.None, destination);
+    x86_sub_register_imm(ref output, destination, value, false);
+}
+
+func x86_sub_register_imm(ref output: X86CodeBuffer, destination: X86Register, value: UInt32, wide: Bool) -> Void {
+    x86_rex(ref output, wide, X86Register.None, X86Register.None, destination);
+    if (value <= 127U) {
+        x86_emit_byte(ref output, Byte(131));
+        x86_emit_byte(ref output, x86_modrm_group(5, destination));
+        x86_emit_byte(ref output, Byte(value));
+        return;
+    }
     x86_emit_byte(ref output, Byte(129));
     x86_emit_byte(ref output, x86_modrm_group(5, destination));
     x86_emit_u32(ref output, value);
@@ -424,7 +455,17 @@ func x86_imul_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
 }
 
 func x86_imul_register_imm32(ref output: X86CodeBuffer, destination: X86Register, value: UInt32) -> Void {
-    x86_rex(ref output, false, destination, X86Register.None, destination);
+    x86_imul_register_imm(ref output, destination, value, false);
+}
+
+func x86_imul_register_imm(ref output: X86CodeBuffer, destination: X86Register, value: UInt32, wide: Bool) -> Void {
+    x86_rex(ref output, wide, destination, X86Register.None, destination);
+    if (value <= 127U) {
+        x86_emit_byte(ref output, Byte(107));
+        x86_emit_byte(ref output, x86_modrm_register(destination, destination));
+        x86_emit_byte(ref output, Byte(value));
+        return;
+    }
     x86_emit_byte(ref output, Byte(105));
     x86_emit_byte(ref output, x86_modrm_register(destination, destination));
     x86_emit_u32(ref output, value);
@@ -435,12 +476,24 @@ func x86_cmp_eax_imm32(ref output: X86CodeBuffer, value: UInt32) -> Void {
 }
 
 func x86_cmp_register_imm32(ref output: X86CodeBuffer, register: X86Register, value: UInt32) -> Void {
+    x86_cmp_register_imm(ref output, register, value, false);
+}
+
+func x86_cmp_register_imm(ref output: X86CodeBuffer, register: X86Register, value: UInt32, wide: Bool) -> Void {
+    if (value <= 127U) {
+        x86_rex(ref output, wide, X86Register.None, X86Register.None, register);
+        x86_emit_byte(ref output, Byte(131));
+        x86_emit_byte(ref output, x86_modrm_group(7, register));
+        x86_emit_byte(ref output, Byte(value));
+        return;
+    }
     if (register == X86Register.RAX) {
+        x86_rex(ref output, wide, X86Register.None, X86Register.None, register);
         x86_emit_byte(ref output, Byte(61));
         x86_emit_u32(ref output, value);
         return;
     }
-    x86_rex(ref output, false, X86Register.None, X86Register.None, register);
+    x86_rex(ref output, wide, X86Register.None, X86Register.None, register);
     x86_emit_byte(ref output, Byte(129));
     x86_emit_byte(ref output, x86_modrm_group(7, register));
     x86_emit_u32(ref output, value);

@@ -23,7 +23,7 @@ func lower_program_to_machine(ref source: Compiler, erased_modules: Vector(Struc
     if (verbose) { print("Optimizing WIR (", opt_level, ")", sep=""); }
     let stats: WirOptimizationStats = optimize_wir(ref lowered.program, opt_level);
     if (verbose) {
-        print("Removed ", stats.instructions, " instructions and ", stats.blocks, " blocks; folded ", stats.constants, " constants and ", stats.branches, " branches; forwarded ", stats.loads, " loads, removed ", stats.slots, " stack slots and ", stats.parameters, " block parameters", sep="");
+        print("Removed ", stats.instructions, " instructions and ", stats.blocks, " blocks; folded ", stats.constants, " constants and ", stats.branches, " branches; threaded ", stats.jumps, " jumps; propagated ", stats.copies, " copies and ", stats.checks, " checks; forwarded ", stats.loads, " loads, removed ", stats.slots, " stack slots and ", stats.parameters, " block parameters", sep="");
     }
     // optimization tests verify every transformed module; avoid a second whole-program walk in release builds
     if (verbose && (stats.instructions != 0 || stats.blocks != 0 || stats.branches != 0 || stats.parameters != 0)) {

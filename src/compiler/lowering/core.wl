@@ -1163,6 +1163,7 @@ func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
     }
 
     c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
+    c.hoist_scope_stack = [];
     c.alloc_regs = [];
     hoist_allocas(ref c, node.body);
     check_local_init(ref c, node.body);
@@ -1277,6 +1278,7 @@ func compile_method_def(ref c: Compiler, class_name: String, node: MethodDefNode
     }
 
     c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
+    c.hoist_scope_stack = [];
     c.alloc_regs = [];
     hoist_allocas(ref c, node.body);
     check_local_init(ref c, node.body);
@@ -1919,6 +1921,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     }
     
     c.hoist_scope = Scope(parent=-1, table=Dict(), gc_vars=[], depth=0);
+    c.hoist_scope_stack = [];
     c.alloc_regs = [];
     hoist_allocas(ref c, func_def.body);
     check_local_init(ref c, func_def.body);

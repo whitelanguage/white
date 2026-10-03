@@ -14,7 +14,7 @@ import * from "closure_environment.wl"
 import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
 import parse_const_uint128, parse_decimal_float_literal from "../../constants.wl"
-import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args from "../../validation.wl"
+import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible from "../../validation.wl"
 import is_typed_dict from "../../lowering/dictionary.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
 import * from "../../../frontend/ast.wl"
@@ -483,6 +483,24 @@ func wir_guard_cast(ref state: WirFunctionLowering, ref program: WirModule, vali
     state.block = success;
 }
 
+func wir_fail(ref program: WirModule, block: WirBlockID, name: String) -> Void {
+    let function_id: WirFuncID = wir_find_function(program, name);
+    if (function_id == NO_WIR_FUNC) {
+        wir_trap(ref program, block, no_wir_location());
+        return;
+    }
+    wir_call(ref program, block, wir_function_value(program, function_id), [], "", no_wir_location());
+    wir_append(ref program, block, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
+}
+
+func wir_guard_runtime(ref state: WirFunctionLowering, ref program: WirModule, valid: WirValueID, failure: String) -> Void {
+    let success: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "guard.ok."), []);
+    let failed: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "guard.fail."), []);
+    wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [valid], [wir_edge(success, []), wir_edge(failed, [])], no_wir_location());
+    wir_fail(ref program, failed, failure);
+    state.block = success;
+}
+
 func wir_copy_owned(values: Vector(WirOwnedValue)) -> Vector(WirOwnedValue) {
     let copy: Vector(WirOwnedValue) = [];
     let i: Int = 0;
@@ -887,7 +905,7 @@ func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     let tag_type: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let expected_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, target_type)));
     let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected_tag, "", no_wir_location());
-    wir_guard_cast(ref state, ref program, matches);
+    wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
 
     let low_slot: WirValueID = wir_field_address(ref program, state.block, value.value, 1, "", no_wir_location());
     let low: WirValueID = wir_load(ref program, state.block, low_slot, "", no_wir_location());
@@ -1170,7 +1188,7 @@ func wir_restore_struct(ref state: WirFunctionLowering, ref types: WirTypeMap, r
     let type_tag: WirValueID = wir_load(ref program, state.block, type_slot, "", no_wir_location());
     let expected: WirValueID = wir_const_int(ref program, uint32_type, UInt128(UInt32(target_type)));
     let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, type_tag, expected, "", no_wir_location());
-    wir_guard_cast(ref state, ref program, matches);
+    wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
 
     let payload: WirValueID = wir_cast(ref program, state.block, value.value, wir_pointer_type(ref program, target_wir), "", no_wir_location());
     let restored: WirValueID = wir_load(ref program, state.block, payload, "", no_wir_location());
@@ -1207,6 +1225,21 @@ func wir_class_tag_matches(ref state: WirFunctionLowering, ref source: Compiler,
     return matches;
 }
 
+func wir_callable_tag_matches(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, tag: WirValueID, target_type: Int) -> WirValueID {
+    let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let matches: WirValueID = wir_const_bool(ref program, false);
+    let candidate: Int = 100;
+    while (candidate < source.type_counter) {
+        if (candidate == target_type || callable_types_compatible(ref source, candidate, target_type)) {
+            let expected: WirValueID = wir_const_int(ref program, uint32_type, UInt128(UInt32(candidate)));
+            let equal: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected, "", no_wir_location());
+            matches = wir_bool_or(ref program, state.block, matches, equal);
+        }
+        candidate++;
+    }
+    return matches;
+}
+
 func wir_restore_class(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, target_type: Int) -> WirExpr {
     let target_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, target_type);
     if (target_wir == NO_WIR_TYPE) { return wir_no_expr(); }
@@ -1227,7 +1260,7 @@ func wir_restore_class(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     let type_slot: WirValueID = wir_pointer_offset(ref program, state.block, value.value, WIR_ARC_TYPE_OFFSET, wir_pointer_type(ref program, uint32_type));
     let type_tag: WirValueID = wir_load(ref program, state.block, type_slot, "", no_wir_location());
     let matches: WirValueID = wir_class_tag_matches(ref state, ref source, ref program, type_tag, target_type);
-    wir_guard_cast(ref state, ref program, matches);
+    wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
     let restored: WirValueID = wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location());
     wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end_block, [restored])], no_wir_location());
 
@@ -1648,6 +1681,36 @@ func wir_cast_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     }
     if (has_struct(source_info) && source_info.is_enum && is_integer_type(target_type)) {
         return wir_cast_expr(ref state, ref types, ref source, ref program, WirExpr(value=value.value, source_type=TYPE_INT), target_type, implicit);
+    }
+    let erased_callable: Bool = value.source_type == TYPE_GENERIC_FUNCTION || value.source_type == TYPE_GENERIC_METHOD;
+    let target_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + target_type))) ||
+                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup("" + target_type)));
+    if (erased_callable && target_callable) {
+        let target_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, target_type);
+        let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
+        let null_value: WirValueID = wir_null(ref program, raw_pointer);
+        let is_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, value.value, null_value, "", no_wir_location());
+        let null_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "callable.cast.null."), []);
+        let inspect_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "callable.cast.inspect."), []);
+        let end_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "callable.cast.end."), [wir_param("value", target_wir)]);
+        wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_null], [wir_edge(null_block, []), wir_edge(inspect_block, [])], no_wir_location());
+
+        let null_result: WirValueID = wir_cast(ref program, null_block, null_value, target_wir, "", no_wir_location());
+        wir_append(ref program, null_block, WirOpcode.Jump, program.void_type, [], [wir_edge(end_block, [null_result])], no_wir_location());
+
+        state.block = inspect_block;
+        let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);
+        let type_slot: WirValueID = wir_pointer_offset(ref program, state.block, value.value, WIR_ARC_TYPE_OFFSET, wir_pointer_type(ref program, uint32_type));
+        let type_tag: WirValueID = wir_load(ref program, state.block, type_slot, "", no_wir_location());
+        let matches: WirValueID = wir_callable_tag_matches(ref state, ref source, ref program, type_tag, target_type);
+        wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
+        let restored: WirValueID = wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end_block, [restored])], no_wir_location());
+
+        state.block = end_block;
+        let result: WirValueID = program.arena.blocks[wir_id_index(UInt32(end_block))].parameters[0];
+        if (wir_take_owned(ref state, value.value)) { wir_track_owned(ref state, result, target_type); }
+        return WirExpr(value=result, source_type=target_type);
     }
     if (target_type == TYPE_GENERIC_STRUCT && is_value_struct(ref source, value.source_type)) {
         return wir_erase_struct(ref state, ref types, ref source, ref program, value);
@@ -5266,8 +5329,16 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         right = wir_cast_expr(ref state, ref types, ref source, ref program, right, common_type, false);
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) { return wir_no_expr(); }
 
-        let runtime_arithmetic: Bool = ((get_repr_type(ref source, common_type) == TYPE_FLOAT || get_repr_type(ref source, common_type) == TYPE_FLOAT32) && binary.op_tok.type == TOK_MOD) ||
-                                       ((get_repr_type(ref source, common_type) == TYPE_INT128 || get_repr_type(ref source, common_type) == TYPE_UINT128) &&
+        let common_repr: Int = get_repr_type(ref source, common_type);
+        if ((binary.op_tok.type == TOK_DIV || binary.op_tok.type == TOK_MOD) && is_integer_type(common_repr)) {
+            let integer_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, common_type);
+            let zero: WirValueID = wir_const_int(ref program, integer_type, UInt128(0U));
+            let nonzero: WirValueID = wir_binary(ref program, state.block, WirOpcode.NotEqual, program.bool_type, right.value, zero, "", no_wir_location());
+            wir_guard_runtime(ref state, ref program, nonzero, "__wl_fail_division");
+        }
+
+        let runtime_arithmetic: Bool = ((common_repr == TYPE_FLOAT || common_repr == TYPE_FLOAT32) && binary.op_tok.type == TOK_MOD) ||
+                                       ((common_repr == TYPE_INT128 || common_repr == TYPE_UINT128) &&
                                         (binary.op_tok.type == TOK_DIV || binary.op_tok.type == TOK_MOD));
         if (runtime_arithmetic) {
             return wir_lower_runtime_arithmetic(ref state, ref types, ref source, ref program, left, right, common_type, binary.op_tok.type);

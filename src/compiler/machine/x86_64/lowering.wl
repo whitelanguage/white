@@ -118,6 +118,17 @@ func x86_find_function(ref program: WirModule, name: String) -> WirFuncID {
     return NO_WIR_FUNC;
 }
 
+func x86_runtime_failure(ref program: WirModule, name: String, ref output: X86CodeBuffer, ref calls: Vector(X86CallFixup)) -> Void {
+    let target: WirFuncID = x86_find_function(ref program, name);
+    if (target == NO_WIR_FUNC) {
+        x86_trap(ref output);
+        return;
+    }
+
+    calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target));
+    x86_trap(ref output);
+}
+
 func x86_scalar_size(ref program: WirModule, type_id: WirTypeID) -> Int {
     let index: Int = wir_id_index(UInt32(type_id));
     if (index < 0 || index >= program.arena.types.length()) { return 0; }
@@ -138,6 +149,14 @@ func x86_scalar_signed(ref program: WirModule, type_id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(type_id));
     if (index < 0 || index >= program.arena.types.length()) { return false; }
     return program.arena.types[index].kind == WirTypeKind.SignedInt;
+}
+
+func x86_integer_immediate(value: WirValue, size: Int) -> Bool {
+    if (value.kind != WirValueKind.Integer) { return false; }
+    if (size <= 4) { return true; }
+    // x86-64 sign extends the 32-bit field. Keep negative bit patterns on the
+    // register path until WIR has one canonical signed-immediate query.
+    return size == 8 && value.integer <= UInt128(2147483647U);
 }
 
 func x86_scalar_float(ref program: WirModule, type_id: WirTypeID) -> Bool {
@@ -844,6 +863,9 @@ func x86_function_call_frame(ref program: WirModule, function: WirFunction, layo
             } else if (instruction.opcode == WirOpcode.Retain || instruction.opcode == WirOpcode.Release) {
                 let required: Int = x86_win64_call_frame(1);
                 if (required > frame_size) { frame_size = required; }
+            } else if (instruction.opcode == WirOpcode.NullCheck || instruction.opcode == WirOpcode.BoundsCheck) {
+                let required: Int = x86_win64_call_frame(0);
+                if (required > frame_size) { frame_size = required; }
             }
 
             instruction_index += 1;
@@ -1523,7 +1545,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (checked.message.length() != 0) { return checked.message; }
         x86_test_register_width(ref output, checked.register, checked.register, true);
         let valid: Int = x86_jump_if_rel32(ref output, X86Opcode.Jne);
-        x86_trap(ref output);
+        x86_runtime_failure(ref program, "__wl_fail_null", ref output, ref calls);
         if (!x86_patch_i32(ref output, valid, output.bytes.length() - (valid + 4))) {
             return "cannot resolve null check";
         }
@@ -1558,7 +1580,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (type.kind == WirTypeKind.SignedInt) { valid_condition = X86Opcode.Jl; }
         let valid: Int = x86_jump_if_rel32(ref output, valid_condition);
         let trap: Int = output.bytes.length();
-        x86_trap(ref output);
+        x86_runtime_failure(ref program, "__wl_fail_bounds", ref output, ref calls);
         let continuation: Int = output.bytes.length();
         if ((negative >= 0 && !x86_patch_i32(ref output, negative, trap - (negative + 4))) ||
             !x86_patch_i32(ref output, valid, continuation - (valid + 4))) {
@@ -2433,13 +2455,20 @@ func x86_lower_instruction(ref program: WirModule,
 
         let left_id: WirValueID = instruction.operands[0];
         let right_id: WirValueID = instruction.operands[1];
+        let left_value: WirValue = program.arena.values[wir_id_index(UInt32(left_id))];
         let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
+        if (instruction.opcode != WirOpcode.Subtract && left_value.kind == WirValueKind.Integer && right.kind != WirValueKind.Integer) {
+            let swap = left_id;
+            left_id = right_id;
+            right_id = swap;
+            right = left_value;
+        }
         let left: X86RegisterResult = x86_materialize_register(ref program, function, left_id, slots, ref state, ref output);
         if (left.message.length() != 0) {
             return left.message;
         }
 
-        let immediate: Bool = right.kind == WirValueKind.Integer && size <= 4;
+        let immediate: Bool = x86_integer_immediate(right, size);
         let right_register: X86Register = X86Register.None;
         if (!immediate) {
             let loaded_right: X86RegisterResult = x86_materialize_register_except(ref program, function, right_id, slots, ref state, left.register, ref output);
@@ -2469,11 +2498,11 @@ func x86_lower_instruction(ref program: WirModule,
 
         if (immediate) {
             if (instruction.opcode == WirOpcode.Add) {
-                x86_add_register_imm32(ref output, destination, UInt32(right.integer));
+                x86_add_register_imm(ref output, destination, UInt32(right.integer), size == 8);
             } else if (instruction.opcode == WirOpcode.Subtract) {
-                x86_sub_register_imm32(ref output, destination, UInt32(right.integer));
+                x86_sub_register_imm(ref output, destination, UInt32(right.integer), size == 8);
             } else {
-                x86_imul_register_imm32(ref output, destination, UInt32(right.integer));
+                x86_imul_register_imm(ref output, destination, UInt32(right.integer), size == 8);
             }
         } else {
             let source: X86Register = right_register;
@@ -2513,8 +2542,15 @@ func x86_lower_instruction(ref program: WirModule,
         }
         let left_id: WirValueID = instruction.operands[0];
         let right_id: WirValueID = instruction.operands[1];
+        let left_value: WirValue = program.arena.values[wir_id_index(UInt32(left_id))];
         let right: WirValue = program.arena.values[wir_id_index(UInt32(right_id))];
-        let immediate: Bool = right.kind == WirValueKind.Integer && size <= 4;
+        if (left_value.kind == WirValueKind.Integer && right.kind != WirValueKind.Integer) {
+            let swap = left_id;
+            left_id = right_id;
+            right_id = swap;
+            right = left_value;
+        }
+        let immediate: Bool = x86_integer_immediate(right, size);
         let left: X86RegisterResult = x86_materialize_register(ref program, function, left_id, slots, ref state, ref output);
         if (left.message.length() != 0) { return left.message; }
 
@@ -2538,7 +2574,7 @@ func x86_lower_instruction(ref program: WirModule,
             let group: Int = 4;
             if (instruction.opcode == WirOpcode.BitOr) { group = 1; }
             else if (instruction.opcode == WirOpcode.BitXor) { group = 6; }
-            x86_bitwise_register_imm32(ref output, destination, UInt32(right.integer), group);
+            x86_bitwise_register_imm(ref output, destination, UInt32(right.integer), group, size == 8);
         } else if (instruction.opcode == WirOpcode.BitAnd) {
             x86_and_register_width(ref output, destination, right_register, size == 8);
         } else if (instruction.opcode == WirOpcode.BitOr) {
@@ -2730,7 +2766,7 @@ func x86_lower_instruction(ref program: WirModule,
             result_register = left.register;
         }
 
-        if (right.kind == WirValueKind.Integer && size <= 4) {
+        if (x86_integer_immediate(right, size)) {
             // narrow registers are extended to 32 bits; compare constants in the same form
             let immediate: UInt32 = UInt32(right.integer);
             if (size == 1) {
@@ -2740,7 +2776,7 @@ func x86_lower_instruction(ref program: WirModule,
                 immediate &= 65535U;
                 if (x86_scalar_signed(ref program, right.type_id) && (immediate & 32768U) != 0U) { immediate |= 4294901760U; }
             }
-            x86_cmp_register_imm32(ref output, left.register, immediate);
+            x86_cmp_register_imm(ref output, left.register, immediate, size == 8);
         } else {
             let loaded_right: X86RegisterResult = x86_materialize_register_except(ref program, function, right_id, slots, ref state, left.register, ref output);
             if (loaded_right.message.length() != 0) { return loaded_right.message; }

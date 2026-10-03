@@ -4,6 +4,7 @@ import * from "../model.wl"
 import * from "../builder.wl"
 import * from "declarations.wl"
 import * from "globals.wl"
+import * from "types.wl"
 import * from "../../context.wl"
 
 func wir_windows_target(program: WirModule) -> Bool {
@@ -19,6 +20,44 @@ func wir_runtime_function(ref source: Compiler, program: WirModule, link_name: S
     let function_id: WirFuncID = wir_find_function(program, info.name);
     if (function_id == NO_WIR_FUNC) { errors.append("Windows entry point cannot find WIR function '" + info.name + "'"); }
     return function_id;
+}
+
+func wir_failure_function(ref program: WirModule, name: String, message: String, writer: WirFuncID, exit: WirFuncID) -> WirFuncID {
+    let old: WirFuncID = wir_find_function(program, name);
+    if (old != NO_WIR_FUNC) { return old; }
+
+    let byte_type: WirTypeID = wir_unsigned_int_type(ref program, 8);
+    let bytes_type: WirTypeID = wir_array_type(ref program, byte_type, UIntSize(message.length()));
+    let bytes: WirValueID = wir_const_bytes(ref program, bytes_type, message);
+    let global: WirGlobalID = wir_add_global(ref program, name + ".message", bytes_type, bytes, WirLinkage.Internal, true);
+    let data_type: WirTypeID = wir_pointer_type(ref program, program.void_type);
+    let data: WirValueID = wir_const_address(ref program, data_type, wir_global_value(program, global), 0L);
+
+    let function_id: WirFuncID = wir_add_function(ref program, name, [], program.void_type, false, WirLinkage.Internal, WirABI.White);
+    let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
+    let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
+    let length: WirValueID = wir_const_int(ref program, int_type, UInt128(message.length()));
+    wir_call(ref program, entry, wir_function_value(program, writer), [data, length], "", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(program, exit), [wir_const_int(ref program, int_type, UInt128(1U))], "", no_wir_location());
+    wir_append(ref program, entry, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
+    return function_id;
+}
+
+func wir_emit_failure_runtime(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
+    let writer_info: FuncInfo = wir_compiler_link_function(ref source, "print_bytes");
+    let exit_info: FuncInfo = wir_compiler_link_function(ref source, "process_exit");
+    if (!has_func(writer_info) || !has_func(exit_info)) { return; }
+
+    let writer: WirFuncID = wir_find_function(program, writer_info.name);
+    if (writer == NO_WIR_FUNC) { writer = wir_lower_function_decl(ref types, ref source, ref program, writer_info); }
+    let exit: WirFuncID = wir_find_function(program, exit_info.name);
+    if (exit == NO_WIR_FUNC) { exit = wir_lower_function_decl(ref types, ref source, ref program, exit_info); }
+    if (writer == NO_WIR_FUNC || exit == NO_WIR_FUNC) { return; }
+
+    wir_failure_function(ref program, "__wl_fail_null", "RuntimeError: Null pointer dereference\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_bounds", "RuntimeError: Index out of bounds\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_division", "RuntimeError: Division by zero\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_erased_type", "RuntimeError: Erased value has the wrong concrete type\n", writer, exit);
 }
 
 func wir_emit_windows_abi(ref program: WirModule) -> Void {
