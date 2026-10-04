@@ -325,16 +325,9 @@ func parse_type_params(ref p: Parser) -> Vector(GenericParamNode) {
     return params;
 }
 
-func may_generic_call(ref p: Parser) -> Bool {
+func may_generic_postfix(ref p: Parser) -> Bool {
     if (p.current_tok.type != TOK_LT) { return false; }
     let lexer: WhitelangLexer.Lexer = p.lexer;
-    let save_idx: Int = lexer.pos.idx;
-    let save_ln: Int = lexer.pos.ln;
-    let save_col: Int = lexer.pos.col;
-    let save_char: Char = lexer.current_char;
-    let save_width: Int = lexer.current_width;
-    let save_valid: Bool = lexer.current_valid;
-    let save_trivia: Bool = lexer.collect_trivia;
     lexer.collect_trivia = false;
 
     let depth: Int = 1;
@@ -348,54 +341,11 @@ func may_generic_call(ref p: Parser) -> Bool {
         }
     }
 
-    let follows_call: Bool = false;
-    if (depth == 0) { follows_call = WhitelangLexer.get_next_token(ref lexer).type == TOK_LPAREN; }
-
-    lexer.pos.idx = save_idx;
-    lexer.pos.ln = save_ln;
-    lexer.pos.col = save_col;
-    lexer.current_char = save_char;
-    lexer.current_width = save_width;
-    lexer.current_valid = save_valid;
-    lexer.collect_trivia = save_trivia;
-    return follows_call;
-}
-
-func may_generic_value(ref p: Parser) -> Bool {
-    if (p.current_tok.type != TOK_LT) { return false; }
-    let lexer: WhitelangLexer.Lexer = p.lexer;
-    let save_idx: Int = lexer.pos.idx;
-    let save_ln: Int = lexer.pos.ln;
-    let save_col: Int = lexer.pos.col;
-    let save_char: Char = lexer.current_char;
-    let save_width: Int = lexer.current_width;
-    let save_valid: Bool = lexer.current_valid;
-    let save_trivia: Bool = lexer.collect_trivia;
-    lexer.collect_trivia = false;
-
-    let depth: Int = 1;
-    let next: Token = WhitelangLexer.get_next_token(ref lexer);
-    while (next.type != TOK_EOF && depth > 0) {
-        if (next.type == TOK_LT) { depth++; }
-        else if (next.type == TOK_GT) { depth--; }
-        else if (next.type == TOK_RSHIFT) { depth -= 2; }
-        if (depth > 0) { next = WhitelangLexer.get_next_token(ref lexer); }
+    if (depth != 0) {
+        return false;
     }
-
-    let follows_value: Bool = false;
-    if (depth == 0) {
-        let after: Int = WhitelangLexer.get_next_token(ref lexer).type;
-        follows_value = after == TOK_SEMICOLON || after == TOK_COMMA || after == TOK_RPAREN || after == TOK_RBRACKET;
-    }
-
-    lexer.pos.idx = save_idx;
-    lexer.pos.ln = save_ln;
-    lexer.pos.col = save_col;
-    lexer.current_char = save_char;
-    lexer.current_width = save_width;
-    lexer.current_valid = save_valid;
-    lexer.collect_trivia = save_trivia;
-    return follows_value;
+    let after: Int = WhitelangLexer.get_next_token(ref lexer).type;
+    return after == TOK_LPAREN || after == TOK_SEMICOLON || after == TOK_COMMA || after == TOK_RPAREN || after == TOK_RBRACKET;
 }
 
 func peek_type(ref p: Parser) -> Int {
@@ -1021,9 +971,14 @@ func parse_args(ref p: Parser) -> Vector(ArgNode) {
 func postfix_expr(ref p: Parser) -> NodeID {
     let node: NodeID = atom(ref p);
 
-    while (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC || p.current_tok.type == TOK_LPAREN ||
-           p.current_tok.type == TOK_DOT || p.current_tok.type == TOK_LBRACKET || p.current_tok.type == TOK_QUESTION ||
-           (p.current_tok.type == TOK_LT && (may_generic_call(ref p) || may_generic_value(ref p)))) {
+    while true {
+        let generic_postfix: Bool = p.current_tok.type == TOK_LT && may_generic_postfix(ref p);
+        if (p.current_tok.type != TOK_INC && p.current_tok.type != TOK_DEC && p.current_tok.type != TOK_LPAREN &&
+            p.current_tok.type != TOK_DOT && p.current_tok.type != TOK_LBRACKET && p.current_tok.type != TOK_QUESTION &&
+            !generic_postfix) {
+            break;
+        }
+
         // ++ / --
         if (p.current_tok.type == TOK_INC || p.current_tok.type == TOK_DEC) {
             let op_tok: Token = p.current_tok;
@@ -1032,7 +987,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
             node = add_postfix_node(ref p.arena, PostfixOpNode(type=NODE_POSTFIX, node=node, op_tok=op_tok, pos=pos));
         }
 
-        else if (p.current_tok.type == TOK_LT && (may_generic_call(ref p) || may_generic_value(ref p))) {
+        else if generic_postfix {
             let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             node = add_generic_type_node(ref p.arena, GenericTypeNode(type=NODE_GENERIC_TYPE, base_type=node, type_args=parse_type_args(ref p), pos=pos));
         }
