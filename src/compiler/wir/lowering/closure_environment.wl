@@ -120,10 +120,10 @@ func wir_alloc_closure_environment(ref state: WirFunctionLowering, ref types: Wi
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let total_size: UInt64 = layout.size + UInt64(WIR_OBJECT_HEADER_SIZE);
-    let raw: WirValueID = wir_call(ref program, state.block, wir_function_value(program, allocator_id), [wir_const_int(ref program, size_type, UInt128(total_size))], "", no_wir_location());
+    let raw: WirValueID = wir_call(ref program, state.block, wir_function_value(ref program, allocator_id), [wir_const_int(ref program, size_type, UInt128(total_size))], "", no_wir_location());
     wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [raw], [], no_wir_location());
 
-    let drop_address: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(program, drop_id), 0L);
+    let drop_address: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(ref program, drop_id), 0L);
     let drop_slot: WirValueID = wir_cast(ref program, state.block, raw, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
     wir_store(ref program, state.block, drop_address, drop_slot, no_wir_location());
     let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);

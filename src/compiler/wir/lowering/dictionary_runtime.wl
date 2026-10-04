@@ -83,7 +83,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let string_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, TYPE_STRING);
     let string_value: WirValueID = wir_cast(ref program, string_key, low, string_type, "value", no_wir_location());
     let string_hash: WirFuncID = wir_dict_string_hash_function(ref types, ref source, ref program, TYPE_STRING);
-    let string_result: WirValueID = wir_call(ref program, string_key, wir_function_value(program, string_hash), [string_value], "hash", no_wir_location());
+    let string_result: WirValueID = wir_call(ref program, string_key, wir_function_value(ref program, string_hash), [string_value], "hash", no_wir_location());
     wir_return(ref program, string_key, string_result, no_wir_location());
 
     let float_type: WirTypeID = wir_float_type(ref program, 64);
@@ -96,7 +96,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let float_done_block: WirBlock = program.arena.blocks[wir_id_index(UInt32(float_done))];
     let normalized: WirValueID = wir_cast(ref program, float_done, float_done_block.parameters[0], tag_type, "normalized", no_wir_location());
     let mix_float: WirFuncID = wir_dict_mix_function(ref program);
-    let float_result: WirValueID = wir_call(ref program, float_done, wir_function_value(program, mix_float), [tag, normalized, wir_const_int(ref program, tag_type, UInt128(0U))], "hash", no_wir_location());
+    let float_result: WirValueID = wir_call(ref program, float_done, wir_function_value(ref program, mix_float), [tag, normalized, wir_const_int(ref program, tag_type, UInt128(0U))], "hash", no_wir_location());
     wir_return(ref program, float_done, float_result, no_wir_location());
 
     let class_check: WirBlockID = check_class;
@@ -115,7 +115,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
             let class_value: WirValueID = wir_cast(ref program, class_key, low, class_type, "value", no_wir_location());
             let class_hash: WirFuncID = wir_dict_class_hash_function(ref types, ref source, ref program, type_id, info);
             if (class_hash != NO_WIR_FUNC) {
-                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(program, class_hash), [class_value], "hash", no_wir_location());
+                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(ref program, class_hash), [class_value], "hash", no_wir_location());
                 wir_return(ref program, class_key, class_result, no_wir_location());
             } else {
                 wir_append(ref program, class_key, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
@@ -129,7 +129,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let low_bits: WirValueID = wir_cast(ref program, bits, low, tag_type, "low.bits", no_wir_location());
     let high_bits: WirValueID = wir_cast(ref program, bits, high, tag_type, "high.bits", no_wir_location());
     let mix: WirFuncID = wir_dict_mix_function(ref program);
-    let result: WirValueID = wir_call(ref program, bits, wir_function_value(program, mix), [tag, low_bits, high_bits], "hash", no_wir_location());
+    let result: WirValueID = wir_call(ref program, bits, wir_function_value(ref program, mix), [tag, low_bits, high_bits], "hash", no_wir_location());
     wir_return(ref program, bits, result, no_wir_location());
     wir_return(ref program, invalid, wir_const_int(ref program, i32_type, UInt128(0U)), no_wir_location());
     return function_id;
@@ -185,7 +185,7 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     let left_string: WirValueID = wir_cast(ref program, string_key, left_low, string_type, "left.value", no_wir_location());
     let right_string: WirValueID = wir_cast(ref program, string_key, right_low, string_type, "right.value", no_wir_location());
     let string_equal: WirFuncID = wir_dict_string_equal_function(ref types, ref source, ref program, TYPE_STRING);
-    let string_result: WirValueID = wir_call(ref program, string_key, wir_function_value(program, string_equal), [left_string, right_string], "equal", no_wir_location());
+    let string_result: WirValueID = wir_call(ref program, string_key, wir_function_value(ref program, string_equal), [left_string, right_string], "equal", no_wir_location());
     wir_return(ref program, string_key, string_result, no_wir_location());
 
     let float_left_low: WirValueID = wir_load(ref program, float_key, wir_field_address(ref program, float_key, left, 1, "", no_wir_location()), "left.low", no_wir_location());
@@ -215,7 +215,7 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
             let right_value: WirValueID = wir_cast(ref program, class_key, right_low, class_type, "right.value", no_wir_location());
             let class_equal: WirFuncID = wir_dict_class_equal_function(ref types, ref source, ref program, type_id, info);
             if (class_equal != NO_WIR_FUNC) {
-                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(program, class_equal), [left_value, right_value], "equal", no_wir_location());
+                let class_result: WirValueID = wir_call(ref program, class_key, wir_function_value(ref program, class_equal), [left_value, right_value], "equal", no_wir_location());
                 wir_return(ref program, class_key, class_result, no_wir_location());
             } else {
                 wir_append(ref program, class_key, WirOpcode.Jump, program.void_type, [], [wir_edge(bits, [])], no_wir_location());
@@ -275,7 +275,7 @@ func wir_dict_string_hash_function(ref types: WirTypeMap, ref source: Compiler, 
     let byte_address: WirValueID = wir_index_address(ref program, body, data, index, "", no_wir_location());
     let byte: WirValueID = wir_load(ref program, body, byte_address, "byte", no_wir_location());
     let wide: WirValueID = byte;
-    if (wir_value_type(program, byte) == i8_type) { wide = wir_cast(ref program, body, byte, i64_type, "wide", no_wir_location()); }
+    if (wir_value_type(ref program, byte) == i8_type) { wide = wir_cast(ref program, body, byte, i64_type, "wide", no_wir_location()); }
     let mixed: WirValueID = wir_binary(ref program, body, WirOpcode.BitXor, i64_type, state, wide, "mixed", no_wir_location());
     let next_state: WirValueID = wir_binary(ref program, body, WirOpcode.Multiply, i64_type, mixed, wir_const_int(ref program, i64_type, UInt128(1099511628211UL)), "next.state", no_wir_location());
     let next: WirValueID = wir_binary(ref program, body, WirOpcode.Add, i32_type, index, wir_const_int(ref program, i32_type, UInt128(1U)), "next", no_wir_location());
@@ -284,7 +284,7 @@ func wir_dict_string_hash_function(ref types: WirTypeMap, ref source: Compiler, 
     let mix_id: WirFuncID = wir_dict_mix_function(ref program);
     let length_wide: WirValueID = wir_cast(ref program, finish, length, i64_type, "length.wide", no_wir_location());
     let tag: WirValueID = wir_const_int(ref program, i64_type, UInt128(type_fingerprint(ref source, source_type)));
-    let result: WirValueID = wir_call(ref program, finish, wir_function_value(program, mix_id), [tag, state, length_wide], "hash", no_wir_location());
+    let result: WirValueID = wir_call(ref program, finish, wir_function_value(ref program, mix_id), [tag, state, length_wide], "hash", no_wir_location());
     wir_return(ref program, finish, result, no_wir_location());
     wir_return(ref program, invalid, wir_const_int(ref program, i32_type, UInt128(0U)), no_wir_location());
     return function_id;
@@ -306,8 +306,8 @@ func wir_dict_string_equal_function(ref types: WirTypeMap, ref source: Compiler,
     }
     let compare_id: WirFuncID = wir_find_function(program, compare.name);
     if (compare_id == NO_WIR_FUNC) { compare_id = wir_lower_function_decl(ref types, ref source, ref program, compare); }
-    let ordering: WirValueID = wir_call(ref program, entry, wir_function_value(program, compare_id), [function.parameters[0], function.parameters[1]], "ordering", no_wir_location());
-    let i32_type: WirTypeID = wir_value_type(program, ordering);
+    let ordering: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, compare_id), [function.parameters[0], function.parameters[1]], "ordering", no_wir_location());
+    let i32_type: WirTypeID = wir_value_type(ref program, ordering);
     let equal: WirValueID = wir_binary(ref program, entry, WirOpcode.Equal, program.bool_type, ordering, wir_const_int(ref program, i32_type, UInt128(0U)), "equal", no_wir_location());
     wir_return(ref program, entry, equal, no_wir_location());
     return function_id;
@@ -346,7 +346,7 @@ func wir_dict_scalar_hash_function(ref types: WirTypeMap, ref source: Compiler, 
         let wide: WirValueID = wir_cast(ref program, bits, raw, i64_type, "wide", no_wir_location());
         wir_append(ref program, bits, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [wide])], no_wir_location());
         let done_block: WirBlock = program.arena.blocks[wir_id_index(UInt32(done))];
-        let result: WirValueID = wir_call(ref program, done, wir_function_value(program, mix), [tag, done_block.parameters[0], wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
+        let result: WirValueID = wir_call(ref program, done, wir_function_value(ref program, mix), [tag, done_block.parameters[0], wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
         wir_return(ref program, done, result, no_wir_location());
         wir_return(ref program, invalid, wir_const_int(ref program, i32_type, UInt128(0U)), no_wir_location());
         return function_id;
@@ -354,7 +354,7 @@ func wir_dict_scalar_hash_function(ref types: WirTypeMap, ref source: Compiler, 
 
     if (source_layout.kind == WirTypeKind.Pointer) {
         let bits: WirValueID = wir_cast(ref program, entry, key, i64_type, "bits", no_wir_location());
-        let result: WirValueID = wir_call(ref program, entry, wir_function_value(program, mix), [tag, bits, wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
+        let result: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, mix), [tag, bits, wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
         wir_return(ref program, entry, result, no_wir_location());
         return function_id;
     }
@@ -366,7 +366,7 @@ func wir_dict_scalar_hash_function(ref types: WirTypeMap, ref source: Compiler, 
         if (source_wir != unsigned_source) { raw = wir_unary(ref program, entry, WirOpcode.Bitcast, unsigned_source, key, "raw", no_wir_location()); }
         let shifted: WirValueID = wir_binary(ref program, entry, WirOpcode.UnsignedShiftRight, unsigned_source, raw, wir_const_int(ref program, unsigned_source, UInt128(64U)), "shifted", no_wir_location());
         let high: WirValueID = wir_cast(ref program, entry, shifted, i64_type, "high", no_wir_location());
-        let result: WirValueID = wir_call(ref program, entry, wir_function_value(program, mix), [tag, low, high], "hash", no_wir_location());
+        let result: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, mix), [tag, low, high], "hash", no_wir_location());
         wir_return(ref program, entry, result, no_wir_location());
         return function_id;
     }
@@ -375,7 +375,7 @@ func wir_dict_scalar_hash_function(ref types: WirTypeMap, ref source: Compiler, 
     let raw: WirValueID = key;
     if (source_wir != unsigned_source) { raw = wir_unary(ref program, entry, WirOpcode.Bitcast, unsigned_source, key, "raw", no_wir_location()); }
     let bits: WirValueID = wir_cast(ref program, entry, raw, i64_type, "bits", no_wir_location());
-    let result: WirValueID = wir_call(ref program, entry, wir_function_value(program, mix), [tag, bits, wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
+    let result: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, mix), [tag, bits, wir_const_int(ref program, i64_type, UInt128(0U))], "hash", no_wir_location());
     wir_return(ref program, entry, result, no_wir_location());
     return function_id;
 }
@@ -448,7 +448,7 @@ func wir_dict_class_hash_function(ref types: WirTypeMap, ref source: Compiler, r
     let wide: WirValueID = wir_cast(ref program, call, hash, i64_type, "wide", no_wir_location());
     let mix: WirFuncID = wir_dict_mix_function(ref program);
     let tag: WirValueID = wir_const_int(ref program, i64_type, UInt128(type_fingerprint(ref source, source_type)));
-    let result: WirValueID = wir_call(ref program, call, wir_function_value(program, mix), [tag, wide, wir_const_int(ref program, i64_type, UInt128(0U))], "result", no_wir_location());
+    let result: WirValueID = wir_call(ref program, call, wir_function_value(ref program, mix), [tag, wide, wir_const_int(ref program, i64_type, UInt128(0U))], "result", no_wir_location());
     wir_return(ref program, call, result, no_wir_location());
     wir_return(ref program, invalid, wir_const_int(ref program, i32_type, UInt128(0U)), no_wir_location());
     return function_id;

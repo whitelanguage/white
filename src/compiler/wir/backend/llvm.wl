@@ -161,7 +161,7 @@ func llvm_write_value(output: strings.Builder, program: WirModule, value_id: Wir
 }
 
 func llvm_write_typed_value(output: strings.Builder, program: WirModule, value: WirValueID) -> Void? {
-    llvm_write_type(output, program, wir_value_type(program, value))?;
+    llvm_write_type(output, program, wir_value_type(ref program, value))?;
     output.write(" ")?;
     llvm_write_value(output, program, value)?;
     return;
@@ -196,7 +196,7 @@ func llvm_binary_opcode(program: WirModule, instruction: WirInstruction) -> Stri
 func llvm_compare_opcode(program: WirModule, instruction: WirInstruction) -> String {
     let opcode: WirOpcode = instruction.opcode;
     if (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual) {
-        let operand_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, instruction.operands[0])))];
+        let operand_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, instruction.operands[0])))];
         if (operand_type.kind == WirTypeKind.FloatType) {
             if (opcode == WirOpcode.Equal) { return "fcmp oeq"; }
             return "fcmp une";
@@ -221,7 +221,7 @@ func llvm_compare_opcode(program: WirModule, instruction: WirInstruction) -> Str
 
 func llvm_noop_cast(program: WirModule, instruction: WirInstruction) -> Bool {
     if (instruction.opcode != WirOpcode.Bitcast || instruction.operands.length() != 1) { return false; }
-    let source: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, instruction.operands[0])))];
+    let source: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, instruction.operands[0])))];
     let target: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
     if (source.kind == WirTypeKind.Pointer && target.kind == WirTypeKind.Pointer) { return true; }
     let source_integer: Bool = source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
@@ -366,7 +366,7 @@ func llvm_write_aggregate_value(output: strings.Builder, program: WirModule, ins
 }
 
 func llvm_write_index_value(output: strings.Builder, program: WirModule, instruction: WirInstruction) -> Void? {
-    let aggregate_type: WirTypeID = wir_value_type(program, instruction.operands[0]);
+    let aggregate_type: WirTypeID = wir_value_type(ref program, instruction.operands[0]);
     let storage: String = llvm_value_name(instruction.result) + ".storage";
     let address: String = llvm_value_name(instruction.result) + ".address";
     output.write("  store ")?;
@@ -400,7 +400,7 @@ func llvm_write_check(output: strings.Builder, program: WirModule, instruction_i
         llvm_write_value(output, program, instruction.operands[0])?;
         output.write(", null\n")?;
     } else {
-        let type_id: WirTypeID = wir_value_type(program, instruction.operands[0]);
+        let type_id: WirTypeID = wir_value_type(ref program, instruction.operands[0]);
         let type: WirType = program.arena.types[wir_id_index(UInt32(type_id))];
         if (type.kind == WirTypeKind.SignedInt) {
             output.write("  %check.bounds.low.")?;
@@ -495,7 +495,7 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
     if (binary.length() != 0 || comparison.length() != 0) {
         if (binary.length() != 0) { output.write(binary)?; } else { output.write(comparison)?; }
         output.write(" ")?;
-        llvm_write_type(output, program, wir_value_type(program, instruction.operands[0]))?;
+        llvm_write_type(output, program, wir_value_type(ref program, instruction.operands[0]))?;
         output.write(" ")?;
         llvm_write_value(output, program, instruction.operands[0])?;
         output.write(", ")?;
@@ -524,7 +524,7 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write(", align ")?;
         output.write_int(wir_type_layout(program, instruction.type_id).alignment)?;
     } else if (instruction.opcode == WirOpcode.AtomicStore) {
-        let value_type: WirTypeID = wir_value_type(program, instruction.operands[0]);
+        let value_type: WirTypeID = wir_value_type(ref program, instruction.operands[0]);
         output.write("store atomic ")?;
         llvm_write_typed_value(output, program, instruction.operands[0])?;
         output.write(", ptr ")?;
@@ -568,7 +568,7 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write(", ")?;
         llvm_write_value(output, program, instruction.operands[1])?;
     } else if (instruction.opcode == WirOpcode.FieldAddress) {
-        let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, instruction.operands[0])))];
+        let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, instruction.operands[0])))];
         output.write("getelementptr ")?;
         llvm_write_type(output, program, pointer.element)?;
         output.write(", ptr ")?;
@@ -576,7 +576,7 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write(", i32 0, i32 ")?;
         llvm_write_value(output, program, instruction.operands[1])?;
     } else if (instruction.opcode == WirOpcode.IndexAddress) {
-        let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, instruction.operands[0])))];
+        let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, instruction.operands[0])))];
         let element: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
         output.write("getelementptr ")?;
         llvm_write_type(output, program, pointer.element)?;
@@ -644,7 +644,7 @@ func llvm_write_phis(output: strings.Builder, program: WirModule, function: WirF
         output.write("  ")?;
         output.write(llvm_value_name(parameter))?;
         output.write(" = phi ")?;
-        llvm_write_type(output, program, wir_value_type(program, parameter))?;
+        llvm_write_type(output, program, wir_value_type(ref program, parameter))?;
         output.write(" ")?;
         let first: Bool = true;
         let source_index: Int = 0;
@@ -697,7 +697,7 @@ func llvm_write_index_storage(output: strings.Builder, program: WirModule, funct
                 output.write("  ")?;
                 output.write(llvm_value_name(instruction.result))?;
                 output.write(".storage = alloca ")?;
-                llvm_write_type(output, program, wir_value_type(program, instruction.operands[0]))?;
+                llvm_write_type(output, program, wir_value_type(ref program, instruction.operands[0]))?;
                 output.write("\n")?;
             }
             instruction_index++;

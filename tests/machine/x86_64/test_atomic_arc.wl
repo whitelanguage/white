@@ -56,8 +56,8 @@ func main() -> Int {
     let exit: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let startup_entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(program, verify), [], "status", no_wir_location());
-    wir_call(ref program, startup_entry, wir_function_value(program, exit), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(ref program, verify), [], "status", no_wir_location());
+    wir_call(ref program, startup_entry, wir_function_value(ref program, exit), [status], "", no_wir_location());
     wir_append(ref program, startup_entry, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);

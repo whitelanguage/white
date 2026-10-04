@@ -38,7 +38,7 @@ func main() -> Int {
     let argument: WirValueID = program.arena.functions[wir_id_index(UInt32(callback))].parameters[0];
     wir_return(ref program, callback_entry, wir_binary(ref program, callback_entry, WirOpcode.Add, i32, argument, number(ref program, i32, 1), "increment", no_wir_location()), no_wir_location());
     let signature: WirTypeID = program.arena.functions[wir_id_index(UInt32(callback))].type_id;
-    let callback_global: WirGlobalID = wir_add_global(ref program, "callback_address", signature, wir_const_address(ref program, signature, wir_function_value(program, callback), 0L), WirLinkage.Internal, true);
+    let callback_global: WirGlobalID = wir_add_global(ref program, "callback_address", signature, wir_const_address(ref program, signature, wir_function_value(ref program, callback), 0L), WirLinkage.Internal, true);
 
     // both arms use an entry value; calls force the register cache to be discarded
     let diamond: WirFuncID = wir_add_function(ref program, "diamond", [WirParam(name="choose", type_id=program.bool_type)], i32, false, WirLinkage.Internal, WirABI.White);
@@ -49,13 +49,13 @@ func main() -> Int {
     let choose: WirValueID = program.arena.functions[wir_id_index(UInt32(diamond))].parameters[0];
     let kept: WirValueID = wir_binary(ref program, entry, WirOpcode.Add, i32, number(ref program, i32, 40), number(ref program, i32, 2), "kept", no_wir_location());
     let floating: WirValueID = wir_binary(ref program, entry, WirOpcode.Add, f64, wir_const_float(ref program, f64, 1.5), wir_const_float(ref program, f64, 2.5), "floating", no_wir_location());
-    let target: WirValueID = wir_load(ref program, entry, wir_global_value(program, callback_global), "target", no_wir_location());
+    let target: WirValueID = wir_load(ref program, entry, wir_global_value(ref program, callback_global), "target", no_wir_location());
     wir_append(ref program, entry, WirOpcode.Branch, program.void_type, [choose], [wir_edge(left, []), wir_edge(right, [])], no_wir_location());
     let arms: Vector(WirBlockID) = [left, right];
     let i: Int = 0;
     while (i < arms.length()) {
         let block: WirBlockID = arms[i];
-        wir_call(ref program, block, wir_function_value(program, pid), [], "clobber", no_wir_location());
+        wir_call(ref program, block, wir_function_value(ref program, pid), [], "clobber", no_wir_location());
         let adjusted: WirValueID = wir_call(ref program, block, target, [kept], "adjusted", no_wir_location());
         wir_append(ref program, block, WirOpcode.Jump, program.void_type, [], [wir_edge(join, [adjusted])], no_wir_location());
         i++;
@@ -92,26 +92,26 @@ func main() -> Int {
     wir_append(ref program, header, WirOpcode.Branch, program.void_type, [less], [wir_edge(body, []), wir_edge(exit, [])], no_wir_location());
     let next_index: WirValueID = wir_binary(ref program, body, WirOpcode.Add, i32, index, invariant, "next_index", no_wir_location());
     jump(ref program, body, latch);
-    wir_call(ref program, latch, wir_function_value(program, pid), [], "clobber", no_wir_location());
+    wir_call(ref program, latch, wir_function_value(ref program, pid), [], "clobber", no_wir_location());
     wir_append(ref program, latch, WirOpcode.Jump, program.void_type, [], [wir_edge(header, [next_index])], no_wir_location());
     wir_return(ref program, exit, index, no_wir_location());
 
     let main_id: WirFuncID = wir_add_function(ref program, "main", [], i32, false, WirLinkage.Exported, WirABI.White);
     block = wir_add_block(ref program, main_id, "entry", []);
-    let result: WirValueID = wir_call(ref program, block, wir_function_value(program, diamond), [wir_const_bool(ref program, true)], "left", no_wir_location());
+    let result: WirValueID = wir_call(ref program, block, wir_function_value(ref program, diamond), [wir_const_bool(ref program, true)], "left", no_wir_location());
     block = check(ref program, main_id, block, result, number(ref program, i32, 0), 4);
-    result = wir_call(ref program, block, wir_function_value(program, diamond), [wir_const_bool(ref program, false)], "right", no_wir_location());
+    result = wir_call(ref program, block, wir_function_value(ref program, diamond), [wir_const_bool(ref program, false)], "right", no_wir_location());
     block = check(ref program, main_id, block, result, number(ref program, i32, 0), 5);
-    result = wir_call(ref program, block, wir_function_value(program, reordered), [], "reordered", no_wir_location());
+    result = wir_call(ref program, block, wir_function_value(ref program, reordered), [], "reordered", no_wir_location());
     block = check(ref program, main_id, block, result, number(ref program, i32, 42), 6);
-    result = wir_call(ref program, block, wir_function_value(program, loop), [], "loop", no_wir_location());
+    result = wir_call(ref program, block, wir_function_value(ref program, loop), [], "loop", no_wir_location());
     block = check(ref program, main_id, block, result, number(ref program, i32, 1000), 7);
     wir_return(ref program, block, number(ref program, i32, 0), no_wir_location());
     let exit_id: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let startup_entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(program, main_id), [], "status", no_wir_location());
-    wir_call(ref program, startup_entry, wir_function_value(program, exit_id), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(ref program, main_id), [], "status", no_wir_location());
+    wir_call(ref program, startup_entry, wir_function_value(ref program, exit_id), [status], "", no_wir_location());
     wir_return(ref program, startup_entry, NO_WIR_VALUE, no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);

@@ -48,7 +48,7 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
     if (has_array_info(array) && array.size == -1) {
         return value;
     }
-    let type_id: WirTypeID = wir_value_type(program, value);
+    let type_id: WirTypeID = wir_value_type(ref program, value);
     if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) { return value; }
     state.errors.append("ARC value has no payload pointer in WIR lowering");
     return NO_WIR_VALUE;

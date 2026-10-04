@@ -57,7 +57,7 @@ func main() -> Int {
         i++;
     }
     wir_return(ref program, entry, total, no_wir_location());
-    let address: WirValueID = wir_function_value(program, helper);
+    let address: WirValueID = wir_function_value(ref program, helper);
     let callback: WirGlobalID = wir_add_global(ref program, "callback", signature, wir_const_address(ref program, signature, address, 0L), WirLinkage.Internal, true);
 
     // the callee is the first parameter; three incoming integers are already on the stack
@@ -92,7 +92,7 @@ func main() -> Int {
         numbers.append(number(ref program, i32, i));
         i++;
     }
-    let loaded: WirValueID = wir_load(ref program, block, wir_global_value(program, callback), "callback", no_wir_location());
+    let loaded: WirValueID = wir_load(ref program, block, wir_global_value(ref program, callback), "callback", no_wir_location());
     let result: WirValueID = wir_call(ref program, block, loaded, numbers, "first", no_wir_location());
     let again: WirValueID = wir_call(ref program, block, loaded, numbers, "second", no_wir_location());
     let combined: WirValueID = wir_binary(ref program, block, WirOpcode.Add, i32, result, again, "combined", no_wir_location());
@@ -104,8 +104,8 @@ func main() -> Int {
         relay_args.append(numbers[i]);
         i++;
     }
-    block = check(ref program, main_id, block, wir_call(ref program, block, wir_function_value(program, relay), relay_args, "relayed", no_wir_location()), 654321, 2);
-    let returned: WirValueID = wir_call(ref program, block, wir_function_value(program, factory), [], "returned", no_wir_location());
+    block = check(ref program, main_id, block, wir_call(ref program, block, wir_function_value(ref program, relay), relay_args, "relayed", no_wir_location()), 654321, 2);
+    let returned: WirValueID = wir_call(ref program, block, wir_function_value(ref program, factory), [], "returned", no_wir_location());
     block = check(ref program, main_id, block, wir_call(ref program, block, returned, numbers, "from_return", no_wir_location()), 654321, 3);
 
     wir_store(ref program, block, address, slot, no_wir_location());
@@ -125,7 +125,7 @@ func main() -> Int {
         computed.append(wir_binary(ref program, block, WirOpcode.Add, i32, numbers[i], number(ref program, i32, 0), "operand", no_wir_location()));
         i++;
     }
-    let live_target: WirValueID = wir_load(ref program, block, wir_global_value(program, callback), "live_target", no_wir_location());
+    let live_target: WirValueID = wir_load(ref program, block, wir_global_value(ref program, callback), "live_target", no_wir_location());
     block = check(ref program, main_id, block, wir_call(ref program, block, live_target, computed, "computed", no_wir_location()), 654321, 6);
 
     computed = [];
@@ -141,7 +141,7 @@ func main() -> Int {
 
     let pid: WirFuncID = wir_add_function(ref program, "GetCurrentProcessId", [], i32, false, WirLinkage.External, WirABI.System);
     let pid_type: WirTypeID = program.arena.functions[wir_id_index(UInt32(pid))].type_id;
-    let pid_address: WirValueID = wir_const_address(ref program, pid_type, wir_function_value(program, pid), 0L);
+    let pid_address: WirValueID = wir_const_address(ref program, pid_type, wir_function_value(ref program, pid), 0L);
     let pid_value: WirValueID = wir_call(ref program, block, pid_address, [], "pid", no_wir_location());
     let exists: WirValueID = wir_append(ref program, block, WirOpcode.NotEqual, program.bool_type, [pid_value, number(ref program, i32, 0)], [], no_wir_location());
     let ok: WirBlockID = wir_add_block(ref program, main_id, "ok", []);
@@ -153,8 +153,8 @@ func main() -> Int {
     let exit_id: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let startup_entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(program, main_id), [], "status", no_wir_location());
-    wir_call(ref program, startup_entry, wir_const_address(ref program, program.arena.functions[wir_id_index(UInt32(exit_id))].type_id, wir_function_value(program, exit_id), 0L), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, startup_entry, wir_function_value(ref program, main_id), [], "status", no_wir_location());
+    wir_call(ref program, startup_entry, wir_const_address(ref program, program.arena.functions[wir_id_index(UInt32(exit_id))].type_id, wir_function_value(ref program, exit_id), 0L), [status], "", no_wir_location());
     wir_return(ref program, startup_entry, NO_WIR_VALUE, no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);

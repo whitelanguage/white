@@ -33,7 +33,7 @@ func main() -> Int {
     wir_add_global(ref program, "count", int_type, zero, WirLinkage.Internal, false);
     wir_add_global(ref program, "answer", int_type, forty_two, WirLinkage.Exported, true);
     wir_add_global(ref program, "errno", int_type, NO_WIR_VALUE, WirLinkage.External, false);
-    if (wir_global_value(program, scratch) != program.arena.globals[wir_id_index(UInt32(scratch))].address) {
+    if (wir_global_value(ref program, scratch) != program.arena.globals[wir_id_index(UInt32(scratch))].address) {
         print("FAIL: global address was not stable");
         return 1;
     }
@@ -48,7 +48,7 @@ func main() -> Int {
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let exit: WirBlockID = wir_add_block(ref program, function_id, "exit", [wir_param("value", int_type)]);
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
-    if (wir_function_value(program, function_id) != function.address) {
+    if (wir_function_value(ref program, function_id) != function.address) {
         print("FAIL: function address was not stable");
         return 1;
     }
@@ -90,7 +90,7 @@ func main() -> Int {
     wir_append(ref program, exercise_entry, WirOpcode.Branch, program.void_type, [less], [wir_edge(exercise_then, []), wir_edge(exercise_trap, [])], no_wir_location());
 
     let increment_value: WirValueID = wir_const_int(ref program, int_type, UInt128(1U));
-    let increment: WirValueID = wir_call(ref program, exercise_then, wir_function_value(program, function_id), [loaded, increment_value], "", no_wir_location());
+    let increment: WirValueID = wir_call(ref program, exercise_then, wir_function_value(ref program, function_id), [loaded, increment_value], "", no_wir_location());
     wir_name_value(ref program, increment, "increment");
     let wide: WirValueID = wir_append(ref program, exercise_then, WirOpcode.SignExtend, long_type, [increment], [], no_wir_location());
     wir_name_value(ref program, wide, "wide");

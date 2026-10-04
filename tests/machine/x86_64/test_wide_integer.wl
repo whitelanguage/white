@@ -99,7 +99,7 @@ func main() -> Int {
     let relay: WirFuncID = wir_add_function(ref program, "native_relay128", [WirParam(name="left", type_id=u128), WirParam(name="right", type_id=u128)], u128, false, WirLinkage.Exported, WirABI.C);
     let relay_entry: WirBlockID = wir_add_block(ref program, relay, "entry", []);
     let relay_parameters: Vector(WirValueID) = program.arena.functions[wir_id_index(UInt32(relay))].parameters;
-    let sum: WirValueID = wir_call(ref program, relay_entry, wir_function_value(program, host), relay_parameters, "sum", no_wir_location());
+    let sum: WirValueID = wir_call(ref program, relay_entry, wir_function_value(ref program, host), relay_parameters, "sum", no_wir_location());
     let mask: UInt128 = (UInt128(0xfedcba9876543210UL) << UInt128(64U)) | UInt128(0x0123456789abcdefUL);
     let result: WirValueID = wir_binary(ref program, relay_entry, WirOpcode.BitXor, u128, sum, wir_const_int(ref program, u128, mask), "result", no_wir_location());
     wir_return(ref program, relay_entry, result, no_wir_location());
@@ -112,8 +112,8 @@ func main() -> Int {
     let exit: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, entry, wir_function_value(program, verify), [], "status", no_wir_location());
-    wir_call(ref program, entry, wir_function_value(program, exit), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, verify), [], "status", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, exit), [status], "", no_wir_location());
     wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);

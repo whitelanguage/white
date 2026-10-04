@@ -87,18 +87,18 @@ func wir_emit_release_runtime(ref program: WirModule, deallocator: WirFuncID, ra
     let drop_slot: WirValueID = wir_cast(ref program, destroy_dynamic, raw, raw_pointer_pointer, "", no_wir_location());
     let drop_address: WirValueID = wir_load(ref program, destroy_dynamic, drop_slot, "drop", no_wir_location());
     wir_call_typed(ref program, destroy_dynamic, drop_address, drop_type, [object], "", no_wir_location());
-    wir_call(ref program, destroy_dynamic, wir_function_value(program, deallocator), [raw], "", no_wir_location());
+    wir_call(ref program, destroy_dynamic, wir_function_value(ref program, deallocator), [raw], "", no_wir_location());
     wir_append(ref program, destroy_dynamic, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [])], no_wir_location());
 
     let legacy_base: WirValueID = wir_pointer_offset(ref program, destroy_legacy, object, -8, raw_pointer);
-    wir_call(ref program, destroy_legacy, wir_function_value(program, deallocator), [legacy_base], "", no_wir_location());
+    wir_call(ref program, destroy_legacy, wir_function_value(ref program, deallocator), [legacy_base], "", no_wir_location());
     wir_append(ref program, destroy_legacy, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [])], no_wir_location());
 
     wir_return(ref program, done, NO_WIR_VALUE, no_wir_location());
 }
 
 func wir_emit_ownership_runtime(ref program: WirModule, deallocator: WirFuncID, string_type_tag: Int) -> Void {
-    if (!wir_module_uses_opcode(program, WirOpcode.Retain) && !wir_module_uses_opcode(program, WirOpcode.Release)) { return; }
+    if (!wir_module_uses_opcode(ref program, WirOpcode.Retain) && !wir_module_uses_opcode(ref program, WirOpcode.Release)) { return; }
     let raw_pointer: WirTypeID = wir_pointer_type(ref program, program.void_type);
     wir_emit_retain_runtime(ref program, raw_pointer);
     wir_emit_release_runtime(ref program, deallocator, raw_pointer, string_type_tag);

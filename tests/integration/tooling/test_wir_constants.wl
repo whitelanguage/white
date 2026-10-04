@@ -18,8 +18,8 @@ func main() -> Int {
 
     let bytes: WirValueID = wir_const_bytes(ref program, bytes_type, "White" + '\0');
     let bytes_global: WirGlobalID = wir_add_aligned_global(ref program, ".str.bytes", bytes_type, bytes, WirLinkage.Private, true, 1);
-    let address: WirValueID = wir_const_address(ref program, byte_pointer, wir_global_value(program, bytes_global), 0L);
-    let tail: WirValueID = wir_const_address(ref program, byte_pointer, wir_global_value(program, bytes_global), 2L);
+    let address: WirValueID = wir_const_address(ref program, byte_pointer, wir_global_value(ref program, bytes_global), 0L);
+    let tail: WirValueID = wir_const_address(ref program, byte_pointer, wir_global_value(ref program, bytes_global), 2L);
     wir_add_global(ref program, ".str.tail", byte_pointer, tail, WirLinkage.Private, true);
     let length: WirValueID = wir_const_int(ref program, i32_type, UInt128(5U));
     let string: WirValueID = wir_const_aggregate(ref program, string_type, [address, length, length]);

@@ -38,14 +38,14 @@ func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, va
     let bytes_type: WirTypeID = wir_array_type(ref program, byte_type, UIntSize(value.length() + 1));
     let bytes: WirValueID = wir_const_bytes(ref program, bytes_type, value + '\0');
     let bytes_global: WirGlobalID = wir_add_aligned_global(ref program, bytes_name, bytes_type, bytes, WirLinkage.Private, true, 1);
-    let data: WirValueID = wir_const_address(ref program, wir_pointer_type(ref program, byte_type), wir_global_value(program, bytes_global), 0L);
+    let data: WirValueID = wir_const_address(ref program, wir_pointer_type(ref program, byte_type), wir_global_value(ref program, bytes_global), 0L);
     let length: WirValueID = wir_const_int(ref program, int_type, UInt128(UInt32(value.length())));
     let string: WirValueID = wir_const_aggregate(ref program, wir_string_record(ref types, ref program), [data, length, length]);
     let ref_count: WirValueID = wir_const_int(ref program, int_type, UInt128(WIR_STATIC_REFCOUNT));
     let type_id: WirValueID = wir_const_int(ref program, int_type, UInt128(UInt32(TYPE_STRING)));
     let object: WirValueID = wir_const_aggregate(ref program, wir_string_object_layout(ref types, ref program), [ref_count, type_id, string]);
     let object_global: WirGlobalID = wir_add_aligned_global(ref program, name, wir_string_object_layout(ref types, ref program), object, WirLinkage.Private, true, program.data_layout.pointer_alignment);
-    let result: WirValueID = wir_const_address(ref program, wir_string_layout(ref types, ref program), wir_global_value(program, object_global), Long(WIR_STRING_HEADER_SIZE));
+    let result: WirValueID = wir_const_address(ref program, wir_string_layout(ref types, ref program), wir_global_value(ref program, object_global), Long(WIR_STRING_HEADER_SIZE));
     types.string_values.put(value, result);
     return result;
 }

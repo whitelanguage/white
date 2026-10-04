@@ -183,7 +183,7 @@ func wir_emit_class_vtable_info(ref types: WirTypeMap, ref source: Compiler, ref
             types.errors.append("Vtable entry '" + info.name + "." + method_info.base_name + "' has no WIR function");
             return;
         }
-        entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(program, function_id), 0L));
+        entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(ref program, function_id), 0L));
         i++;
     }
     let table_type: WirTypeID = wir_dispatch_table_type(ref types, ref program, entries.length());
@@ -226,7 +226,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
                     types.errors.append("Interface method '" + interface_info.name + "." + required.name_tok.value + "' has no WIR implementation");
                     return;
                 }
-                entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(program, function_id), 0L));
+                entries.append(wir_const_address(ref program, raw_pointer, wir_function_value(ref program, function_id), 0L));
                 method_index++;
             }
             let table_type: WirTypeID = wir_dispatch_table_type(ref types, ref program, entries.length());
@@ -417,7 +417,7 @@ func wir_verify_lowering(ref types: WirTypeMap, program: WirModule, verbose: Boo
 }
 
 func wir_emit_required_runtime(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
-    if (!wir_module_uses_opcode(program, WirOpcode.Retain) && !wir_module_uses_opcode(program, WirOpcode.Release)) { return; }
+    if (!wir_module_uses_opcode(ref program, WirOpcode.Retain) && !wir_module_uses_opcode(ref program, WirOpcode.Release)) { return; }
     let deallocator: FuncInfo = wir_compiler_link_function(ref source, "memory_free");
     if (!has_func(deallocator)) { return; }
     let deallocator_id: WirFuncID = wir_find_function(program, deallocator.name);

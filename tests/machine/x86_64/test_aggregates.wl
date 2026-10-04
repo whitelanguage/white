@@ -182,7 +182,7 @@ func main() -> Int {
     while (i < cases.length()) {
         let args: Vector(WirValueID) = [];
         if (i != 0) { args.append(wir_const_int(ref program, i32, UInt128(42U))); }
-        let status: WirValueID = wir_call(ref program, block, wir_function_value(program, cases[i]), args, "status", no_wir_location());
+        let status: WirValueID = wir_call(ref program, block, wir_function_value(ref program, cases[i]), args, "status", no_wir_location());
         let next: WirBlockID = wir_add_block(ref program, native, "case_next_" + i, []);
         let fail: WirBlockID = wir_add_block(ref program, native, "case_fail_" + i, []);
         let equal: WirValueID = wir_append(ref program, block, WirOpcode.Equal, program.bool_type, [status, wir_const_int(ref program, i32, UInt128(0U))], [], no_wir_location());
@@ -193,7 +193,7 @@ func main() -> Int {
     }
     i = 0;
     while (i < edge_functions.length() * 2) {
-        let status: WirValueID = wir_call(ref program, block, wir_function_value(program, edge_functions[i / 2]), [wir_const_bool(ref program, i % 2 == 0)], "edge_status", no_wir_location());
+        let status: WirValueID = wir_call(ref program, block, wir_function_value(ref program, edge_functions[i / 2]), [wir_const_bool(ref program, i % 2 == 0)], "edge_status", no_wir_location());
         let next: WirBlockID = wir_add_block(ref program, native, "edge_next_" + i, []);
         let fail: WirBlockID = wir_add_block(ref program, native, "edge_fail_" + i, []);
         let equal: WirValueID = wir_append(ref program, block, WirOpcode.Equal, program.bool_type, [status, wir_const_int(ref program, i32, UInt128(0U))], [], no_wir_location());
@@ -206,8 +206,8 @@ func main() -> Int {
     let exit: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, entry, wir_function_value(program, native), [], "status", no_wir_location());
-    wir_call(ref program, entry, wir_function_value(program, exit), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, native), [], "status", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, exit), [status], "", no_wir_location());
     wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {

@@ -31,14 +31,14 @@ func wir_failure_function(ref program: WirModule, name: String, message: String,
     let bytes: WirValueID = wir_const_bytes(ref program, bytes_type, message);
     let global: WirGlobalID = wir_add_global(ref program, name + ".message", bytes_type, bytes, WirLinkage.Internal, true);
     let data_type: WirTypeID = wir_pointer_type(ref program, program.void_type);
-    let data: WirValueID = wir_const_address(ref program, data_type, wir_global_value(program, global), 0L);
+    let data: WirValueID = wir_const_address(ref program, data_type, wir_global_value(ref program, global), 0L);
 
     let function_id: WirFuncID = wir_add_function(ref program, name, [], program.void_type, false, WirLinkage.Internal, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
     let length: WirValueID = wir_const_int(ref program, int_type, UInt128(message.length()));
-    wir_call(ref program, entry, wir_function_value(program, writer), [data, length], "", no_wir_location());
-    wir_call(ref program, entry, wir_function_value(program, exit), [wir_const_int(ref program, int_type, UInt128(1U))], "", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, writer), [data, length], "", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, exit), [wir_const_int(ref program, int_type, UInt128(1U))], "", no_wir_location());
     wir_append(ref program, entry, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
     return function_id;
 }
@@ -104,8 +104,8 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let status: WirValueID = NO_WIR_VALUE;
     if (main_type.parameters.length() == 0) {
-        status = wir_call(ref program, entry, wir_function_value(program, main_id), [], "status", no_wir_location());
-        wir_call(ref program, entry, wir_function_value(program, exit_id), [status], "", no_wir_location());
+        status = wir_call(ref program, entry, wir_function_value(ref program, main_id), [], "status", no_wir_location());
+        wir_call(ref program, entry, wir_function_value(ref program, exit_id), [status], "", no_wir_location());
         wir_append(ref program, entry, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
         return;
     }
@@ -116,22 +116,22 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
     let argc_slot: WirValueID = wir_stack_alloc(ref program, entry, int_type, "argc.addr", no_wir_location());
     wir_store(ref program, entry, wir_const_int(ref program, int_type, UInt128(0U)), argc_slot, no_wir_location());
-    let raw_argv: WirValueID = wir_call(ref program, entry, wir_function_value(program, args_id), [argc_slot], "argv.raw", no_wir_location());
-    let raw_type: WirTypeID = wir_value_type(program, raw_argv);
+    let raw_argv: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, args_id), [argc_slot], "argv.raw", no_wir_location());
+    let raw_type: WirTypeID = wir_value_type(ref program, raw_argv);
     let missing: WirValueID = wir_binary(ref program, entry, WirOpcode.Equal, program.bool_type, raw_argv, wir_null(ref program, raw_type), "argv.missing", no_wir_location());
     let failed: WirBlockID = wir_add_block(ref program, function_id, "startup.failed", []);
     let ready: WirBlockID = wir_add_block(ref program, function_id, "startup.ready", []);
     wir_append(ref program, entry, WirOpcode.Branch, program.void_type, [missing], [wir_edge(failed, []), wir_edge(ready, [])], no_wir_location());
 
     let failed_status: WirValueID = wir_const_int(ref program, int_type, UInt128(127U));
-    wir_call(ref program, failed, wir_function_value(program, exit_id), [failed_status], "", no_wir_location());
+    wir_call(ref program, failed, wir_function_value(ref program, exit_id), [failed_status], "", no_wir_location());
     wir_append(ref program, failed, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
 
     let argc: WirValueID = wir_load(ref program, ready, argc_slot, "argc", no_wir_location());
     let argv: WirValueID = wir_cast(ref program, ready, raw_argv, main_type.parameters[1], "argv", no_wir_location());
-    status = wir_call(ref program, ready, wir_function_value(program, main_id), [argc, argv], "status", no_wir_location());
-    wir_call(ref program, ready, wir_function_value(program, free_id), [argc, raw_argv], "", no_wir_location());
-    wir_call(ref program, ready, wir_function_value(program, exit_id), [status], "", no_wir_location());
+    status = wir_call(ref program, ready, wir_function_value(ref program, main_id), [argc, argv], "status", no_wir_location());
+    wir_call(ref program, ready, wir_function_value(ref program, free_id), [argc, raw_argv], "", no_wir_location());
+    wir_call(ref program, ready, wir_function_value(ref program, exit_id), [status], "", no_wir_location());
     wir_append(ref program, ready, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
 }
 

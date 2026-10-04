@@ -16,14 +16,14 @@ func main() -> Int {
     let callback_entry: WirBlockID = wir_add_block(ref program, callback, "entry", []);
     wir_return(ref program, callback_entry, wir_const_int(ref program, int_type, UInt128(7U)), no_wir_location());
 
-    let callback_address: WirValueID = wir_function_value(program, callback);
+    let callback_address: WirValueID = wir_function_value(ref program, callback);
     let callback_pointer: WirValueID = wir_const_address(ref program, pointer_type, callback_address, 0L);
     let callback_global: WirGlobalID = wir_add_global(ref program, "callback.slot", pointer_type, callback_pointer, WirLinkage.Internal, true);
 
     let root: WirFuncID = wir_add_function(ref program, "main", [], int_type, false, WirLinkage.Exported, WirABI.White);
     let root_entry: WirBlockID = wir_add_block(ref program, root, "entry", []);
-    wir_load(ref program, root_entry, wir_global_value(program, callback_global), "callback", no_wir_location());
-    wir_call(ref program, root_entry, wir_function_value(program, live_external), [], "", no_wir_location());
+    wir_load(ref program, root_entry, wir_global_value(ref program, callback_global), "callback", no_wir_location());
+    wir_call(ref program, root_entry, wir_function_value(ref program, live_external), [], "", no_wir_location());
     wir_return(ref program, root_entry, wir_const_int(ref program, int_type, UInt128(0U)), no_wir_location());
 
     let reachable: WirReachability = wir_reachable_symbols(program);

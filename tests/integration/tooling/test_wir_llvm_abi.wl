@@ -16,8 +16,8 @@ func check_x64_abi() -> Bool {
     let entry: WirBlockID = wir_add_block(ref program, caller_id, "entry", []);
     let caller: WirFunction = program.arena.functions[wir_id_index(UInt32(caller_id))];
     wir_retain(ref program, entry, caller.parameters[0], no_wir_location());
-    wir_call(ref program, entry, wir_function_value(program, system_id), [wir_const_int(ref program, i32_type, UInt128(7U))], "handle", no_wir_location());
-    let result: WirValueID = wir_call(ref program, entry, wir_function_value(program, c_id), [caller.parameters[0]], "result", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, system_id), [wir_const_int(ref program, i32_type, UInt128(7U))], "handle", no_wir_location());
+    let result: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, c_id), [caller.parameters[0]], "result", no_wir_location());
     wir_release(ref program, entry, caller.parameters[0], no_wir_location());
     wir_return(ref program, entry, result, no_wir_location());
 

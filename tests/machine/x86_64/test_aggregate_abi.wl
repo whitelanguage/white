@@ -25,7 +25,7 @@ func relay(ref program: WirModule, name: String, qword: WirTypeID, dword: WirTyp
     let function: WirFuncID = wir_add_function(ref program, name, params, qword, false, WirLinkage.Exported, WirABI.C);
     let entry: WirBlockID = wir_add_block(ref program, function, "entry", []);
     let values: Vector(WirValueID) = program.arena.functions[wir_id_index(UInt32(function))].parameters;
-    let target: WirValueID = wir_function_value(program, host);
+    let target: WirValueID = wir_function_value(ref program, host);
     let input: WirValueID = values[0];
     if (indirect) {
         target = values[0];
@@ -66,7 +66,7 @@ func large_cases(ref program: WirModule, length: Int, qword: WirTypeID, double_r
         let entry: WirBlockID = wir_add_block(ref program, function, "entry", []);
         let values: Vector(WirValueID) = program.arena.functions[wir_id_index(UInt32(function))].parameters;
         let input: WirValueID = values[0];
-        let target: WirValueID = wir_function_value(program, host);
+        let target: WirValueID = wir_function_value(ref program, host);
         if (i == 2) {
             input = values[1];
             target = values[0];
@@ -100,7 +100,7 @@ func main() -> Int {
     }
     let discarded: WirFuncID = wir_add_function(ref rejected, "discarded_result", [], rejected.void_type, false, WirLinkage.Internal, WirABI.C);
     let discarded_entry: WirBlockID = wir_add_block(ref rejected, discarded, "entry", []);
-    wir_call(ref rejected, discarded_entry, wir_function_value(rejected, rejected_function), [], "unused", no_wir_location());
+    wir_call(ref rejected, discarded_entry, wir_function_value(ref rejected, rejected_function), [], "unused", no_wir_location());
     wir_return(ref rejected, discarded_entry, NO_WIR_VALUE, no_wir_location());
     rejected_result = x86_lower_function(ref rejected, discarded);
     if (rejected_result.errors.length() != 0 || rejected_result.bytes.length() == 0) {
@@ -142,8 +142,8 @@ func main() -> Int {
     let exit: WirFuncID = wir_add_function(ref program, "ExitProcess", [WirParam(name="status", type_id=i32)], program.void_type, false, WirLinkage.External, WirABI.System);
     let startup: WirFuncID = wir_add_function(ref program, "mainCRTStartup", [], program.void_type, false, WirLinkage.Exported, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, startup, "entry", []);
-    let status: WirValueID = wir_call(ref program, entry, wir_function_value(program, verify), [], "status", no_wir_location());
-    wir_call(ref program, entry, wir_function_value(program, exit), [status], "", no_wir_location());
+    let status: WirValueID = wir_call(ref program, entry, wir_function_value(ref program, verify), [], "status", no_wir_location());
+    wir_call(ref program, entry, wir_function_value(ref program, exit), [status], "", no_wir_location());
     wir_return(ref program, entry, NO_WIR_VALUE, no_wir_location());
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {

@@ -62,8 +62,8 @@ func check_graph(count: Int, seed: Int) -> Bool {
         i++;
     }
     program.arena.functions[wir_id_index(UInt32(function))] = current;
-    let indices: Vector(Int) = wir_block_indices(program);
-    let dominators: Vector(Vector(UInt64)) = wir_dominators(program, current, indices);
+    let indices: Vector(Int) = wir_block_indices(ref program);
+    let dominators: Vector(Vector(UInt64)) = wir_dominators(ref program, current, indices);
     let candidate = 0;
     while (candidate < count) {
         let paths: Vector(Bool) = paths_without(edges, candidate);

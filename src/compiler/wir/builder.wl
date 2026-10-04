@@ -134,7 +134,7 @@ func wir_add_value(ref program: WirModule, value: WirValue) -> WirValueID {
     return WirValueID(UInt32(program.arena.values.length()));
 }
 
-func wir_value_type(program: WirModule, value_id: WirValueID) -> WirTypeID {
+func wir_value_type(ref program: WirModule, value_id: WirValueID) -> WirTypeID {
     return program.arena.values[wir_id_index(UInt32(value_id))].type_id;
 }
 
@@ -303,7 +303,7 @@ func wir_atomic_store(ref program: WirModule, block: WirBlockID, value: WirValue
 }
 
 func wir_atomic_rmw(ref program: WirModule, block: WirBlockID, operation: WirAtomicOp, address: WirValueID, value: WirValueID, order: WirMemoryOrder, name: String, location: WirLocation) -> WirValueID {
-    let result: WirValueID = wir_append(ref program, block, WirOpcode.AtomicRmw, wir_value_type(program, value), [address, value], [], location);
+    let result: WirValueID = wir_append(ref program, block, WirOpcode.AtomicRmw, wir_value_type(ref program, value), [address, value], [], location);
     let instruction_index: Int = program.arena.instructions.length() - 1;
     program.arena.instructions[instruction_index].atomic_op = operation;
     program.arena.instructions[instruction_index].memory_order = order;
@@ -312,7 +312,7 @@ func wir_atomic_rmw(ref program: WirModule, block: WirBlockID, operation: WirAto
 }
 
 func wir_field(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, field: Int, name: String, location: WirLocation) -> WirValueID {
-    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, aggregate)))];
     let field_id: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(field)));
     let value: WirValueID = wir_append(ref program, block, WirOpcode.Field, aggregate_type.fields[field], [aggregate, field_id], [], location);
     wir_name_value(ref program, value, name);
@@ -320,7 +320,7 @@ func wir_field(ref program: WirModule, block: WirBlockID, aggregate: WirValueID,
 }
 
 func wir_field_address(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, field: Int, name: String, location: WirLocation) -> WirValueID {
-    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, aggregate)))];
     let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(pointer.element))];
     let field_id: WirValueID = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(field)));
     let result_type: WirTypeID = wir_pointer_type(ref program, aggregate_type.fields[field]);
@@ -330,14 +330,14 @@ func wir_field_address(ref program: WirModule, block: WirBlockID, aggregate: Wir
 }
 
 func wir_index(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, index: WirValueID, name: String, location: WirLocation) -> WirValueID {
-    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, aggregate)))];
     let value: WirValueID = wir_append(ref program, block, WirOpcode.Index, aggregate_type.element, [aggregate, index], [], location);
     wir_name_value(ref program, value, name);
     return value;
 }
 
 func wir_index_address(ref program: WirModule, block: WirBlockID, aggregate: WirValueID, index: WirValueID, name: String, location: WirLocation) -> WirValueID {
-    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(program, aggregate)))];
+    let pointer: WirType = program.arena.types[wir_id_index(UInt32(wir_value_type(ref program, aggregate)))];
     let element: WirTypeID = pointer.element;
     let aggregate_type: WirType = program.arena.types[wir_id_index(UInt32(element))];
     if (aggregate_type.kind == WirTypeKind.Array) { element = aggregate_type.element; }
@@ -398,7 +398,7 @@ func wir_release(ref program: WirModule, block: WirBlockID, value: WirValueID, l
     wir_append(ref program, block, WirOpcode.Release, program.void_type, [value], [], location);
 }
 
-func wir_cast_opcode(program: WirModule, source_id: WirTypeID, target_id: WirTypeID) -> WirOpcode {
+func wir_cast_opcode(ref program: WirModule, source_id: WirTypeID, target_id: WirTypeID) -> WirOpcode {
     let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
     let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
     let source_integer: Bool = source.kind == WirTypeKind.BoolType || source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
@@ -430,9 +430,9 @@ func wir_cast_opcode(program: WirModule, source_id: WirTypeID, target_id: WirTyp
 }
 
 func wir_cast(ref program: WirModule, block: WirBlockID, value: WirValueID, type_id: WirTypeID, name: String, location: WirLocation) -> WirValueID {
-    let source_id: WirTypeID = wir_value_type(program, value);
+    let source_id: WirTypeID = wir_value_type(ref program, value);
     if (source_id == type_id) { return value; }
-    let opcode: WirOpcode = wir_cast_opcode(program, source_id, type_id);
+    let opcode: WirOpcode = wir_cast_opcode(ref program, source_id, type_id);
     let result: WirValueID = wir_append(ref program, block, opcode, type_id, [value], [], location);
     wir_name_value(ref program, result, name);
     return result;
@@ -453,7 +453,7 @@ func wir_pointer_offset(ref program: WirModule, block: WirBlockID, pointer: WirV
     return wir_cast(ref program, block, adjusted, target_type, "", no_wir_location());
 }
 
-func wir_module_uses_opcode(program: WirModule, opcode: WirOpcode) -> Bool {
+func wir_module_uses_opcode(ref program: WirModule, opcode: WirOpcode) -> Bool {
     let i: Int = 0;
     while (i < program.arena.instructions.length()) {
         if (program.arena.instructions[i].opcode == opcode) { return true; }
@@ -484,12 +484,12 @@ func wir_add_aligned_global(ref program: WirModule, name: String, type_id: WirTy
     return global_id;
 }
 
-func wir_function_value(program: WirModule, function_id: WirFuncID) -> WirValueID {
+func wir_function_value(ref program: WirModule, function_id: WirFuncID) -> WirValueID {
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     return function.address;
 }
 
-func wir_global_value(program: WirModule, global_id: WirGlobalID) -> WirValueID {
+func wir_global_value(ref program: WirModule, global_id: WirGlobalID) -> WirValueID {
     let global: WirGlobal = program.arena.globals[wir_id_index(UInt32(global_id))];
     return global.address;
 }
