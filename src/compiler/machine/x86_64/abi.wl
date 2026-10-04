@@ -44,23 +44,34 @@ func x86_win64_abi() -> X86Win64ABI {
 }
 
 func x86_win64_argument_register(index: Int, floating: Bool) -> X86Register {
-    let abi: X86Win64ABI = x86_win64_abi();
-    if (index < 0) {
+    // this runs for each call argument, building the full ABI description here
+    // would allocate three vectors just to select one of four registers.
+    if (index < 0 || index >= 4) {
         return X86Register.None;
     }
 
     if floating {
-        if (index >= abi.floating_arguments.length()) {
-            return X86Register.None;
+        if (index == 0) {
+            return X86Register.XMM0;
         }
-
-        return abi.floating_arguments[index];
+        if (index == 1) {
+            return X86Register.XMM1;
+        }
+        if (index == 2) {
+            return X86Register.XMM2;
+        }
+        return X86Register.XMM3;
     }
-    if (index >= abi.integer_arguments.length()) {
-        return X86Register.None;
+    if (index == 0) {
+        return X86Register.RCX;
     }
-
-    return abi.integer_arguments[index];
+    if (index == 1) {
+        return X86Register.RDX;
+    }
+    if (index == 2) {
+        return X86Register.R8;
+    }
+    return X86Register.R9;
 }
 
 func x86_win64_stack_arg_offset(index: Int) -> Int {

@@ -27,23 +27,45 @@ func main() -> Int {
 
     let order: Vector(WirBlockID) = [entry];
     let uses: X86UseTable = x86_collect_uses(ref program, order);
-    if (x86_spill_capacity(ref program, order, uses, 3) < 1) {
+    if (x86_spill_capacity(ref program, order, ref uses, 3) < 1) {
         print("FAIL: x86_64 spill planner did not detect register pressure");
         return 1;
     }
 
     let registers: X86RegisterPlan = x86_register_plan(uses);
     let spills: X86SpillPlan = x86_new_spill_plan([-8, -16]);
-    x86_claim_spill(spills, a);
-    x86_claim_spill(spills, b);
-    x86_bind_register(registers, X86Register.RAX, a);
-    let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=registers, spills=spills, stack=X86StackIndex(base=0, dense_count=0, sparse=[], offsets=[], sizes=[]), layouts=[], retain_function=NO_WIR_FUNC, release_function=NO_WIR_FUNC, return_pointer=0, position=0, message="");
-    if (x86_claim_register_spill(ref state, c) != -8 || x86_spill_offset(spills, b) != -16 || x86_spill_offset(spills, a) != 0) {
+    x86_claim_spill(ref spills, a);
+    x86_claim_spill(ref spills, b);
+    x86_bind_register(ref registers, X86Register.RAX, a);
+    let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=registers, spills=spills, stack=X86StackIndex(base=0, dense_count=0, sparse=[], offsets=[], sizes=[]), layouts=[], retain_function=NO_WIR_FUNC, release_function=NO_WIR_FUNC, null_function=NO_WIR_FUNC, bounds_function=NO_WIR_FUNC, return_pointer=0, position=0, message="");
+    if (x86_claim_register_spill(ref state, c) != -8 || x86_spill_offset(ref spills, b) != -16 || x86_spill_offset(ref spills, a) != 0) {
         print("FAIL: reloaded spill copy was not reclaimed");
         return 1;
     }
     if (x86_claim_register_spill(ref state, d) != 0 || x86_claim_register_spill(ref state, c) != -8) {
         print("FAIL: spill allocation discarded a value without a register copy");
+        return 1;
+    }
+
+    // copied branch state must own its lookup table and free-slot stack too.
+    let branch: X86SpillPlan = x86_copy_spill_plan(ref state.spills);
+    x86_forget_spill_value(ref branch, b);
+    if (x86_claim_spill(ref branch, d) != -16 || x86_spill_offset(ref state.spills, b) != -16 || x86_spill_offset(ref state.spills, d) != 0) {
+        print("FAIL: spill changes leaked across branch copies");
+        return 1;
+    }
+    x86_reset_spills(ref branch);
+    if (x86_spill_offset(ref branch, c) != 0 || x86_claim_spill(ref branch, a) != -8 || x86_claim_spill(ref branch, b) != -16 || x86_claim_spill(ref branch, d) != 0) {
+        print("FAIL: spill reset left stale indices or free slots");
+        return 1;
+    }
+
+    let dense: X86SpillPlan = x86_spill_plan_for_range([-8, -16], x86_function_value_range(ref program, order));
+    x86_claim_spill(ref dense, a);
+    x86_claim_spill(ref dense, b);
+    x86_forget_spill_value(ref dense, a);
+    if (x86_claim_spill(ref dense, c) != -8 || x86_spill_offset(ref dense, a) != 0 || x86_spill_offset(ref dense, b) != -16) {
+        print("FAIL: dense spill lookup retained a recycled value");
         return 1;
     }
 
