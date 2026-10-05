@@ -15,7 +15,7 @@ import select_target from "../../target.wl"
 import register_extern_library from "../../validation.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
-import throw_extern_error from "../../../frontend/diagnostics.wl"
+import GLOBAL_ERROR_COUNT, throw_extern_error from "../../../frontend/diagnostics.wl"
 
 struct WirLoweringResult(
     program: WirModule,
@@ -272,7 +272,7 @@ func wir_refresh_generic_vtables(ref types: WirTypeMap, ref source: Compiler, re
 
 func wir_lower_generic_methods(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (source.generic_method_worklist is !null && i < source.generic_method_worklist.length()) {
+    while (GLOBAL_ERROR_COUNT == 0 && source.generic_method_worklist is !null && i < source.generic_method_worklist.length()) {
         let instance: GenericMethodInstance = source.generic_method_worklist[i];
         let method_node: MethodDefNode = get_method_def_node(ref source.arena, instance.template.node);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
@@ -300,7 +300,7 @@ func wir_lower_generic_methods(ref types: WirTypeMap, ref source: Compiler, ref 
 
 func wir_lower_generic_functions(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (source.generic_worklist is !null && i < source.generic_worklist.length()) {
+    while (GLOBAL_ERROR_COUNT == 0 && source.generic_worklist is !null && i < source.generic_worklist.length()) {
         let instance: GenericFuncInstance = source.generic_worklist[i];
         let function_node: FunctionDefNode = get_func_def_node(ref source.arena, instance.template.node);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
@@ -328,7 +328,7 @@ func wir_lower_generic_functions(ref types: WirTypeMap, ref source: Compiler, re
 }
 
 func wir_lower_generic_instances(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
-    while true {
+    while (GLOBAL_ERROR_COUNT == 0) {
         let class_count: Int = 0;
         let function_count: Int = 0;
         let method_count: Int = 0;
@@ -467,6 +467,11 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
 
     if (verbose) { print("Lowering generic WIR instances"); }
     wir_lower_generic_instances(ref types, ref source, ref program);
+    // a failed instantiation already has a source diagnostic. Do not verify the
+    // half-built function and replace it with a list of backend errors.
+    if (GLOBAL_ERROR_COUNT > 0) {
+        return WirLoweringResult(program=program, errors=[]);
+    }
     wir_refresh_generic_vtables(ref types, ref source, ref program);
 
     if (verbose) { print("Emitting WIR runtime"); }

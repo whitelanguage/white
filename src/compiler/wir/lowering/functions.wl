@@ -20,6 +20,7 @@ import target_intrinsic_symbol, target_value, fold_target_cond from "../../targe
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 import * from "../../../frontend/tokens.wl"
+import throw_type_error from "../../../frontend/diagnostics.wl"
 
 struct WirMemberCall(
     handled: Bool,
@@ -136,10 +137,6 @@ func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compi
     if (source.generic_funcs is null) { return FuncInfo(); }
     let generic: GenericTemplate = source.generic_funcs.lookup(name);
     if (!has_template(generic)) { return FuncInfo(); }
-    if (source.generic_func_key.length() != 0 && source.func_table is !null) {
-        let current: FuncInfo = source.func_table.lookup(source.generic_func_key);
-        if (has_func(current) && current.base_name == generic.name) { return current; }
-    }
 
     let arguments: Vector(Struct) = [];
     if (call.type_args is !null) {
@@ -170,12 +167,78 @@ func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compi
     return register_generic_func(ref source, generic, arguments, call.pos);
 }
 
+func wir_generic_constructor_type(ref state: WirFunctionLowering, ref source: Compiler, call: CallNode) -> Int {
+    let generic: GenericTemplate = wir_generic_constructor(ref source, call.callee);
+    if (!has_template(generic)) { return 0; }
+
+    let arguments: Vector(Struct) = [];
+    if (call.type_args is !null) {
+        arguments = resolve_generic_constructor_args(ref source, generic, call.type_args, call.args, 0, call.pos);
+    } else {
+        let inferred: Dict(String, SymbolInfo) = Dict();
+        let parameters: Vector(ParamNode) = generic_constructor_params(ref source, generic);
+        let i: Int = 0;
+        while (call.args is !null && parameters is !null && i < call.args.length()) {
+            let argument: ArgNode = call.args[i];
+            let parameter_index: Int = generic_call_param(parameters, argument, i);
+            if (parameter_index >= 0) {
+                let actual_type: Int = wir_generic_argument_type(ref state, ref source, argument, parameters[parameter_index]);
+                if (actual_type == TYPE_POISON || !infer_type_args(ref source, generic, parameters[parameter_index].type_tok, actual_type, inferred, call.pos)) {
+                    return TYPE_POISON;
+                }
+            }
+            i++;
+        }
+
+        i = 0;
+        while (i < generic.type_params.length()) {
+            let parameter: GenericParamNode = generic.type_params[i];
+            let actual: SymbolInfo = inferred.lookup(parameter.name_tok.value);
+            if (!has_symbol(actual)) {
+                throw_type_error(call.pos, "Cannot infer type argument '" + parameter.name_tok.value + "' for type '" + generic.name + "'.");
+                return TYPE_POISON;
+            }
+            arguments.append(TypeListNode(type=actual.type));
+            i++;
+        }
+    }
+    if (arguments is null) { return TYPE_POISON; }
+
+    let template_kind: Int = node_tag(generic.node);
+    if (template_kind == NODE_CLASS_DEF) { return register_generic_class(ref source, generic, arguments, call.pos); }
+    return register_generic_struct(ref source, generic, arguments, call.pos);
+}
+
 func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> Int {
     if (!has_node(node)) { return TYPE_POISON; }
     if (node_tag(node) == NODE_TRY_UNWRAP) {
         let wrapped: Int = wir_argument_type(ref state, ref source, get_try_unwrap_node(ref source.arena, node).expr);
         if (is_fallible_type(ref source, wrapped)) { return get_inner_fallible_type(ref source, wrapped); }
         return wrapped;
+    }
+    if (node_tag(node) == NODE_UNARYOP) {
+        let unary: UnaryOpNode = get_unary_node(ref source.arena, node);
+        if (unary.op_tok.type == TOK_NOT) { return TYPE_BOOL; }
+        return wir_argument_type(ref state, ref source, unary.node);
+    }
+    if (node_tag(node) == NODE_BINOP) {
+        let binary: BinOpNode = get_binop_node(ref source.arena, node);
+        let left_type: Int = wir_argument_type(ref state, ref source, binary.left);
+        let right_type: Int = wir_argument_type(ref state, ref source, binary.right);
+        if (left_type == TYPE_POISON || right_type == TYPE_POISON) { return TYPE_POISON; }
+        if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR ||
+            binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE ||
+            binary.op_tok.type == TOK_LT || binary.op_tok.type == TOK_LTE ||
+            binary.op_tok.type == TOK_GT || binary.op_tok.type == TOK_GTE ||
+            binary.op_tok.type == TOK_IS) {
+            return TYPE_BOOL;
+        }
+        if (binary.op_tok.type == TOK_POW) { return TYPE_FLOAT; }
+        if (get_repr_type(ref source, left_type) == TYPE_STRING || get_repr_type(ref source, right_type) == TYPE_STRING) {
+            if (binary.op_tok.type == TOK_PLUS) { return TYPE_STRING; }
+            return TYPE_POISON;
+        }
+        return wir_binary_type(ref state, ref source, WirExpr(value=NO_WIR_VALUE, source_type=left_type), WirExpr(value=NO_WIR_VALUE, source_type=right_type), binary.left, binary.right);
     }
     if (node_tag(node) == NODE_CALL) {
         let call: CallNode = get_call_node(ref source.arena, node);
@@ -202,6 +265,19 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
                 }
             }
         }
+
+        let constructor_type: Int = wir_generic_constructor_type(ref state, ref source, call);
+        if (constructor_type != 0) { return constructor_type; }
+
+        // A call can also name a struct or class constructor. Asking for an
+        // lvalue below would diagnose the type name as an unknown value before
+        // the normal expression checker has a chance to instantiate it.
+        let call_type: Int = get_expr_type(ref source, node);
+        if (call_type != 0 && call_type != TYPE_POISON) {
+            if (call.preserve_fallible || !is_fallible_type(ref source, call_type)) { return call_type; }
+            return get_inner_fallible_type(ref source, call_type);
+        }
+        return TYPE_POISON;
     }
     let source_type: Int = wir_lvalue_type(ref state, ref source, node);
     if (source_type != TYPE_POISON) { return source_type; }
