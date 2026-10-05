@@ -2,7 +2,8 @@
 
 import * from "model.wl"
 
-struct WirOptimizationStats(instructions: Int, blocks: Int, branches: Int, jumps: Int, constants: Int, copies: Int, checks: Int, loads: Int, stores: Int, slots: Int, parameters: Int)
+
+struct WirOptimizationStats(instructions: Int, blocks: Int, branches: Int, jumps: Int, constants: Int, copies: Int, checks: Int, loads: Int, stores: Int, slots: Int, parameters: Int, expressions: Int)
 
 struct WirOptimizationPlan(forwarding_distance: Int, extra_scans: Int, code_growth_percent: Int, inline_size: Int)
 
@@ -242,6 +243,13 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
                         stats.loads++;
                     } else {
                         unresolved_load[active_slot] = true;
+
+                        // keep the first real read, then reuse it for nearby reads
+                        // of this private slot. A later store replaces the value.
+                        // Escaping addresses and atomic accesses were excluded above.
+                        current[active_slot] = instruction.result;
+                        generation[active_slot] = block_generation;
+                        stored_at[active_slot] = j;
                     }
                 }
             }
@@ -366,6 +374,134 @@ func wir_refold_aliases(ref program: WirModule, ref removed: Vector(Bool), ref a
                 removed[i] = true;
                 stats.constants++;
             }
+        }
+        i++;
+    }
+}
+
+struct WirLocalExpr(op: WirOpcode, type_id: WirTypeID, left: WirValueID, right: WirValueID, result: WirValueID, block: Int, position: Int)
+
+func wir_integer_expression(ref program: WirModule, ref instruction: WirInstruction) -> Bool {
+    let op = instruction.opcode;
+
+    // this is an allowlist, not the dead-code predicate. An allocation can be
+    // discarded when unused, but two allocations must never become one address.
+    // Leave loads, trapping operations and IEEE floating-point operations alone.
+    if (op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
+        op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor &&
+        op != WirOpcode.Not && op != WirOpcode.Negate &&
+        op != WirOpcode.Equal && op != WirOpcode.NotEqual &&
+        op != WirOpcode.SignedLess && op != WirOpcode.SignedLessEqual &&
+        op != WirOpcode.SignedGreater && op != WirOpcode.SignedGreaterEqual &&
+        op != WirOpcode.UnsignedLess && op != WirOpcode.UnsignedLessEqual &&
+        op != WirOpcode.UnsignedGreater && op != WirOpcode.UnsignedGreaterEqual &&
+        op != WirOpcode.Truncate && op != WirOpcode.SignExtend && op != WirOpcode.ZeroExtend) {
+        return false;
+    }
+
+    if (instruction.result == NO_WIR_VALUE || instruction.operands.length() == 0 || instruction.operands.length() > 2) {
+        return false;
+    }
+
+    let type_id = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+    let kind = program.arena.types[wir_id_index(UInt32(type_id))].kind;
+
+    return kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt || kind == WirTypeKind.BoolType;
+}
+
+func wir_expression_slot(op: WirOpcode, type_id: WirTypeID, left: WirValueID, right: WirValueID) -> Int {
+    let hash = UInt64(UInt32(left)) * 2654435761UL;
+    hash = hash ^ (UInt64(UInt32(right)) * 2246822519UL);
+    hash = hash ^ (UInt64(UInt32(type_id)) << 17) ^ (UInt64(Int(op)) << 9);
+    hash = hash ^ (hash >> 32) ^ (hash >> 16) ^ (hash >> 8);
+
+    return Int(hash & 255UL);
+}
+
+func wir_expression_operand(ref program: WirModule, value: WirValueID, ref constants: Vector(WirValueID)) -> WirValueID {
+    let ptr item: WirValue = ref program.arena.values[wir_id_index(UInt32(value))];
+    if (item.kind != WirValueKind.Integer && item.kind != WirValueKind.BoolValue) {
+        return value;
+    }
+
+    // the builder gives each literal a fresh ID. Equal integer literals need a
+    // common key here, otherwise two instances of `x & 255` never compare equal.
+    // This cache is also replace-on-collision, no global constant pool is built.
+    let bits = item.integer;
+    let hash = UInt64(bits & UInt128(18446744073709551615UL)) ^ UInt64(bits >> 64);
+    hash ^= (hash >> 32) ^ (hash >> 16) ^ (hash >> 8) ^ UInt64(UInt32(item.type_id));
+
+    let slot = Int(hash & 255UL);
+    let previous = constants[slot];
+    if (previous != NO_WIR_VALUE) {
+        let ptr other: WirValue = ref program.arena.values[wir_id_index(UInt32(previous))];
+
+        if (item.type_id == other.type_id && item.kind == other.kind && item.integer == other.integer) {
+            return previous;
+        }
+    }
+
+    constants[slot] = value;
+    return value;
+}
+
+func wir_reuse_expressions(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats, distance: Int) -> Void {
+    // one candidate per bucket keeps both memory and lookup work bounded. A hash
+    // collision only loses an optimization, the complete key is checked below.
+    // Block stamps avoid clearing the table for every small block in the module.
+    let table: Vector(WirLocalExpr) = [];
+    let constants: Vector(WirValueID) = [];
+
+    let i = 0;
+    while (i < 256) {
+        table.append(WirLocalExpr(op=WirOpcode.Invalid, type_id=NO_WIR_TYPE, left=NO_WIR_VALUE, right=NO_WIR_VALUE, result=NO_WIR_VALUE, block=-1, position=-1));
+        constants.append(NO_WIR_VALUE);
+        i++;
+    }
+
+    i = 0;
+    while (i < program.arena.blocks.length()) {
+        let ptr block: WirBlock = ref program.arena.blocks[i];
+        let first = 0;
+        let j = 0;
+        while (j < block.instructions.length()) {
+            let index = wir_id_index(UInt32(block.instructions[j]));
+            let ptr instruction: WirInstruction = ref program.arena.instructions[index];
+
+            // even pure values are not reused across calls. Keeping a value alive
+            // across the ABI clobbers can cost more spills than recomputing it.
+            if (instruction.opcode == WirOpcode.Call || instruction.opcode == WirOpcode.Retain || instruction.opcode == WirOpcode.Release) {
+                first = j + 1;
+            }
+            if (!removed[index] && wir_integer_expression(ref program, ref program.arena.instructions[index])) {
+                let left = wir_resolve_alias(instruction.operands[0], ref aliases);
+                left = wir_expression_operand(ref program, left, ref constants);
+                let right = NO_WIR_VALUE;
+                if (instruction.operands.length() == 2) {
+                    right = wir_resolve_alias(instruction.operands[1], ref aliases);
+                    right = wir_expression_operand(ref program, right, ref constants);
+                }
+                let op = instruction.opcode;
+                if (op == WirOpcode.Add || op == WirOpcode.Multiply || op == WirOpcode.BitAnd || op == WirOpcode.BitOr || op == WirOpcode.BitXor || op == WirOpcode.Equal || op == WirOpcode.NotEqual) {
+                    if (UInt32(left) > UInt32(right)) {
+                        let swap = left;
+                        left = right;
+                        right = swap;
+                    }
+                }
+
+                let slot = wir_expression_slot(op, instruction.type_id, left, right);
+                let ptr previous: WirLocalExpr = ref table[slot];
+                if (previous.block == i && previous.position >= first && j - previous.position <= distance &&
+                    previous.op == op && previous.type_id == instruction.type_id && previous.left == left && previous.right == right) {
+                    aliases[wir_id_index(UInt32(instruction.result))] = previous.result;
+                    removed[index] = true;
+                    stats.expressions++;
+                } else {
+                    table[slot] = WirLocalExpr(op=op, type_id=instruction.type_id, left=left, right=right, result=instruction.result, block=i, position=j);
+                }
+            }
+            j++;
         }
         i++;
     }
@@ -734,7 +870,7 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
 }
 
 func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats {
-    let stats = WirOptimizationStats(instructions=0, blocks=0, branches=0, jumps=0, constants=0, copies=0, checks=0, loads=0, stores=0, slots=0, parameters=0);
+    let stats = WirOptimizationStats(instructions=0, blocks=0, branches=0, jumps=0, constants=0, copies=0, checks=0, loads=0, stores=0, slots=0, parameters=0, expressions=0);
     if (level == "-O0") {
         return stats;
     }
@@ -771,6 +907,13 @@ func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats
     if (plan.extra_scans > 2) {
         wir_refold_aliases(ref program, ref folded, ref aliases, ref stats);
     }
+    let expression_distance = 32;
+    if (level == "-O1") {
+        expression_distance = 8;
+    }
+
+    wir_reuse_expressions(ref program, ref folded, ref aliases, ref stats, expression_distance);
+
     i = 0;
     while (i < program.arena.functions.length()) {
         let entry = program.arena.functions[i].entry;
