@@ -2053,7 +2053,9 @@ func x86_divide_wide_unsigned(ref output: X86CodeBuffer) -> Bool {
     }
     x86_sub_register64(ref output, X86Register.RDX, X86Register.R11);
     x86_sbb_register64(ref output, X86Register.R8, X86Register.R9);
-    x86_bitwise_register_imm32(ref output, X86Register.RAX, 1U, 1);
+    // A 32-bit OR would clear the upper half of RAX on every quotient bit.
+    // It went unnoticed while the test values happened to keep the quotient small.
+    x86_bitwise_register_imm(ref output, X86Register.RAX, 1U, 1, true);
     let next: Int = output.bytes.length();
     if (!x86_patch_i32(ref output, skip_high, next - (skip_high + 4)) ||
         !x86_patch_i32(ref output, skip_low, next - (skip_low + 4))) { return false; }

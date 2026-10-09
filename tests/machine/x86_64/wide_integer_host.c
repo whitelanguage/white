@@ -128,6 +128,12 @@ int host_verify128(void) {
         const u128 expected_quotient = reference_udiv128(wide, divisor, &expected_remainder);
         if (native_udiv128(wide, divisor) != expected_quotient || native_urem128(wide, divisor) != expected_remainder) return 24;
     }
+    // Keep the divisor wider than 64 bits and the quotient wider than 32.
+    // A 32-bit OR in the restoring loop used to clear the upper quotient bits.
+    const u128 general_dividend = ((u128)0x123456789abcdef0ULL << 64) | 0xfedcba9876543210ULL;
+    const u128 general_divisor = ((u128)1 << 64) | 17;
+    if (native_udiv128(general_dividend, general_divisor) != general_dividend / general_divisor ||
+        native_urem128(general_dividend, general_divisor) != general_dividend % general_divisor) return 26;
     return 0;
 }
 #endif

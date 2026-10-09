@@ -123,6 +123,47 @@ func a64_multiply_register(ref output: A64CodeBuffer, destination: A64Register, 
     return true;
 }
 
+func a64_divide_register(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, signed: Bool, wide: Bool) -> Bool {
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(left);
+    let rm: Int = a64_gpr_code(right);
+    if (rd < 0 || rn < 0 || rm < 0 || destination == A64Register.SP || left == A64Register.SP || right == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x1AC00800U;
+    if signed { word = 0x1AC00C00U; }
+    if wide { word |= 0x80000000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_multiply_subtract(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, addend: A64Register, wide: Bool) -> Bool {
+// MSUB computes addend - left * right, division uses it for the remainder.
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(left);
+    let rm: Int = a64_gpr_code(right);
+    let ra: Int = a64_gpr_code(addend);
+    if (rd < 0 || rn < 0 || rm < 0 || ra < 0 || destination == A64Register.SP ||
+        left == A64Register.SP || right == A64Register.SP || addend == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x1B008000U;
+    if wide { word = 0x9B008000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(ra << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_logical_register(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, operation: Int, wide: Bool) -> Bool {
     let rd: Int = a64_gpr_code(destination);
     let rn: Int = a64_gpr_code(left);
@@ -138,6 +179,23 @@ func a64_logical_register(ref output: A64CodeBuffer, destination: A64Register, l
     if wide { word |= 0x80000000U; }
     word |= UInt32(rm << 16);
     word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_invert_register(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, wide: Bool) -> Bool {
+// MVN is ORN with the zero register as the first operand.
+    let rd: Int = a64_gpr_code(destination);
+    let rm: Int = a64_gpr_code(source);
+    if (rd < 0 || rm < 0 || destination == A64Register.SP || source == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x2A2003E0U;
+    if wide { word = 0xAA2003E0U; }
+    word |= UInt32(rm << 16);
     word |= UInt32(rd);
     a64_emit_u32(ref output, word);
 
@@ -254,6 +312,126 @@ func a64_store_unsigned(ref output: A64CodeBuffer, source: A64Register, base: A6
     return true;
 }
 
+func a64_load_float(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
+// LDR S/D uses the same scaled unsigned offset as the integer load.
+    let rt: Int = a64_vec_code(destination);
+    let rn: Int = a64_gpr_code(base);
+    let scale: Int = 4;
+    if double { scale = 8; }
+
+    if (rt < 0 || rn < 0 || offset < 0 || offset % scale != 0 || offset / scale > 4095) {
+        return false;
+    }
+
+    let word: UInt32 = 0xBD400000U;
+    if double { word = 0xFD400000U; }
+    word |= UInt32((offset / scale) << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_store_float(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
+    let rt: Int = a64_vec_code(source);
+    let rn: Int = a64_gpr_code(base);
+    let scale: Int = 4;
+    if double { scale = 8; }
+
+    if (rt < 0 || rn < 0 || offset < 0 || offset % scale != 0 || offset / scale > 4095) {
+        return false;
+    }
+
+    let word: UInt32 = 0xBD000000U;
+    if double { word = 0xFD000000U; }
+    word |= UInt32((offset / scale) << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_float_from_bits(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, double: Bool) -> Bool {
+// FMOV transfers the bit pattern, it does not perform a numeric conversion.
+    let rd: Int = a64_vec_code(destination);
+    let rn: Int = a64_gpr_code(source);
+    if (rd < 0 || rn < 0 || source == A64Register.SP) { return false; }
+
+    let word: UInt32 = 0x1E270000U;
+    if double { word = 0x9E670000U; }
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_float_binary(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, operation: Int, double: Bool) -> Bool {
+// operation is add, sub, mul, div in that order.
+    let rd: Int = a64_vec_code(destination);
+    let rn: Int = a64_vec_code(left);
+    let rm: Int = a64_vec_code(right);
+    if (rd < 0 || rn < 0 || rm < 0 || operation < 0 || operation > 3) {
+        return false;
+    }
+
+    let word: UInt32 = 0x1E202800U;
+    if (operation == 1) { word = 0x1E203800U; }
+    if (operation == 2) { word = 0x1E200800U; }
+    if (operation == 3) { word = 0x1E201800U; }
+    if double { word |= 0x00400000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_float_negate(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, double: Bool) -> Bool {
+    let rd: Int = a64_vec_code(destination);
+    let rn: Int = a64_vec_code(source);
+    if (rd < 0 || rn < 0) { return false; }
+
+    let word: UInt32 = 0x1E214000U;
+    if double { word = 0x1E614000U; }
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_float_move(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, double: Bool) -> Bool {
+    let rd: Int = a64_vec_code(destination);
+    let rn: Int = a64_vec_code(source);
+    if (rd < 0 || rn < 0) { return false; }
+
+    let word: UInt32 = 0x1E204000U;
+    if double { word = 0x1E604000U; }
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_float_compare(ref output: A64CodeBuffer, left: A64Register, right: A64Register, double: Bool) -> Bool {
+    let rn: Int = a64_vec_code(left);
+    let rm: Int = a64_vec_code(right);
+    if (rn < 0 || rm < 0) { return false; }
+
+    let word: UInt32 = 0x1E202000U;
+    if double { word = 0x1E602000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_condition_code(condition: A64Condition) -> Int {
     if (condition == A64Condition.Equal) { return 0; }
     if (condition == A64Condition.NotEqual) { return 1; }
@@ -286,6 +464,27 @@ func a64_set_condition(ref output: A64CodeBuffer, destination: A64Register, cond
 
     let word: UInt32 = 0x1A9F07E0U;
     word |= UInt32((code ^ 1) << 12);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_select_condition(ref output: A64CodeBuffer, destination: A64Register, when_true: A64Register, when_false: A64Register, condition: A64Condition, wide: Bool) -> Bool {
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(when_true);
+    let rm: Int = a64_gpr_code(when_false);
+    let code: Int = a64_condition_code(condition);
+    if (rd < 0 || rn < 0 || rm < 0 || code < 0 || code >= 14 ||
+        destination == A64Register.SP || when_true == A64Register.SP || when_false == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x1A800000U;
+    if wide { word = 0x9A800000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(code << 12);
+    word |= UInt32(rn << 5);
     word |= UInt32(rd);
     a64_emit_u32(ref output, word);
 
@@ -424,6 +623,24 @@ func a64_branch_symbol(ref output: A64CodeBuffer, symbol: String, link: Bool) ->
     }
     a64_emit_u32(ref output, word);
     output.relocations.append(A64Relocation(section=".text", offset=offset, kind=kind, symbol=symbol, addend=0L));
+
+    return true;
+}
+
+func a64_symbol_address(ref output: A64CodeBuffer, destination: A64Register, symbol: String, addend: Long) -> Bool {
+// ADRP obtains the page and ADD applies the low 12 bits. Keeping the pair in
+// the object lets the linker relax or move the symbol without text fixups.
+    let rd: Int = a64_gpr_code(destination);
+    if (rd < 0 || destination == A64Register.SP || symbol.length() == 0) { return false; }
+
+    let page_offset: UInt32 = UInt32(output.bytes.length());
+    a64_emit_u32(ref output, 0x90000000U | UInt32(rd));
+    output.relocations.append(A64Relocation(section=".text", offset=page_offset, kind=A64RelocationKind.Page21, symbol=symbol, addend=addend));
+
+    let low_offset: UInt32 = UInt32(output.bytes.length());
+    let add: UInt32 = 0x91000000U | UInt32(rd << 5) | UInt32(rd);
+    a64_emit_u32(ref output, add);
+    output.relocations.append(A64Relocation(section=".text", offset=low_offset, kind=A64RelocationKind.PageOffset12, symbol=symbol, addend=addend));
 
     return true;
 }
