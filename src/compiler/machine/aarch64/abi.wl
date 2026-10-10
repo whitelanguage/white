@@ -31,6 +31,23 @@ func a64_argument_register(index: Int, floating: Bool) -> A64Register {
     return A64Register.X7;
 }
 
+func a64_pair_argument_index(index: Int) -> Int {
+// AAPCS64 gives 16-byte integral arguments an even-numbered register pair.
+    if (index < 0) {
+        return -1;
+    }
+
+    let first: Int = index;
+    if ((first & 1) != 0) {
+        first++;
+    }
+    if (first > 6) {
+        return -1;
+    }
+
+    return first;
+}
+
 func a64_result_register(floating: Bool) -> A64Register {
     if floating { return A64Register.V0; }
 

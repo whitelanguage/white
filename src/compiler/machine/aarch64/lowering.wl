@@ -1,7 +1,7 @@
 // src/compiler/machine/aarch64/lowering.wl
 import * from "model.wl"
 import * from "encoder.wl"
-import a64_argument_register from "abi.wl"
+import a64_argument_register, a64_pair_argument_index from "abi.wl"
 import * from "../../wir/model.wl"
 import wir_type_layouts from "../../wir/layout.wl"
 import MachineSection, MachineSymbol from "../object.wl"
@@ -22,6 +22,8 @@ struct A64ModuleResult(
 )
 
 struct A64ValueMap(registers: Vector(A64Register), next_register: Int, next_float_register: Int)
+
+struct A64RegisterPair(low: A64Register, high: A64Register)
 
 struct A64BlockOffset(block: WirBlockID, offset: Int)
 
@@ -64,6 +66,37 @@ func a64_scalar_width(ref program: WirModule, type_id: WirTypeID) -> Int {
     return 64;
 }
 
+func a64_integer_width(ref program: WirModule, type_id: WirTypeID) -> Int {
+    let index: Int = wir_id_index(UInt32(type_id));
+    if (index < 0 || index >= program.arena.types.length()) {
+        return 0;
+    }
+
+    let type: WirType = program.arena.types[index];
+    if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) {
+        return 0;
+    }
+    if (type.bits == 128) {
+        return 128;
+    }
+
+    return a64_scalar_width(ref program, type_id);
+}
+
+func a64_value_size(ref program: WirModule, type_id: WirTypeID) -> Int {
+    let width: Int = a64_integer_width(ref program, type_id);
+    if (width != 0) {
+        return width / 8;
+    }
+
+    width = a64_scalar_width(ref program, type_id);
+    if (width == 0) {
+        return 0;
+    }
+
+    return width / 8;
+}
+
 func a64_scalar_float(ref program: WirModule, type_id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(type_id));
     return index >= 0 && index < program.arena.types.length() && program.arena.types[index].kind == WirTypeKind.FloatType;
@@ -82,12 +115,11 @@ func a64_stack_layout(ref program: WirModule, ref function: WirFunction) -> A64S
 
     while (i < function.parameters.length()) {
         let param: WirValueID = function.parameters[i];
-        let width: Int = a64_scalar_width(ref program, program.arena.values[wir_id_index(UInt32(param))].type_id);
-        if (width == 0) {
-            return A64StackLayout(storage=[], homes=[], frame_size=0, message="initial AArch64 parameter homes only support scalar values");
+        let bytes: Int = a64_value_size(ref program, program.arena.values[wir_id_index(UInt32(param))].type_id);
+        if (bytes == 0) {
+            return A64StackLayout(storage=[], homes=[], frame_size=0, message="AArch64 parameter home has an unsupported type");
         }
 
-        let bytes: Int = width / 8;
         size = a64_align(size, bytes);
         homes.append(A64StackSlot(value=param, offset=size, size=bytes));
         size += bytes;
@@ -102,12 +134,11 @@ func a64_stack_layout(ref program: WirModule, ref function: WirFunction) -> A64S
         let param_index: Int = 0;
         while (param_index < block.parameters.length()) {
             let param: WirValueID = block.parameters[param_index];
-            let width: Int = a64_scalar_width(ref program, program.arena.values[wir_id_index(UInt32(param))].type_id);
-            if (width == 0) {
-                return A64StackLayout(storage=[], homes=[], frame_size=0, message="initial AArch64 block parameter homes only support scalar values");
+            let bytes: Int = a64_value_size(ref program, program.arena.values[wir_id_index(UInt32(param))].type_id);
+            if (bytes == 0) {
+                return A64StackLayout(storage=[], homes=[], frame_size=0, message="AArch64 block parameter home has an unsupported type");
             }
 
-            let bytes: Int = width / 8;
             size = a64_align(size, bytes);
             homes.append(A64StackSlot(value=param, offset=size, size=bytes));
             size += bytes;
@@ -118,20 +149,18 @@ func a64_stack_layout(ref program: WirModule, ref function: WirFunction) -> A64S
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
             if (instruction.opcode == WirOpcode.StackAlloc) {
                 let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
-                let width: Int = 0;
-                if (pointer.kind == WirTypeKind.Pointer) { width = a64_scalar_width(ref program, pointer.element); }
-                if (instruction.result == NO_WIR_VALUE || width == 0) {
-                    return A64StackLayout(storage=[], homes=[], frame_size=0, message="initial AArch64 stack slots only support scalar values");
+                let bytes: Int = 0;
+                if (pointer.kind == WirTypeKind.Pointer) { bytes = a64_value_size(ref program, pointer.element); }
+                if (instruction.result == NO_WIR_VALUE || bytes == 0) {
+                    return A64StackLayout(storage=[], homes=[], frame_size=0, message="AArch64 stack slot has an unsupported type");
                 }
 
-                let bytes: Int = width / 8;
                 size = a64_align(size, bytes);
                 storage.append(A64StackSlot(value=instruction.result, offset=size, size=bytes));
                 size += bytes;
             } else if (instruction.result != NO_WIR_VALUE) {
-                let width: Int = a64_scalar_width(ref program, instruction.type_id);
-                if (width != 0) {
-                    let bytes: Int = width / 8;
+                let bytes: Int = a64_value_size(ref program, instruction.type_id);
+                if (bytes != 0) {
                     size = a64_align(size, bytes);
                     homes.append(A64StackSlot(value=instruction.result, offset=size, size=bytes));
                     size += bytes;
@@ -304,6 +333,72 @@ func a64_materialize(
     }
 
     return register;
+}
+
+func a64_alloc_pair(ref values: A64ValueMap) -> A64RegisterPair {
+    let low: A64Register = a64_alloc_register(ref values, false);
+    let high: A64Register = a64_alloc_register(ref values, false);
+
+    return A64RegisterPair(low=low, high=high);
+}
+
+func a64_materialize_pair(
+    ref program: WirModule,
+    value_id: WirValueID,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer
+) -> A64RegisterPair {
+// 128-bit integers stay as a little-endian pair all the way through lowering.
+    let index: Int = wir_id_index(UInt32(value_id));
+    if (index < 0 || index >= program.arena.values.length()) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let value: WirValue = program.arena.values[index];
+    if (a64_integer_width(ref program, value.type_id) != 128) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let pair: A64RegisterPair = a64_alloc_pair(ref values);
+    if (pair.low == A64Register.None || pair.high == A64Register.None) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
+    if (home.value != NO_WIR_VALUE) {
+        if (home.size != 16 ||
+            !a64_load_unsigned(ref output, pair.low, A64Register.SP, home.offset, true) ||
+            !a64_load_unsigned(ref output, pair.high, A64Register.SP, home.offset + 8, true)) {
+            return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+        }
+
+        return pair;
+    }
+
+    if (value.kind != WirValueKind.Integer) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let low_bits: UInt64 = UInt64(value.integer & UInt128(18446744073709551615UL));
+    let high_bits: UInt64 = UInt64(value.integer >> UInt128(64U));
+    if (!a64_mov_immediate(ref output, pair.low, low_bits, true) ||
+        !a64_mov_immediate(ref output, pair.high, high_bits, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    return pair;
+}
+
+func a64_save_pair(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, pair: A64RegisterPair) -> Bool {
+    let home: A64StackSlot = a64_find_stack_slot(homes, value);
+    if (home.value == NO_WIR_VALUE || home.size != 16 ||
+        pair.low == A64Register.None || pair.high == A64Register.None) {
+        return false;
+    }
+
+    return a64_store_unsigned(ref output, pair.low, A64Register.SP, home.offset, true) &&
+           a64_store_unsigned(ref output, pair.high, A64Register.SP, home.offset + 8, true);
 }
 
 func a64_save_home(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, register: A64Register, width: Int) -> Bool {
@@ -493,8 +588,29 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
     while (i < function.parameters.length()) {
         let parameter: WirValueID = function.parameters[i];
         let value: WirValue = program.arena.values[wir_id_index(UInt32(parameter))];
-        let width: Int = a64_scalar_width(ref program, value.type_id);
+        let width: Int = a64_integer_width(ref program, value.type_id);
         let floating: Bool = a64_scalar_float(ref program, value.type_id);
+
+        if (width == 128) {
+            let pair_index: Int = a64_pair_argument_index(integer_argument);
+            if (pair_index < 0 || !a64_save_pair(
+                ref output,
+                stack.homes,
+                parameter,
+                A64RegisterPair(
+                    low=a64_argument_register(pair_index, false),
+                    high=a64_argument_register(pair_index + 1, false)
+                )
+            )) {
+                return a64_lowering_error("cannot save an AArch64 128-bit argument pair");
+            }
+
+            integer_argument = pair_index + 2;
+            i++;
+            continue;
+        }
+
+        width = a64_scalar_width(ref program, value.type_id);
         let argument_index: Int = integer_argument;
         if floating { argument_index = float_argument; }
         if (width == 0) {
@@ -527,14 +643,29 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let slot: A64StackSlot = a64_find_stack_slot(stack.storage, instruction.operands[0]);
                 let floating: Bool = a64_scalar_float(ref program, instruction.type_id);
-                let destination: A64Register = a64_alloc_register(ref values, floating);
-                let width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let width: Int = a64_integer_width(ref program, instruction.type_id);
                 let base: A64Register = A64Register.SP;
                 let offset: Int = slot.offset;
                 if (slot.value == NO_WIR_VALUE) {
                     base = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                     offset = 0;
                 }
+
+                if (width == 128) {
+                    let pair: A64RegisterPair = a64_alloc_pair(ref values);
+                    if (base == A64Register.None || pair.low == A64Register.None || pair.high == A64Register.None ||
+                        !a64_load_unsigned(ref output, pair.low, base, offset, true) ||
+                        !a64_load_unsigned(ref output, pair.high, base, offset + 8, true) ||
+                        !a64_save_pair(ref output, stack.homes, instruction.result, pair)) {
+                        return a64_lowering_error("cannot encode AArch64 128-bit load");
+                    }
+
+                    instruction_index++;
+                    continue;
+                }
+
+                let destination: A64Register = a64_alloc_register(ref values, floating);
+                width = a64_scalar_width(ref program, instruction.type_id);
                 let loaded: Bool = false;
                 if floating {
                     loaded = a64_load_float(ref output, destination, base, offset, width == 64);
@@ -550,17 +681,33 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("store has an invalid WIR shape");
                 }
 
-                let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let slot: A64StackSlot = a64_find_stack_slot(stack.storage, instruction.operands[1]);
-                let width: Int = a64_scalar_width(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id);
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+                let width: Int = a64_integer_width(ref program, source_type);
                 let base: A64Register = A64Register.SP;
                 let offset: Int = slot.offset;
                 if (slot.value == NO_WIR_VALUE) {
                     base = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
                     offset = 0;
                 }
+
+                if (width == 128) {
+                    let pair: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                    if (base == A64Register.None || pair.low == A64Register.None || pair.high == A64Register.None ||
+                        (slot.value != NO_WIR_VALUE && slot.size != 16) ||
+                        !a64_store_unsigned(ref output, pair.low, base, offset, true) ||
+                        !a64_store_unsigned(ref output, pair.high, base, offset + 8, true)) {
+                        return a64_lowering_error("cannot encode AArch64 128-bit store");
+                    }
+
+                    instruction_index++;
+                    continue;
+                }
+
+                let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                width = a64_scalar_width(ref program, source_type);
                 let stored: Bool = false;
-                if (a64_scalar_float(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id)) {
+                if (a64_scalar_float(ref program, source_type)) {
                     stored = a64_store_float(ref output, source, base, offset, width == 64);
                 } else {
                     stored = a64_store_unsigned(ref output, source, base, offset, width == 64);
@@ -733,8 +880,26 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 while (argument_index < instruction.operands.length()) {
                     let argument: WirValueID = instruction.operands[argument_index];
                     let argument_type: WirTypeID = program.arena.values[wir_id_index(UInt32(argument))].type_id;
-                    let width: Int = a64_scalar_width(ref program, argument_type);
+                    let width: Int = a64_integer_width(ref program, argument_type);
                     let floating: Bool = a64_scalar_float(ref program, argument_type);
+
+                    if (width == 128) {
+                        let pair_index: Int = a64_pair_argument_index(integer_index);
+                        let pair: A64RegisterPair = a64_materialize_pair(ref program, argument, stack.homes, ref values, ref output);
+                        let low: A64Register = a64_argument_register(pair_index, false);
+                        let high: A64Register = a64_argument_register(pair_index + 1, false);
+                        if (pair_index < 0 || pair.low == A64Register.None || pair.high == A64Register.None ||
+                            !a64_mov_register(ref output, low, pair.low, true) ||
+                            !a64_mov_register(ref output, high, pair.high, true)) {
+                            return a64_lowering_error("cannot assign an AArch64 128-bit call argument");
+                        }
+
+                        integer_index = pair_index + 2;
+                        argument_index++;
+                        continue;
+                    }
+
+                    width = a64_scalar_width(ref program, argument_type);
                     let source: A64Register = a64_materialize(ref program, argument, stack.homes, ref values, ref output);
                     let position: Int = integer_index;
                     if floating { position = float_index; }
@@ -756,7 +921,22 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("cannot encode an AArch64 direct call");
                 }
 
-                let result_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let result_width: Int = a64_integer_width(ref program, instruction.type_id);
+                if (instruction.result != NO_WIR_VALUE && result_width == 128) {
+                    if (!a64_save_pair(
+                        ref output,
+                        stack.homes,
+                        instruction.result,
+                        A64RegisterPair(low=A64Register.X0, high=A64Register.X1)
+                    )) {
+                        return a64_lowering_error("cannot bind the AArch64 128-bit call result");
+                    }
+
+                    instruction_index++;
+                    continue;
+                }
+
+                result_width = a64_scalar_width(ref program, instruction.type_id);
                 let result_register: A64Register = A64Register.X0;
                 if (a64_scalar_float(ref program, instruction.type_id)) { result_register = A64Register.V0; }
                 if (instruction.result != NO_WIR_VALUE &&
@@ -810,8 +990,17 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
                 if (instruction.operands.length() == 1) {
                     let value: WirValueID = instruction.operands[0];
+                    let value_type: WirTypeID = program.arena.values[wir_id_index(UInt32(value))].type_id;
+                    if (a64_integer_width(ref program, value_type) == 128) {
+                        let pair: A64RegisterPair = a64_materialize_pair(ref program, value, stack.homes, ref values, ref output);
+                        if (pair.low == A64Register.None || pair.high == A64Register.None ||
+                            !a64_mov_register(ref output, A64Register.X0, pair.low, true) ||
+                            !a64_mov_register(ref output, A64Register.X1, pair.high, true)) {
+                            return a64_lowering_error("cannot move the AArch64 128-bit return value");
+                        }
+                    } else {
                     let source: A64Register = a64_materialize(ref program, value, stack.homes, ref values, ref output);
-                    let width: Int = a64_scalar_width(ref program, program.arena.values[wir_id_index(UInt32(value))].type_id);
+                    let width: Int = a64_scalar_width(ref program, value_type);
                     if (source == A64Register.None || width == 0) {
                         return a64_lowering_error("cannot materialize the AArch64 return value");
                     }
@@ -826,6 +1015,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                     if (!moved) {
                         return a64_lowering_error("cannot move the AArch64 return value");
+                    }
                     }
                 }
                 if has_frame {

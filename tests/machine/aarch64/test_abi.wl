@@ -23,6 +23,12 @@ func main() -> Int {
         return 1;
     }
 
+    if (a64_pair_argument_index(0) != 0 || a64_pair_argument_index(1) != 2 ||
+        a64_pair_argument_index(5) != 6 || a64_pair_argument_index(7) != -1) {
+        print("FAIL: AAPCS64 128-bit register pairs are incorrect");
+        return 1;
+    }
+
     if (a64_stack_argument_offset(7) != -1 || a64_stack_argument_offset(8) != 0 ||
         a64_stack_argument_offset(10) != 16 || a64_call_frame(8) != 0 ||
         a64_call_frame(9) != 16 || a64_call_frame(11) != 32) {
