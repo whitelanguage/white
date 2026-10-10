@@ -58,12 +58,17 @@ func main() -> Int {
 
     binary(ref program, "add128", u128, WirOpcode.Add);
     binary(ref program, "sub128", u128, WirOpcode.Subtract);
+    binary(ref program, "mul128", u128, WirOpcode.Multiply);
     binary(ref program, "and128", u128, WirOpcode.BitAnd);
     binary(ref program, "or128", u128, WirOpcode.BitOr);
     binary(ref program, "xor128", u128, WirOpcode.BitXor);
     binary(ref program, "shl128", u128, WirOpcode.ShiftLeft);
     binary(ref program, "lshr128", u128, WirOpcode.UnsignedShiftRight);
     binary(ref program, "ashr128", i128, WirOpcode.SignedShiftRight);
+    binary(ref program, "udiv128", u128, WirOpcode.UnsignedDivide);
+    binary(ref program, "urem128", u128, WirOpcode.UnsignedRemainder);
+    binary(ref program, "sdiv128", i128, WirOpcode.SignedDivide);
+    binary(ref program, "srem128", i128, WirOpcode.SignedRemainder);
     unary(ref program, "neg128", i128, WirOpcode.Negate);
     unary(ref program, "not128", u128, WirOpcode.Not);
     comparison(ref program, "eq128", u128, WirOpcode.Equal);
@@ -82,7 +87,7 @@ func main() -> Int {
         print("FAIL: AArch64 128-bit ABI lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 23 || lowered.sections.length() == 0 ||
+    if (lowered.symbols.length() != 28 || lowered.sections.length() == 0 ||
         lowered.relocations.length() != 1 || lowered.relocations[0].kind != A64RelocationKind.Call26) {
         print("FAIL: AArch64 128-bit functions were not emitted");
         return 1;

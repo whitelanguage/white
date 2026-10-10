@@ -163,6 +163,25 @@ func a64_multiply_register(ref output: A64CodeBuffer, destination: A64Register, 
     return true;
 }
 
+func a64_multiply_high_unsigned(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register) -> Bool {
+// UMULH returns bits 64-127 of the unsigned 64 by 64 product.
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(left);
+    let rm: Int = a64_gpr_code(right);
+    if (rd < 0 || rn < 0 || rm < 0 || destination == A64Register.SP ||
+        left == A64Register.SP || right == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x9BC07C00U;
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_divide_register(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, signed: Bool, wide: Bool) -> Bool {
     let rd: Int = a64_gpr_code(destination);
     let rn: Int = a64_gpr_code(left);

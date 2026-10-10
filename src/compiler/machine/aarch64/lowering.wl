@@ -392,6 +392,38 @@ func a64_materialize_pair(
     return pair;
 }
 
+func a64_materialize_pair_into(
+    ref program: WirModule,
+    value_id: WirValueID,
+    homes: Vector(A64StackSlot),
+    destination: A64RegisterPair,
+    ref output: A64CodeBuffer
+) -> Bool {
+    let index: Int = wir_id_index(UInt32(value_id));
+    if (index < 0 || index >= program.arena.values.length() ||
+        destination.low == A64Register.None || destination.high == A64Register.None) {
+        return false;
+    }
+
+    let value: WirValue = program.arena.values[index];
+    if (a64_integer_width(ref program, value.type_id) != 128) {
+        return false;
+    }
+
+    let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
+    if (home.value != NO_WIR_VALUE) {
+        return home.size == 16 &&
+               a64_load_unsigned(ref output, destination.low, A64Register.SP, home.offset, true) &&
+               a64_load_unsigned(ref output, destination.high, A64Register.SP, home.offset + 8, true);
+    }
+    if (value.kind != WirValueKind.Integer) {
+        return false;
+    }
+
+    return a64_mov_immediate(ref output, destination.low, UInt64(value.integer & UInt128(18446744073709551615UL)), true) &&
+           a64_mov_immediate(ref output, destination.high, UInt64(value.integer >> UInt128(64U)), true);
+}
+
 func a64_save_pair(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, pair: A64RegisterPair) -> Bool {
     let home: A64StackSlot = a64_find_stack_slot(homes, value);
     if (home.value == NO_WIR_VALUE || home.size != 16 ||
@@ -423,6 +455,117 @@ func a64_wide_binary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: 
 
     return a64_logical_register(ref output, destination.low, left.low, right.low, operation, true) &&
            a64_logical_register(ref output, destination.high, left.high, right.high, operation, true);
+}
+
+func a64_wide_multiply(ref output: A64CodeBuffer, destination: A64RegisterPair, left: A64RegisterPair, right: A64RegisterPair, temporary: A64Register) -> Bool {
+// Only the low 128 bits survive. The two cross products contribute their low
+// words to the high half, UMULH supplies the missing half of low * low.
+    if (!a64_multiply_register(ref output, destination.low, left.low, right.low, true) ||
+        !a64_multiply_high_unsigned(ref output, destination.high, left.low, right.low) ||
+        !a64_multiply_register(ref output, temporary, left.high, right.low, true) ||
+        !a64_add_register(ref output, destination.high, destination.high, temporary, true) ||
+        !a64_multiply_register(ref output, temporary, left.low, right.high, true)) {
+        return false;
+    }
+
+    return a64_add_register(ref output, destination.high, destination.high, temporary, true);
+}
+
+func a64_apply_wide_sign(ref output: A64CodeBuffer, value: A64RegisterPair, mask: A64Register) -> Bool {
+    return a64_logical_register(ref output, value.low, value.low, mask, 2, true) &&
+           a64_logical_register(ref output, value.high, value.high, mask, 2, true) &&
+           a64_add_sub_flags(ref output, value.low, value.low, mask, true) &&
+           a64_add_sub_carry(ref output, value.high, value.high, mask, true);
+}
+
+func a64_wide_divide(ref output: A64CodeBuffer, signed: Bool, remainder: Bool) -> A64RegisterPair {
+// X0:X1 starts as the dividend and becomes the quotient. X4:X5 is the
+// remainder. Keeping the loop in emitted code avoids unrolling 128 rounds.
+    let quotient: A64RegisterPair = A64RegisterPair(low=A64Register.X0, high=A64Register.X1);
+    let divisor: A64RegisterPair = A64RegisterPair(low=A64Register.X2, high=A64Register.X3);
+    let rest: A64RegisterPair = A64RegisterPair(low=A64Register.X4, high=A64Register.X5);
+    let counter: A64Register = A64Register.X6;
+    let bit: A64Register = A64Register.X7;
+    let temporary: A64Register = A64Register.X8;
+    let one: A64Register = A64Register.X9;
+    let quotient_sign: A64Register = A64Register.X10;
+    let remainder_sign: A64Register = A64Register.X11;
+    let divisor_sign: A64Register = A64Register.X12;
+
+    if (!a64_mov_immediate(ref output, temporary, 63UL, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+    if signed {
+        if (!a64_shift_register(ref output, remainder_sign, quotient.high, temporary, 1, true) ||
+            !a64_shift_register(ref output, divisor_sign, divisor.high, temporary, 1, true) ||
+            !a64_logical_register(ref output, quotient_sign, divisor_sign, remainder_sign, 2, true) ||
+            !a64_apply_wide_sign(ref output, quotient, remainder_sign) ||
+            !a64_apply_wide_sign(ref output, divisor, divisor_sign)) {
+            return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+        }
+    }
+
+    if (!a64_mov_immediate(ref output, rest.low, 0UL, true) ||
+        !a64_mov_immediate(ref output, rest.high, 0UL, true) ||
+        !a64_mov_immediate(ref output, counter, 128UL, true) ||
+        !a64_mov_immediate(ref output, one, 1UL, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let loop: Int = output.bytes.length();
+    if (!a64_mov_immediate(ref output, temporary, 63UL, true) ||
+        !a64_shift_register(ref output, bit, quotient.high, temporary, 2, true) ||
+        !a64_shift_register(ref output, quotient.high, quotient.high, one, 0, true) ||
+        !a64_shift_register(ref output, temporary, quotient.low, temporary, 2, true) ||
+        !a64_logical_register(ref output, quotient.high, quotient.high, temporary, 1, true) ||
+        !a64_shift_register(ref output, quotient.low, quotient.low, one, 0, true) ||
+        !a64_mov_immediate(ref output, temporary, 63UL, true) ||
+        !a64_shift_register(ref output, temporary, rest.low, temporary, 2, true) ||
+        !a64_shift_register(ref output, rest.high, rest.high, one, 0, true) ||
+        !a64_logical_register(ref output, rest.high, rest.high, temporary, 1, true) ||
+        !a64_shift_register(ref output, rest.low, rest.low, one, 0, true) ||
+        !a64_logical_register(ref output, rest.low, rest.low, bit, 1, true) ||
+        !a64_compare_register(ref output, rest.high, divisor.high, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let subtract_high: Int = output.bytes.length();
+    if (!a64_conditional_branch(ref output, 0, A64Condition.UnsignedHigher)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+    let skip_high: Int = output.bytes.length();
+    if (!a64_conditional_branch(ref output, 0, A64Condition.CarryClear) ||
+        !a64_compare_register(ref output, rest.low, divisor.low, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+    let skip_low: Int = output.bytes.length();
+    if (!a64_conditional_branch(ref output, 0, A64Condition.CarryClear) ||
+        !a64_patch_branch(ref output, subtract_high, output.bytes.length(), A64Condition.UnsignedHigher, true) ||
+        !a64_add_sub_flags(ref output, rest.low, rest.low, divisor.low, true) ||
+        !a64_add_sub_carry(ref output, rest.high, rest.high, divisor.high, true) ||
+        !a64_logical_register(ref output, quotient.low, quotient.low, one, 1, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    let next: Int = output.bytes.length();
+    if (!a64_patch_branch(ref output, skip_high, next, A64Condition.CarryClear, true) ||
+        !a64_patch_branch(ref output, skip_low, next, A64Condition.CarryClear, true) ||
+        !a64_add_sub_flags(ref output, counter, counter, one, true) ||
+        !a64_conditional_branch(ref output, loop - output.bytes.length(), A64Condition.NotEqual)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    if signed {
+        if (!a64_apply_wide_sign(ref output, quotient, quotient_sign) ||
+            !a64_apply_wide_sign(ref output, rest, remainder_sign)) {
+            return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+        }
+    }
+    if remainder {
+        return rest;
+    }
+
+    return quotient;
 }
 
 func a64_wide_unary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A64RegisterPair, source: A64RegisterPair, temporary: A64Register) -> Bool {
@@ -892,6 +1035,24 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("cannot encode AArch64 128-bit integer operation");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
+                       instruction.opcode == WirOpcode.Multiply) {
+                if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("128-bit multiply has an invalid WIR shape");
+                }
+
+                let left: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                let right: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
+                let destination: A64RegisterPair = a64_alloc_pair(ref values);
+                let temporary: A64Register = a64_alloc_register(ref values, false);
+                if (left.low == A64Register.None || left.high == A64Register.None ||
+                    right.low == A64Register.None || right.high == A64Register.None ||
+                    destination.low == A64Register.None || destination.high == A64Register.None ||
+                    temporary == A64Register.None ||
+                    !a64_wide_multiply(ref output, destination, left, right, temporary) ||
+                    !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    return a64_lowering_error("cannot encode AArch64 128-bit multiply");
+                }
+            } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
                        (instruction.opcode == WirOpcode.ShiftLeft ||
                         instruction.opcode == WirOpcode.SignedShiftRight ||
                         instruction.opcode == WirOpcode.UnsignedShiftRight)) {
@@ -928,6 +1089,21 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let encoded: Bool = a64_emit_integer_binary(ref output, instruction.opcode, destination, left, right, width == 64);
                 if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer arithmetic");
+                }
+            } else if (a64_is_integer_division(instruction.opcode) &&
+                       a64_integer_width(ref program, instruction.type_id) == 128) {
+                if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE ||
+                    !a64_materialize_pair_into(ref program, instruction.operands[0], stack.homes, A64RegisterPair(low=A64Register.X0, high=A64Register.X1), ref output) ||
+                    !a64_materialize_pair_into(ref program, instruction.operands[1], stack.homes, A64RegisterPair(low=A64Register.X2, high=A64Register.X3), ref output)) {
+                    return a64_lowering_error("128-bit division has an invalid WIR shape");
+                }
+
+                let signed: Bool = instruction.opcode == WirOpcode.SignedDivide || instruction.opcode == WirOpcode.SignedRemainder;
+                let remainder: Bool = instruction.opcode == WirOpcode.SignedRemainder || instruction.opcode == WirOpcode.UnsignedRemainder;
+                let result: A64RegisterPair = a64_wide_divide(ref output, signed, remainder);
+                if (result.low == A64Register.None || result.high == A64Register.None ||
+                    !a64_save_pair(ref output, stack.homes, instruction.result, result)) {
+                    return a64_lowering_error("cannot encode AArch64 128-bit division");
                 }
             } else if (a64_is_integer_division(instruction.opcode)) {
                 if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
