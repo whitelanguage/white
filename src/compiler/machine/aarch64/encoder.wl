@@ -103,6 +103,46 @@ func a64_sub_register(ref output: A64CodeBuffer, destination: A64Register, left:
     return true;
 }
 
+func a64_add_sub_flags(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, subtract: Bool) -> Bool {
+// ADDS and SUBS produce the carry or borrow consumed by the upper word.
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(left);
+    let rm: Int = a64_gpr_code(right);
+    if (rd < 0 || rn < 0 || rm < 0 || destination == A64Register.SP ||
+        left == A64Register.SP || right == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0xAB000000U;
+    if subtract { word = 0xEB000000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_add_sub_carry(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, subtract: Bool) -> Bool {
+// ADC/SBC finish a two-word operation with the flags left by ADDS/SUBS.
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(left);
+    let rm: Int = a64_gpr_code(right);
+    if (rd < 0 || rn < 0 || rm < 0 || destination == A64Register.SP ||
+        left == A64Register.SP || right == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x9A000000U;
+    if subtract { word = 0xDA000000U; }
+    word |= UInt32(rm << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_multiply_register(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, wide: Bool) -> Bool {
 // MUL is MADD with XZR/WZR as the addend.
     let rd: Int = a64_gpr_code(destination);
