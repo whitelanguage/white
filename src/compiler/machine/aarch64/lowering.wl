@@ -1048,6 +1048,57 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     !stored) {
                     return a64_lowering_error("cannot encode AArch64 scalar store");
                 }
+            } else if (instruction.opcode == WirOpcode.Bitcast ||
+                       instruction.opcode == WirOpcode.PointerToInt ||
+                       instruction.opcode == WirOpcode.IntToPointer) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("pointer cast has an invalid WIR shape");
+                }
+
+                let source_id: WirValueID = instruction.operands[0];
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                let source_width: Int = a64_integer_width(ref program, source_type);
+                let target_width: Int = a64_integer_width(ref program, instruction.type_id);
+                if (source_width == 0) { source_width = a64_scalar_width(ref program, source_type); }
+                if (target_width == 0) { target_width = a64_scalar_width(ref program, instruction.type_id); }
+
+                if (source_width == 0 || target_width == 0 || a64_scalar_float(ref program, source_type) ||
+                    a64_scalar_float(ref program, instruction.type_id)) {
+                    return a64_lowering_error("AArch64 pointer cast has unsupported types");
+                }
+
+                if (target_width == 128) {
+                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64RegisterPair = a64_alloc_pair(ref values);
+                    let encoded: Bool = source != A64Register.None && destination.low != A64Register.None &&
+                                        destination.high != A64Register.None &&
+                                        a64_mov_register(ref output, destination.low, source, true) &&
+                                        a64_mov_immediate(ref output, destination.high, 0UL, true);
+                    if (!encoded || !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                        return a64_lowering_error("cannot cast an AArch64 pointer to a 128-bit integer");
+                    }
+                } else if (source_width == 128) {
+                    let source: A64RegisterPair = a64_materialize_pair(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let encoded: Bool = source.low != A64Register.None && destination != A64Register.None &&
+                                        a64_mov_register(ref output, destination, source.low, target_width == 64);
+                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                        return a64_lowering_error("cannot cast a 128-bit integer to an AArch64 pointer");
+                    }
+                } else {
+                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let encoded: Bool = source != A64Register.None && destination != A64Register.None;
+                    if (encoded && instruction.opcode == WirOpcode.IntToPointer && source_width < 64) {
+                        let bits: Int = a64_integer_bits(ref program, source_type);
+                        encoded = bits > 0 && a64_extend_integer(ref output, destination, source, bits, false, true);
+                    } else if encoded {
+                        encoded = a64_mov_register(ref output, destination, source, target_width == 64);
+                    }
+                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                        return a64_lowering_error("cannot encode an AArch64 pointer cast");
+                    }
+                }
             } else if (instruction.opcode == WirOpcode.Truncate ||
                        instruction.opcode == WirOpcode.SignExtend ||
                        instruction.opcode == WirOpcode.ZeroExtend) {
@@ -1458,6 +1509,12 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     (result_width == 0 || !a64_save_home(ref output, stack.homes, instruction.result, result_register, result_width))) {
                     return a64_lowering_error("cannot bind the AArch64 call result");
                 }
+            } else if (instruction.opcode == WirOpcode.Trap || instruction.opcode == WirOpcode.Unreachable) {
+                if (instruction.operands.length() != 0 || instruction.result != NO_WIR_VALUE) {
+                    return a64_lowering_error("AArch64 trap instruction has an invalid WIR shape");
+                }
+
+                a64_trap(ref output);
             } else if (instruction.opcode == WirOpcode.Jump) {
                 if (instruction.operands.length() != 0 || instruction.edges.length() != 1 ||
                     !a64_write_edge(ref program, instruction.edges[0], stack.homes, ref values, ref output)) {
@@ -1541,7 +1598,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("cannot encode the AArch64 return instruction");
                 }
             } else {
-                return a64_lowering_error("WIR instruction is not covered by initial AArch64 lowering");
+                return a64_lowering_error("WIR opcode " + Int(instruction.opcode) + " is not covered by initial AArch64 lowering");
             }
             instruction_index++;
         }

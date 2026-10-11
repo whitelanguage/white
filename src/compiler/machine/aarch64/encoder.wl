@@ -627,6 +627,11 @@ func a64_return(ref output: A64CodeBuffer, register: A64Register) -> Bool {
     return true;
 }
 
+func a64_trap(ref output: A64CodeBuffer) -> Void {
+// BRK #0 gives the operating system an immediate, non-returning trap.
+    a64_emit_u32(ref output, 0xD4200000U);
+}
+
 func a64_branch_register(ref output: A64CodeBuffer, register: A64Register, link: Bool) -> Bool {
     let rn: Int = a64_gpr_code(register);
 
