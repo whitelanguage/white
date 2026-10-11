@@ -814,6 +814,68 @@ func a64_emit_float_binary(ref output: A64CodeBuffer, opcode: WirOpcode, destina
     return a64_float_binary(ref output, destination, left, right, operation, double);
 }
 
+func a64_atomic_acquire(order: WirMemoryOrder) -> Bool {
+    return order == WirMemoryOrder.Acquire || order == WirMemoryOrder.AcquireRelease ||
+           order == WirMemoryOrder.SequentiallyConsistent;
+}
+
+func a64_atomic_release(order: WirMemoryOrder) -> Bool {
+    return order == WirMemoryOrder.Release || order == WirMemoryOrder.AcquireRelease ||
+           order == WirMemoryOrder.SequentiallyConsistent;
+}
+
+func a64_emit_atomic_rmw(
+    ref output: A64CodeBuffer,
+    operation: WirAtomicOp,
+    address: A64Register,
+    input: A64Register,
+    old_value: A64Register,
+    new_value: A64Register,
+    status: A64Register,
+    width: Int,
+    order: WirMemoryOrder
+) -> Bool {
+// AAPCS64 only promises the base ARMv8 instruction set, use an LL/SC loop
+// here instead of making the whole backend depend on the optional LSE atomics.
+    let retry: Int = output.bytes.length();
+    let wide: Bool = width == 64;
+    if (!a64_load_exclusive(ref output, old_value, address, width, a64_atomic_acquire(order))) {
+        return false;
+    }
+
+    let encoded: Bool = false;
+    if (operation == WirAtomicOp.Exchange) {
+        encoded = a64_mov_register(ref output, new_value, input, wide);
+    } else if (operation == WirAtomicOp.Add) {
+        encoded = a64_add_register(ref output, new_value, old_value, input, wide);
+    } else if (operation == WirAtomicOp.Subtract) {
+        encoded = a64_sub_register(ref output, new_value, old_value, input, wide);
+    } else if (operation == WirAtomicOp.BitAnd) {
+        encoded = a64_logical_register(ref output, new_value, old_value, input, 0, wide);
+    } else if (operation == WirAtomicOp.BitOr) {
+        encoded = a64_logical_register(ref output, new_value, old_value, input, 1, wide);
+    } else if (operation == WirAtomicOp.BitXor) {
+        encoded = a64_logical_register(ref output, new_value, old_value, input, 2, wide);
+    }
+    if (!encoded || !a64_store_exclusive(
+        ref output,
+        status,
+        new_value,
+        address,
+        width,
+        a64_atomic_release(order)
+    )) {
+        return false;
+    }
+
+    if (!a64_compare_zero(ref output, status, false)) {
+        return false;
+    }
+
+    let branch: Int = output.bytes.length();
+    return a64_conditional_branch(ref output, retry - branch, A64Condition.NotEqual);
+}
+
 func a64_block_offset(offsets: Vector(A64BlockOffset), block: WirBlockID) -> Int {
     let i: Int = 0;
     while (i < offsets.length()) {
@@ -1050,6 +1112,105 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     (slot.value != NO_WIR_VALUE && slot.size != width / 8) ||
                     !stored) {
                     return a64_lowering_error("cannot encode AArch64 scalar store");
+                }
+            } else if (instruction.opcode == WirOpcode.AtomicLoad) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("atomic load has an invalid WIR shape");
+                }
+
+                let width: Int = a64_integer_bits(ref program, instruction.type_id);
+                let home_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let address: A64Register = a64_materialize(
+                    ref program,
+                    instruction.operands[0],
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
+                let destination: A64Register = a64_alloc_register(ref values, false);
+                if (address == A64Register.None || destination == A64Register.None ||
+                    !a64_atomic_load(
+                        ref output,
+                        destination,
+                        address,
+                        width,
+                        a64_atomic_acquire(instruction.memory_order)
+                    ) ||
+                    !a64_save_home(ref output, stack.homes, instruction.result, destination, home_width)) {
+                    return a64_lowering_error("cannot encode AArch64 atomic load");
+                }
+            } else if (instruction.opcode == WirOpcode.AtomicStore) {
+                if (instruction.operands.length() != 2 || instruction.result != NO_WIR_VALUE) {
+                    return a64_lowering_error("atomic store has an invalid WIR shape");
+                }
+
+                let value_type: WirTypeID = program.arena.values[
+                    wir_id_index(UInt32(instruction.operands[0]))
+                ].type_id;
+                let width: Int = a64_integer_bits(ref program, value_type);
+                let source: A64Register = a64_materialize(
+                    ref program,
+                    instruction.operands[0],
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
+                let address: A64Register = a64_materialize(
+                    ref program,
+                    instruction.operands[1],
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
+                if (source == A64Register.None || address == A64Register.None ||
+                    !a64_atomic_store(
+                        ref output,
+                        source,
+                        address,
+                        width,
+                        a64_atomic_release(instruction.memory_order)
+                    )) {
+                    return a64_lowering_error("cannot encode AArch64 atomic store");
+                }
+            } else if (instruction.opcode == WirOpcode.AtomicRmw) {
+                if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("atomic RMW has an invalid WIR shape");
+                }
+
+                let width: Int = a64_integer_bits(ref program, instruction.type_id);
+                let home_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let address: A64Register = a64_materialize(
+                    ref program,
+                    instruction.operands[0],
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
+                let input: A64Register = a64_materialize(
+                    ref program,
+                    instruction.operands[1],
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
+                let old_value: A64Register = a64_alloc_register(ref values, false);
+                let new_value: A64Register = a64_alloc_register(ref values, false);
+                let status: A64Register = a64_alloc_register(ref values, false);
+                if (address == A64Register.None || input == A64Register.None || old_value == A64Register.None ||
+                    new_value == A64Register.None || status == A64Register.None ||
+                    !a64_emit_atomic_rmw(
+                        ref output,
+                        instruction.atomic_op,
+                        address,
+                        input,
+                        old_value,
+                        new_value,
+                        status,
+                        width,
+                        instruction.memory_order
+                    ) ||
+                    !a64_save_home(ref output, stack.homes, instruction.result, old_value, home_width)) {
+                    return a64_lowering_error("cannot encode AArch64 atomic read-modify-write");
                 }
             } else if (instruction.opcode == WirOpcode.Bitcast ||
                        instruction.opcode == WirOpcode.PointerToInt ||

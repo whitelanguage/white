@@ -393,6 +393,114 @@ func a64_store_unsigned(ref output: A64CodeBuffer, source: A64Register, base: A6
     return true;
 }
 
+func a64_atomic_load(ref output: A64CodeBuffer, destination: A64Register, address: A64Register, width: Int, acquire: Bool) -> Bool {
+// load one naturally aligned atomic integer
+    let rt: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(address);
+    if (rt < 0 || rn < 0 || destination == A64Register.SP || address == A64Register.SP ||
+        (width != 8 && width != 16 && width != 32 && width != 64)) {
+        return false;
+    }
+
+    let word: UInt32 = 0x39400000U;
+    if (width == 16) { word = 0x79400000U; }
+    if (width == 32) { word = 0xB9400000U; }
+    if (width == 64) { word = 0xF9400000U; }
+
+    if acquire {
+        word = 0x08DFFC00U;
+        if (width == 16) { word = 0x48DFFC00U; }
+        if (width == 32) { word = 0x88DFFC00U; }
+        if (width == 64) { word = 0xC8DFFC00U; }
+    }
+
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_atomic_store(ref output: A64CodeBuffer, source: A64Register, address: A64Register, width: Int, release: Bool) -> Bool {
+// store one naturally aligned atomic integer
+    let rt: Int = a64_gpr_code(source);
+    let rn: Int = a64_gpr_code(address);
+    if (rt < 0 || rn < 0 || source == A64Register.SP || address == A64Register.SP ||
+        (width != 8 && width != 16 && width != 32 && width != 64)) {
+        return false;
+    }
+
+    let word: UInt32 = 0x39000000U;
+    if (width == 16) { word = 0x79000000U; }
+    if (width == 32) { word = 0xB9000000U; }
+    if (width == 64) { word = 0xF9000000U; }
+
+    if release {
+        word = 0x089FFC00U;
+        if (width == 16) { word = 0x489FFC00U; }
+        if (width == 32) { word = 0x889FFC00U; }
+        if (width == 64) { word = 0xC89FFC00U; }
+    }
+
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_load_exclusive(ref output: A64CodeBuffer, destination: A64Register, address: A64Register, width: Int, acquire: Bool) -> Bool {
+// LDXR and LDAXR start the LL/SC loop used for atomic read-modify-write
+    let rt: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(address);
+    if (rt < 0 || rn < 0 || destination == A64Register.SP || address == A64Register.SP ||
+        (width != 8 && width != 16 && width != 32 && width != 64)) {
+        return false;
+    }
+
+    let word: UInt32 = 0x085F7C00U;
+    if (width == 16) { word = 0x485F7C00U; }
+    if (width == 32) { word = 0x885F7C00U; }
+    if (width == 64) { word = 0xC85F7C00U; }
+
+    if acquire {
+        word |= 0x00008000U;
+    }
+
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_store_exclusive(ref output: A64CodeBuffer, status: A64Register, source: A64Register, address: A64Register, width: Int, release: Bool) -> Bool {
+// STXR writes zero to status on success, a non-zero result retries the loop
+    let rs: Int = a64_gpr_code(status);
+    let rt: Int = a64_gpr_code(source);
+    let rn: Int = a64_gpr_code(address);
+    if (rs < 0 || rt < 0 || rn < 0 || status == A64Register.SP || source == A64Register.SP ||
+        address == A64Register.SP || (width != 8 && width != 16 && width != 32 && width != 64)) {
+        return false;
+    }
+
+    let word: UInt32 = 0x08007C00U;
+    if (width == 16) { word = 0x48007C00U; }
+    if (width == 32) { word = 0x88007C00U; }
+    if (width == 64) { word = 0xC8007C00U; }
+
+    if release {
+        word |= 0x00008000U;
+    }
+
+    word |= UInt32(rs << 16);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_load_float(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
 // LDR S/D uses the same scaled unsigned offset as the integer load.
     let rt: Int = a64_vec_code(destination);
