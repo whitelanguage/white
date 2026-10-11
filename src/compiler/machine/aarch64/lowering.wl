@@ -903,7 +903,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         let j: Int = 0;
         while (j < scan_block.instructions.length()) {
             let scan: WirInstruction = program.arena.instructions[wir_id_index(UInt32(scan_block.instructions[j]))];
-            if (scan.opcode == WirOpcode.Call) { has_call = true; }
+            if (scan.opcode == WirOpcode.Call || scan.opcode == WirOpcode.Retain || scan.opcode == WirOpcode.Release) {
+                has_call = true;
+            }
             j++;
         }
         i++;
@@ -1417,6 +1419,21 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (source == A64Register.None || destination == A64Register.None || width == 0 || !encoded ||
                     !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer unary operation");
+                }
+            } else if (instruction.opcode == WirOpcode.Retain || instruction.opcode == WirOpcode.Release) {
+                if (instruction.operands.length() != 1 || instruction.result != NO_WIR_VALUE) {
+                    return a64_lowering_error("AArch64 ownership operation has an invalid WIR shape");
+                }
+
+                let object: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                let target: String = "__wl_retain";
+                if (instruction.opcode == WirOpcode.Release) {
+                    target = "__wl_release";
+                }
+                if (object == A64Register.None ||
+                    (object != A64Register.X0 && !a64_mov_register(ref output, A64Register.X0, object, true)) ||
+                    !a64_branch_symbol(ref output, target, true)) {
+                    return a64_lowering_error("cannot encode an AArch64 ownership call");
                 }
             } else if (instruction.opcode == WirOpcode.Call) {
                 if (instruction.operands.length() == 0 || instruction.operands.length() > 17 || instruction.call_type == NO_WIR_TYPE) {
