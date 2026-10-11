@@ -83,6 +83,26 @@ func a64_integer_width(ref program: WirModule, type_id: WirTypeID) -> Int {
     return a64_scalar_width(ref program, type_id);
 }
 
+func a64_integer_bits(ref program: WirModule, type_id: WirTypeID) -> Int {
+    let index: Int = wir_id_index(UInt32(type_id));
+    if (index < 0 || index >= program.arena.types.length()) {
+        return 0;
+    }
+
+    let type: WirType = program.arena.types[index];
+    if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) {
+        return 0;
+    }
+
+    return type.bits;
+}
+
+func a64_integer_signed(ref program: WirModule, type_id: WirTypeID) -> Bool {
+    let index: Int = wir_id_index(UInt32(type_id));
+    return index >= 0 && index < program.arena.types.length() &&
+           program.arena.types[index].kind == WirTypeKind.SignedInt;
+}
+
 func a64_value_size(ref program: WirModule, type_id: WirTypeID) -> Int {
     let width: Int = a64_integer_width(ref program, type_id);
     if (width != 0) {
@@ -831,7 +851,19 @@ func a64_write_edge(ref program: WirModule, edge: WirEdge, homes: Vector(A64Stac
     while (i < edge.arguments.length()) {
         let argument: WirValueID = edge.arguments[i];
         let parameter: WirValueID = target.parameters[i];
-        let width: Int = a64_scalar_width(ref program, program.arena.values[wir_id_index(UInt32(parameter))].type_id);
+        let parameter_type: WirTypeID = program.arena.values[wir_id_index(UInt32(parameter))].type_id;
+        let width: Int = a64_integer_width(ref program, parameter_type);
+        if (width == 128) {
+            let pair: A64RegisterPair = a64_materialize_pair(ref program, argument, homes, ref values, ref output);
+            if (!a64_save_pair(ref output, homes, parameter, pair)) {
+                return false;
+            }
+
+            i++;
+            continue;
+        }
+
+        width = a64_scalar_width(ref program, parameter_type);
         let source: A64Register = a64_materialize(ref program, argument, homes, ref values, ref output);
         if (source == A64Register.None || width == 0 || !a64_save_home(ref output, homes, parameter, source, width)) {
             return false;
@@ -1015,6 +1047,84 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     (slot.value != NO_WIR_VALUE && slot.size != width / 8) ||
                     !stored) {
                     return a64_lowering_error("cannot encode AArch64 scalar store");
+                }
+            } else if (instruction.opcode == WirOpcode.Truncate ||
+                       instruction.opcode == WirOpcode.SignExtend ||
+                       instruction.opcode == WirOpcode.ZeroExtend) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("integer cast has an invalid WIR shape");
+                }
+
+                let source_id: WirValueID = instruction.operands[0];
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                let source_bits: Int = a64_integer_bits(ref program, source_type);
+                let target_bits: Int = a64_integer_bits(ref program, instruction.type_id);
+                if (source_bits == 0 || target_bits == 0) {
+                    return a64_lowering_error("AArch64 integer cast has unsupported types");
+                }
+
+                if (target_bits == 128) {
+                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64RegisterPair = a64_alloc_pair(ref values);
+                    let amount: A64Register = a64_alloc_register(ref values, false);
+                    let encoded: Bool = source != A64Register.None && destination.low != A64Register.None &&
+                                        destination.high != A64Register.None && amount != A64Register.None;
+                    if (encoded && source_bits < 64) {
+                        encoded = a64_extend_integer(
+                            ref output,
+                            destination.low,
+                            source,
+                            source_bits,
+                            instruction.opcode == WirOpcode.SignExtend,
+                            true
+                        );
+                    } else if encoded {
+                        encoded = a64_mov_register(ref output, destination.low, source, true);
+                    }
+                    if (encoded && instruction.opcode == WirOpcode.SignExtend) {
+                        encoded = a64_mov_immediate(ref output, amount, 63UL, true) &&
+                                  a64_shift_register(ref output, destination.high, destination.low, amount, 1, true);
+                    } else if encoded {
+                        encoded = a64_mov_immediate(ref output, destination.high, 0UL, true);
+                    }
+                    if (!encoded || !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                        return a64_lowering_error("cannot extend an AArch64 integer to 128 bits");
+                    }
+                } else if (source_bits == 128) {
+                    let source: A64RegisterPair = a64_materialize_pair(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                    let encoded: Bool = source.low != A64Register.None && destination != A64Register.None && target_width != 0;
+                    if (encoded && target_bits < target_width) {
+                        encoded = a64_extend_integer(
+                            ref output,
+                            destination,
+                            source.low,
+                            target_bits,
+                            a64_integer_signed(ref program, instruction.type_id),
+                            target_width == 64
+                        );
+                    } else if encoded {
+                        encoded = a64_mov_register(ref output, destination, source.low, target_width == 64);
+                    }
+                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                        return a64_lowering_error("cannot truncate an AArch64 128-bit integer");
+                    }
+                } else {
+                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                    let extend_bits: Int = source_bits;
+                    let signed: Bool = instruction.opcode == WirOpcode.SignExtend;
+                    if (instruction.opcode == WirOpcode.Truncate) {
+                        extend_bits = target_bits;
+                        signed = a64_integer_signed(ref program, instruction.type_id);
+                    }
+                    if (source == A64Register.None || destination == A64Register.None || target_width == 0 ||
+                        !a64_extend_integer(ref output, destination, source, extend_bits, signed, target_width == 64) ||
+                        !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                        return a64_lowering_error("cannot encode AArch64 integer cast");
+                    }
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
                        (instruction.opcode == WirOpcode.Add || instruction.opcode == WirOpcode.Subtract ||

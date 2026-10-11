@@ -282,6 +282,28 @@ func a64_shift_register(ref output: A64CodeBuffer, destination: A64Register, val
     return true;
 }
 
+func a64_extend_integer(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, source_bits: Int, signed: Bool, wide: Bool) -> Bool {
+// SBFM and UBFM with immr zero are the architectural sign/zero-extend forms.
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(source);
+    let limit: Int = 32;
+    if wide { limit = 64; }
+    if (rd < 0 || rn < 0 || source_bits <= 0 || source_bits > limit ||
+        destination == A64Register.SP || source == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x53000000U;
+    if signed { word = 0x13000000U; }
+    if wide { word |= 0x80000000U | 0x00400000U; }
+    word |= UInt32((source_bits - 1) << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_mov_register(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, wide: Bool) -> Bool {
     let rd: Int = a64_gpr_code(destination);
     let rm: Int = a64_gpr_code(source);

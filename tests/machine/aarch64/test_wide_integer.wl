@@ -82,12 +82,42 @@ func main() -> Int {
     comparison(ref program, "sgt128", i128, WirOpcode.SignedGreater);
     comparison(ref program, "sge128", i128, WirOpcode.SignedGreaterEqual);
 
+    let select: WirFuncID = wir_add_function(ref program, "select128", [wir_param("condition", program.bool_type), wir_param("left", u128), wir_param("right", u128)], u128, false, WirLinkage.Exported, WirABI.C);
+    let select_entry: WirBlockID = wir_add_block(ref program, select, "entry", []);
+    let selected: WirBlockID = wir_add_block(ref program, select, "selected", [wir_param("value", u128)]);
+    let select_function: WirFunction = program.arena.functions[wir_id_index(UInt32(select))];
+    wir_append(ref program, select_entry, WirOpcode.Branch, program.void_type, [select_function.parameters[0]], [wir_edge(selected, [select_function.parameters[1]]), wir_edge(selected, [select_function.parameters[2]])], no_wir_location());
+    wir_return(ref program, selected, program.arena.blocks[wir_id_index(UInt32(selected))].parameters[0], no_wir_location());
+
+    let i32: WirTypeID = wir_signed_int_type(ref program, 32);
+    let u32: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let u64: WirTypeID = wir_unsigned_int_type(ref program, 64);
+    let sign_extend: WirFuncID = wir_add_function(ref program, "sign_extend128", [wir_param("value", i32)], i128, false, WirLinkage.Exported, WirABI.C);
+    let sign_entry: WirBlockID = wir_add_block(ref program, sign_extend, "entry", []);
+    let sign_value: WirValueID = program.arena.functions[wir_id_index(UInt32(sign_extend))].parameters[0];
+    wir_return(ref program, sign_entry, wir_cast(ref program, sign_entry, sign_value, i128, "wide", no_wir_location()), no_wir_location());
+
+    let zero_extend: WirFuncID = wir_add_function(ref program, "zero_extend128", [wir_param("value", u32)], u128, false, WirLinkage.Exported, WirABI.C);
+    let zero_entry: WirBlockID = wir_add_block(ref program, zero_extend, "entry", []);
+    let zero_value: WirValueID = program.arena.functions[wir_id_index(UInt32(zero_extend))].parameters[0];
+    wir_return(ref program, zero_entry, wir_cast(ref program, zero_entry, zero_value, u128, "wide", no_wir_location()), no_wir_location());
+
+    let truncate32: WirFuncID = wir_add_function(ref program, "truncate32", [wir_param("value", u128)], u32, false, WirLinkage.Exported, WirABI.C);
+    let truncate32_entry: WirBlockID = wir_add_block(ref program, truncate32, "entry", []);
+    let truncate32_value: WirValueID = program.arena.functions[wir_id_index(UInt32(truncate32))].parameters[0];
+    wir_return(ref program, truncate32_entry, wir_cast(ref program, truncate32_entry, truncate32_value, u32, "small", no_wir_location()), no_wir_location());
+
+    let truncate64: WirFuncID = wir_add_function(ref program, "truncate64", [wir_param("value", u128)], u64, false, WirLinkage.Exported, WirABI.C);
+    let truncate64_entry: WirBlockID = wir_add_block(ref program, truncate64, "entry", []);
+    let truncate64_value: WirValueID = program.arena.functions[wir_id_index(UInt32(truncate64))].parameters[0];
+    wir_return(ref program, truncate64_entry, wir_cast(ref program, truncate64_entry, truncate64_value, u64, "small", no_wir_location()), no_wir_location());
+
     let lowered: A64ModuleResult = a64_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: AArch64 128-bit ABI lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 28 || lowered.sections.length() == 0 ||
+    if (lowered.symbols.length() != 33 || lowered.sections.length() == 0 ||
         lowered.relocations.length() != 1 || lowered.relocations[0].kind != A64RelocationKind.Call26) {
         print("FAIL: AArch64 128-bit functions were not emitted");
         return 1;
