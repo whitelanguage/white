@@ -393,6 +393,52 @@ func a64_store_unsigned(ref output: A64CodeBuffer, source: A64Register, base: A6
     return true;
 }
 
+func a64_load_integer(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
+// scalar integer memory traffic, unlike register homes this keeps i8 and i16 narrow
+    let rt: Int = a64_gpr_code(destination);
+    let rn: Int = a64_gpr_code(base);
+    let scale: Int = width / 8;
+    if (rt < 0 || rn < 0 || destination == A64Register.SP || scale <= 0 ||
+        (width != 8 && width != 16 && width != 32 && width != 64) ||
+        offset < 0 || offset % scale != 0 || offset / scale > 4095) {
+        return false;
+    }
+
+    let word: UInt32 = 0x39400000U;
+    if (width == 16) { word = 0x79400000U; }
+    if (width == 32) { word = 0xB9400000U; }
+    if (width == 64) { word = 0xF9400000U; }
+    word |= UInt32((offset / scale) << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
+func a64_store_integer(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
+// STRB, STRH, STR and their 64-bit form share the same scaled offset layout
+    let rt: Int = a64_gpr_code(source);
+    let rn: Int = a64_gpr_code(base);
+    let scale: Int = width / 8;
+    if (rt < 0 || rn < 0 || source == A64Register.SP || scale <= 0 ||
+        (width != 8 && width != 16 && width != 32 && width != 64) ||
+        offset < 0 || offset % scale != 0 || offset / scale > 4095) {
+        return false;
+    }
+
+    let word: UInt32 = 0x39000000U;
+    if (width == 16) { word = 0x79000000U; }
+    if (width == 32) { word = 0xB9000000U; }
+    if (width == 64) { word = 0xF9000000U; }
+    word |= UInt32((offset / scale) << 10);
+    word |= UInt32(rn << 5);
+    word |= UInt32(rt);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_atomic_load(ref output: A64CodeBuffer, destination: A64Register, address: A64Register, width: Int, acquire: Bool) -> Bool {
 // load one naturally aligned atomic integer
     let rt: Int = a64_gpr_code(destination);
