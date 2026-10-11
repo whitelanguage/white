@@ -954,6 +954,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
     let values: A64ValueMap = a64_new_value_map(program.arena.values.length());
     let offsets: Vector(A64BlockOffset) = [];
     let fixups: Vector(A64BranchFixup) = [];
+    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
     let stack: A64StackLayout = a64_stack_layout(ref program, ref function);
     if (stack.message.length() != 0) { return a64_lowering_error(stack.message); }
 
@@ -1211,6 +1212,107 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     ) ||
                     !a64_save_home(ref output, stack.homes, instruction.result, old_value, home_width)) {
                     return a64_lowering_error("cannot encode AArch64 atomic read-modify-write");
+                }
+            } else if (instruction.opcode == WirOpcode.FieldAddress ||
+                       instruction.opcode == WirOpcode.IndexAddress) {
+                if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("aggregate address has an invalid WIR shape");
+                }
+
+                let base_id: WirValueID = instruction.operands[0];
+                let base_value: WirValue = program.arena.values[wir_id_index(UInt32(base_id))];
+                let pointer: WirType = program.arena.types[wir_id_index(UInt32(base_value.type_id))];
+                if (pointer.kind != WirTypeKind.Pointer) {
+                    return a64_lowering_error("aggregate address requires a pointer base");
+                }
+
+                let base: A64Register = a64_materialize(ref program, base_id, stack.homes, ref values, ref output);
+                let destination: A64Register = a64_alloc_register(ref values, false);
+                if (base == A64Register.None || destination == A64Register.None) {
+                    return a64_lowering_error("cannot materialize an AArch64 aggregate address");
+                }
+
+                if (instruction.opcode == WirOpcode.FieldAddress) {
+                    let layout: WirTypeLayout = layouts[wir_id_index(UInt32(pointer.element))];
+                    let field: WirValue = program.arena.values[
+                        wir_id_index(UInt32(instruction.operands[1]))
+                    ];
+                    if (!layout.valid || field.kind != WirValueKind.Integer ||
+                        field.integer >= UInt128(layout.field_offsets.length())) {
+                        return a64_lowering_error("AArch64 field address has an invalid field index");
+                    }
+
+                    let offset: UInt64 = layout.field_offsets[Int(field.integer)];
+                    let encoded: Bool = false;
+                    if (offset == 0UL) {
+                        encoded = a64_mov_register(ref output, destination, base, true);
+                    } else if (offset <= 4095UL) {
+                        encoded = a64_add_immediate(ref output, destination, base, Int(offset), true);
+                    } else {
+                        let temporary: A64Register = a64_alloc_register(ref values, false);
+                        encoded = temporary != A64Register.None &&
+                                  a64_mov_immediate(ref output, temporary, offset, true) &&
+                                  a64_add_register(ref output, destination, base, temporary, true);
+                    }
+                    if (!encoded) {
+                        return a64_lowering_error("cannot encode an AArch64 field address");
+                    }
+                } else {
+                    let element_type: WirTypeID = pointer.element;
+                    let element: WirType = program.arena.types[wir_id_index(UInt32(element_type))];
+                    if (element.kind == WirTypeKind.Array) {
+                        element_type = element.element;
+                    }
+
+                    let layout: WirTypeLayout = layouts[wir_id_index(UInt32(element_type))];
+                    let index_id: WirValueID = instruction.operands[1];
+                    let index_value: WirValue = program.arena.values[wir_id_index(UInt32(index_id))];
+                    let index_bits: Int = a64_integer_bits(ref program, index_value.type_id);
+                    let index: A64Register = a64_materialize(
+                        ref program,
+                        index_id,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
+                    let scaled: A64Register = a64_alloc_register(ref values, false);
+                    if (!layout.valid || layout.size == 0UL || index == A64Register.None ||
+                        scaled == A64Register.None || index_bits <= 0 || index_bits > 64) {
+                        return a64_lowering_error("AArch64 index address has an invalid element layout");
+                    }
+
+                    let extended: Bool = false;
+                    if (index_bits < 64) {
+                        extended = a64_extend_integer(
+                            ref output,
+                            scaled,
+                            index,
+                            index_bits,
+                            a64_integer_signed(ref program, index_value.type_id),
+                            true
+                        );
+                    } else {
+                        extended = a64_mov_register(ref output, scaled, index, true);
+                    }
+                    if (!extended) {
+                        return a64_lowering_error("cannot extend an AArch64 aggregate index");
+                    }
+
+                    if (layout.size != 1UL) {
+                        let stride: A64Register = a64_alloc_register(ref values, false);
+                        if (stride == A64Register.None ||
+                            !a64_mov_immediate(ref output, stride, layout.size, true) ||
+                            !a64_multiply_register(ref output, scaled, scaled, stride, true)) {
+                            return a64_lowering_error("cannot scale an AArch64 aggregate index");
+                        }
+                    }
+                    if (!a64_add_register(ref output, destination, base, scaled, true)) {
+                        return a64_lowering_error("cannot encode an AArch64 index address");
+                    }
+                }
+
+                if (!a64_save_home(ref output, stack.homes, instruction.result, destination, 64)) {
+                    return a64_lowering_error("cannot save an AArch64 aggregate address");
                 }
             } else if (instruction.opcode == WirOpcode.Bitcast ||
                        instruction.opcode == WirOpcode.PointerToInt ||
