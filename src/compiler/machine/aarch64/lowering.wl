@@ -903,7 +903,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         let j: Int = 0;
         while (j < scan_block.instructions.length()) {
             let scan: WirInstruction = program.arena.instructions[wir_id_index(UInt32(scan_block.instructions[j]))];
-            if (scan.opcode == WirOpcode.Call || scan.opcode == WirOpcode.Retain || scan.opcode == WirOpcode.Release) {
+            if (scan.opcode == WirOpcode.Call || scan.opcode == WirOpcode.Retain || scan.opcode == WirOpcode.Release ||
+                scan.opcode == WirOpcode.NullCheck || scan.opcode == WirOpcode.BoundsCheck) {
                 has_call = true;
             }
             j++;
@@ -1420,6 +1421,46 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer unary operation");
                 }
+            } else if (instruction.opcode == WirOpcode.NullCheck) {
+                if (instruction.operands.length() != 1 || instruction.result != NO_WIR_VALUE) {
+                    return a64_lowering_error("AArch64 null check has an invalid WIR shape");
+                }
+
+                let checked_id: WirValueID = instruction.operands[0];
+                let checked_type: WirTypeID = program.arena.values[wir_id_index(UInt32(checked_id))].type_id;
+                let type: WirType = program.arena.types[wir_id_index(UInt32(checked_type))];
+                let checked: A64Register = a64_materialize(ref program, checked_id, stack.homes, ref values, ref output);
+                if (type.kind != WirTypeKind.Pointer || checked == A64Register.None ||
+                    !a64_compare_zero(ref output, checked, true) ||
+                    !a64_conditional_branch(ref output, 12, A64Condition.NotEqual) ||
+                    !a64_branch_symbol(ref output, "__wl_fail_null", true)) {
+                    return a64_lowering_error("cannot encode an AArch64 null check");
+                }
+
+                a64_trap(ref output);
+            } else if (instruction.opcode == WirOpcode.BoundsCheck) {
+                if (instruction.operands.length() != 2 || instruction.result != NO_WIR_VALUE) {
+                    return a64_lowering_error("AArch64 bounds check has an invalid WIR shape");
+                }
+
+                let index_id: WirValueID = instruction.operands[0];
+                let limit_id: WirValueID = instruction.operands[1];
+                let index_value: WirValue = program.arena.values[wir_id_index(UInt32(index_id))];
+                let limit_value: WirValue = program.arena.values[wir_id_index(UInt32(limit_id))];
+                let index_type: WirType = program.arena.types[wir_id_index(UInt32(index_value.type_id))];
+                let width: Int = a64_scalar_width(ref program, index_value.type_id);
+                let index: A64Register = a64_materialize(ref program, index_id, stack.homes, ref values, ref output);
+                let limit: A64Register = a64_materialize(ref program, limit_id, stack.homes, ref values, ref output);
+                if (index_value.type_id != limit_value.type_id || width == 0 ||
+                    (index_type.kind != WirTypeKind.SignedInt && index_type.kind != WirTypeKind.UnsignedInt) ||
+                    index == A64Register.None || limit == A64Register.None ||
+                    !a64_compare_register(ref output, index, limit, width == 64) ||
+                    !a64_conditional_branch(ref output, 12, A64Condition.CarryClear) ||
+                    !a64_branch_symbol(ref output, "__wl_fail_bounds", true)) {
+                    return a64_lowering_error("cannot encode an AArch64 bounds check");
+                }
+
+                a64_trap(ref output);
             } else if (instruction.opcode == WirOpcode.Retain || instruction.opcode == WirOpcode.Release) {
                 if (instruction.operands.length() != 1 || instruction.result != NO_WIR_VALUE) {
                     return a64_lowering_error("AArch64 ownership operation has an invalid WIR shape");
