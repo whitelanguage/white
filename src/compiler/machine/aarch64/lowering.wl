@@ -2108,6 +2108,74 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         return a64_lowering_error("cannot encode AArch64 integer cast");
                     }
                 }
+            } else if (instruction.opcode == WirOpcode.FloatExtend ||
+                       instruction.opcode == WirOpcode.FloatTruncate) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("floating-point width conversion has an invalid WIR shape");
+                }
+
+                let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                let destination: A64Register = a64_alloc_register(ref values, true);
+                let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let extend: Bool = instruction.opcode == WirOpcode.FloatExtend;
+                if (source == A64Register.None || destination == A64Register.None ||
+                    (target_width != 32 && target_width != 64) ||
+                    !a64_convert_float(ref output, destination, source, extend) ||
+                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    return a64_lowering_error("cannot encode an AArch64 floating-point width conversion");
+                }
+            } else if (instruction.opcode == WirOpcode.SignedIntToFloat ||
+                       instruction.opcode == WirOpcode.UnsignedIntToFloat) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("integer to float conversion has an invalid WIR shape");
+                }
+
+                let source_id: WirValueID = instruction.operands[0];
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                let source_width: Int = a64_integer_width(ref program, source_type);
+                let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                let destination: A64Register = a64_alloc_register(ref values, true);
+                if ((source_width != 32 && source_width != 64) ||
+                    (target_width != 32 && target_width != 64) ||
+                    source == A64Register.None || destination == A64Register.None ||
+                    !a64_int_to_float(
+                        ref output,
+                        destination,
+                        source,
+                        instruction.opcode == WirOpcode.SignedIntToFloat,
+                        source_width == 64,
+                        target_width == 64
+                    ) ||
+                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    return a64_lowering_error("cannot encode an AArch64 integer to float conversion");
+                }
+            } else if (instruction.opcode == WirOpcode.FloatToSignedInt ||
+                       instruction.opcode == WirOpcode.FloatToUnsignedInt) {
+                if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("float to integer conversion has an invalid WIR shape");
+                }
+
+                let source_id: WirValueID = instruction.operands[0];
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                let source_width: Int = a64_scalar_width(ref program, source_type);
+                let target_width: Int = a64_integer_width(ref program, instruction.type_id);
+                let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                let destination: A64Register = a64_alloc_register(ref values, false);
+                if ((source_width != 32 && source_width != 64) ||
+                    (target_width != 32 && target_width != 64) ||
+                    source == A64Register.None || destination == A64Register.None ||
+                    !a64_float_to_int(
+                        ref output,
+                        destination,
+                        source,
+                        instruction.opcode == WirOpcode.FloatToSignedInt,
+                        source_width == 64,
+                        target_width == 64
+                    ) ||
+                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    return a64_lowering_error("cannot encode an AArch64 float to integer conversion");
+                }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
                        (instruction.opcode == WirOpcode.Add || instruction.opcode == WirOpcode.Subtract ||
                         instruction.opcode == WirOpcode.BitAnd || instruction.opcode == WirOpcode.BitOr ||

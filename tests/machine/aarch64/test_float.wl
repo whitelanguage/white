@@ -62,6 +62,22 @@ func main() -> Int {
         return 1;
     }
 
+    let convert_id: WirFuncID = wir_add_function(ref program, "float_convert", [wir_param("value", f64), wir_param("integer", i32)], i32, false, WirLinkage.Exported, WirABI.C);
+    let convert_entry: WirBlockID = wir_add_block(ref program, convert_id, "entry", []);
+    let convert: WirFunction = program.arena.functions[wir_id_index(UInt32(convert_id))];
+    let narrowed: WirValueID = wir_cast(ref program, convert_entry, convert.parameters[0], f32, "narrowed", no_wir_location());
+    let widened: WirValueID = wir_cast(ref program, convert_entry, narrowed, f64, "widened", no_wir_location());
+    let from_integer: WirValueID = wir_cast(ref program, convert_entry, convert.parameters[1], f64, "float", no_wir_location());
+    let sum_convert: WirValueID = wir_binary(ref program, convert_entry, WirOpcode.Add, f64, widened, from_integer, "sum", no_wir_location());
+    let converted: WirValueID = wir_cast(ref program, convert_entry, sum_convert, i32, "integer", no_wir_location());
+    wir_return(ref program, convert_entry, converted, no_wir_location());
+
+    let convert_lowered: A64LoweringResult = a64_lower_function(ref program, convert_id);
+    if (convert_lowered.errors.length() != 0) {
+        print("FAIL: AArch64 numeric conversion failed: ", convert_lowered.errors[0]);
+        return 1;
+    }
+
     print("PASS: AArch64 floating-point lowering");
     return 0;
 }
