@@ -61,6 +61,13 @@ func main() -> Int {
     );
     wir_return(ref program, pointer_entry, pointer_result, no_wir_location());
 
+    let unary_type: WirTypeID = wir_function_type(ref program, [int_type], int_type, false, WirABI.C);
+    let apply_id: WirFuncID = wir_add_function(ref program, "apply", [wir_param("function", unary_type), wir_param("value", int_type)], int_type, false, WirLinkage.Exported, WirABI.C);
+    let apply_entry: WirBlockID = wir_add_block(ref program, apply_id, "entry", []);
+    let apply: WirFunction = program.arena.functions[wir_id_index(UInt32(apply_id))];
+    let applied: WirValueID = wir_call_typed(ref program, apply_entry, apply.parameters[0], unary_type, [apply.parameters[1]], "applied", no_wir_location());
+    wir_return(ref program, apply_entry, applied, no_wir_location());
+
     let lowered: A64ModuleResult = a64_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: AArch64 direct call lowering failed: ", lowered.errors[0]);

@@ -2477,17 +2477,17 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("initial AArch64 calls support a direct target and register-passed scalar arguments");
                 }
 
-                let callee: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
-                if (callee.kind != WirValueKind.Function) {
-                    return a64_lowering_error("initial AArch64 lowering only supports direct calls");
+                let callee_id: WirValueID = instruction.operands[0];
+                let callee: WirValue = program.arena.values[wir_id_index(UInt32(callee_id))];
+                let direct: Bool = callee.kind == WirValueKind.Function;
+                let callee_name: String = "";
+                if (direct) {
+                    let function_index: Int = wir_id_index(callee.owner);
+                    if (function_index < 0 || function_index >= program.arena.functions.length()) {
+                        return a64_lowering_error("direct call target is outside the WIR function arena");
+                    }
+                    callee_name = program.arena.functions[function_index].name;
                 }
-
-                let callee_id: WirFuncID = WirFuncID(callee.owner);
-                let callee_index: Int = wir_id_index(UInt32(callee_id));
-                if (callee_index < 0 || callee_index >= program.arena.functions.length()) {
-                    return a64_lowering_error("direct call target is outside the WIR function arena");
-                }
-                let callee_function: WirFunction = program.arena.functions[callee_index];
 
                 let call_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
                 if (call_type.parameters.length() != instruction.operands.length() - 1) {
@@ -2590,8 +2590,24 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     argument_index++;
                 }
 
-                if (!a64_branch_symbol(ref output, callee_function.name, true)) {
-                    return a64_lowering_error("cannot encode an AArch64 direct call");
+                let called: Bool = false;
+                if (direct) {
+                    called = a64_branch_symbol(ref output, callee_name, true);
+                } else {
+                    let target: A64Register = a64_materialize_address(
+                        ref program,
+                        callee_id,
+                        stack.storage,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
+                    called = target != A64Register.None &&
+                             a64_mov_register(ref output, A64Register.X16, target, true) &&
+                             a64_branch_register(ref output, A64Register.X16, true);
+                }
+                if (!called) {
+                    return a64_lowering_error("cannot encode an AArch64 call target");
                 }
 
                 if (instruction.result != NO_WIR_VALUE && a64_aggregate_type(ref program, instruction.type_id)) {
