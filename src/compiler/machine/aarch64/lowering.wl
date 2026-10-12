@@ -2486,7 +2486,14 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
 
                     width = a64_scalar_width(ref program, argument_type);
-                    let source: A64Register = a64_materialize(ref program, argument, stack.homes, ref values, ref output);
+                    let source: A64Register = a64_materialize_address(
+                        ref program,
+                        argument,
+                        stack.storage,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
                     let position: Int = integer_index;
                     if floating { position = float_index; }
                     let destination: A64Register = a64_argument_register(position, floating);

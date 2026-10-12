@@ -40,13 +40,35 @@ func main() -> Int {
     );
     wir_return(ref program, caller_entry, answer, no_wir_location());
 
+    let pointer_type: WirTypeID = wir_pointer_type(ref program, int_type);
+    let load_id: WirFuncID = wir_add_function(ref program, "load_pointer", [wir_param("value", pointer_type)], int_type, false, WirLinkage.Internal, WirABI.C);
+    let load_entry: WirBlockID = wir_add_block(ref program, load_id, "entry", []);
+    let load_pointer: WirValueID = program.arena.functions[wir_id_index(UInt32(load_id))].parameters[0];
+    let loaded: WirValueID = wir_load(ref program, load_entry, load_pointer, "loaded", no_wir_location());
+    wir_return(ref program, load_entry, loaded, no_wir_location());
+
+    let pointer_caller: WirFuncID = wir_add_function(ref program, "pointer_caller", [], int_type, false, WirLinkage.Exported, WirABI.C);
+    let pointer_entry: WirBlockID = wir_add_block(ref program, pointer_caller, "entry", []);
+    let slot: WirValueID = wir_stack_alloc(ref program, pointer_entry, int_type, "slot", no_wir_location());
+    wir_store(ref program, pointer_entry, wir_const_int(ref program, int_type, UInt128(42U)), slot, no_wir_location());
+    let pointer_result: WirValueID = wir_call(
+        ref program,
+        pointer_entry,
+        program.arena.functions[wir_id_index(UInt32(load_id))].address,
+        [slot],
+        "result",
+        no_wir_location()
+    );
+    wir_return(ref program, pointer_entry, pointer_result, no_wir_location());
+
     let lowered: A64ModuleResult = a64_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: AArch64 direct call lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.relocations.length() != 1 || lowered.relocations[0].kind != A64RelocationKind.Call26 ||
-        lowered.relocations[0].symbol != "helper") {
+    if (lowered.relocations.length() != 2 || lowered.relocations[0].kind != A64RelocationKind.Call26 ||
+        lowered.relocations[0].symbol != "helper" || lowered.relocations[1].kind != A64RelocationKind.Call26 ||
+        lowered.relocations[1].symbol != "load_pointer") {
         print("FAIL: AArch64 direct call relocation is missing");
         return 1;
     }
