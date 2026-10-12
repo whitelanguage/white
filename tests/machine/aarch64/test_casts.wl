@@ -33,6 +33,12 @@ func main() -> Int {
     let restored: WirValueID = wir_cast(ref program, wide_block, wide_bits, pointer, "restored", no_wir_location());
     wir_return(ref program, wide_block, restored, no_wir_location());
 
+    let local: WirFuncID = wir_add_function(ref program, "local_pointer_cast", [], u64, false, WirLinkage.Exported, WirABI.C);
+    let local_block: WirBlockID = wir_add_block(ref program, local, "entry", []);
+    let local_slot: WirValueID = wir_stack_alloc(ref program, local_block, i64, "slot", no_wir_location());
+    let local_bits: WirValueID = wir_cast(ref program, local_block, local_slot, u64, "bits", no_wir_location());
+    wir_return(ref program, local_block, local_bits, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 cast test: ", errors[0]);

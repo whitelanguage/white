@@ -1858,7 +1858,14 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("aggregate address requires a pointer base");
                 }
 
-                let base: A64Register = a64_materialize(ref program, base_id, stack.homes, ref values, ref output);
+                let base: A64Register = a64_materialize_address(
+                    ref program,
+                    base_id,
+                    stack.storage,
+                    stack.homes,
+                    ref values,
+                    ref output
+                );
                 let destination: A64Register = a64_alloc_register(ref values, false);
                 if (base == A64Register.None || destination == A64Register.None) {
                     return a64_lowering_error("cannot materialize an AArch64 aggregate address");
@@ -1966,7 +1973,14 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 if (target_width == 128) {
-                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let source: A64Register = a64_materialize_address(
+                        ref program,
+                        source_id,
+                        stack.storage,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
                     let destination: A64RegisterPair = a64_alloc_pair(ref values);
                     let encoded: Bool = source != A64Register.None && destination.low != A64Register.None &&
                                         destination.high != A64Register.None &&
@@ -1984,7 +1998,14 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         return a64_lowering_error("cannot cast a 128-bit integer to an AArch64 pointer");
                     }
                 } else {
-                    let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                    let source: A64Register = a64_materialize_address(
+                        ref program,
+                        source_id,
+                        stack.storage,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
                     let destination: A64Register = a64_alloc_register(ref values, false);
                     let encoded: Bool = source != A64Register.None && destination != A64Register.None;
                     if (encoded && instruction.opcode == WirOpcode.IntToPointer && source_width < 64) {
