@@ -595,6 +595,31 @@ func a64_materialize(
     return register;
 }
 
+func a64_materialize_address(
+    ref program: WirModule,
+    value_id: WirValueID,
+    storage: Vector(A64StackSlot),
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer
+) -> A64Register {
+// load the address consumed by field access, casts and calls
+
+    // form StackAlloc pointers from frame offsets, loading a scalar home here
+    // would read the allocation's contents and treat those bytes as an address.
+    let slot: A64StackSlot = a64_find_stack_slot(storage, value_id);
+    if (slot.value != NO_WIR_VALUE) {
+        let address: A64Register = a64_alloc_register(ref values, false);
+        if (address == A64Register.None || !a64_stack_address(ref output, address, slot.offset)) {
+            return A64Register.None;
+        }
+
+        return address;
+    }
+
+    return a64_materialize(ref program, value_id, homes, ref values, ref output);
+}
+
 func a64_alloc_pair(ref values: A64ValueMap) -> A64RegisterPair {
     let low: A64Register = a64_alloc_register(ref values, false);
     let high: A64Register = a64_alloc_register(ref values, false);

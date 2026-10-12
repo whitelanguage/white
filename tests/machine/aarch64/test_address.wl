@@ -38,6 +38,31 @@ func main() -> Int {
     let array_address: WirValueID = wir_index_address(ref program, array_block, array_params[0], array_params[1], "element", no_wir_location());
     wir_return(ref program, array_block, array_address, no_wir_location());
 
+    let local_field_function: WirFuncID = wir_add_function(ref program, "local_field", [wir_param("value", i64)], i64, false, WirLinkage.Exported, WirABI.C);
+    let local_field_block: WirBlockID = wir_add_block(ref program, local_field_function, "entry", []);
+    let local_field_param: WirValueID = program.arena.functions[wir_id_index(UInt32(local_field_function))].parameters[0];
+    let local_pair: WirValueID = wir_struct_value(ref program, local_field_block, pair, [wir_const_int(ref program, i8, UInt128(7U)), local_field_param], "pair", no_wir_location());
+    let local_pair_slot: WirValueID = wir_stack_alloc(ref program, local_field_block, pair, "slot", no_wir_location());
+    wir_store(ref program, local_field_block, local_pair, local_pair_slot, no_wir_location());
+    let local_field_address: WirValueID = wir_field_address(ref program, local_field_block, local_pair_slot, 1, "field", no_wir_location());
+    let local_field: WirValueID = wir_load(ref program, local_field_block, local_field_address, "value", no_wir_location());
+    wir_return(ref program, local_field_block, local_field, no_wir_location());
+
+    let local_array_function: WirFuncID = wir_add_function(ref program, "local_array", [wir_param("index", i32)], i16, false, WirLinkage.Exported, WirABI.C);
+    let local_array_block: WirBlockID = wir_add_block(ref program, local_array_function, "entry", []);
+    let local_array_index: WirValueID = program.arena.functions[wir_id_index(UInt32(local_array_function))].parameters[0];
+    let local_array_value: WirValueID = wir_array_value(ref program, local_array_block, array, [
+        wir_const_int(ref program, i16, UInt128(11U)),
+        wir_const_int(ref program, i16, UInt128(22U)),
+        wir_const_int(ref program, i16, UInt128(33U)),
+        wir_const_int(ref program, i16, UInt128(44U))
+    ], "array", no_wir_location());
+    let local_array_slot: WirValueID = wir_stack_alloc(ref program, local_array_block, array, "slot", no_wir_location());
+    wir_store(ref program, local_array_block, local_array_value, local_array_slot, no_wir_location());
+    let local_array_address: WirValueID = wir_index_address(ref program, local_array_block, local_array_slot, local_array_index, "element", no_wir_location());
+    let local_element: WirValueID = wir_load(ref program, local_array_block, local_array_address, "value", no_wir_location());
+    wir_return(ref program, local_array_block, local_element, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 address test: ", errors[0]);
@@ -49,7 +74,7 @@ func main() -> Int {
         print("FAIL: AArch64 aggregate addressing: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 3 || lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
+    if (lowered.symbols.length() != 5 || lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
         print("FAIL: missing AArch64 aggregate address code");
         return 1;
     }
