@@ -1972,7 +1972,19 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("AArch64 pointer cast has unsupported types");
                 }
 
-                if (target_width == 128) {
+                if (source_width == 128 && target_width == 128) {
+                    let source: A64RegisterPair = a64_materialize_pair(
+                        ref program,
+                        source_id,
+                        stack.homes,
+                        ref values,
+                        ref output
+                    );
+                    if (source.low == A64Register.None || source.high == A64Register.None ||
+                        !a64_save_pair(ref output, stack.homes, instruction.result, source)) {
+                        return a64_lowering_error("cannot encode an AArch64 128-bit bitcast");
+                    }
+                } else if (target_width == 128) {
                     let source: A64Register = a64_materialize_address(
                         ref program,
                         source_id,

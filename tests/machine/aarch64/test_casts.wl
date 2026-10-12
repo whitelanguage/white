@@ -14,6 +14,7 @@ func main() -> Int {
     let program: WirModule = new_wir_module("aarch64-unknown-linux-gnu", 64);
     let i32: WirTypeID = wir_signed_int_type(ref program, 32);
     let i64: WirTypeID = wir_signed_int_type(ref program, 64);
+    let i128: WirTypeID = wir_signed_int_type(ref program, 128);
     let u64: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let u128: WirTypeID = wir_unsigned_int_type(ref program, 128);
     let pointer: WirTypeID = wir_pointer_type(ref program, wir_unsigned_int_type(ref program, 8));
@@ -38,6 +39,12 @@ func main() -> Int {
     let local_slot: WirValueID = wir_stack_alloc(ref program, local_block, i64, "slot", no_wir_location());
     let local_bits: WirValueID = wir_cast(ref program, local_block, local_slot, u64, "bits", no_wir_location());
     wir_return(ref program, local_block, local_bits, no_wir_location());
+
+    let wide_bitcast: WirFuncID = wir_add_function(ref program, "wide_bitcast", [WirParam(name="value", type_id=u128)], i128, false, WirLinkage.Exported, WirABI.C);
+    let wide_bitcast_block: WirBlockID = wir_add_block(ref program, wide_bitcast, "entry", []);
+    let wide_bitcast_value: WirValueID = program.arena.functions[wir_id_index(UInt32(wide_bitcast))].parameters[0];
+    let signed_wide: WirValueID = wir_cast(ref program, wide_bitcast_block, wide_bitcast_value, i128, "signed", no_wir_location());
+    wir_return(ref program, wide_bitcast_block, signed_wide, no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
