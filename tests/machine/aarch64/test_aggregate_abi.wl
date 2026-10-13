@@ -73,6 +73,15 @@ func main() -> Int {
     let tail_result: WirValueID = wir_call(ref program, tail_caller_entry, program.arena.functions[wir_id_index(UInt32(tail_id))].address, tail_args, "result", no_wir_location());
     wir_return(ref program, tail_caller_entry, tail_result, no_wir_location());
 
+    let zero_id: WirFuncID = wir_add_function(ref program, "zero_small", [], small, false, WirLinkage.Exported, WirABI.C);
+    let zero_entry: WirBlockID = wir_add_block(ref program, zero_id, "entry", []);
+    wir_return(ref program, zero_entry, wir_const_zero(ref program, small), no_wir_location());
+
+    let constant_id: WirFuncID = wir_add_function(ref program, "constant_small", [], small, false, WirLinkage.Exported, WirABI.C);
+    let constant_entry: WirBlockID = wir_add_block(ref program, constant_id, "entry", []);
+    let constant_small: WirValueID = wir_const_aggregate(ref program, small, [wir_const_int(ref program, i64, UInt128(11U)), wir_const_int(ref program, i32, UInt128(42U))]);
+    wir_return(ref program, constant_entry, constant_small, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 aggregate ABI test: ", errors[0]);
@@ -91,7 +100,7 @@ func main() -> Int {
         print("FAIL: AArch64 aggregate ABI lowering: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 8 || lowered.relocations.length() != 4 ||
+    if (lowered.symbols.length() != 10 || lowered.relocations.length() != 4 ||
         lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
         print("FAIL: AArch64 aggregate ABI output is incomplete");
         return 1;

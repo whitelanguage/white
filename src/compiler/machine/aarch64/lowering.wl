@@ -439,6 +439,25 @@ func a64_stack_layout(ref program: WirModule, ref function: WirFunction, layouts
                     size += bytes;
                 }
             }
+
+            let operand_index: Int = 0;
+            while (operand_index < instruction.operands.length()) {
+                let operand: WirValueID = instruction.operands[operand_index];
+                let value: WirValue = program.arena.values[wir_id_index(UInt32(operand))];
+                let existing: A64StackSlot = a64_find_stack_slot(homes, operand);
+                if (value.kind == WirValueKind.Constant && existing.value == NO_WIR_VALUE &&
+                    a64_aggregate_type(ref program, value.type_id)) {
+                    let bytes: Int = a64_stack_value_size(ref program, value.type_id, layouts);
+                    if (bytes == 0) {
+                        return A64StackLayout(storage=[], homes=[], frame_size=0, result_pointer_offset=-1, message="AArch64 aggregate constant has an unsupported type");
+                    }
+
+                    size = a64_align(size, a64_stack_value_alignment(value.type_id, layouts, bytes));
+                    homes.append(A64StackSlot(value=operand, offset=size, size=bytes));
+                    size += bytes;
+                }
+                operand_index++;
+            }
             j++;
         }
         i++;
@@ -1819,6 +1838,27 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         }
         if (incoming == A64Register.None || !a64_save_home(ref output, stack.homes, parameter, incoming, width)) {
             return a64_lowering_error("cannot save an AArch64 argument register");
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < stack.homes.length()) {
+        let home: A64StackSlot = stack.homes[i];
+        let value: WirValue = program.arena.values[wir_id_index(UInt32(home.value))];
+        if (value.kind == WirValueKind.Constant && a64_aggregate_type(ref program, value.type_id) &&
+            !a64_store_value_at(
+                ref program,
+                home.value,
+                A64Register.SP,
+                home.offset,
+                stack.storage,
+                stack.homes,
+                layouts,
+                ref values,
+                ref output
+            )) {
+            return a64_lowering_error("cannot initialize an AArch64 aggregate constant");
         }
         i++;
     }
