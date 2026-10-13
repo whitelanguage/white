@@ -317,27 +317,64 @@ func a64_find_stack_slot(slots: Vector(A64StackSlot), value: WirValueID) -> A64S
 }
 
 func a64_stack_address(ref output: A64CodeBuffer, destination: A64Register, offset: Int) -> Bool {
-    if (offset < 0 || destination == A64Register.None || destination == A64Register.SP) {
+    return a64_offset_address(ref output, destination, A64Register.SP, offset);
+}
+
+func a64_offset_address(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int) -> Bool {
+    if (offset < 0 || destination == A64Register.None || destination == A64Register.SP ||
+        base == A64Register.None || base == A64Register.ZR) {
         return false;
     }
 
     let remaining: Int = offset;
-    let base: A64Register = A64Register.SP;
+    let current: A64Register = base;
     if (remaining == 0) {
-        return a64_add_immediate(ref output, destination, base, 0, true);
+        return a64_add_immediate(ref output, destination, current, 0, true);
     }
 
     while (remaining != 0) {
         let amount: Int = remaining;
         if (amount > 4095) { amount = 4095; }
-        if (!a64_add_immediate(ref output, destination, base, amount, true)) {
+        if (!a64_add_immediate(ref output, destination, current, amount, true)) {
             return false;
         }
         remaining -= amount;
-        base = destination;
+        current = destination;
     }
 
     return true;
+}
+
+func a64_load_integer_at(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
+    if (a64_load_integer(ref output, destination, base, offset, width)) {
+        return true;
+    }
+    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
+           a64_load_integer(ref output, destination, A64Register.X16, 0, width);
+}
+
+func a64_store_integer_at(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
+    if (a64_store_integer(ref output, source, base, offset, width)) {
+        return true;
+    }
+    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
+           a64_store_integer(ref output, source, A64Register.X16, 0, width);
+}
+
+func a64_load_float_at(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
+    if (a64_load_float(ref output, destination, base, offset, double)) {
+        return true;
+    }
+    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
+           a64_load_float(ref output, destination, A64Register.X16, 0, double);
+}
+
+func a64_store_float_at(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
+    if (a64_store_float(ref output, source, base, offset, double)) {
+        return true;
+    }
+    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
+           a64_store_float(ref output, source, A64Register.X16, 0, double);
 }
 
 func a64_aggregate_register_count(layout: WirTypeLayout) -> Int {
@@ -365,7 +402,7 @@ func a64_save_aggregate_registers(
     while (i < count) {
         let incoming: A64Register = a64_argument_register(first + i, false);
         if (incoming == A64Register.None ||
-            !a64_store_integer(ref output, incoming, A64Register.SP, home.offset + i * 8, 64)) {
+            !a64_store_integer_at(ref output, incoming, A64Register.SP, home.offset + i * 8, 64)) {
             return false;
         }
         i++;
@@ -384,7 +421,7 @@ func a64_load_aggregate_registers(
     while (i < count) {
         let outgoing: A64Register = a64_argument_register(first + i, false);
         if (outgoing == A64Register.None ||
-            !a64_load_integer(ref output, outgoing, A64Register.SP, home.offset + i * 8, 64)) {
+            !a64_load_integer_at(ref output, outgoing, A64Register.SP, home.offset + i * 8, 64)) {
             return false;
         }
         i++;
@@ -398,7 +435,7 @@ func a64_save_hfa_registers(ref output: A64CodeBuffer, home: A64StackSlot, first
     while (i < hfa.count) {
         let incoming: A64Register = a64_argument_register(first + i, true);
         if (incoming == A64Register.None ||
-            !a64_store_float(ref output, incoming, A64Register.SP, home.offset + i * (hfa.bits / 8), hfa.bits == 64)) {
+            !a64_store_float_at(ref output, incoming, A64Register.SP, home.offset + i * (hfa.bits / 8), hfa.bits == 64)) {
             return false;
         }
         i++;
@@ -412,7 +449,7 @@ func a64_load_hfa_registers(ref output: A64CodeBuffer, home: A64StackSlot, first
     while (i < hfa.count) {
         let destination: A64Register = a64_argument_register(first + i, true);
         if (destination == A64Register.None ||
-            !a64_load_float(ref output, destination, A64Register.SP, home.offset + i * (hfa.bits / 8), hfa.bits == 64)) {
+            !a64_load_float_at(ref output, destination, A64Register.SP, home.offset + i * (hfa.bits / 8), hfa.bits == 64)) {
             return false;
         }
         i++;
@@ -422,7 +459,8 @@ func a64_load_hfa_registers(ref output: A64CodeBuffer, home: A64StackSlot, first
 }
 
 func a64_work_register(index: Int) -> A64Register {
-// X9-X17 are caller-saved temporaries and do not overlap ABI argument registers.
+// X9-X15 are caller-saved temporaries and do not overlap ABI argument registers.
+// X16 and X17 remain free for large address formation and linker veneers.
     if (index == 0) { return A64Register.X9; }
     if (index == 1) { return A64Register.X10; }
     if (index == 2) { return A64Register.X11; }
@@ -430,9 +468,6 @@ func a64_work_register(index: Int) -> A64Register {
     if (index == 4) { return A64Register.X13; }
     if (index == 5) { return A64Register.X14; }
     if (index == 6) { return A64Register.X15; }
-    if (index == 7) { return A64Register.X16; }
-    if (index == 8) { return A64Register.X17; }
-
     return A64Register.None;
 }
 
@@ -468,7 +503,7 @@ func a64_alloc_register(ref values: A64ValueMap, floating: Bool) -> A64Register 
         return register;
     }
 
-    let register: A64Register = a64_work_register(values.next_register % 9);
+    let register: A64Register = a64_work_register(values.next_register % 7);
     values.next_register++;
 
     return register;
@@ -519,9 +554,9 @@ func a64_materialize(
         let register: A64Register = a64_alloc_register(ref values, floating);
         let loaded: Bool = false;
         if (floating) {
-            loaded = a64_load_float(ref output, register, A64Register.SP, home.offset, width == 64);
+            loaded = a64_load_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
         } else {
-            loaded = a64_load_unsigned(ref output, register, A64Register.SP, home.offset, width == 64);
+            loaded = a64_load_integer_at(ref output, register, A64Register.SP, home.offset, width);
         }
         if (register == A64Register.None || width == 0 || home.size != width / 8 || !loaded) {
             return A64Register.None;
@@ -668,8 +703,8 @@ func a64_materialize_pair(
     let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
     if (home.value != NO_WIR_VALUE) {
         if (home.size != 16 ||
-            !a64_load_unsigned(ref output, pair.low, A64Register.SP, home.offset, true) ||
-            !a64_load_unsigned(ref output, pair.high, A64Register.SP, home.offset + 8, true)) {
+            !a64_load_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) ||
+            !a64_load_integer_at(ref output, pair.high, A64Register.SP, home.offset + 8, 64)) {
             return A64RegisterPair(low=A64Register.None, high=A64Register.None);
         }
 
@@ -721,8 +756,8 @@ func a64_materialize_pair_into(
     let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
     if (home.value != NO_WIR_VALUE) {
         return home.size == 16 &&
-               a64_load_unsigned(ref output, destination.low, A64Register.SP, home.offset, true) &&
-               a64_load_unsigned(ref output, destination.high, A64Register.SP, home.offset + 8, true);
+               a64_load_integer_at(ref output, destination.low, A64Register.SP, home.offset, 64) &&
+               a64_load_integer_at(ref output, destination.high, A64Register.SP, home.offset + 8, 64);
     }
     if (value.kind != WirValueKind.Integer) {
         return false;
@@ -739,8 +774,8 @@ func a64_save_pair(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value
         return false;
     }
 
-    return a64_store_unsigned(ref output, pair.low, A64Register.SP, home.offset, true) &&
-           a64_store_unsigned(ref output, pair.high, A64Register.SP, home.offset + 8, true);
+    return a64_store_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) &&
+           a64_store_integer_at(ref output, pair.high, A64Register.SP, home.offset + 8, 64);
 }
 
 func a64_wide_binary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A64RegisterPair, left: A64RegisterPair, right: A64RegisterPair) -> Bool {
@@ -1013,10 +1048,10 @@ func a64_save_home(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value
     if (home.value == NO_WIR_VALUE || width == 0 || home.size != width / 8) { return false; }
 
     if (a64_vec_code(register) >= 0) {
-        return a64_store_float(ref output, register, A64Register.SP, home.offset, width == 64);
+        return a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
     }
 
-    return a64_store_unsigned(ref output, register, A64Register.SP, home.offset, width == 64);
+    return a64_store_integer_at(ref output, register, A64Register.SP, home.offset, width);
 }
 
 func a64_memory_width(ref program: WirModule, type_id: WirTypeID) -> Int {
@@ -1050,7 +1085,7 @@ func a64_zero_memory(ref output: A64CodeBuffer, base: A64Register, offset: Int, 
     let written: Int = 0;
     while (written < size) {
         let width: Int = a64_copy_chunk(offset + written, offset + written, size - written);
-        if (!a64_store_integer(ref output, A64Register.ZR, base, offset + written, width)) {
+        if (!a64_store_integer_at(ref output, A64Register.ZR, base, offset + written, width)) {
             return false;
         }
         written += width / 8;
@@ -1071,8 +1106,18 @@ func a64_copy_memory(
     let copied: Int = 0;
     while (copied < size) {
         let width: Int = a64_copy_chunk(source_offset + copied, destination_offset + copied, size - copied);
-        if (!a64_load_integer(ref output, temporary, source_base, source_offset + copied, width) ||
-            !a64_store_integer(ref output, temporary, destination_base, destination_offset + copied, width)) {
+        let loaded: Bool = a64_load_integer(ref output, temporary, source_base, source_offset + copied, width);
+        if (!loaded) {
+            loaded = a64_offset_address(ref output, A64Register.X16, source_base, source_offset + copied) &&
+                     a64_load_integer(ref output, temporary, A64Register.X16, 0, width);
+        }
+
+        let stored: Bool = a64_store_integer(ref output, temporary, destination_base, destination_offset + copied, width);
+        if (!stored) {
+            stored = a64_offset_address(ref output, A64Register.X17, destination_base, destination_offset + copied) &&
+                     a64_store_integer(ref output, temporary, A64Register.X17, 0, width);
+        }
+        if (!loaded || !stored) {
             return false;
         }
         copied += width / 8;
@@ -1086,6 +1131,7 @@ func a64_store_value_at(
     value_id: WirValueID,
     base: A64Register,
     offset: Int,
+    storage: Vector(A64StackSlot),
     homes: Vector(A64StackSlot),
     layouts: Vector(WirTypeLayout),
     ref values: A64ValueMap,
@@ -1139,6 +1185,7 @@ func a64_store_value_at(
                     constant.elements[i],
                     base,
                     offset + member_offset,
+                    storage,
                     homes,
                     layouts,
                     ref values,
@@ -1168,19 +1215,26 @@ func a64_store_value_at(
     if (width == 128) {
         let pair: A64RegisterPair = a64_materialize_pair(ref program, value_id, homes, ref values, ref output);
         return pair.low != A64Register.None && pair.high != A64Register.None &&
-               a64_store_integer(ref output, pair.low, base, offset, 64) &&
-               a64_store_integer(ref output, pair.high, base, offset + 8, 64);
+               a64_store_integer_at(ref output, pair.low, base, offset, 64) &&
+               a64_store_integer_at(ref output, pair.high, base, offset + 8, 64);
     }
 
-    let source: A64Register = a64_materialize(ref program, value_id, homes, ref values, ref output);
+    let source: A64Register = a64_materialize_address(
+        ref program,
+        value_id,
+        storage,
+        homes,
+        ref values,
+        ref output
+    );
     if (source == A64Register.None || width == 0) {
         return false;
     }
     if (type.kind == WirTypeKind.FloatType) {
-        return a64_store_float(ref output, source, base, offset, width == 64);
+        return a64_store_float_at(ref output, source, base, offset, width == 64);
     }
 
-    return a64_store_integer(ref output, source, base, offset, width);
+    return a64_store_integer_at(ref output, source, base, offset, width);
 }
 
 func a64_load_value_at(
@@ -1217,8 +1271,8 @@ func a64_load_value_at(
     if (width == 128) {
         let pair: A64RegisterPair = a64_alloc_pair(ref values);
         return pair.low != A64Register.None && pair.high != A64Register.None &&
-               a64_load_integer(ref output, pair.low, base, offset, 64) &&
-               a64_load_integer(ref output, pair.high, base, offset + 8, 64) &&
+               a64_load_integer_at(ref output, pair.low, base, offset, 64) &&
+               a64_load_integer_at(ref output, pair.high, base, offset + 8, 64) &&
                a64_save_pair(ref output, homes, result, pair);
     }
 
@@ -1226,9 +1280,9 @@ func a64_load_value_at(
     let destination: A64Register = a64_alloc_register(ref values, floating);
     let loaded: Bool = false;
     if (floating) {
-        loaded = a64_load_float(ref output, destination, base, offset, width == 64);
+        loaded = a64_load_float_at(ref output, destination, base, offset, width == 64);
     } else {
-        loaded = a64_load_integer(ref output, destination, base, offset, width);
+        loaded = a64_load_integer_at(ref output, destination, base, offset, width);
         if (loaded && type.kind == WirTypeKind.SignedInt && width < 32) {
             loaded = a64_extend_integer(ref output, destination, destination, width, true, false);
         }
@@ -1510,7 +1564,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         return a64_lowering_error("cannot encode the AArch64 stack frame");
     }
     if (stack.result_pointer_offset >= 0 &&
-        !a64_store_integer(ref output, A64Register.X8, A64Register.SP, stack.result_pointer_offset, 64)) {
+        !a64_store_integer_at(ref output, A64Register.X8, A64Register.SP, stack.result_pointer_offset, 64)) {
         return a64_lowering_error("cannot save the AArch64 aggregate return pointer");
     }
 
@@ -1658,6 +1712,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     instruction.operands[0],
                     base,
                     offset,
+                    stack.storage,
                     stack.homes,
                     layouts,
                     ref values,
@@ -1705,6 +1760,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         instruction.operands[element_index],
                         A64Register.SP,
                         home.offset + offset,
+                        stack.storage,
                         stack.homes,
                         layouts,
                         ref values,
