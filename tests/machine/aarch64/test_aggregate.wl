@@ -41,6 +41,17 @@ func main() -> Int {
     let copied_field: WirValueID = wir_field(ref program, copy_block, copy, 1, "field", no_wir_location());
     wir_return(ref program, copy_block, copied_field, no_wir_location());
 
+    let zero_function: WirFuncID = wir_add_function(ref program, "zero_field", [], i64, false, WirLinkage.Exported, WirABI.C);
+    let zero_block: WirBlockID = wir_add_block(ref program, zero_function, "entry", []);
+    let zero_field: WirValueID = wir_field(ref program, zero_block, wir_const_zero(ref program, pair), 1, "field", no_wir_location());
+    wir_return(ref program, zero_block, zero_field, no_wir_location());
+
+    let constant_function: WirFuncID = wir_add_function(ref program, "constant_field", [], i64, false, WirLinkage.Exported, WirABI.C);
+    let constant_block: WirBlockID = wir_add_block(ref program, constant_function, "entry", []);
+    let constant_pair: WirValueID = wir_const_aggregate(ref program, pair, [wir_const_int(ref program, i8, UInt128(9U)), wir_const_int(ref program, i64, UInt128(42U))]);
+    let constant_field: WirValueID = wir_field(ref program, constant_block, constant_pair, 1, "field", no_wir_location());
+    wir_return(ref program, constant_block, constant_field, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 aggregate test: ", errors[0]);
@@ -52,7 +63,7 @@ func main() -> Int {
         print("FAIL: AArch64 aggregate lowering: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 3 || lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
+    if (lowered.symbols.length() != 5 || lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
         print("FAIL: missing AArch64 aggregate code");
         return 1;
     }

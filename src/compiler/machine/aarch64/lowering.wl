@@ -1950,8 +1950,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let index: WirValue = program.arena.values[
                     wir_id_index(UInt32(instruction.operands[1]))
                 ];
-                if (!layout.valid || home.value == NO_WIR_VALUE || index.kind != WirValueKind.Integer) {
-                    return a64_lowering_error("AArch64 aggregate extraction requires a stored value and constant index");
+                if (!layout.valid || index.kind != WirValueKind.Integer) {
+                    return a64_lowering_error("AArch64 aggregate extraction requires a valid layout and constant index");
                 }
 
                 let offset: Int = 0;
@@ -1971,7 +1971,40 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     offset = Int(index.integer) * Int(element_layout.size);
                 }
 
-                if (!a64_load_value_at(
+                if (home.value == NO_WIR_VALUE && aggregate.kind == WirValueKind.Constant) {
+                    let constant_index: Int = wir_id_index(aggregate.owner);
+                    let result_home: A64StackSlot = a64_find_stack_slot(stack.homes, instruction.result);
+                    if (constant_index < 0 || constant_index >= program.arena.constants.length() ||
+                        result_home.value == NO_WIR_VALUE) {
+                        return a64_lowering_error("AArch64 constant aggregate member has no storage");
+                    }
+
+                    let constant: WirConstant = program.arena.constants[constant_index];
+                    if (constant.kind == WirConstKind.Zero) {
+                        if (!a64_zero_memory(ref output, A64Register.SP, result_home.offset, result_home.size)) {
+                            return a64_lowering_error("cannot extract an AArch64 zero aggregate member");
+                        }
+                    } else if (constant.kind == WirConstKind.Aggregate &&
+                               index.integer < UInt128(constant.elements.length())) {
+                        if (!a64_store_value_at(
+                            ref program,
+                            constant.elements[Int(index.integer)],
+                            A64Register.SP,
+                            result_home.offset,
+                            stack.storage,
+                            stack.homes,
+                            layouts,
+                            ref values,
+                            ref output
+                        )) {
+                            return a64_lowering_error("cannot extract an AArch64 constant aggregate member");
+                        }
+                    } else {
+                        return a64_lowering_error("AArch64 constant aggregate member is unavailable");
+                    }
+                } else if (home.value == NO_WIR_VALUE) {
+                    return a64_lowering_error("AArch64 aggregate value has no storage for extraction");
+                } else if (!a64_load_value_at(
                     ref program,
                     instruction.type_id,
                     instruction.result,
