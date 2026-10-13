@@ -28,6 +28,19 @@ func main() -> Int {
         return 1;
     }
 
+    let byte_type: WirTypeID = wir_unsigned_int_type(ref program, 8);
+    let large_array: WirTypeID = wir_array_type(ref program, byte_type, UIntSize(8192));
+    let large_id: WirFuncID = wir_add_function(ref program, "large_stack", [], int_type, false, WirLinkage.Exported, WirABI.C);
+    let large_entry: WirBlockID = wir_add_block(ref program, large_id, "entry", []);
+    wir_stack_alloc(ref program, large_entry, large_array, "buffer", no_wir_location());
+    wir_return(ref program, large_entry, wir_const_int(ref program, int_type, UInt128(0U)), no_wir_location());
+
+    let large: A64LoweringResult = a64_lower_function(ref program, large_id);
+    if (large.errors.length() != 0) {
+        print("FAIL: AArch64 large stack lowering failed: ", large.errors[0]);
+        return 1;
+    }
+
     print("PASS: AArch64 scalar stack slots");
     return 0;
 }

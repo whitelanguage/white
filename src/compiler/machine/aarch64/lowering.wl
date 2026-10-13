@@ -303,10 +303,6 @@ func a64_stack_layout(ref program: WirModule, ref function: WirFunction, layouts
     }
 
     let frame_size: Int = a64_align(size, 16);
-    if (frame_size > 4095) {
-        return A64StackLayout(storage=[], homes=[], frame_size=0, result_pointer_offset=-1, message="initial AArch64 stack frame exceeds the immediate range");
-    }
-
     return A64StackLayout(storage=storage, homes=homes, frame_size=frame_size, result_pointer_offset=result_pointer_offset, message="");
 }
 
@@ -321,8 +317,27 @@ func a64_find_stack_slot(slots: Vector(A64StackSlot), value: WirValueID) -> A64S
 }
 
 func a64_stack_address(ref output: A64CodeBuffer, destination: A64Register, offset: Int) -> Bool {
-    return offset >= 0 && offset <= 4095 &&
-           a64_add_immediate(ref output, destination, A64Register.SP, offset, true);
+    if (offset < 0 || destination == A64Register.None || destination == A64Register.SP) {
+        return false;
+    }
+
+    let remaining: Int = offset;
+    let base: A64Register = A64Register.SP;
+    if (remaining == 0) {
+        return a64_add_immediate(ref output, destination, base, 0, true);
+    }
+
+    while (remaining != 0) {
+        let amount: Int = remaining;
+        if (amount > 4095) { amount = 4095; }
+        if (!a64_add_immediate(ref output, destination, base, amount, true)) {
+            return false;
+        }
+        remaining -= amount;
+        base = destination;
+    }
+
+    return true;
 }
 
 func a64_aggregate_register_count(layout: WirTypeLayout) -> Int {

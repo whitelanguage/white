@@ -967,21 +967,33 @@ func a64_leave_frame(ref output: A64CodeBuffer) -> Void {
 }
 
 func a64_enter_sized_frame(ref output: A64CodeBuffer, frame_size: Int) -> Bool {
-    if (frame_size < 0 || frame_size > 4095 || frame_size % 16 != 0) { return false; }
+    if (frame_size < 0 || frame_size % 16 != 0) { return false; }
 
     a64_enter_frame(ref output);
-    if (frame_size != 0 && !a64_sub_immediate(ref output, A64Register.SP, A64Register.SP, frame_size, true)) {
-        return false;
+    let remaining: Int = frame_size;
+    while (remaining != 0) {
+        let amount: Int = remaining;
+        if (amount > 4080) { amount = 4080; }
+        if (!a64_sub_immediate(ref output, A64Register.SP, A64Register.SP, amount, true)) {
+            return false;
+        }
+        remaining -= amount;
     }
 
     return true;
 }
 
 func a64_leave_sized_frame(ref output: A64CodeBuffer, frame_size: Int) -> Bool {
-    if (frame_size < 0 || frame_size > 4095 || frame_size % 16 != 0) { return false; }
+    if (frame_size < 0 || frame_size % 16 != 0) { return false; }
 
-    if (frame_size != 0 && !a64_add_immediate(ref output, A64Register.SP, A64Register.SP, frame_size, true)) {
-        return false;
+    let remaining: Int = frame_size;
+    while (remaining != 0) {
+        let amount: Int = remaining;
+        if (amount > 4080) { amount = 4080; }
+        if (!a64_add_immediate(ref output, A64Register.SP, A64Register.SP, amount, true)) {
+            return false;
+        }
+        remaining -= amount;
     }
     a64_leave_frame(ref output);
 
