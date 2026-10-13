@@ -603,6 +603,23 @@ func a64_float_from_bits(ref output: A64CodeBuffer, destination: A64Register, so
     return true;
 }
 
+func a64_float_to_bits(ref output: A64CodeBuffer, destination: A64Register, source: A64Register, double: Bool) -> Bool {
+// this is the opposite FMOV form, from the SIMD bank back to a general register
+    let rd: Int = a64_gpr_code(destination);
+    let rn: Int = a64_vec_code(source);
+    if (rd < 0 || rn < 0 || destination == A64Register.SP) {
+        return false;
+    }
+
+    let word: UInt32 = 0x1E260000U;
+    if double { word = 0x9E660000U; }
+    word |= UInt32(rn << 5);
+    word |= UInt32(rd);
+    a64_emit_u32(ref output, word);
+
+    return true;
+}
+
 func a64_float_binary(ref output: A64CodeBuffer, destination: A64Register, left: A64Register, right: A64Register, operation: Int, double: Bool) -> Bool {
 // operation is add, sub, mul, div in that order.
     let rd: Int = a64_vec_code(destination);

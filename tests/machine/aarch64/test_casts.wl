@@ -17,6 +17,8 @@ func main() -> Int {
     let i128: WirTypeID = wir_signed_int_type(ref program, 128);
     let u64: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let u128: WirTypeID = wir_unsigned_int_type(ref program, 128);
+    let f32: WirTypeID = wir_float_type(ref program, 32);
+    let f64: WirTypeID = wir_float_type(ref program, 64);
     let pointer: WirTypeID = wir_pointer_type(ref program, wir_unsigned_int_type(ref program, 8));
 
     let function: WirFuncID = wir_add_function(ref program, "pointer_casts", [WirParam(name="value", type_id=i32)], i64, false, WirLinkage.Exported, WirABI.C);
@@ -45,6 +47,24 @@ func main() -> Int {
     let wide_bitcast_value: WirValueID = program.arena.functions[wir_id_index(UInt32(wide_bitcast))].parameters[0];
     let signed_wide: WirValueID = wir_cast(ref program, wide_bitcast_block, wide_bitcast_value, i128, "signed", no_wir_location());
     wir_return(ref program, wide_bitcast_block, signed_wide, no_wir_location());
+
+    let float_bits: WirFuncID = wir_add_function(ref program, "float_bits", [WirParam(name="value", type_id=f64)], i64, false, WirLinkage.Exported, WirABI.C);
+    let float_bits_block: WirBlockID = wir_add_block(ref program, float_bits, "entry", []);
+    let float_value: WirValueID = program.arena.functions[wir_id_index(UInt32(float_bits))].parameters[0];
+    let float_raw: WirValueID = wir_unary(ref program, float_bits_block, WirOpcode.Bitcast, i64, float_value, "raw", no_wir_location());
+    wir_return(ref program, float_bits_block, float_raw, no_wir_location());
+
+    let bits_float: WirFuncID = wir_add_function(ref program, "bits_float", [WirParam(name="value", type_id=i64)], f64, false, WirLinkage.Exported, WirABI.C);
+    let bits_float_block: WirBlockID = wir_add_block(ref program, bits_float, "entry", []);
+    let raw_value: WirValueID = program.arena.functions[wir_id_index(UInt32(bits_float))].parameters[0];
+    let restored_float: WirValueID = wir_unary(ref program, bits_float_block, WirOpcode.Bitcast, f64, raw_value, "value", no_wir_location());
+    wir_return(ref program, bits_float_block, restored_float, no_wir_location());
+
+    let single_bits: WirFuncID = wir_add_function(ref program, "single_bits", [WirParam(name="value", type_id=f32)], i32, false, WirLinkage.Exported, WirABI.C);
+    let single_bits_block: WirBlockID = wir_add_block(ref program, single_bits, "entry", []);
+    let single_value: WirValueID = program.arena.functions[wir_id_index(UInt32(single_bits))].parameters[0];
+    let single_raw: WirValueID = wir_unary(ref program, single_bits_block, WirOpcode.Bitcast, i32, single_value, "raw", no_wir_location());
+    wir_return(ref program, single_bits_block, single_raw, no_wir_location());
 
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {

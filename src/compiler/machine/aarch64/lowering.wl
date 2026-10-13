@@ -1953,6 +1953,33 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (!a64_save_home(ref output, stack.homes, instruction.result, destination, 64)) {
                     return a64_lowering_error("cannot save an AArch64 aggregate address");
                 }
+            } else if (instruction.opcode == WirOpcode.Bitcast && instruction.operands.length() == 1 &&
+                       (a64_scalar_float(ref program, instruction.type_id) ||
+                        a64_scalar_float(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id))) {
+                if (instruction.result == NO_WIR_VALUE) {
+                    return a64_lowering_error("floating-point bitcast has no result");
+                }
+
+                let source_id: WirValueID = instruction.operands[0];
+                let source_type: WirTypeID = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                let source_width: Int = a64_scalar_width(ref program, source_type);
+                let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
+                let source_float: Bool = a64_scalar_float(ref program, source_type);
+                let target_float: Bool = a64_scalar_float(ref program, instruction.type_id);
+                let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
+                let destination: A64Register = a64_alloc_register(ref values, target_float);
+                let encoded: Bool = source_width == target_width && (target_width == 32 || target_width == 64) &&
+                                    source != A64Register.None && destination != A64Register.None;
+                if (encoded && source_float && target_float) {
+                    encoded = a64_float_move(ref output, destination, source, target_width == 64);
+                } else if (encoded && source_float) {
+                    encoded = a64_float_to_bits(ref output, destination, source, target_width == 64);
+                } else if (encoded && target_float) {
+                    encoded = a64_float_from_bits(ref output, destination, source, target_width == 64);
+                }
+                if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    return a64_lowering_error("cannot encode an AArch64 floating-point bitcast");
+                }
             } else if (instruction.opcode == WirOpcode.Bitcast ||
                        instruction.opcode == WirOpcode.PointerToInt ||
                        instruction.opcode == WirOpcode.IntToPointer) {
