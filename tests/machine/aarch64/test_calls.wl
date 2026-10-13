@@ -68,14 +68,44 @@ func main() -> Int {
     let applied: WirValueID = wir_call_typed(ref program, apply_entry, apply.parameters[0], unary_type, [apply.parameters[1]], "applied", no_wir_location());
     wir_return(ref program, apply_entry, applied, no_wir_location());
 
+    let i64_type: WirTypeID = wir_signed_int_type(ref program, 64);
+    let sum_params: Vector(WirParam) = [];
+    let param_index: Int = 0;
+    while (param_index < 10) {
+        sum_params.append(wir_param("value" + param_index, i64_type));
+        param_index++;
+    }
+    let sum_id: WirFuncID = wir_add_function(ref program, "sum10", sum_params, i64_type, false, WirLinkage.Internal, WirABI.C);
+    let sum_entry: WirBlockID = wir_add_block(ref program, sum_id, "entry", []);
+    let sum_function: WirFunction = program.arena.functions[wir_id_index(UInt32(sum_id))];
+    let sum: WirValueID = sum_function.parameters[0];
+    param_index = 1;
+    while (param_index < sum_function.parameters.length()) {
+        sum = wir_binary(ref program, sum_entry, WirOpcode.Add, i64_type, sum, sum_function.parameters[param_index], "sum", no_wir_location());
+        param_index++;
+    }
+    wir_return(ref program, sum_entry, sum, no_wir_location());
+
+    let sum_caller: WirFuncID = wir_add_function(ref program, "call_sum10", [], i64_type, false, WirLinkage.Exported, WirABI.C);
+    let sum_caller_entry: WirBlockID = wir_add_block(ref program, sum_caller, "entry", []);
+    let sum_args: Vector(WirValueID) = [];
+    let arg_index: Int = 0;
+    while (arg_index < 10) {
+        sum_args.append(wir_const_int(ref program, i64_type, UInt128(arg_index + 1)));
+        arg_index++;
+    }
+    let sum_result: WirValueID = wir_call(ref program, sum_caller_entry, program.arena.functions[wir_id_index(UInt32(sum_id))].address, sum_args, "sum", no_wir_location());
+    wir_return(ref program, sum_caller_entry, sum_result, no_wir_location());
+
     let lowered: A64ModuleResult = a64_lower_module(ref program);
     if (lowered.errors.length() != 0) {
         print("FAIL: AArch64 direct call lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.relocations.length() != 2 || lowered.relocations[0].kind != A64RelocationKind.Call26 ||
+    if (lowered.relocations.length() != 3 || lowered.relocations[0].kind != A64RelocationKind.Call26 ||
         lowered.relocations[0].symbol != "helper" || lowered.relocations[1].kind != A64RelocationKind.Call26 ||
-        lowered.relocations[1].symbol != "load_pointer") {
+        lowered.relocations[1].symbol != "load_pointer" || lowered.relocations[2].kind != A64RelocationKind.Call26 ||
+        lowered.relocations[2].symbol != "sum10") {
         print("FAIL: AArch64 direct call relocation is missing");
         return 1;
     }

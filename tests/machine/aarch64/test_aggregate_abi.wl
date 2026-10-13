@@ -49,6 +49,30 @@ func main() -> Int {
     add_relay(ref program, "round_large", large, large_echo);
     add_relay(ref program, "round_hfa", hfa, hfa_echo);
 
+    let tail_params: Vector(WirParam) = [];
+    let i: Int = 0;
+    while (i < 8) {
+        tail_params.append(wir_param("prefix" + i, i64));
+        i++;
+    }
+    tail_params.append(wir_param("value", small));
+    let tail_id: WirFuncID = wir_add_function(ref program, "tail_small", tail_params, i32, false, WirLinkage.Internal, WirABI.C);
+    let tail_entry: WirBlockID = wir_add_block(ref program, tail_id, "entry", []);
+    let tail_function: WirFunction = program.arena.functions[wir_id_index(UInt32(tail_id))];
+    wir_return(ref program, tail_entry, wir_field(ref program, tail_entry, tail_function.parameters[8], 1, "value", no_wir_location()), no_wir_location());
+
+    let tail_caller: WirFuncID = wir_add_function(ref program, "call_tail_small", [], i32, false, WirLinkage.Exported, WirABI.C);
+    let tail_caller_entry: WirBlockID = wir_add_block(ref program, tail_caller, "entry", []);
+    let tail_args: Vector(WirValueID) = [];
+    i = 0;
+    while (i < 8) {
+        tail_args.append(wir_const_int(ref program, i64, UInt128(i)));
+        i++;
+    }
+    tail_args.append(wir_struct_value(ref program, tail_caller_entry, small, [wir_const_int(ref program, i64, UInt128(11U)), wir_const_int(ref program, i32, UInt128(42U))], "pair", no_wir_location()));
+    let tail_result: WirValueID = wir_call(ref program, tail_caller_entry, program.arena.functions[wir_id_index(UInt32(tail_id))].address, tail_args, "result", no_wir_location());
+    wir_return(ref program, tail_caller_entry, tail_result, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 aggregate ABI test: ", errors[0]);
@@ -67,7 +91,7 @@ func main() -> Int {
         print("FAIL: AArch64 aggregate ABI lowering: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 6 || lowered.relocations.length() != 3 ||
+    if (lowered.symbols.length() != 8 || lowered.relocations.length() != 4 ||
         lowered.sections.length() == 0 || lowered.sections[0].bytes.length() == 0) {
         print("FAIL: AArch64 aggregate ABI output is incomplete");
         return 1;
