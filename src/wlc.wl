@@ -401,8 +401,10 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     if (cfg.backend == "machine") {
         let machine_target: String = WhitelangTarget.get_target_triple();
-        if (machine_target != "x86_64-pc-windows-msvc" && machine_target != "x86_64-unknown-linux-gnu") {
-            print("Error: The machine backend currently supports x86_64 Windows and Linux targets.");
+        if (machine_target != "x86_64-pc-windows-msvc" &&
+            machine_target != "x86_64-unknown-linux-gnu" &&
+            machine_target != "aarch64-unknown-linux-gnu") {
+            print("Error: The machine backend currently supports x86_64 Windows, x86_64 Linux, and AArch64 Linux targets.");
             return 1;
         }
         if (cfg.is_emit_llvm || cfg.is_asm_only || cfg.dump_ir || cfg.debug_info) {
@@ -705,6 +707,11 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let clang_args: Vector(String) = [];
     let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
+    // A machine ELF object may contain target-specific helpers which are not
+    // reachable from this program. Keep section collection enabled at O0 too,
+    // otherwise a cross build still asks the linker to resolve those helpers.
+    let collect_sections: Bool = size_opt ||
+        (cfg.backend == "machine" && WhitelangTarget.get_target_triple() == "aarch64-unknown-linux-gnu");
     if (cfg.debug_info) { clang_args.append("-g"); }
     if using_mingw_linker {
         clang_args.append("--target=x86_64-w64-windows-gnu");
@@ -763,7 +770,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         clang_args.append(cfg.output_file);
     }
     else {
-        if size_opt {
+        if collect_sections {
             clang_args.append("-Xlinker");
             if using_mingw_linker { clang_args.append("--gc-sections"); }
             else if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
@@ -772,10 +779,10 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             else { clang_args.append("--gc-sections"); }
 
-            if using_mingw_linker {
+            if (size_opt && using_mingw_linker) {
                 clang_args.append("-Xlinker");
                 clang_args.append("--icf=all");
-            } else if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+            } else if (size_opt && WhitelangTarget.get_target_os() == sys.Os.Windows) {
                 clang_args.append("-Xlinker");
                 clang_args.append("/opt:icf");
             }
