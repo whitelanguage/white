@@ -11,6 +11,8 @@ func a64_elf_reloc_type(kind: A64RelocationKind) -> UInt32 {
     if (kind == A64RelocationKind.PageOffset12) { return 277U; }
     if (kind == A64RelocationKind.Jump26) { return 282U; }
     if (kind == A64RelocationKind.Call26) { return 283U; }
+    if (kind == A64RelocationKind.GotPage21) { return 311U; }
+    if (kind == A64RelocationKind.GotOffset12) { return 312U; }
 
     return 0U;
 }

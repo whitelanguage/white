@@ -20,6 +20,8 @@ extern struct Large large_relay(struct Large value);
 extern unsigned __int128 wide_add(unsigned __int128 value, unsigned __int128 extra);
 extern unsigned __int128 wide_relay(unsigned __int128 value);
 extern int64_t stack_pair(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, struct Pair);
+extern int64_t exported_counter;
+extern int64_t counter_read(void);
 
 struct Hfa host_hfa(struct Hfa value) {
     value.a += 1.0;
@@ -58,6 +60,10 @@ int main(void) {
     if (wide_relay(high + 7) != high + (((unsigned __int128)1) << 96) + 16) return 7;
 
     if (stack_pair(1, 2, 3, 4, 5, 6, 7, 8, pair) != 78) return 8;
+
+    if (exported_counter != 17 || counter_read() != 17) return 9;
+    exported_counter = 42;
+    if (counter_read() != 42) return 10;
 
     puts("PASS: AArch64 C ABI");
     return 0;

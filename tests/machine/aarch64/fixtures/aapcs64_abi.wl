@@ -13,6 +13,14 @@ extern "C" {
 }
 
 @ExportLib
+let exported_counter: Long = 17L;
+
+@ExportLib
+func counter_read() -> Long {
+    return exported_counter;
+}
+
+@ExportLib
 func pair_make(x: Long, y: Int) -> Pair {
     return Pair(x=x, y=y);
 }

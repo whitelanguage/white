@@ -700,6 +700,34 @@ func a64_value_symbol(ref program: WirModule, value: WirValue) -> String {
     return "";
 }
 
+func a64_value_uses_got(ref program: WirModule, value: WirValue) -> Bool {
+    let owner: Int = wir_id_index(value.owner);
+    if (value.kind == WirValueKind.Global && owner >= 0 && owner < program.arena.globals.length()) {
+        let linkage: WirLinkage = program.arena.globals[owner].linkage;
+        return linkage == WirLinkage.Exported || linkage == WirLinkage.External;
+    }
+    if (value.kind == WirValueKind.Function && owner >= 0 && owner < program.arena.functions.length()) {
+        let linkage: WirLinkage = program.arena.functions[owner].linkage;
+        return linkage == WirLinkage.Exported || linkage == WirLinkage.External;
+    }
+
+    return false;
+}
+
+func a64_materialize_symbol(ref program: WirModule, value: WirValue, addend: Long, ref values: A64ValueMap, ref output: A64CodeBuffer) -> A64Register {
+    let register: A64Register = a64_alloc_register(ref values, false);
+    if (register == A64Register.None) { return A64Register.None; }
+
+    let symbol: String = a64_value_symbol(ref program, value);
+    if (a64_value_uses_got(ref program, value)) {
+        if (!a64_symbol_got_address(ref output, register, symbol, addend)) { return A64Register.None; }
+    } else if (!a64_symbol_address(ref output, register, symbol, addend)) {
+        return A64Register.None;
+    }
+
+    return register;
+}
+
 func a64_materialize(
     ref program: WirModule,
     value_id: WirValueID,
@@ -730,12 +758,7 @@ func a64_materialize(
     }
 
     if (value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
-        let register: A64Register = a64_alloc_register(ref values, false);
-        if (register == A64Register.None || !a64_symbol_address(ref output, register, a64_value_symbol(ref program, value), 0L)) {
-            return A64Register.None;
-        }
-
-        return register;
+        return a64_materialize_symbol(ref program, value, 0L, ref values, ref output);
     }
 
     if (value.kind == WirValueKind.Constant) {
@@ -750,13 +773,8 @@ func a64_materialize(
             if (target_index < 0 || target_index >= program.arena.values.length()) {
                 return A64Register.None;
             }
-            let register: A64Register = a64_alloc_register(ref values, false);
             let target: WirValue = program.arena.values[target_index];
-            if (register == A64Register.None ||
-                !a64_symbol_address(ref output, register, a64_value_symbol(ref program, target), constant.addend)) {
-                return A64Register.None;
-            }
-            return register;
+            return a64_materialize_symbol(ref program, target, constant.addend, ref values, ref output);
         }
         if (constant.kind != WirConstKind.Zero) {
             return A64Register.None;

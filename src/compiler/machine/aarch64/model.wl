@@ -93,6 +93,8 @@ enum A64RelocationKind {
     Jump26,
     Page21,
     PageOffset12,
+    GotPage21,
+    GotOffset12,
     Abs64
 }
 
