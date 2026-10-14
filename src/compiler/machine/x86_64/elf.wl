@@ -111,7 +111,7 @@ func elf_object(input: X86Object) -> Vector(Byte)? {
     i = 0;
     while (i < input.symbols.length()) {
         let source: X86Symbol = input.symbols[i];
-        symbols.append(MachineSymbol(name=source.name, section=source.section, offset=source.offset, external=source.external));
+        symbols.append(MachineSymbol(name=source.name, section=source.section, offset=source.offset, external=source.external, hidden=source.section.length() != 0 && !source.external));
         i++;
     }
 

@@ -187,7 +187,7 @@ func machine_emit_globals(
     while (i < program.arena.globals.length()) {
         let global: WirGlobal = program.arena.globals[i];
         if (global.linkage == WirLinkage.External) {
-            symbols.append(MachineSymbol(name=global.name, section="", offset=0U, external=true));
+            symbols.append(MachineSymbol(name=global.name, section="", offset=0U, external=true, hidden=false));
             i++;
             continue;
         }
@@ -222,7 +222,7 @@ func machine_emit_globals(
         let message: String = machine_write_initializer(ref program, layouts, ref section, ref relocations, global.initializer, offset, 0);
         if (message.length() != 0) { return machine_data_error(message); }
 
-        symbols.append(MachineSymbol(name=global.name, section=section.name, offset=UInt32(offset), external=global.linkage == WirLinkage.Exported));
+        symbols.append(MachineSymbol(name=global.name, section=section.name, offset=UInt32(offset), external=global.linkage == WirLinkage.Exported, hidden=global.linkage != WirLinkage.Exported));
         if (global.is_const) {
             readonly = section;
             has_readonly = true;

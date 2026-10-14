@@ -3194,9 +3194,9 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
                 relocations.append(relocation);
                 relocation_index++;
             }
-            symbols.append(A64Symbol(name=function.name, section=".text", offset=UInt32(offset), external=function.linkage == WirLinkage.Exported));
+            symbols.append(A64Symbol(name=function.name, section=".text", offset=UInt32(offset), external=function.linkage == WirLinkage.Exported, hidden=function.linkage != WirLinkage.Exported));
         } else if (function.linkage == WirLinkage.External) {
-            symbols.append(A64Symbol(name=function.name, section="", offset=0U, external=true));
+            symbols.append(A64Symbol(name=function.name, section="", offset=0U, external=true, hidden=false));
         }
         i++;
     }
@@ -3207,7 +3207,7 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
     i = 0;
     while (i < data.symbols.length()) {
         let symbol: MachineSymbol = data.symbols[i];
-        symbols.append(A64Symbol(name=symbol.name, section=symbol.section, offset=symbol.offset, external=symbol.external));
+        symbols.append(A64Symbol(name=symbol.name, section=symbol.section, offset=symbol.offset, external=symbol.external, hidden=symbol.hidden));
         i++;
     }
     i = 0;

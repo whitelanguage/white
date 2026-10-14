@@ -208,12 +208,14 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
         let symbol: MachineSymbol = input.symbols[i];
         let section: Int = section_numbers.lookup(symbol.section);
         let bind_type: UInt32 = 16U;
+        let visibility: Byte = Byte(0);
 
         if (symbol.section == ".text" || symbol.section.starts_with(".text.")) { bind_type += 2U; }
         else if (symbol.section.length() != 0) { bind_type += 1U; }
+        if (symbol.hidden) { visibility = Byte(2); }
         elf_u32(ref symtab, UInt32(stroffsets.lookup(symbol.name)));
         symtab.append(Byte(bind_type));
-        symtab.append(Byte(0));
+        symtab.append(visibility);
         elf_u16(ref symtab, UInt32(section));
         elf_u64(ref symtab, UInt64(symbol.offset));
         elf_u64(ref symtab, 0UL);

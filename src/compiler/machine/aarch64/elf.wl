@@ -119,7 +119,7 @@ func a64_elf_object(input: A64Object) -> Vector(Byte)? {
             section = ".text." + owner;
             offset -= input.symbols[text_symbols[owner]].offset;
         }
-        symbols.append(MachineSymbol(name=source.name, section=section, offset=offset, external=source.external));
+        symbols.append(MachineSymbol(name=source.name, section=section, offset=offset, external=source.external, hidden=source.hidden));
         i++;
     }
     i = 0;

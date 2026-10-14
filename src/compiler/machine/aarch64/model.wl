@@ -100,7 +100,8 @@ struct A64Symbol(
     name: String,
     section: String,
     offset: UInt32,
-    external: Bool
+    external: Bool,
+    hidden: Bool
 )
 
 struct A64Relocation(

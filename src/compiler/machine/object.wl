@@ -11,7 +11,8 @@ struct MachineSymbol(
     name: String,
     section: String,
     offset: UInt32,
-    external: Bool
+    external: Bool,
+    hidden: Bool
 )
 
 struct MachineRelocation(
