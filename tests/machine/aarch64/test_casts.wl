@@ -66,6 +66,12 @@ func main() -> Int {
     let single_raw: WirValueID = wir_unary(ref program, single_bits_block, WirOpcode.Bitcast, i32, single_value, "raw", no_wir_location());
     wir_return(ref program, single_bits_block, single_raw, no_wir_location());
 
+    let bool_extend: WirFuncID = wir_add_function(ref program, "bool_extend", [], u64, false, WirLinkage.Exported, WirABI.C);
+    let bool_extend_block: WirBlockID = wir_add_block(ref program, bool_extend, "entry", []);
+    let bool_value: WirValueID = wir_const_bool(ref program, true);
+    let bool_wide: WirValueID = wir_unary(ref program, bool_extend_block, WirOpcode.ZeroExtend, u64, bool_value, "wide", no_wir_location());
+    wir_return(ref program, bool_extend_block, bool_wide, no_wir_location());
+
     let errors: Vector(String) = verify_wir(program);
     if (errors.length() != 0) {
         print("FAIL: invalid AArch64 cast test: ", errors[0]);

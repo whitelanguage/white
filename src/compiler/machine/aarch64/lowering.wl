@@ -109,6 +109,9 @@ func a64_integer_bits(ref program: WirModule, type_id: WirTypeID) -> Int {
     }
 
     let type: WirType = program.arena.types[index];
+    if (type.kind == WirTypeKind.BoolType) {
+        return 1;
+    }
     if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) {
         return 0;
     }
