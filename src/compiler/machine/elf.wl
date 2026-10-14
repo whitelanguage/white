@@ -120,12 +120,13 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     }
 
     let sections: Vector(ElfSection) = [];
+    let section_numbers: Dict(String, Int) = Dict();
     let i: Int = 0;
 
     while (i < input.sections.length()) {
         let source: MachineSection = input.sections[i];
 
-        if (source.name.length() == 0 || elf_section_index(sections, source.name) >= 0) {
+        if (source.name.length() == 0 || section_numbers.contains_key(source.name)) {
             throw Error.InvalidArgument;
         }
 
@@ -137,6 +138,7 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
 
         if (align == 0UL) { align = 1UL; }
         sections.append(ElfSection(name=source.name, kind=1U, flags=flags, align=align, data=source.bytes, link=0U, info=0U, entsize=0UL));
+        section_numbers.put(source.name, sections.length());
         i += 1;
     }
 
@@ -156,15 +158,15 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     }
 
     let reloc_names: Vector(String) = [];
+    let reloc_sections: Dict(String, Bool) = Dict();
+    i = 0;
+    while (i < input.relocations.length()) {
+        reloc_sections.put(input.relocations[i].section, true);
+        i += 1;
+    }
     i = 0;
     while (i < input.sections.length()) {
-        let found: Bool = false;
-        let j: Int = 0;
-
-        while (j < input.relocations.length()) {
-            if (input.relocations[j].section == input.sections[i].name) { found = true; }
-            j += 1;
-        }
+        let found: Bool = reloc_sections.contains_key(input.sections[i].name);
 
         if found { reloc_names.append(".rela" + input.sections[i].name); }
         i += 1;
@@ -172,21 +174,26 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
 
     // Mark the object as not requiring an executable process stack. Without
     // this empty note GNU ld warns and may carry an executable-stack flag.
-    if (elf_section_index(sections, ".note.GNU-stack") < 0) {
+    if (!section_numbers.contains_key(".note.GNU-stack")) {
         sections.append(ElfSection(name=".note.GNU-stack", kind=1U, flags=0UL, align=1UL, data=[], link=0U, info=0U, entsize=0UL));
+        section_numbers.put(".note.GNU-stack", sections.length());
     }
     i = 0;
     while (i < reloc_names.length()) {
         sections.append(ElfSection(name=reloc_names[i], kind=4U, flags=0UL, align=8UL, data=[], link=0U, info=0U, entsize=24UL));
+        section_numbers.put(reloc_names[i], sections.length());
         i += 1;
     }
 
     let symtab_index: Int = sections.length();
     sections.append(ElfSection(name=".symtab", kind=2U, flags=0UL, align=8UL, data=[], link=0U, info=1U, entsize=24UL));
+    section_numbers.put(".symtab", sections.length());
     let strtab_index: Int = sections.length();
     sections.append(ElfSection(name=".strtab", kind=3U, flags=0UL, align=1UL, data=strtab, link=0U, info=0U, entsize=0UL));
+    section_numbers.put(".strtab", sections.length());
     let shstrtab_index: Int = sections.length();
     sections.append(ElfSection(name=".shstrtab", kind=3U, flags=0UL, align=1UL, data=[], link=0U, info=0U, entsize=0UL));
+    section_numbers.put(".shstrtab", sections.length());
 
     let symtab: Vector(Byte) = [];
     elf_u32(ref symtab, 0U);
@@ -199,18 +206,15 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     i = 0;
     while (i < input.symbols.length()) {
         let symbol: MachineSymbol = input.symbols[i];
-        let section: Int = elf_section_index(sections, symbol.section);
+        let section: Int = section_numbers.lookup(symbol.section);
         let bind_type: UInt32 = 16U;
 
-        if (symbol.section == ".text") { bind_type += 2U; }
+        if (symbol.section == ".text" || symbol.section.starts_with(".text.")) { bind_type += 2U; }
         else if (symbol.section.length() != 0) { bind_type += 1U; }
         elf_u32(ref symtab, UInt32(stroffsets.lookup(symbol.name)));
         symtab.append(Byte(bind_type));
         symtab.append(Byte(0));
-        if (section < 0) { elf_u16(ref symtab, 0U); }
-        else {
-            elf_u16(ref symtab, UInt32(section + 1));
-        }
+        elf_u16(ref symtab, UInt32(section));
         elf_u64(ref symtab, UInt64(symbol.offset));
         elf_u64(ref symtab, 0UL);
         i += 1;
@@ -222,12 +226,14 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     while (i < reloc_names.length()) {
         let target: String = reloc_names[i].slice(5, reloc_names[i].length());
         let reloc: Vector(Byte) = elf_reloc_data(input.relocations, target, sym_indices)?;
-        let section_index: Int = elf_section_index(sections, reloc_names[i]);
+        let section_number: Int = section_numbers.lookup(reloc_names[i]);
+        let target_number: Int = section_numbers.lookup(target);
 
-        if (section_index < 0) { throw Error.InvalidArgument; }
+        if (section_number == 0 || target_number == 0) { throw Error.InvalidArgument; }
+        let section_index: Int = section_number - 1;
         sections[section_index].data = reloc;
         sections[section_index].link = UInt32(symtab_index + 1);
-        sections[section_index].info = UInt32(elf_section_index(sections, target) + 1);
+        sections[section_index].info = UInt32(target_number);
         i += 1;
     }
 
@@ -276,8 +282,12 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     output[20] = Byte(1);
     output[52] = Byte(64);
     output[58] = Byte(64);
-    output[60] = Byte(sections.length() + 1);
-    output[62] = Byte(shstrtab_index + 1);
+    let section_count: UInt32 = UInt32(sections.length() + 1);
+    let string_section: UInt32 = UInt32(shstrtab_index + 1);
+    output[60] = Byte(section_count & 255U);
+    output[61] = Byte((section_count >> 8U) & 255U);
+    output[62] = Byte(string_section & 255U);
+    output[63] = Byte((string_section >> 8U) & 255U);
 
     let shoff: UInt64 = UInt64(section_headers);
     let shoff_index: Int = 40;
