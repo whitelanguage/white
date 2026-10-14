@@ -1153,19 +1153,19 @@ func a64_wide_shift(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A
     }
 
     if (opcode == WirOpcode.ShiftLeft) {
-        if (!a64_shift_register(ref output, destination.high, source.high, count, 0, true) ||
-            !a64_shift_register(ref output, cross, source.low, work, 2, true) ||
+        if (!a64_shift_register(ref output, destination.high, destination.high, count, 0, true) ||
+            !a64_shift_register(ref output, cross, destination.low, work, 2, true) ||
             !a64_logical_register(ref output, destination.high, destination.high, cross, 1, true) ||
-            !a64_shift_register(ref output, destination.low, source.low, count, 0, true)) {
+            !a64_shift_register(ref output, destination.low, destination.low, count, 0, true)) {
             return false;
         }
     } else {
         let high_shift: Int = 2;
         if (opcode == WirOpcode.SignedShiftRight) { high_shift = 1; }
-        if (!a64_shift_register(ref output, destination.low, source.low, count, 2, true) ||
-            !a64_shift_register(ref output, cross, source.high, work, 0, true) ||
+        if (!a64_shift_register(ref output, destination.low, destination.low, count, 2, true) ||
+            !a64_shift_register(ref output, cross, destination.high, work, 0, true) ||
             !a64_logical_register(ref output, destination.low, destination.low, cross, 1, true) ||
-            !a64_shift_register(ref output, destination.high, source.high, count, high_shift, true)) {
+            !a64_shift_register(ref output, destination.high, destination.high, count, high_shift, true)) {
             return false;
         }
     }
@@ -1179,19 +1179,19 @@ func a64_wide_shift(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A
     }
 
     if (opcode == WirOpcode.ShiftLeft) {
-        if (!a64_shift_register(ref output, destination.high, source.low, count, 0, true) ||
+        if (!a64_shift_register(ref output, destination.high, destination.low, count, 0, true) ||
             !a64_mov_immediate(ref output, destination.low, 0UL, true)) {
             return false;
         }
     } else {
         let low_shift: Int = 2;
         if (opcode == WirOpcode.SignedShiftRight) { low_shift = 1; }
-        if (!a64_shift_register(ref output, destination.low, source.high, count, low_shift, true)) {
+        if (!a64_shift_register(ref output, destination.low, destination.high, count, low_shift, true)) {
             return false;
         }
         if (opcode == WirOpcode.SignedShiftRight) {
             if (!a64_mov_immediate(ref output, work, 63UL, true) ||
-                !a64_shift_register(ref output, destination.high, source.high, work, 1, true)) {
+                !a64_shift_register(ref output, destination.high, destination.high, work, 1, true)) {
                 return false;
             }
         } else if (!a64_mov_immediate(ref output, destination.high, 0UL, true)) {
