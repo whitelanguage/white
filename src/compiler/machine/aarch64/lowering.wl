@@ -720,7 +720,19 @@ func a64_materialize_symbol(ref program: WirModule, value: WirValue, addend: Lon
 
     let symbol: String = a64_value_symbol(ref program, value);
     if (a64_value_uses_got(ref program, value)) {
-        if (!a64_symbol_got_address(ref output, register, symbol, addend)) { return A64Register.None; }
+        if (!a64_symbol_got_address(ref output, register, symbol)) { return A64Register.None; }
+
+        if (addend > 0L && addend <= 4095L) {
+            if (!a64_add_immediate(ref output, register, register, Int(addend), true)) { return A64Register.None; }
+        } else if (addend < 0L && addend >= -4095L) {
+            if (!a64_sub_immediate(ref output, register, register, Int(-addend), true)) { return A64Register.None; }
+        } else if (addend != 0L) {
+            let temporary: A64Register = a64_alloc_register(ref values, false);
+            if (temporary == A64Register.None || !a64_mov_immediate(ref output, temporary, UInt64(addend), true) ||
+                !a64_add_register(ref output, register, register, temporary, true)) {
+                return A64Register.None;
+            }
+        }
     } else if (!a64_symbol_address(ref output, register, symbol, addend)) {
         return A64Register.None;
     }

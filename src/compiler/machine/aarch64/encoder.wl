@@ -954,7 +954,7 @@ func a64_symbol_address(ref output: A64CodeBuffer, destination: A64Register, sym
     return true;
 }
 
-func a64_symbol_got_address(ref output: A64CodeBuffer, destination: A64Register, symbol: String, addend: Long) -> Bool {
+func a64_symbol_got_address(ref output: A64CodeBuffer, destination: A64Register, symbol: String) -> Bool {
 // Default-visible data may be replaced by the dynamic loader. Load its final
 // address through the GOT rather than baking the link-time definition into text.
     let rd: Int = a64_gpr_code(destination);
@@ -962,12 +962,12 @@ func a64_symbol_got_address(ref output: A64CodeBuffer, destination: A64Register,
 
     let page_offset: UInt32 = UInt32(output.bytes.length());
     a64_emit_u32(ref output, 0x90000000U | UInt32(rd));
-    output.relocations.append(A64Relocation(section=".text", offset=page_offset, kind=A64RelocationKind.GotPage21, symbol=symbol, addend=addend));
+    output.relocations.append(A64Relocation(section=".text", offset=page_offset, kind=A64RelocationKind.GotPage21, symbol=symbol, addend=0L));
 
     let low_offset: UInt32 = UInt32(output.bytes.length());
     let load: UInt32 = 0xF9400000U | UInt32(rd << 5) | UInt32(rd);
     a64_emit_u32(ref output, load);
-    output.relocations.append(A64Relocation(section=".text", offset=low_offset, kind=A64RelocationKind.GotOffset12, symbol=symbol, addend=addend));
+    output.relocations.append(A64Relocation(section=".text", offset=low_offset, kind=A64RelocationKind.GotOffset12, symbol=symbol, addend=0L));
 
     return true;
 }

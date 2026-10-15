@@ -59,6 +59,14 @@ func main() -> Int {
         return 1;
     }
 
+    if (!a64_symbol_got_address(ref code, A64Register.X9, "exported_value") || code.relocations.length() != 3 ||
+        code.relocations[1].kind != A64RelocationKind.GotPage21 ||
+        code.relocations[2].kind != A64RelocationKind.GotOffset12 ||
+        code.relocations[1].addend != 0L || code.relocations[2].addend != 0L) {
+        print("FAIL: GOT address relocations were not recorded");
+        return 1;
+    }
+
     print("PASS: AArch64 instruction encoding");
     return 0;
 }
