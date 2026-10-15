@@ -4,6 +4,7 @@
 
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
+import A64Register from "../../../src/compiler/machine/aarch64/model.wl"
 import * from "../../../src/compiler/machine/aarch64/allocator.wl"
 
 
@@ -57,10 +58,18 @@ func main() -> Int {
     let first_instruction: WirInstruction = program.arena.instructions[
         wir_id_index(UInt32(block.instructions[0]))
     ];
+    let value_register: A64Register = a64_alloc_register(ref values, false);
+    if (value_register == A64Register.None || !a64_bind_value(ref values, value, value_register) ||
+        a64_mapped_register(ref values, value) != value_register) {
+        print("FAIL: AArch64 value was not bound to its register");
+        return 1;
+    }
+
     a64_finish_instruction(ref values, first_instruction);
 
     if (values.position != 1 || a64_next_use(ref values.uses, value, 0) != 1 ||
-        a64_next_use(ref values.uses, one, 0) != A64_NO_NEXT_USE) {
+        a64_next_use(ref values.uses, one, 0) != A64_NO_NEXT_USE ||
+        a64_mapped_register(ref values, value) != value_register) {
         print("FAIL: AArch64 next-use cursor did not advance");
         return 1;
     }
@@ -69,7 +78,8 @@ func main() -> Int {
         wir_id_index(UInt32(block.instructions[1]))
     ];
     a64_finish_instruction(ref values, second_instruction);
-    if (a64_next_use(ref values.uses, value, 1) != A64_NO_NEXT_USE) {
+    if (a64_next_use(ref values.uses, value, 1) != A64_NO_NEXT_USE ||
+        a64_mapped_register(ref values, value) != A64Register.None) {
         print("FAIL: AArch64 value remained live after its last use");
         return 1;
     }

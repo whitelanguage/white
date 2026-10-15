@@ -684,6 +684,9 @@ func a64_materialize(
     if (index < 0 || index >= program.arena.values.length()) { return A64Register.None; }
 
     let value: WirValue = program.arena.values[index];
+    let mapped: A64Register = a64_mapped_register(ref values, value_id);
+    if (mapped != A64Register.None) { return mapped; }
+
     let floating: Bool = a64_scalar_float(ref program, value.type_id);
     let width: Int = a64_scalar_width(ref program, value.type_id);
     let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
@@ -699,11 +702,16 @@ func a64_materialize(
             return A64Register.None;
         }
 
+        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
         return register;
     }
 
     if (value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
-        return a64_materialize_symbol(ref program, value, 0L, ref values, ref output);
+        let register: A64Register = a64_materialize_symbol(ref program, value, 0L, ref values, ref output);
+        if (register == A64Register.None || !a64_bind_value(ref values, value_id, register)) {
+            return A64Register.None;
+        }
+        return register;
     }
 
     if (value.kind == WirValueKind.Constant) {
@@ -719,7 +727,17 @@ func a64_materialize(
                 return A64Register.None;
             }
             let target: WirValue = program.arena.values[target_index];
-            return a64_materialize_symbol(ref program, target, constant.addend, ref values, ref output);
+            let register: A64Register = a64_materialize_symbol(
+                ref program,
+                target,
+                constant.addend,
+                ref values,
+                ref output
+            );
+            if (register == A64Register.None || !a64_bind_value(ref values, value_id, register)) {
+                return A64Register.None;
+            }
+            return register;
         }
         if (constant.kind != WirConstKind.Zero) {
             return A64Register.None;
@@ -733,6 +751,7 @@ func a64_materialize(
                 !a64_float_from_bits(ref output, register, bits, width == 64)) {
                 return A64Register.None;
             }
+            if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
             return register;
         }
 
@@ -740,6 +759,7 @@ func a64_materialize(
         if (register == A64Register.None || !a64_mov_immediate(ref output, register, 0UL, width == 64)) {
             return A64Register.None;
         }
+        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
         return register;
     }
 
@@ -758,6 +778,7 @@ func a64_materialize(
             !a64_float_from_bits(ref output, register, bits_register, width == 64)) {
             return A64Register.None;
         }
+        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
         return register;
     }
 
@@ -769,6 +790,7 @@ func a64_materialize(
         return A64Register.None;
     }
 
+    if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
     return register;
 }
 
@@ -784,6 +806,9 @@ func a64_materialize_address(
 
     // form StackAlloc pointers from frame offsets, loading a scalar home here
     // would read the allocation's contents and treat those bytes as an address.
+    let mapped: A64Register = a64_mapped_register(ref values, value_id);
+    if (mapped != A64Register.None) { return mapped; }
+
     let slot: A64StackSlot = a64_find_stack_slot(storage, value_id);
     if (slot.value != NO_WIR_VALUE) {
         let address: A64Register = a64_alloc_register(ref values, false);
@@ -791,6 +816,7 @@ func a64_materialize_address(
             return A64Register.None;
         }
 
+        if (!a64_bind_value(ref values, value_id, address)) { return A64Register.None; }
         return address;
     }
 
@@ -1170,15 +1196,18 @@ func a64_wide_shift(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A
            a64_patch_branch(ref output, done, end, A64Condition.Always, false);
 }
 
-func a64_save_home(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, register: A64Register, width: Int) -> Bool {
+func a64_save_home(ref values: A64ValueMap, ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, register: A64Register, width: Int) -> Bool {
     let home: A64StackSlot = a64_find_stack_slot(homes, value);
     if (home.value == NO_WIR_VALUE || width == 0 || home.size != width / 8) { return false; }
 
+    let saved: Bool = false;
     if (a64_vec_code(register) >= 0) {
-        return a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
+        saved = a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
+    } else {
+        saved = a64_store_integer_at(ref output, register, A64Register.SP, home.offset, width);
     }
 
-    return a64_store_integer_at(ref output, register, A64Register.SP, home.offset, width);
+    return saved && a64_bind_value(ref values, value, register);
 }
 
 func a64_memory_width(ref program: WirModule, type_id: WirTypeID) -> Int {
@@ -1416,7 +1445,7 @@ func a64_load_value_at(
     }
 
     return destination != A64Register.None && loaded &&
-           a64_save_home(ref output, homes, result, destination, a64_scalar_width(ref program, type_id));
+           a64_save_home(ref values, ref output, homes, result, destination, a64_scalar_width(ref program, type_id));
 }
 
 func a64_comparison_condition(opcode: WirOpcode) -> A64Condition {
@@ -1451,6 +1480,24 @@ func a64_is_integer_binary(opcode: WirOpcode) -> Bool {
 func a64_is_integer_division(opcode: WirOpcode) -> Bool {
     return opcode == WirOpcode.SignedDivide || opcode == WirOpcode.UnsignedDivide ||
            opcode == WirOpcode.SignedRemainder || opcode == WirOpcode.UnsignedRemainder;
+}
+
+func a64_instruction_uses_wide_int(ref program: WirModule, instruction: WirInstruction) -> Bool {
+    if (instruction.type_id != NO_WIR_TYPE && a64_integer_width(ref program, instruction.type_id) == 128) {
+        return true;
+    }
+
+    let i: Int = 0;
+    while (i < instruction.operands.length()) {
+        let index: Int = wir_id_index(UInt32(instruction.operands[i]));
+        if (index >= 0 && index < program.arena.values.length() &&
+            a64_integer_width(ref program, program.arena.values[index].type_id) == 128) {
+            return true;
+        }
+        i++;
+    }
+
+    return false;
 }
 
 func a64_is_float_comparison(opcode: WirOpcode) -> Bool {
@@ -1639,7 +1686,7 @@ func a64_write_edge(ref program: WirModule, edge: WirEdge, homes: Vector(A64Stac
 
         width = a64_scalar_width(ref program, parameter_type);
         let source: A64Register = a64_materialize(ref program, argument, homes, ref values, ref output);
-        if (source == A64Register.None || width == 0 || !a64_save_home(ref output, homes, parameter, source, width)) {
+        if (source == A64Register.None || width == 0 || !a64_save_home(ref values, ref output, homes, parameter, source, width)) {
             return false;
         }
         i++;
@@ -1802,7 +1849,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         } else {
             incoming = a64_argument_register(location.first, floating);
         }
-        if (incoming == A64Register.None || !a64_save_home(ref output, stack.homes, parameter, incoming, width)) {
+        if (incoming == A64Register.None || !a64_save_home(ref values, ref output, stack.homes, parameter, incoming, width)) {
             return a64_lowering_error("cannot save an AArch64 argument register");
         }
         i++;
@@ -1831,6 +1878,12 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
     i = 0;
     while (i < function.blocks.length()) {
+        if (i != 0) {
+            // each block starts from its homes. Keeping a mapping from the
+            // previously emitted block would make code layout look like flow.
+            a64_clear_bindings(ref values);
+        }
+
         let block_id: WirBlockID = function.blocks[i];
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
         offsets.append(A64BlockOffset(block=block_id, offset=output.bytes.length()));
@@ -1838,6 +1891,11 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         let instruction_index: Int = 0;
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
+            if (a64_instruction_uses_wide_int(ref program, instruction)) {
+                // Pair lowering still uses a compact rotating scratch bank.
+                // Do not let scalar cache state change its overlap pattern.
+                a64_reset_temporaries(ref values);
+            }
 
             if (instruction.opcode == WirOpcode.StackAlloc) {
                 // stack slots were assigned before instruction selection
@@ -2046,7 +2104,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         width,
                         a64_atomic_acquire(instruction.memory_order)
                     ) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, home_width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, home_width)) {
                     return a64_lowering_error("cannot encode AArch64 atomic load");
                 }
             } else if (instruction.opcode == WirOpcode.AtomicStore) {
@@ -2119,7 +2177,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         width,
                         instruction.memory_order
                     ) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, old_value, home_width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, old_value, home_width)) {
                     return a64_lowering_error("cannot encode AArch64 atomic read-modify-write");
                 }
             } else if (instruction.opcode == WirOpcode.FieldAddress ||
@@ -2227,7 +2285,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                 }
 
-                if (!a64_save_home(ref output, stack.homes, instruction.result, destination, 64)) {
+                if (!a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, 64)) {
                     return a64_lowering_error("cannot save an AArch64 aggregate address");
                 }
             } else if (instruction.opcode == WirOpcode.Bitcast && instruction.operands.length() == 1 &&
@@ -2254,7 +2312,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 } else if (encoded && target_float) {
                     encoded = a64_float_from_bits(ref output, destination, source, target_width == 64);
                 }
-                if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                     return a64_lowering_error("cannot encode an AArch64 floating-point bitcast");
                 }
             } else if (instruction.opcode == WirOpcode.Bitcast ||
@@ -2310,7 +2368,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     let destination: A64Register = a64_alloc_register(ref values, false);
                     let encoded: Bool = source.low != A64Register.None && destination != A64Register.None &&
                                         a64_mov_register(ref output, destination, source.low, target_width == 64);
-                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                         return a64_lowering_error("cannot cast a 128-bit integer to an AArch64 pointer");
                     }
                 } else {
@@ -2330,7 +2388,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     } else if encoded {
                         encoded = a64_mov_register(ref output, destination, source, target_width == 64);
                     }
-                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                         return a64_lowering_error("cannot encode an AArch64 pointer cast");
                     }
                 }
@@ -2393,7 +2451,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     } else if encoded {
                         encoded = a64_mov_register(ref output, destination, source.low, target_width == 64);
                     }
-                    if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                         return a64_lowering_error("cannot truncate an AArch64 128-bit integer");
                     }
                 } else {
@@ -2408,7 +2466,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                     if (source == A64Register.None || destination == A64Register.None || target_width == 0 ||
                         !a64_extend_integer(ref output, destination, source, extend_bits, signed, target_width == 64) ||
-                        !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                        !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                         return a64_lowering_error("cannot encode AArch64 integer cast");
                     }
                 }
@@ -2425,7 +2483,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (source == A64Register.None || destination == A64Register.None ||
                     (target_width != 32 && target_width != 64) ||
                     !a64_convert_float(ref output, destination, source, extend) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                     return a64_lowering_error("cannot encode an AArch64 floating-point width conversion");
                 }
             } else if (instruction.opcode == WirOpcode.SignedIntToFloat ||
@@ -2451,7 +2509,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         source_width == 64,
                         target_width == 64
                     ) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                     return a64_lowering_error("cannot encode an AArch64 integer to float conversion");
                 }
             } else if (instruction.opcode == WirOpcode.FloatToSignedInt ||
@@ -2477,7 +2535,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         source_width == 64,
                         target_width == 64
                     ) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, target_width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
                     return a64_lowering_error("cannot encode an AArch64 float to integer conversion");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
@@ -2551,7 +2609,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 let encoded: Bool = a64_emit_integer_binary(ref output, instruction.opcode, destination, left, right, width == 64);
-                if (!encoded || !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
+                if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer arithmetic");
                 }
             } else if (a64_is_integer_division(instruction.opcode) &&
@@ -2564,6 +2622,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let signed: Bool = instruction.opcode == WirOpcode.SignedDivide || instruction.opcode == WirOpcode.SignedRemainder;
                 let remainder: Bool = instruction.opcode == WirOpcode.SignedRemainder || instruction.opcode == WirOpcode.UnsignedRemainder;
+                // The software divider owns X0-X12 while its emitted loop runs.
+                a64_clear_bindings(ref values);
                 let result: A64RegisterPair = a64_wide_divide(ref output, signed, remainder);
                 if (result.low == A64Register.None || result.high == A64Register.None ||
                     !a64_save_pair(ref output, stack.homes, instruction.result, result)) {
@@ -2589,7 +2649,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
                 if (left == A64Register.None || right == A64Register.None || quotient == A64Register.None ||
                     destination == A64Register.None || width == 0 || !encoded ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer division");
                 }
             } else if (a64_is_float_binary(instruction.opcode) && a64_scalar_float(ref program, instruction.type_id)) {
@@ -2603,7 +2663,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 if (left == A64Register.None || right == A64Register.None || destination == A64Register.None || width == 0 ||
                     !a64_emit_float_binary(ref output, instruction.opcode, destination, left, right, width == 64) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 floating-point arithmetic");
                 }
             } else if (instruction.opcode == WirOpcode.FloatNegate) {
@@ -2616,7 +2676,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 if (source == A64Register.None || destination == A64Register.None || width == 0 ||
                     !a64_float_negate(ref output, destination, source, width == 64) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 floating-point negate");
                 }
             } else if (a64_is_integer_comparison(instruction.opcode) && instruction.operands.length() == 2 &&
@@ -2634,7 +2694,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     right.low == A64Register.None || right.high == A64Register.None ||
                     destination == A64Register.None || first == A64Register.None || second == A64Register.None ||
                     !a64_wide_compare(ref output, instruction.opcode, destination, first, second, left, right) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, 32)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, 32)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit comparison");
                 }
             } else if (a64_is_float_comparison(instruction.opcode) && instruction.operands.length() == 2 &&
@@ -2654,7 +2714,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     destination == A64Register.None || width == 0 || condition == A64Condition.Never ||
                     !a64_float_compare(ref output, left, right, width == 64) ||
                     !a64_set_condition(ref output, destination, condition) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, 32)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, 32)) {
                     return a64_lowering_error("cannot encode AArch64 floating-point comparison");
                 }
             } else if (a64_is_integer_comparison(instruction.opcode)) {
@@ -2672,7 +2732,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (left == A64Register.None || right == A64Register.None || destination == A64Register.None || width == 0 ||
                     condition == A64Condition.Never || !a64_compare_register(ref output, left, right, width == 64) ||
                     !a64_set_condition(ref output, destination, condition) ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, 32)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, 32)) {
                     return a64_lowering_error("cannot encode AArch64 integer comparison");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
@@ -2718,7 +2778,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                               a64_select_condition(ref output, destination, negative, source, A64Condition.Minus, width == 64);
                 }
                 if (source == A64Register.None || destination == A64Register.None || width == 0 || !encoded ||
-                    !a64_save_home(ref output, stack.homes, instruction.result, destination, width)) {
+                    !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, width)) {
                     return a64_lowering_error("cannot encode AArch64 integer unary operation");
                 }
             } else if (instruction.opcode == WirOpcode.NullCheck) {
@@ -2776,6 +2836,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     !a64_branch_symbol(ref output, target, true)) {
                     return a64_lowering_error("cannot encode an AArch64 ownership call");
                 }
+                a64_clear_bindings(ref values);
             } else if (instruction.opcode == WirOpcode.Call) {
                 if (instruction.operands.length() == 0 || instruction.call_type == NO_WIR_TYPE) {
                     return a64_lowering_error("AArch64 call has no target or function type");
@@ -2835,9 +2896,11 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         if (location.on_stack) {
                             let stored: Bool = false;
                             if (location.indirect) {
+                                a64_clobber_register(ref values, A64Register.X9);
                                 stored = a64_stack_address(ref output, A64Register.X9, home.offset) &&
                                          a64_store_integer_at(ref output, A64Register.X9, A64Register.SP, location.offset, 64);
                             } else {
+                                a64_clobber_register(ref values, A64Register.X9);
                                 stored = a64_copy_memory(
                                     ref output,
                                     A64Register.SP,
@@ -2942,6 +3005,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (!called) {
                     return a64_lowering_error("cannot encode an AArch64 call target");
                 }
+                a64_clear_bindings(ref values);
 
                 if (instruction.result != NO_WIR_VALUE && a64_aggregate_type(ref program, instruction.type_id)) {
                     let result_layout: WirTypeLayout = layouts[wir_id_index(UInt32(instruction.type_id))];
@@ -2982,7 +3046,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let result_register: A64Register = A64Register.X0;
                 if (a64_scalar_float(ref program, instruction.type_id)) { result_register = A64Register.V0; }
                 if (instruction.result != NO_WIR_VALUE &&
-                    (result_width == 0 || !a64_save_home(ref output, stack.homes, instruction.result, result_register, result_width))) {
+                    (result_width == 0 || !a64_save_home(ref values, ref output, stack.homes, instruction.result, result_register, result_width))) {
                     return a64_lowering_error("cannot bind the AArch64 call result");
                 }
             } else if (instruction.opcode == WirOpcode.Trap || instruction.opcode == WirOpcode.Unreachable) {
@@ -3026,6 +3090,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("cannot patch AArch64 branch argument path");
                 }
 
+                a64_clear_bindings(ref values);
                 if (!a64_write_edge(ref program, instruction.edges[1], stack.homes, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower the false AArch64 branch arguments");
                 }
