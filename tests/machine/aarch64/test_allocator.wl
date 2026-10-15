@@ -58,8 +58,9 @@ func main() -> Int {
     let first_instruction: WirInstruction = program.arena.instructions[
         wir_id_index(UInt32(block.instructions[0]))
     ];
-    let value_register: A64Register = a64_alloc_register(ref values, false);
-    if (value_register == A64Register.None || !a64_bind_value(ref values, value, value_register) ||
+    let binding_index: Int = a64_select_register(ref values, false);
+    let value_register: A64Register = a64_claim_register(ref values, binding_index);
+    if (value_register == A64Register.None || !a64_bind_value(ref values, value, value_register, false) ||
         a64_mapped_register(ref values, value) != value_register) {
         print("FAIL: AArch64 value was not bound to its register");
         return 1;

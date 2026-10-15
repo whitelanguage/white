@@ -16,7 +16,7 @@ struct A64UseTable(
 
 struct A64ValueRange(base: Int, count: Int)
 
-struct A64RegisterBinding(register: A64Register, value: WirValueID, held: Bool)
+struct A64RegisterBinding(register: A64Register, value: WirValueID, held: Bool, dirty: Bool)
 
 struct A64ValueMap(
     registers: Vector(A64Register),
@@ -313,13 +313,13 @@ func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64
 
     i = 0;
     while (i < 7) {
-        bindings.append(A64RegisterBinding(register=a64_work_register(i), value=NO_WIR_VALUE, held=false));
+        bindings.append(A64RegisterBinding(register=a64_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false));
         i++;
     }
 
     i = 0;
     while (i < 7) {
-        bindings.append(A64RegisterBinding(register=a64_float_work_register(i), value=NO_WIR_VALUE, held=false));
+        bindings.append(A64RegisterBinding(register=a64_float_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false));
         i++;
     }
 
@@ -360,7 +360,8 @@ func a64_release_binding(ref values: A64ValueMap, index: Int) -> Void {
     values.bindings[index] = A64RegisterBinding(
         register=binding.register,
         value=NO_WIR_VALUE,
-        held=false
+        held=false,
+        dirty=false
     );
 }
 
@@ -383,7 +384,7 @@ func a64_reset_temporaries(ref values: A64ValueMap) -> Void {
     values.next_float_register = 0;
 }
 
-func a64_alloc_register(ref values: A64ValueMap, floating: Bool) -> A64Register {
+func a64_select_register(ref values: A64ValueMap, floating: Bool) -> Int {
 // Keep the choice local and bounded. Go's SSA allocator makes the same basic
 // trade: prefer a free register, otherwise evict the value used farthest away.
     let first: Int = 0;
@@ -431,14 +432,22 @@ func a64_alloc_register(ref values: A64ValueMap, floating: Bool) -> A64Register 
         }
     }
 
-    let register: A64Register = values.bindings[selected].register;
-    a64_release_binding(ref values, selected);
-    values.bindings[selected] = A64RegisterBinding(register=register, value=NO_WIR_VALUE, held=true);
+    return selected;
+}
+
+func a64_claim_register(ref values: A64ValueMap, index: Int) -> A64Register {
+    if (index < 0 || index >= values.bindings.length()) {
+        return A64Register.None;
+    }
+
+    let register: A64Register = values.bindings[index].register;
+    a64_release_binding(ref values, index);
+    values.bindings[index] = A64RegisterBinding(register=register, value=NO_WIR_VALUE, held=true, dirty=false);
 
     return register;
 }
 
-func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64Register) -> Bool {
+func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64Register, dirty: Bool) -> Bool {
     let index: Int = wir_id_index(UInt32(value_id));
     if (index < 0 || index >= values.registers.length()) { return false; }
 
@@ -455,7 +464,7 @@ func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64
 
     a64_release_binding(ref values, binding_index);
     values.registers[index] = register;
-    values.bindings[binding_index] = A64RegisterBinding(register=register, value=value_id, held=false);
+    values.bindings[binding_index] = A64RegisterBinding(register=register, value=value_id, held=false, dirty=dirty);
 
     return true;
 }

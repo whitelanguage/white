@@ -540,6 +540,106 @@ func a64_store_float_at(ref output: A64CodeBuffer, source: A64Register, base: A6
            a64_store_float(ref output, source, A64Register.X16, 0, double);
 }
 
+func a64_spill_binding(
+    ref program: WirModule,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer,
+    index: Int
+) -> Bool {
+// Values get a stack home during frame layout, but writing every result there
+// defeats the register cache. A dirty binding reaches its home only when the
+// register is needed for something else or control leaves the current block.
+    if (index < 0 || index >= values.bindings.length()) {
+        return false;
+    }
+
+    let binding: A64RegisterBinding = values.bindings[index];
+    if (!binding.dirty) {
+        return true;
+    }
+
+    let home: A64StackSlot = a64_find_stack_slot(homes, binding.value);
+    let value_index: Int = wir_id_index(UInt32(binding.value));
+    if (home.value == NO_WIR_VALUE || value_index < 0 || value_index >= program.arena.values.length()) {
+        return false;
+    }
+
+    let type_id: WirTypeID = program.arena.values[value_index].type_id;
+    let width: Int = a64_scalar_width(ref program, type_id);
+    if (width == 0 || home.size != width / 8) {
+        return false;
+    }
+
+    let saved: Bool = false;
+    if (a64_scalar_float(ref program, type_id)) {
+        saved = a64_store_float_at(ref output, binding.register, A64Register.SP, home.offset, width == 64);
+    } else {
+        saved = a64_store_integer_at(ref output, binding.register, A64Register.SP, home.offset, width);
+    }
+    if (!saved) {
+        return false;
+    }
+
+    values.bindings[index] = A64RegisterBinding(
+        register=binding.register,
+        value=binding.value,
+        held=binding.held,
+        dirty=false
+    );
+    return true;
+}
+
+func a64_alloc_register(
+    ref program: WirModule,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer,
+    floating: Bool
+) -> A64Register {
+    let index: Int = a64_select_register(ref values, floating);
+    if (index < 0 || !a64_spill_binding(ref program, homes, ref values, ref output, index)) {
+        return A64Register.None;
+    }
+
+    return a64_claim_register(ref values, index);
+}
+
+func a64_flush_registers(
+    ref program: WirModule,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer
+) -> Bool {
+    let i: Int = 0;
+    while (i < values.bindings.length()) {
+        if (!a64_spill_binding(ref program, homes, ref values, ref output, i)) {
+            return false;
+        }
+        i++;
+    }
+    return true;
+}
+
+func a64_spill_register(
+    ref program: WirModule,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer,
+    register: A64Register
+) -> Bool {
+    let index: Int = a64_binding_index(ref values, register);
+    if (index < 0) {
+        return true;
+    }
+    if (!a64_spill_binding(ref program, homes, ref values, ref output, index)) {
+        return false;
+    }
+
+    a64_release_binding(ref values, index);
+    return true;
+}
+
 func a64_aggregate_register_count(layout: WirTypeLayout) -> Int {
     if (!layout.valid || layout.size == 0UL || layout.size > 16UL) {
         return 0;
@@ -647,8 +747,15 @@ func a64_value_uses_got(ref program: WirModule, value: WirValue) -> Bool {
     return false;
 }
 
-func a64_materialize_symbol(ref program: WirModule, value: WirValue, addend: Long, ref values: A64ValueMap, ref output: A64CodeBuffer) -> A64Register {
-    let register: A64Register = a64_alloc_register(ref values, false);
+func a64_materialize_symbol(
+    ref program: WirModule,
+    value: WirValue,
+    addend: Long,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer
+) -> A64Register {
+    let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
     if (register == A64Register.None) { return A64Register.None; }
 
     let symbol: String = a64_value_symbol(ref program, value);
@@ -660,7 +767,7 @@ func a64_materialize_symbol(ref program: WirModule, value: WirValue, addend: Lon
         } else if (addend < 0L && addend >= -4095L) {
             if (!a64_sub_immediate(ref output, register, register, Int(-addend), true)) { return A64Register.None; }
         } else if (addend != 0L) {
-            let temporary: A64Register = a64_alloc_register(ref values, false);
+            let temporary: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
             if (temporary == A64Register.None || !a64_mov_immediate(ref output, temporary, UInt64(addend), true) ||
                 !a64_add_register(ref output, register, register, temporary, true)) {
                 return A64Register.None;
@@ -691,7 +798,7 @@ func a64_materialize(
     let width: Int = a64_scalar_width(ref program, value.type_id);
     let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
     if (home.value != NO_WIR_VALUE) {
-        let register: A64Register = a64_alloc_register(ref values, floating);
+        let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, floating);
         let loaded: Bool = false;
         if (floating) {
             loaded = a64_load_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
@@ -702,13 +809,13 @@ func a64_materialize(
             return A64Register.None;
         }
 
-        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
+        if (!a64_bind_value(ref values, value_id, register, false)) { return A64Register.None; }
         return register;
     }
 
     if (value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
-        let register: A64Register = a64_materialize_symbol(ref program, value, 0L, ref values, ref output);
-        if (register == A64Register.None || !a64_bind_value(ref values, value_id, register)) {
+        let register: A64Register = a64_materialize_symbol(ref program, value, 0L, homes, ref values, ref output);
+        if (register == A64Register.None || !a64_bind_value(ref values, value_id, register, false)) {
             return A64Register.None;
         }
         return register;
@@ -731,10 +838,11 @@ func a64_materialize(
                 ref program,
                 target,
                 constant.addend,
+                homes,
                 ref values,
                 ref output
             );
-            if (register == A64Register.None || !a64_bind_value(ref values, value_id, register)) {
+            if (register == A64Register.None || !a64_bind_value(ref values, value_id, register, false)) {
                 return A64Register.None;
             }
             return register;
@@ -744,22 +852,22 @@ func a64_materialize(
         }
 
         if (floating) {
-            let bits: A64Register = a64_alloc_register(ref values, false);
-            let register: A64Register = a64_alloc_register(ref values, true);
+            let bits: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
+            let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, true);
             if (bits == A64Register.None || register == A64Register.None ||
                 !a64_mov_immediate(ref output, bits, 0UL, width == 64) ||
                 !a64_float_from_bits(ref output, register, bits, width == 64)) {
                 return A64Register.None;
             }
-            if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
+            if (!a64_bind_value(ref values, value_id, register, false)) { return A64Register.None; }
             return register;
         }
 
-        let register: A64Register = a64_alloc_register(ref values, false);
+        let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
         if (register == A64Register.None || !a64_mov_immediate(ref output, register, 0UL, width == 64)) {
             return A64Register.None;
         }
-        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
+        if (!a64_bind_value(ref values, value_id, register, false)) { return A64Register.None; }
         return register;
     }
 
@@ -771,18 +879,18 @@ func a64_materialize(
     if (width == 0) { return A64Register.None; }
 
     if (floating) {
-        let bits_register: A64Register = a64_alloc_register(ref values, false);
-        let register: A64Register = a64_alloc_register(ref values, true);
+        let bits_register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
+        let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, true);
         if (bits_register == A64Register.None || register == A64Register.None ||
             !a64_mov_immediate(ref output, bits_register, value.float_bits, width == 64) ||
             !a64_float_from_bits(ref output, register, bits_register, width == 64)) {
             return A64Register.None;
         }
-        if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
+        if (!a64_bind_value(ref values, value_id, register, false)) { return A64Register.None; }
         return register;
     }
 
-    let register: A64Register = a64_alloc_register(ref values, false);
+    let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
     if (register == A64Register.None) { return register; }
 
     let bits: UInt64 = UInt64(value.integer & UInt128(18446744073709551615UL));
@@ -790,7 +898,7 @@ func a64_materialize(
         return A64Register.None;
     }
 
-    if (!a64_bind_value(ref values, value_id, register)) { return A64Register.None; }
+    if (!a64_bind_value(ref values, value_id, register, false)) { return A64Register.None; }
     return register;
 }
 
@@ -811,21 +919,26 @@ func a64_materialize_address(
 
     let slot: A64StackSlot = a64_find_stack_slot(storage, value_id);
     if (slot.value != NO_WIR_VALUE) {
-        let address: A64Register = a64_alloc_register(ref values, false);
+        let address: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
         if (address == A64Register.None || !a64_stack_address(ref output, address, slot.offset)) {
             return A64Register.None;
         }
 
-        if (!a64_bind_value(ref values, value_id, address)) { return A64Register.None; }
+        if (!a64_bind_value(ref values, value_id, address, false)) { return A64Register.None; }
         return address;
     }
 
     return a64_materialize(ref program, value_id, homes, ref values, ref output);
 }
 
-func a64_alloc_pair(ref values: A64ValueMap) -> A64RegisterPair {
-    let low: A64Register = a64_alloc_register(ref values, false);
-    let high: A64Register = a64_alloc_register(ref values, false);
+func a64_alloc_pair(
+    ref program: WirModule,
+    homes: Vector(A64StackSlot),
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer
+) -> A64RegisterPair {
+    let low: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
+    let high: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
 
     return A64RegisterPair(low=low, high=high);
 }
@@ -848,7 +961,7 @@ func a64_materialize_pair(
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
 
-    let pair: A64RegisterPair = a64_alloc_pair(ref values);
+    let pair: A64RegisterPair = a64_alloc_pair(ref program, homes, ref values, ref output);
     if (pair.low == A64Register.None || pair.high == A64Register.None) {
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
@@ -1200,14 +1313,16 @@ func a64_save_home(ref values: A64ValueMap, ref output: A64CodeBuffer, homes: Ve
     let home: A64StackSlot = a64_find_stack_slot(homes, value);
     if (home.value == NO_WIR_VALUE || width == 0 || home.size != width / 8) { return false; }
 
-    let saved: Bool = false;
-    if (a64_vec_code(register) >= 0) {
-        saved = a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
-    } else {
-        saved = a64_store_integer_at(ref output, register, A64Register.SP, home.offset, width);
+    // ABI registers are outside the allocator bank and cannot carry a dirty
+    // binding. Save those immediately, ordinary temporaries stay lazy.
+    if (a64_binding_index(ref values, register) < 0) {
+        if (a64_vec_code(register) >= 0) {
+            return a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
+        }
+        return a64_store_integer_at(ref output, register, A64Register.SP, home.offset, width);
     }
 
-    return saved && a64_bind_value(ref values, value, register);
+    return a64_bind_value(ref values, value, register, true);
 }
 
 func a64_memory_width(ref program: WirModule, type_id: WirTypeID) -> Int {
@@ -1355,7 +1470,7 @@ func a64_store_value_at(
         }
 
         let source: A64StackSlot = a64_find_stack_slot(homes, value_id);
-        let temporary: A64Register = a64_alloc_register(ref values, false);
+        let temporary: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
         return source.value != NO_WIR_VALUE && temporary != A64Register.None &&
                a64_copy_memory(
                    ref output,
@@ -1410,7 +1525,7 @@ func a64_load_value_at(
     if (type.kind == WirTypeKind.Struct || type.kind == WirTypeKind.Array) {
         let destination: A64StackSlot = a64_find_stack_slot(homes, result);
         let layout: WirTypeLayout = layouts[wir_id_index(UInt32(type_id))];
-        let temporary: A64Register = a64_alloc_register(ref values, false);
+        let temporary: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
         return destination.value != NO_WIR_VALUE && layout.valid && temporary != A64Register.None &&
                a64_zero_memory(ref output, A64Register.SP, destination.offset, destination.size) &&
                a64_copy_memory(
@@ -1425,7 +1540,7 @@ func a64_load_value_at(
     }
 
     if (width == 128) {
-        let pair: A64RegisterPair = a64_alloc_pair(ref values);
+        let pair: A64RegisterPair = a64_alloc_pair(ref program, homes, ref values, ref output);
         return pair.low != A64Register.None && pair.high != A64Register.None &&
                a64_load_integer_at(ref output, pair.low, base, offset, 64) &&
                a64_load_integer_at(ref output, pair.high, base, offset + 8, 64) &&
@@ -1433,7 +1548,7 @@ func a64_load_value_at(
     }
 
     let floating: Bool = type.kind == WirTypeKind.FloatType;
-    let destination: A64Register = a64_alloc_register(ref values, floating);
+    let destination: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, floating);
     let loaded: Bool = false;
     if (floating) {
         loaded = a64_load_float_at(ref output, destination, base, offset, width == 64);
@@ -1653,7 +1768,7 @@ func a64_write_edge(ref program: WirModule, edge: WirEdge, homes: Vector(A64Stac
             let source: A64StackSlot = a64_find_stack_slot(homes, argument);
             let destination: A64StackSlot = a64_find_stack_slot(homes, parameter);
             let layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter_type))];
-            let temporary: A64Register = a64_alloc_register(ref values, false);
+            let temporary: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
             if (source.value == NO_WIR_VALUE || destination.value == NO_WIR_VALUE ||
                 !layout.valid || temporary == A64Register.None ||
                 !a64_zero_memory(ref output, A64Register.SP, destination.offset, destination.size) ||
@@ -1835,7 +1950,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         }
         let incoming: A64Register = A64Register.None;
         if (location.on_stack) {
-            incoming = a64_alloc_register(ref values, floating);
+            incoming = a64_alloc_register(ref program, stack.homes, ref values, ref output, floating);
             let incoming_offset: Int = stack.frame_size + 16 + location.offset;
             let loaded: Bool = false;
             if floating {
@@ -1894,6 +2009,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
             if (a64_instruction_uses_wide_int(ref program, instruction)) {
                 // Pair lowering still uses a compact rotating scratch bank.
                 // Do not let scalar cache state change its overlap pattern.
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill AArch64 scalar values before a wide instruction");
+                }
                 a64_reset_temporaries(ref values);
             }
 
@@ -2095,7 +2213,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     ref values,
                     ref output
                 );
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (address == A64Register.None || destination == A64Register.None ||
                     !a64_atomic_load(
                         ref output,
@@ -2161,9 +2279,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     ref values,
                     ref output
                 );
-                let old_value: A64Register = a64_alloc_register(ref values, false);
-                let new_value: A64Register = a64_alloc_register(ref values, false);
-                let status: A64Register = a64_alloc_register(ref values, false);
+                let old_value: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let new_value: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let status: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (address == A64Register.None || input == A64Register.None || old_value == A64Register.None ||
                     new_value == A64Register.None || status == A64Register.None ||
                     !a64_emit_atomic_rmw(
@@ -2201,7 +2319,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     ref values,
                     ref output
                 );
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (base == A64Register.None || destination == A64Register.None) {
                     return a64_lowering_error("cannot materialize an AArch64 aggregate address");
                 }
@@ -2223,7 +2341,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     } else if (offset <= 4095UL) {
                         encoded = a64_add_immediate(ref output, destination, base, Int(offset), true);
                     } else {
-                        let temporary: A64Register = a64_alloc_register(ref values, false);
+                        let temporary: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                         encoded = temporary != A64Register.None &&
                                   a64_mov_immediate(ref output, temporary, offset, true) &&
                                   a64_add_register(ref output, destination, base, temporary, true);
@@ -2249,7 +2367,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         ref values,
                         ref output
                     );
-                    let scaled: A64Register = a64_alloc_register(ref values, false);
+                    let scaled: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     if (!layout.valid || layout.size == 0UL || index == A64Register.None ||
                         scaled == A64Register.None || index_bits <= 0 || index_bits > 64) {
                         return a64_lowering_error("AArch64 index address has an invalid element layout");
@@ -2273,7 +2391,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
 
                     if (layout.size != 1UL) {
-                        let stride: A64Register = a64_alloc_register(ref values, false);
+                        let stride: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                         if (stride == A64Register.None ||
                             !a64_mov_immediate(ref output, stride, layout.size, true) ||
                             !a64_multiply_register(ref output, scaled, scaled, stride, true)) {
@@ -2302,7 +2420,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let source_float: Bool = a64_scalar_float(ref program, source_type);
                 let target_float: Bool = a64_scalar_float(ref program, instruction.type_id);
                 let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, target_float);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, target_float);
                 let encoded: Bool = source_width == target_width && (target_width == 32 || target_width == 64) &&
                                     source != A64Register.None && destination != A64Register.None;
                 if (encoded && source_float && target_float) {
@@ -2355,7 +2473,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         ref values,
                         ref output
                     );
-                    let destination: A64RegisterPair = a64_alloc_pair(ref values);
+                    let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
                     let encoded: Bool = source != A64Register.None && destination.low != A64Register.None &&
                                         destination.high != A64Register.None &&
                                         a64_mov_register(ref output, destination.low, source, true) &&
@@ -2365,7 +2483,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                 } else if (source_width == 128) {
                     let source: A64RegisterPair = a64_materialize_pair(ref program, source_id, stack.homes, ref values, ref output);
-                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     let encoded: Bool = source.low != A64Register.None && destination != A64Register.None &&
                                         a64_mov_register(ref output, destination, source.low, target_width == 64);
                     if (!encoded || !a64_save_home(ref values, ref output, stack.homes, instruction.result, destination, target_width)) {
@@ -2380,7 +2498,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         ref values,
                         ref output
                     );
-                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     let encoded: Bool = source != A64Register.None && destination != A64Register.None;
                     if (encoded && instruction.opcode == WirOpcode.IntToPointer && source_width < 64) {
                         let bits: Int = a64_integer_bits(ref program, source_type);
@@ -2409,8 +2527,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 if (target_bits == 128) {
                     let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
-                    let destination: A64RegisterPair = a64_alloc_pair(ref values);
-                    let amount: A64Register = a64_alloc_register(ref values, false);
+                    let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
+                    let amount: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     let encoded: Bool = source != A64Register.None && destination.low != A64Register.None &&
                                         destination.high != A64Register.None && amount != A64Register.None;
                     if (encoded && source_bits < 64) {
@@ -2436,7 +2554,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                 } else if (source_bits == 128) {
                     let source: A64RegisterPair = a64_materialize_pair(ref program, source_id, stack.homes, ref values, ref output);
-                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
                     let encoded: Bool = source.low != A64Register.None && destination != A64Register.None && target_width != 0;
                     if (encoded && target_bits < target_width) {
@@ -2456,7 +2574,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     }
                 } else {
                     let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
-                    let destination: A64Register = a64_alloc_register(ref values, false);
+                    let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
                     let extend_bits: Int = source_bits;
                     let signed: Bool = instruction.opcode == WirOpcode.SignExtend;
@@ -2477,7 +2595,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, true);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, true);
                 let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
                 let extend: Bool = instruction.opcode == WirOpcode.FloatExtend;
                 if (source == A64Register.None || destination == A64Register.None ||
@@ -2497,7 +2615,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let source_width: Int = a64_integer_width(ref program, source_type);
                 let target_width: Int = a64_scalar_width(ref program, instruction.type_id);
                 let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, true);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, true);
                 if ((source_width != 32 && source_width != 64) ||
                     (target_width != 32 && target_width != 64) ||
                     source == A64Register.None || destination == A64Register.None ||
@@ -2523,7 +2641,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let source_width: Int = a64_scalar_width(ref program, source_type);
                 let target_width: Int = a64_integer_width(ref program, instruction.type_id);
                 let source: A64Register = a64_materialize(ref program, source_id, stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if ((source_width != 32 && source_width != 64) ||
                     (target_width != 32 && target_width != 64) ||
                     source == A64Register.None || destination == A64Register.None ||
@@ -2548,7 +2666,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64RegisterPair = a64_alloc_pair(ref values);
+                let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
                 if (left.low == A64Register.None || left.high == A64Register.None ||
                     right.low == A64Register.None || right.high == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
@@ -2564,8 +2682,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64RegisterPair = a64_alloc_pair(ref values);
-                let temporary: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
+                let temporary: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (left.low == A64Register.None || left.high == A64Register.None ||
                     right.low == A64Register.None || right.high == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
@@ -2584,10 +2702,10 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let source: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let amount: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64RegisterPair = a64_alloc_pair(ref values);
-                let count: A64Register = a64_alloc_register(ref values, false);
-                let work: A64Register = a64_alloc_register(ref values, false);
-                let cross: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
+                let count: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let work: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let cross: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (source.low == A64Register.None || source.high == A64Register.None || amount.low == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     count == A64Register.None || work == A64Register.None || cross == A64Register.None ||
@@ -2602,7 +2720,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 if (left == A64Register.None || right == A64Register.None || destination == A64Register.None || width == 0) {
                     return a64_lowering_error("AArch64 integer arithmetic ran out of temporary registers");
@@ -2636,12 +2754,12 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let quotient: A64Register = a64_alloc_register(ref values, false);
+                let quotient: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let destination: A64Register = quotient;
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 let signed: Bool = instruction.opcode == WirOpcode.SignedDivide || instruction.opcode == WirOpcode.SignedRemainder;
                 let remainder: Bool = instruction.opcode == WirOpcode.SignedRemainder || instruction.opcode == WirOpcode.UnsignedRemainder;
-                if remainder { destination = a64_alloc_register(ref values, false); }
+                if remainder { destination = a64_alloc_register(ref program, stack.homes, ref values, ref output, false); }
 
                 let encoded: Bool = a64_divide_register(ref output, quotient, left, right, signed, width == 64);
                 if (encoded && remainder) {
@@ -2659,7 +2777,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, true);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, true);
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 if (left == A64Register.None || right == A64Register.None || destination == A64Register.None || width == 0 ||
                     !a64_emit_float_binary(ref output, instruction.opcode, destination, left, right, width == 64) ||
@@ -2672,7 +2790,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, true);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, true);
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 if (source == A64Register.None || destination == A64Register.None || width == 0 ||
                     !a64_float_negate(ref output, destination, source, width == 64) ||
@@ -2687,9 +2805,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
-                let first: A64Register = a64_alloc_register(ref values, false);
-                let second: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let first: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                let second: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (left.low == A64Register.None || left.high == A64Register.None ||
                     right.low == A64Register.None || right.high == A64Register.None ||
                     destination == A64Register.None || first == A64Register.None || second == A64Register.None ||
@@ -2707,7 +2825,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let right_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
                 let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let width: Int = a64_scalar_width(ref program, left_value.type_id);
                 let condition: A64Condition = a64_float_condition(instruction.opcode);
                 if (left_value.type_id != right_value.type_id || left == A64Register.None || right == A64Register.None ||
@@ -2724,7 +2842,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
                 let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let input_type: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
                 let width: Int = a64_scalar_width(ref program, input_type);
                 let condition: A64Condition = a64_comparison_condition(instruction.opcode);
@@ -2742,8 +2860,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 let source: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[0], stack.homes, ref values, ref output);
-                let destination: A64RegisterPair = a64_alloc_pair(ref values);
-                let temporary: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
+                let temporary: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 if (source.low == A64Register.None || source.high == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     temporary == A64Register.None ||
@@ -2758,20 +2876,20 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 let source: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref values, false);
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let width: Int = a64_scalar_width(ref program, instruction.type_id);
                 let encoded: Bool = false;
                 if (instruction.opcode == WirOpcode.Negate) {
                     encoded = a64_sub_register(ref output, destination, A64Register.ZR, source, width == 64);
                 } else if (instruction.opcode == WirOpcode.Not && instruction.type_id == program.bool_type) {
-                    let one: A64Register = a64_alloc_register(ref values, false);
+                    let one: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     encoded = one != A64Register.None &&
                               a64_mov_immediate(ref output, one, 1UL, false) &&
                               a64_logical_register(ref output, destination, source, one, 2, false);
                 } else if (instruction.opcode == WirOpcode.Not) {
                     encoded = a64_invert_register(ref output, destination, source, width == 64);
                 } else {
-                    let negative: A64Register = a64_alloc_register(ref values, false);
+                    let negative: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                     encoded = negative != A64Register.None &&
                               a64_compare_zero(ref output, source, width == 64) &&
                               a64_sub_register(ref output, negative, A64Register.ZR, source, width == 64) &&
@@ -2826,6 +2944,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("AArch64 ownership operation has an invalid WIR shape");
                 }
 
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill AArch64 values before an ownership call");
+                }
                 let object: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
                 let target: String = "__wl_retain";
                 if (instruction.opcode == WirOpcode.Release) {
@@ -2857,6 +2978,10 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let call_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
                 if (call_type.parameters.length() != instruction.operands.length() - 1) {
                     return a64_lowering_error("AArch64 call arguments do not match the WIR function type");
+                }
+
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill live AArch64 values before a call");
                 }
 
                 if (instruction.result != NO_WIR_VALUE && a64_aggregate_type(ref program, instruction.type_id)) {
@@ -2896,11 +3021,15 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         if (location.on_stack) {
                             let stored: Bool = false;
                             if (location.indirect) {
-                                a64_clobber_register(ref values, A64Register.X9);
+                                if (!a64_spill_register(ref program, stack.homes, ref values, ref output, A64Register.X9)) {
+                                    return a64_lowering_error("cannot release the AArch64 aggregate address register");
+                                }
                                 stored = a64_stack_address(ref output, A64Register.X9, home.offset) &&
                                          a64_store_integer_at(ref output, A64Register.X9, A64Register.SP, location.offset, 64);
                             } else {
-                                a64_clobber_register(ref values, A64Register.X9);
+                                if (!a64_spill_register(ref program, stack.homes, ref values, ref output, A64Register.X9)) {
+                                    return a64_lowering_error("cannot release the AArch64 aggregate copy register");
+                                }
                                 stored = a64_copy_memory(
                                     ref output,
                                     A64Register.SP,
@@ -3060,6 +3189,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     !a64_write_edge(ref program, instruction.edges[0], stack.homes, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower AArch64 jump arguments");
                 }
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill AArch64 jump values");
+                }
 
                 let patch: Int = output.bytes.length();
                 if (!a64_branch(ref output, 0, false)) { return a64_lowering_error("cannot encode AArch64 jump"); }
@@ -3067,6 +3199,10 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
             } else if (instruction.opcode == WirOpcode.Branch) {
                 if (instruction.operands.length() != 1 || instruction.edges.length() != 2) {
                     return a64_lowering_error("branch has an invalid WIR shape");
+                }
+
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill AArch64 values before a branch");
                 }
 
                 let condition: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
@@ -3082,6 +3218,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 if (!a64_write_edge(ref program, instruction.edges[0], stack.homes, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower the true AArch64 branch arguments");
                 }
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill true AArch64 branch values");
+                }
                 let true_patch: Int = output.bytes.length();
                 if (!a64_branch(ref output, 0, false)) { return a64_lowering_error("cannot encode AArch64 true branch"); }
                 fixups.append(A64BranchFixup(offset=true_patch, target=instruction.edges[0].target, condition=A64Condition.Always, conditional=false));
@@ -3093,6 +3232,9 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 a64_clear_bindings(ref values);
                 if (!a64_write_edge(ref program, instruction.edges[1], stack.homes, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower the false AArch64 branch arguments");
+                }
+                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                    return a64_lowering_error("cannot spill false AArch64 branch values");
                 }
                 let false_patch: Int = output.bytes.length();
                 if (!a64_branch(ref output, 0, false)) { return a64_lowering_error("cannot encode AArch64 branch fallback"); }
