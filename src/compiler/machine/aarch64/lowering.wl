@@ -1663,7 +1663,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         return a64_lowering_error("AArch64 lowering requires a valid entry block");
     }
     let output: A64CodeBuffer = a64_new_code_buffer();
-    let values: A64ValueMap = a64_new_value_map(program.arena.values.length());
+    let values: A64ValueMap = a64_new_value_map(ref program, function.blocks);
     let offsets: Vector(A64BlockOffset) = [];
     let fixups: Vector(A64BranchFixup) = [];
     let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
@@ -2957,6 +2957,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         return a64_lowering_error("cannot save an AArch64 aggregate call result");
                     }
 
+                    a64_finish_instruction(ref values, instruction);
                     instruction_index++;
                     continue;
                 }
@@ -2972,6 +2973,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         return a64_lowering_error("cannot bind the AArch64 128-bit call result");
                     }
 
+                    a64_finish_instruction(ref values, instruction);
                     instruction_index++;
                     continue;
                 }
@@ -3114,6 +3116,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
             } else {
                 return a64_lowering_error("WIR opcode " + Int(instruction.opcode) + " is not covered by initial AArch64 lowering");
             }
+            a64_finish_instruction(ref values, instruction);
             instruction_index++;
         }
         i++;

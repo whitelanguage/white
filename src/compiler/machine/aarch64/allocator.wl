@@ -1,9 +1,264 @@
 // src/compiler/machine/aarch64/allocator.wl
 import * from "model.wl"
-import WirValueID, wir_id_index from "../../wir/model.wl"
+import * from "../../wir/model.wl"
 
 
-struct A64ValueMap(registers: Vector(A64Register), next_register: Int, next_float_register: Int)
+const A64_NO_NEXT_USE: Int = 2147483647;
+
+struct A64UseQueue(positions: Vector(Int), cursor: Int)
+
+struct A64UseTable(
+    base: Int,
+    dense_count: Int,
+    sparse_indices: Dict(UInt32, Int),
+    queues: Vector(A64UseQueue)
+)
+
+struct A64ValueRange(base: Int, count: Int)
+
+struct A64ValueMap(
+    registers: Vector(A64Register),
+    next_register: Int,
+    next_float_register: Int,
+    uses: A64UseTable,
+    position: Int
+)
+
+func a64_include_value(value: WirValueID, ref first: Int, ref last: Int) -> Void {
+    let index: Int = wir_id_index(UInt32(value));
+
+    if (index < 0) {
+        return;
+    }
+
+    if (first < 0 || index < first) { first = index; }
+    if (index > last) { last = index; }
+}
+
+func a64_function_value_range(ref program: WirModule, order: Vector(WirBlockID)) -> A64ValueRange {
+    let first: Int = -1;
+    let last: Int = -1;
+    let block_index: Int = 0;
+
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        let i: Int = 0;
+
+        while (i < block.parameters.length()) {
+            a64_include_value(block.parameters[i], ref first, ref last);
+            i++;
+        }
+
+        i = 0;
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+
+            if (instruction.result != NO_WIR_VALUE) {
+                a64_include_value(instruction.result, ref first, ref last);
+            }
+            i++;
+        }
+        block_index++;
+    }
+
+    if (first < 0) {
+        return A64ValueRange(base=0, count=0);
+    }
+
+    return A64ValueRange(base=first, count=last - first + 1);
+}
+
+func a64_sparse_add(ref sparse: Vector(WirValueID), seen: Dict(UInt32, Int), range: A64ValueRange, value: WirValueID) -> Void {
+    let index: Int = wir_id_index(UInt32(value));
+
+    if (index < 0 || (index >= range.base && index < range.base + range.count)) { return; }
+    if (seen.lookup(UInt32(value)) != 0) { return; }
+
+    sparse.append(value);
+    seen.put(UInt32(value), sparse.length());
+}
+
+func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range: A64ValueRange) -> Vector(WirValueID) {
+    let sparse: Vector(WirValueID) = [];
+    let seen: Dict(UInt32, Int) = Dict();
+
+    if (order.length() == 0) { return sparse; }
+
+    let function_id: WirFuncID = program.arena.blocks[wir_id_index(UInt32(order[0]))].function;
+    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
+    let i: Int = 0;
+
+    while (i < function.parameters.length()) {
+        a64_sparse_add(ref sparse, seen, range, function.parameters[i]);
+        i++;
+    }
+
+    let block_index: Int = 0;
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        i = 0;
+
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            let operand_index: Int = 0;
+
+            while (operand_index < instruction.operands.length()) {
+                a64_sparse_add(ref sparse, seen, range, instruction.operands[operand_index]);
+                operand_index++;
+            }
+
+            let edge_index: Int = 0;
+            while (edge_index < instruction.edges.length()) {
+                let argument_index: Int = 0;
+
+                while (argument_index < instruction.edges[edge_index].arguments.length()) {
+                    a64_sparse_add(ref sparse, seen, range, instruction.edges[edge_index].arguments[argument_index]);
+                    argument_index++;
+                }
+                edge_index++;
+            }
+            i++;
+        }
+        block_index++;
+    }
+
+    return sparse;
+}
+
+func a64_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) -> A64UseTable {
+    let queues: Vector(A64UseQueue) = [];
+    let indices: Dict(UInt32, Int) = Dict();
+    let i: Int = 0;
+
+    while (i < dense_count + sparse.length()) {
+        queues.append(A64UseQueue(positions=[], cursor=0));
+        i++;
+    }
+
+    i = 0;
+    while (i < sparse.length()) {
+        indices.put(UInt32(sparse[i]), dense_count + i + 1);
+        i++;
+    }
+
+    return A64UseTable(base=base, dense_count=dense_count, sparse_indices=indices, queues=queues);
+}
+
+func a64_use_index(ref table: A64UseTable, value: WirValueID) -> Int {
+    let index: Int = wir_id_index(UInt32(value));
+
+    if (index >= table.base && index < table.base + table.dense_count) {
+        return index - table.base;
+    }
+
+    return table.sparse_indices.lookup(UInt32(value)) - 1;
+}
+
+func a64_record_use(ref table: A64UseTable, value: WirValueID, position: Int) -> Void {
+    let index: Int = a64_use_index(ref table, value);
+
+    if (index < 0 || index >= table.queues.length()) {
+        return;
+    }
+
+    let queue: A64UseQueue = table.queues[index];
+    queue.positions.append(position);
+    table.queues[index] = queue;
+}
+
+func a64_collect_uses(ref program: WirModule, order: Vector(WirBlockID)) -> A64UseTable {
+    let range: A64ValueRange = a64_function_value_range(ref program, order);
+    let sparse: Vector(WirValueID) = a64_sparse_values(ref program, order, range);
+    let table: A64UseTable = a64_new_use_table(range.base, range.count, sparse);
+    let position: Int = 0;
+    let block_index: Int = 0;
+
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        let instruction_index: Int = 0;
+
+        while (instruction_index < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[
+                wir_id_index(UInt32(block.instructions[instruction_index]))
+            ];
+            let operand_index: Int = 0;
+
+            while (operand_index < instruction.operands.length()) {
+                a64_record_use(ref table, instruction.operands[operand_index], position);
+                operand_index++;
+            }
+
+            let edge_index: Int = 0;
+            while (edge_index < instruction.edges.length()) {
+                let argument_index: Int = 0;
+
+                while (argument_index < instruction.edges[edge_index].arguments.length()) {
+                    a64_record_use(ref table, instruction.edges[edge_index].arguments[argument_index], position);
+                    argument_index++;
+                }
+                edge_index++;
+            }
+            position++;
+            instruction_index++;
+        }
+        block_index++;
+    }
+
+    return table;
+}
+
+func a64_next_use(ref table: A64UseTable, value: WirValueID, position: Int) -> Int {
+    let index: Int = a64_use_index(ref table, value);
+
+    if (index < 0 || index >= table.queues.length()) { return A64_NO_NEXT_USE; }
+
+    let queue: A64UseQueue = table.queues[index];
+    let cursor: Int = queue.cursor;
+
+    while (cursor < queue.positions.length() && queue.positions[cursor] <= position) {
+        cursor++;
+    }
+
+    if (cursor >= queue.positions.length()) { return A64_NO_NEXT_USE; }
+
+    return queue.positions[cursor];
+}
+
+func a64_consume_use(ref table: A64UseTable, value: WirValueID, position: Int) -> Void {
+    let index: Int = a64_use_index(ref table, value);
+
+    if (index < 0 || index >= table.queues.length()) {
+        return;
+    }
+
+    let queue: A64UseQueue = table.queues[index];
+    while (queue.cursor < queue.positions.length() && queue.positions[queue.cursor] <= position) {
+        queue.cursor++;
+    }
+    table.queues[index] = queue;
+}
+
+func a64_finish_instruction(ref values: A64ValueMap, instruction: WirInstruction) -> Void {
+    let i: Int = 0;
+
+    while (i < instruction.operands.length()) {
+        a64_consume_use(ref values.uses, instruction.operands[i], values.position);
+        i++;
+    }
+
+    i = 0;
+    while (i < instruction.edges.length()) {
+        let j: Int = 0;
+
+        while (j < instruction.edges[i].arguments.length()) {
+            a64_consume_use(ref values.uses, instruction.edges[i].arguments[j], values.position);
+            j++;
+        }
+        i++;
+    }
+
+    values.position++;
+}
 
 func a64_work_register(index: Int) -> A64Register {
 // X9-X15 are caller-saved temporaries and do not overlap ABI argument registers.
@@ -32,16 +287,22 @@ func a64_float_work_register(index: Int) -> A64Register {
     return A64Register.None;
 }
 
-func a64_new_value_map(value_count: Int) -> A64ValueMap {
+func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64ValueMap {
     let registers: Vector(A64Register) = [];
     let i: Int = 0;
 
-    while (i < value_count) {
+    while (i < program.arena.values.length()) {
         registers.append(A64Register.None);
         i++;
     }
 
-    return A64ValueMap(registers=registers, next_register=0, next_float_register=0);
+    return A64ValueMap(
+        registers=registers,
+        next_register=0,
+        next_float_register=0,
+        uses=a64_collect_uses(ref program, order),
+        position=0
+    );
 }
 
 func a64_alloc_register(ref values: A64ValueMap, floating: Bool) -> A64Register {
