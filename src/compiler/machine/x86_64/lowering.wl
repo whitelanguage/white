@@ -1843,6 +1843,11 @@ func x86_store_value(
     ref output: X86CodeBuffer
 ) -> String {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    // copies read the home, a cached Int128 pair may still hold its newest bits.
+    if (x86_wide_integer(ref program, value.type_id) && !x86_spill_wide_value(ref state, value_id, ref output)) {
+        return "cannot save a 128-bit integer before a memory copy";
+    }
+
     if (!x86_memory_value(ref program, value.type_id)) {
         let stored: X86RegisterResult = x86_materialize_register_except(ref program, ref function, value_id, slots, ref state, base, ref output);
         if (stored.message.length() != 0) { return stored.message; }
@@ -4027,6 +4032,12 @@ func x86_lower_instruction(ref program: WirModule,
     if (instruction.opcode == WirOpcode.Return) {
         if (instruction.operands.length() == 1) {
             let value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+            // both return ABIs may read the home directly, commit a dirty pair first.
+            if (x86_wide_integer(ref program, value.type_id) &&
+                !x86_spill_wide_value(ref state, instruction.operands[0], ref output)) {
+                return "cannot save a 128-bit integer before returning";
+            }
+
             let return_signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
             let native_sysv: Bool = x86_native_sysv_abi(return_signature.abi);
             if (native_sysv && x86_memory_value(ref program, value.type_id)) {

@@ -213,6 +213,55 @@ func a64_collect_uses(ref program: WirModule, order: Vector(WirBlockID)) -> A64U
     return table;
 }
 
+func a64_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -> Dict(UInt32, Int) {
+// count incoming edges once, the table only contains blocks from this function
+    let counts: Dict(UInt32, Int) = Dict();
+    let i: Int = 0;
+
+    while (i < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[i]))];
+        if (block.instructions.length() != 0) {
+            let term: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+            let j: Int = 0;
+
+            while (j < term.edges.length()) {
+                let target: UInt32 = UInt32(term.edges[j].target);
+                counts.put(target, counts.lookup(target) + 1);
+                j++;
+            }
+        }
+        i++;
+    }
+
+    return counts;
+}
+
+func a64_carry_to_next(ref program: WirModule, order: Vector(WirBlockID), predecessors: Dict(UInt32, Int), index: Int) -> Bool {
+// the next block can keep bindings when every execution arrives through this jump
+    if (index < 0 || index + 1 >= order.length()) { return false; }
+
+    let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[index]))];
+    if (block.instructions.length() == 0) { return false; }
+
+    let term: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+    if (term.opcode != WirOpcode.Jump || term.edges.length() != 1 ||
+        term.edges[0].target != order[index + 1] || term.edges[0].arguments.length() != 0) {
+        return false;
+    }
+
+    let target: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[index + 1]))];
+    return target.parameters.length() == 0 && predecessors.lookup(UInt32(order[index + 1])) == 1;
+}
+
+func a64_use_precedes_definition(ref table: A64UseTable, value: WirValueID, position: Int) -> Bool {
+// SSA dominance follows control flow, a defining block may be emitted after its user
+    let index: Int = a64_use_index(ref table, value);
+    if (index < 0 || index >= table.queues.length()) { return false; }
+
+    let queue: A64UseQueue = table.queues[index];
+    return queue.positions.length() != 0 && queue.positions[0] < position;
+}
+
 func a64_next_use(ref table: A64UseTable, value: WirValueID, position: Int) -> Int {
     let index: Int = a64_use_index(ref table, value);
 

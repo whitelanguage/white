@@ -2049,13 +2049,17 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         i++;
     }
 
+    let predecessors: Dict(UInt32, Int) = a64_predecessor_counts(ref program, function.blocks);
+    let carry: Bool = false;
     i = 0;
     while (i < function.blocks.length()) {
-        if (i != 0) {
-            // each block starts from its homes. Keeping a mapping from the
-            // previously emitted block would make code layout look like flow.
+        if (i != 0 && !carry) {
+            // joins, back edges and reordered blocks still enter through homes.
+            // Only a straight edge has the same register state at both ends.
             a64_clear_bindings(ref values);
         }
+
+        carry = a64_carry_to_next(ref program, function.blocks, predecessors, i);
 
         let block_id: WirBlockID = function.blocks[i];
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
@@ -3251,7 +3255,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     !a64_write_edge(ref program, instruction.edges[0], stack.homes, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower AArch64 jump arguments");
                 }
-                if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
+                if (!carry && !a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
                     return a64_lowering_error("cannot spill AArch64 jump values");
                 }
 
@@ -3385,6 +3389,17 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
             } else {
                 return a64_lowering_error("WIR opcode " + Int(instruction.opcode) + " is not covered by initial AArch64 lowering");
             }
+            // next-use positions describe emission order. Save
+            // a late definition before dead-register cleanup discards it.
+            if (instruction.result != NO_WIR_VALUE &&
+                a64_use_precedes_definition(ref values.uses, instruction.result, values.position)) {
+                let reg: A64Register = a64_mapped_register(ref values, instruction.result);
+                let binding: Int = a64_binding_index(ref values, reg);
+                if (binding >= 0 && !a64_spill_binding(ref program, stack.homes, ref values, ref output, binding)) {
+                    return a64_lowering_error("cannot save an AArch64 value used by an earlier block");
+                }
+            }
+
             a64_finish_instruction(ref values, instruction);
             instruction_index++;
         }

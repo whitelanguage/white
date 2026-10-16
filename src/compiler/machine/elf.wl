@@ -1,5 +1,6 @@
-// src/compiler/machine/x86_64/elf.wl
+// src/compiler/machine/elf.wl
 import * from "object.wl"
+
 
 struct ElfSection(
     name: String,
@@ -88,24 +89,21 @@ func elf_add_string(ref table: Vector(Byte), name: String, ref offsets: Dict(Str
 
 func elf_reloc_data(
     relocations: Vector(MachineRelocation),
-    section: String,
+    indices: Vector(Int),
     symbols: Dict(String, Int)
 ) -> Vector(Byte)? {
 // encode the RELA records for one section
     let out: Vector(Byte) = [];
     let i: Int = 0;
 
-    while (i < relocations.length()) {
-        let relocation: MachineRelocation = relocations[i];
+    while (i < indices.length()) {
+        let relocation: MachineRelocation = relocations[indices[i]];
+        let symbol: Int = symbols.lookup(relocation.symbol);
 
-        if (relocation.section == section) {
-            let symbol: Int = symbols.lookup(relocation.symbol);
-
-            if (symbol == 0 || relocation.kind == 0U) { throw Error.InvalidArgument; }
-            elf_u64(ref out, UInt64(relocation.offset));
-            elf_u64(ref out, (UInt64(symbol) << 32UL) | UInt64(relocation.kind));
-            elf_i64(ref out, relocation.addend);
-        }
+        if (symbol == 0 || relocation.kind == 0U) { throw Error.InvalidArgument; }
+        elf_u64(ref out, UInt64(relocation.offset));
+        elf_u64(ref out, (UInt64(symbol) << 32UL) | UInt64(relocation.kind));
+        elf_i64(ref out, relocation.addend);
 
         i += 1;
     }
@@ -158,15 +156,25 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     }
 
     let reloc_names: Vector(String) = [];
-    let reloc_sections: Dict(String, Bool) = Dict();
+    // one list per input section keeps relocation order without rescanning
+    // the entire object for each of the thousands of function sections.
+    let reloc_groups: Vector(Vector(Int)) = [];
+    i = 0;
+    while (i < input.sections.length()) {
+        reloc_groups.append([]);
+        i++;
+    }
+
     i = 0;
     while (i < input.relocations.length()) {
-        reloc_sections.put(input.relocations[i].section, true);
+        let section: Int = section_numbers.lookup(input.relocations[i].section);
+        if (section == 0) { throw Error.InvalidArgument; }
+        reloc_groups[section - 1].append(i);
         i += 1;
     }
     i = 0;
     while (i < input.sections.length()) {
-        let found: Bool = reloc_sections.contains_key(input.sections[i].name);
+        let found: Bool = reloc_groups[i].length() != 0;
 
         if found { reloc_names.append(".rela" + input.sections[i].name); }
         i += 1;
@@ -227,11 +235,11 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     i = 0;
     while (i < reloc_names.length()) {
         let target: String = reloc_names[i].slice(5, reloc_names[i].length());
-        let reloc: Vector(Byte) = elf_reloc_data(input.relocations, target, sym_indices)?;
         let section_number: Int = section_numbers.lookup(reloc_names[i]);
         let target_number: Int = section_numbers.lookup(target);
 
         if (section_number == 0 || target_number == 0) { throw Error.InvalidArgument; }
+        let reloc: Vector(Byte) = elf_reloc_data(input.relocations, reloc_groups[target_number - 1], sym_indices)?;
         let section_index: Int = section_number - 1;
         sections[section_index].data = reloc;
         sections[section_index].link = UInt32(symtab_index + 1);
