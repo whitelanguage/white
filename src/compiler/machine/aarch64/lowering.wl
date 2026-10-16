@@ -22,8 +22,6 @@ struct A64ModuleResult(
     relocations: Vector(A64Relocation)
 )
 
-struct A64RegisterPair(low: A64Register, high: A64Register)
-
 struct A64BlockOffset(block: WirBlockID, offset: Int)
 
 struct A64BranchFixup(
@@ -565,6 +563,36 @@ func a64_spill_binding(
         return false;
     }
 
+    if (binding.wide) {
+        let pair: A64RegisterPair = a64_mapped_register_pair(ref values, binding.value);
+        if (home.size != 16 || pair.low == A64Register.None || pair.high == A64Register.None ||
+            !a64_store_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) ||
+            !a64_store_integer_at(ref output, pair.high, A64Register.SP, home.offset + 8, 64)) {
+            return false;
+        }
+
+        let low_index: Int = a64_binding_index(ref values, pair.low);
+        let high_index: Int = a64_binding_index(ref values, pair.high);
+        if (low_index < 0 || high_index < 0) {
+            return false;
+        }
+        values.bindings[low_index] = A64RegisterBinding(
+            register=pair.low,
+            value=binding.value,
+            held=false,
+            dirty=false,
+            wide=true
+        );
+        values.bindings[high_index] = A64RegisterBinding(
+            register=pair.high,
+            value=binding.value,
+            held=false,
+            dirty=false,
+            wide=true
+        );
+        return true;
+    }
+
     let type_id: WirTypeID = program.arena.values[value_index].type_id;
     let width: Int = a64_scalar_width(ref program, type_id);
     if (width == 0 || home.size != width / 8) {
@@ -585,7 +613,8 @@ func a64_spill_binding(
         register=binding.register,
         value=binding.value,
         held=binding.held,
-        dirty=false
+        dirty=false,
+        wide=false
     );
     return true;
 }
@@ -961,6 +990,11 @@ func a64_materialize_pair(
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
 
+    let mapped: A64RegisterPair = a64_mapped_register_pair(ref values, value_id);
+    if (mapped.low != A64Register.None && mapped.high != A64Register.None) {
+        return mapped;
+    }
+
     let pair: A64RegisterPair = a64_alloc_pair(ref program, homes, ref values, ref output);
     if (pair.low == A64Register.None || pair.high == A64Register.None) {
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
@@ -974,6 +1008,9 @@ func a64_materialize_pair(
             return A64RegisterPair(low=A64Register.None, high=A64Register.None);
         }
 
+        if (!a64_bind_register_pair(ref values, value_id, pair.low, pair.high, false)) {
+            return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+        }
         return pair;
     }
 
@@ -983,6 +1020,9 @@ func a64_materialize_pair(
             program.arena.constants[constant_index].kind == WirConstKind.Zero &&
             a64_mov_immediate(ref output, pair.low, 0UL, true) &&
             a64_mov_immediate(ref output, pair.high, 0UL, true)) {
+            if (!a64_bind_register_pair(ref values, value_id, pair.low, pair.high, false)) {
+                return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+            }
             return pair;
         }
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
@@ -995,6 +1035,10 @@ func a64_materialize_pair(
     let high_bits: UInt64 = UInt64(value.integer >> UInt128(64U));
     if (!a64_mov_immediate(ref output, pair.low, low_bits, true) ||
         !a64_mov_immediate(ref output, pair.high, high_bits, true)) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    if (!a64_bind_register_pair(ref values, value_id, pair.low, pair.high, false)) {
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
 
@@ -1033,11 +1077,25 @@ func a64_materialize_pair_into(
            a64_mov_immediate(ref output, destination.high, UInt64(value.integer >> UInt128(64U)), true);
 }
 
-func a64_save_pair(ref output: A64CodeBuffer, homes: Vector(A64StackSlot), value: WirValueID, pair: A64RegisterPair) -> Bool {
+func a64_save_pair(
+    ref values: A64ValueMap,
+    ref output: A64CodeBuffer,
+    homes: Vector(A64StackSlot),
+    value: WirValueID,
+    pair: A64RegisterPair
+) -> Bool {
     let home: A64StackSlot = a64_find_stack_slot(homes, value);
     if (home.value == NO_WIR_VALUE || home.size != 16 ||
         pair.low == A64Register.None || pair.high == A64Register.None) {
         return false;
+    }
+
+    let low_index: Int = a64_binding_index(ref values, pair.low);
+    let high_index: Int = a64_binding_index(ref values, pair.high);
+    if (low_index >= 0 && high_index >= 0 &&
+        (values.bindings[low_index].value == NO_WIR_VALUE || values.bindings[low_index].value == value) &&
+        (values.bindings[high_index].value == NO_WIR_VALUE || values.bindings[high_index].value == value)) {
+        return a64_bind_register_pair(ref values, value, pair.low, pair.high, true);
     }
 
     return a64_store_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) &&
@@ -1544,7 +1602,7 @@ func a64_load_value_at(
         return pair.low != A64Register.None && pair.high != A64Register.None &&
                a64_load_integer_at(ref output, pair.low, base, offset, 64) &&
                a64_load_integer_at(ref output, pair.high, base, offset + 8, 64) &&
-               a64_save_pair(ref output, homes, result, pair);
+               a64_save_pair(ref values, ref output, homes, result, pair);
     }
 
     let floating: Bool = type.kind == WirTypeKind.FloatType;
@@ -1791,7 +1849,7 @@ func a64_write_edge(ref program: WirModule, edge: WirEdge, homes: Vector(A64Stac
         let width: Int = a64_integer_width(ref program, parameter_type);
         if (width == 128) {
             let pair: A64RegisterPair = a64_materialize_pair(ref program, argument, homes, ref values, ref output);
-            if (!a64_save_pair(ref output, homes, parameter, pair)) {
+            if (!a64_save_pair(ref values, ref output, homes, parameter, pair)) {
                 return false;
             }
 
@@ -1935,7 +1993,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 pair.high = a64_argument_register(location.first + 1, false);
                 loaded = pair.low != A64Register.None && pair.high != A64Register.None;
             }
-            if (!loaded || !a64_save_pair(ref output, stack.homes, parameter, pair)) {
+            if (!loaded || !a64_save_pair(ref values, ref output, stack.homes, parameter, pair)) {
                 return a64_lowering_error("cannot save an AArch64 128-bit argument pair");
             }
 
@@ -2006,9 +2064,12 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
         let instruction_index: Int = 0;
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
-            if (a64_instruction_uses_wide_int(ref program, instruction)) {
+            if (a64_instruction_uses_wide_int(ref program, instruction) &&
+                (a64_is_integer_division(instruction.opcode) || instruction.opcode == WirOpcode.ShiftLeft ||
+                 instruction.opcode == WirOpcode.SignedShiftRight || instruction.opcode == WirOpcode.UnsignedShiftRight)) {
                 // Pair lowering still uses a compact rotating scratch bank.
-                // Do not let scalar cache state change its overlap pattern.
+                // The software divider owns fixed registers and the wide shift
+                // needs more scratch values than the current seven-register bank.
                 if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
                     return a64_lowering_error("cannot spill AArch64 scalar values before a wide instruction");
                 }
@@ -2461,7 +2522,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                         ref output
                     );
                     if (source.low == A64Register.None || source.high == A64Register.None ||
-                        !a64_save_pair(ref output, stack.homes, instruction.result, source)) {
+                        !a64_save_pair(ref values, ref output, stack.homes, instruction.result, source)) {
                         return a64_lowering_error("cannot encode an AArch64 128-bit bitcast");
                     }
                 } else if (target_width == 128) {
@@ -2478,7 +2539,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                                         destination.high != A64Register.None &&
                                         a64_mov_register(ref output, destination.low, source, true) &&
                                         a64_mov_immediate(ref output, destination.high, 0UL, true);
-                    if (!encoded || !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    if (!encoded || !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                         return a64_lowering_error("cannot cast an AArch64 pointer to a 128-bit integer");
                     }
                 } else if (source_width == 128) {
@@ -2549,7 +2610,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     } else if encoded {
                         encoded = a64_mov_immediate(ref output, destination.high, 0UL, true);
                     }
-                    if (!encoded || !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    if (!encoded || !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                         return a64_lowering_error("cannot extend an AArch64 integer to 128 bits");
                     }
                 } else if (source_bits == 128) {
@@ -2671,7 +2732,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     right.low == A64Register.None || right.high == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     !a64_wide_binary(ref output, instruction.opcode, destination, left, right) ||
-                    !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit integer operation");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
@@ -2689,7 +2750,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     temporary == A64Register.None ||
                     !a64_wide_multiply(ref output, destination, left, right, temporary) ||
-                    !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit multiply");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
@@ -2710,7 +2771,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     count == A64Register.None || work == A64Register.None || cross == A64Register.None ||
                     !a64_wide_shift(ref output, instruction.opcode, destination, source, amount.low, count, work, cross) ||
-                    !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit shift");
                 }
             } else if (a64_is_integer_binary(instruction.opcode) && !a64_scalar_float(ref program, instruction.type_id)) {
@@ -2744,7 +2805,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 a64_clear_bindings(ref values);
                 let result: A64RegisterPair = a64_wide_divide(ref output, signed, remainder);
                 if (result.low == A64Register.None || result.high == A64Register.None ||
-                    !a64_save_pair(ref output, stack.homes, instruction.result, result)) {
+                    !a64_save_pair(ref values, ref output, stack.homes, instruction.result, result)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit division");
                 }
             } else if (a64_is_integer_division(instruction.opcode)) {
@@ -2866,7 +2927,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     temporary == A64Register.None ||
                     !a64_wide_unary(ref output, instruction.opcode, destination, source, temporary) ||
-                    !a64_save_pair(ref output, stack.homes, instruction.result, destination)) {
+                    !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit unary operation");
                 }
             } else if (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not ||
@@ -3158,6 +3219,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 let result_width: Int = a64_integer_width(ref program, instruction.type_id);
                 if (instruction.result != NO_WIR_VALUE && result_width == 128) {
                     if (!a64_save_pair(
+                        ref values,
                         ref output,
                         stack.homes,
                         instruction.result,

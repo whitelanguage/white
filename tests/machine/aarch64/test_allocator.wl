@@ -85,6 +85,31 @@ func main() -> Int {
         return 1;
     }
 
+    let low_index: Int = a64_select_register(ref values, false);
+    let low: A64Register = a64_claim_register(ref values, low_index);
+    let high_index: Int = a64_select_register(ref values, false);
+    let high: A64Register = a64_claim_register(ref values, high_index);
+    if (!a64_bind_register_pair(ref values, first, low, high, true)) {
+        print("FAIL: AArch64 register pair was not bound");
+        return 1;
+    }
+
+    let pair: A64RegisterPair = a64_mapped_register_pair(ref values, first);
+    if (pair.low != low || pair.high != high ||
+        !values.bindings[a64_binding_index(ref values, low)].dirty ||
+        !values.bindings[a64_binding_index(ref values, high)].dirty) {
+        print("FAIL: AArch64 register pair mapping was incomplete");
+        return 1;
+    }
+
+    a64_release_binding(ref values, a64_binding_index(ref values, low));
+    pair = a64_mapped_register_pair(ref values, first);
+    if (pair.low != A64Register.None || pair.high != A64Register.None ||
+        values.bindings[a64_binding_index(ref values, high)].value != NO_WIR_VALUE) {
+        print("FAIL: AArch64 register pair was only half released");
+        return 1;
+    }
+
     print("PASS: AArch64 next-use table");
     return 0;
 }

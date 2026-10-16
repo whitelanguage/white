@@ -16,10 +16,13 @@ struct A64UseTable(
 
 struct A64ValueRange(base: Int, count: Int)
 
-struct A64RegisterBinding(register: A64Register, value: WirValueID, held: Bool, dirty: Bool)
+struct A64RegisterPair(low: A64Register, high: A64Register)
+
+struct A64RegisterBinding(register: A64Register, value: WirValueID, held: Bool, dirty: Bool, wide: Bool)
 
 struct A64ValueMap(
     registers: Vector(A64Register),
+    wide_high: Vector(A64Register),
     bindings: Vector(A64RegisterBinding),
     uses: A64UseTable,
     position: Int,
@@ -303,28 +306,31 @@ func a64_float_work_register(index: Int) -> A64Register {
 
 func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64ValueMap {
     let registers: Vector(A64Register) = [];
+    let wide_high: Vector(A64Register) = [];
     let bindings: Vector(A64RegisterBinding) = [];
     let i: Int = 0;
 
     while (i < program.arena.values.length()) {
         registers.append(A64Register.None);
+        wide_high.append(A64Register.None);
         i++;
     }
 
     i = 0;
     while (i < 7) {
-        bindings.append(A64RegisterBinding(register=a64_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false));
+        bindings.append(A64RegisterBinding(register=a64_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false, wide=false));
         i++;
     }
 
     i = 0;
     while (i < 7) {
-        bindings.append(A64RegisterBinding(register=a64_float_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false));
+        bindings.append(A64RegisterBinding(register=a64_float_work_register(i), value=NO_WIR_VALUE, held=false, dirty=false, wide=false));
         i++;
     }
 
     return A64ValueMap(
         registers=registers,
+        wide_high=wide_high,
         bindings=bindings,
         uses=a64_collect_uses(ref program, order),
         position=0,
@@ -351,9 +357,28 @@ func a64_release_binding(ref values: A64ValueMap, index: Int) -> Void {
     if (binding.value != NO_WIR_VALUE) {
         let value_index: Int = wir_id_index(UInt32(binding.value));
 
-        if (value_index >= 0 && value_index < values.registers.length() &&
-            values.registers[value_index] == binding.register) {
-            values.registers[value_index] = A64Register.None;
+        if (value_index >= 0 && value_index < values.registers.length()) {
+            if (binding.wide) {
+                let low: A64Register = values.registers[value_index];
+                let high: A64Register = values.wide_high[value_index];
+                let low_index: Int = a64_binding_index(ref values, low);
+                let high_index: Int = a64_binding_index(ref values, high);
+
+                values.registers[value_index] = A64Register.None;
+                values.wide_high[value_index] = A64Register.None;
+
+                if (low_index >= 0) {
+                    values.bindings[low_index] = A64RegisterBinding(register=low, value=NO_WIR_VALUE, held=false, dirty=false, wide=false);
+                }
+                if (high_index >= 0) {
+                    values.bindings[high_index] = A64RegisterBinding(register=high, value=NO_WIR_VALUE, held=false, dirty=false, wide=false);
+                }
+                return;
+            }
+
+            if (values.registers[value_index] == binding.register) {
+                values.registers[value_index] = A64Register.None;
+            }
         }
     }
 
@@ -361,7 +386,8 @@ func a64_release_binding(ref values: A64ValueMap, index: Int) -> Void {
         register=binding.register,
         value=NO_WIR_VALUE,
         held=false,
-        dirty=false
+        dirty=false,
+        wide=false
     );
 }
 
@@ -442,7 +468,7 @@ func a64_claim_register(ref values: A64ValueMap, index: Int) -> A64Register {
 
     let register: A64Register = values.bindings[index].register;
     a64_release_binding(ref values, index);
-    values.bindings[index] = A64RegisterBinding(register=register, value=NO_WIR_VALUE, held=true, dirty=false);
+    values.bindings[index] = A64RegisterBinding(register=register, value=NO_WIR_VALUE, held=true, dirty=false, wide=false);
 
     return register;
 }
@@ -464,7 +490,8 @@ func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64
 
     a64_release_binding(ref values, binding_index);
     values.registers[index] = register;
-    values.bindings[binding_index] = A64RegisterBinding(register=register, value=value_id, held=false, dirty=dirty);
+    values.wide_high[index] = A64Register.None;
+    values.bindings[binding_index] = A64RegisterBinding(register=register, value=value_id, held=false, dirty=dirty, wide=false);
 
     return true;
 }
@@ -474,4 +501,39 @@ func a64_mapped_register(ref values: A64ValueMap, value_id: WirValueID) -> A64Re
     if (index < 0 || index >= values.registers.length()) { return A64Register.None; }
 
     return values.registers[index];
+}
+
+func a64_bind_register_pair(
+    ref values: A64ValueMap,
+    value_id: WirValueID,
+    low: A64Register,
+    high: A64Register,
+    dirty: Bool
+) -> Bool {
+    let value_index: Int = wir_id_index(UInt32(value_id));
+    let low_index: Int = a64_binding_index(ref values, low);
+    let high_index: Int = a64_binding_index(ref values, high);
+    if (value_index < 0 || value_index >= values.registers.length() ||
+        low_index < 0 || high_index < 0 || low_index == high_index) {
+        return false;
+    }
+
+    a64_release_binding(ref values, low_index);
+    a64_release_binding(ref values, high_index);
+
+    values.registers[value_index] = low;
+    values.wide_high[value_index] = high;
+    values.bindings[low_index] = A64RegisterBinding(register=low, value=value_id, held=false, dirty=dirty, wide=true);
+    values.bindings[high_index] = A64RegisterBinding(register=high, value=value_id, held=false, dirty=dirty, wide=true);
+    return true;
+}
+
+func a64_mapped_register_pair(ref values: A64ValueMap, value_id: WirValueID) -> A64RegisterPair {
+    let index: Int = wir_id_index(UInt32(value_id));
+    if (index < 0 || index >= values.registers.length() ||
+        values.registers[index] == A64Register.None || values.wide_high[index] == A64Register.None) {
+        return A64RegisterPair(low=A64Register.None, high=A64Register.None);
+    }
+
+    return A64RegisterPair(low=values.registers[index], high=values.wide_high[index]);
 }
