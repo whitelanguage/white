@@ -321,6 +321,48 @@ func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: 
     return true;
 }
 
+func check_equality_operands(ref c: Compiler, left_repr: Int, right_repr: Int, pos: Position) -> Bool {
+    if (left_repr == TYPE_NULL || left_repr == TYPE_NULLPTR || right_repr == TYPE_NULL || right_repr == TYPE_NULLPTR) {
+        throw_type_error(pos, "Invalid operator. Do not use '==' or '!=' with null/nullptr. Use 'is' or 'is !'.");
+        return false;
+    }
+    if (left_repr == TYPE_ANYPTR || right_repr == TYPE_ANYPTR ||
+        (left_repr >= 100 && is_pointer_type(ref c, left_repr)) ||
+        (right_repr >= 100 && is_pointer_type(ref c, right_repr))) {
+        throw_type_error(pos, "Pointer addresses must be compared with 'is' or 'is !'.");
+        return false;
+    }
+    return true;
+}
+
+func check_equality_fallback(ref c: Compiler, left_repr: Int, right_repr: Int, pos: Position) -> Bool {
+// protocol dispatch has already failed, a class must not fall through to an address comparison
+    let class_operand: Bool = left_repr == TYPE_GENERIC_CLASS || right_repr == TYPE_GENERIC_CLASS;
+    if (left_repr >= 100) {
+        let info: Optional(StructInfo) = c.struct_id_map.lookup(left_repr);
+        class_operand = class_operand || ((info is !null) && info.is_class);
+    }
+    if (!class_operand && right_repr >= 100 && right_repr != left_repr) {
+        let info: Optional(StructInfo) = c.struct_id_map.lookup(right_repr);
+        class_operand = (info is !null) && info.is_class;
+    }
+
+    if class_operand {
+        throw_type_error(pos, "Class equality requires matching types implementing Equal. Use 'is' or 'is !' for identity.");
+        return false;
+    }
+    return true;
+}
+
+func check_identity_operand(ref c: Compiler, type_id: Int, pos: Position) -> Bool {
+    if (type_id == TYPE_POISON) { return false; }
+    if (type_id >= 100 && is_value_struct(ref c, type_id)) {
+        throw_type_error(pos, "Operator 'is' is not defined for Struct values. Compare explicit pointers instead.");
+        return false;
+    }
+    return true;
+}
+
 func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
     if (name.length() == 0) {
         return;

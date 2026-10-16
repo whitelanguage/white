@@ -5501,10 +5501,8 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         right.type = get_repr_type(ref c, right.type);
     }
     if (op_type == TOK_EE || op_type == TOK_NE) {
-        if (left.type == TYPE_NULL || left.type == TYPE_NULLPTR ||
-            right.type == TYPE_NULL || right.type == TYPE_NULLPTR) {
-            throw_type_error(node.pos, "Invalid operator. Do not use '==' or '!=' with null/nullptr. Use 'is' or 'is !'.");
-            return void_result();
+        if (!check_equality_operands(ref c, left.type, right.type, node.pos)) {
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
     }
 
@@ -5552,6 +5550,11 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
     if (op_type == TOK_EE || op_type == TOK_NE || op_type == TOK_LT || op_type == TOK_GT || op_type == TOK_LTE || op_type == TOK_GTE) {
         let protocol_result: CompileResult = compile_protocol_comparison(ref c, left, right, op_type, node.pos);
         if (has_result(protocol_result)) { return protocol_result; }
+    }
+
+    if ((op_type == TOK_EE || op_type == TOK_NE) &&
+        !check_equality_fallback(ref c, left.type, right.type, node.pos)) {
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     // string
@@ -5691,16 +5694,6 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
     if (op_type == TOK_LTE) { is_cmp = true; }
 
     if is_cmp {
-        if (left.type == right.type && (left.type == TYPE_ANYPTR || is_pointer_type(ref c, left.type)) &&
-            (op_type == TOK_EE || op_type == TOK_NE)) {
-            let op_code: String = "icmp eq";
-            if (op_type == TOK_NE) { op_code = "icmp ne"; }
-            let res_reg: String = next_reg(ref c);
-            write_ir(ref c, c.indent + res_reg + " = " + op_code + " " + get_llvm_type_str(ref c, left.type) + " " + left.reg + ", " + right.reg + "\n");
-
-            return CompileResult(reg=res_reg, type=TYPE_BOOL, origin_type=0, owns_ref=false, is_const_access=false);
-        }
-
         let is_enum_cmp: Bool = false;
         if (left.type >= 100 && left.type == right.type) {
             let s_info: Optional(StructInfo) = c.struct_id_map.lookup(left.type);
@@ -6420,6 +6413,11 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         c.flow_skip = b_node.right;
         let rhs_res: CompileResult = compile_node(ref c, b_node.right);
         c.flow_skip = old_skip;
+
+        if (!check_identity_operand(ref c, lhs_res.type, b_node.pos) ||
+            !check_identity_operand(ref c, rhs_res.type, b_node.pos)) {
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+        }
 
         let left_union: Bool = is_union_type(ref c, get_repr_type(ref c, lhs_res.type));
         let right_union: Bool = is_union_type(ref c, get_repr_type(ref c, rhs_res.type));

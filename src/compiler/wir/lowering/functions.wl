@@ -24,6 +24,7 @@ import parse_const_uint128, parse_decimal_float_literal, eval_const_long, check_
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
 import return_value_type, check_null_return, check_unary_operand, check_postfix_operand from "../../validation.wl"
 import c_vararg_type from "../../validation.wl"
+import check_equality_operands, check_equality_fallback, check_identity_operand from "../../validation.wl"
 import check_struct_init, struct_arg_supplied from "../../initialization.wl"
 import is_typed_dict, is_dict_key_type, validate_explicit_literal_cast from "../../validation.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
@@ -6821,6 +6822,10 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
     }
     let left_repr: Int = get_repr_type(ref source, left.source_type);
     let right_repr: Int = get_repr_type(ref source, right.source_type);
+    if ((binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE) &&
+        !check_equality_operands(ref source, left_repr, right_repr, binary.pos)) {
+        return wir_no_expr();
+    }
     if (is_union_type(ref source, left_repr) || is_union_type(ref source, right_repr)) {
         throw_type_error(binary.pos, "Invalid types for binary operator.");
         return wir_no_expr();
@@ -6888,6 +6893,10 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
     if (protocol_comparison.handled) {
         wir_cleanup_temporaries(ref state, ref types, ref source, ref program, owned_start);
         return protocol_comparison.value;
+    }
+    if ((binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE) &&
+        !check_equality_fallback(ref source, left_repr, right_repr, binary.pos)) {
+        return wir_no_expr();
     }
     if (binary.op_tok.type == TOK_POW) {
         if (!wir_source_numeric(left_repr) || !wir_source_numeric(right_repr)) {
@@ -7130,6 +7139,10 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
         let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, identity.right);
         source.flow_skip = old_skip;
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) {
+            return wir_no_expr();
+        }
+        if (!check_identity_operand(ref source, left.source_type, identity.pos) ||
+            !check_identity_operand(ref source, right.source_type, identity.pos)) {
             return wir_no_expr();
         }
         let left_union: Bool = is_union_type(ref source, get_repr_type(ref source, left.source_type));
