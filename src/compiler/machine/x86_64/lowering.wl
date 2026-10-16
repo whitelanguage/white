@@ -1219,6 +1219,21 @@ func x86_save_live_registers(ref program: WirModule, slots: Vector(X86StackSlot)
             needed = operands[operand_index] == binding.value;
             operand_index++;
         }
+
+        let pair: X86RegisterPair = x86_register_pair_for(ref state.registers, binding.value);
+        if (pair.low != X86Register.None && pair.high != X86Register.None) {
+            if (binding.register != pair.low) {
+                i++;
+                continue;
+            }
+            if (needed && !x86_spill_wide_value(ref state, binding.value, ref output)) {
+                return "x86_64 cannot spill a 128-bit value before a call";
+            }
+            if (needed) { x86_forget_register_value(ref state.registers, binding.value); }
+            i++;
+            continue;
+        }
+
         // argument setup may reuse scratch registers before all operands are read
         if (binding.value != NO_WIR_VALUE && needed) {
             if (x86_rematerializable(ref program, binding.value) || x86_stack_offset(ref state.stack, binding.value) != 0) {
@@ -1268,6 +1283,15 @@ func x86_prepare_register(ref program: WirModule, ref state: X86BlockState, choi
     }
 
     let next_use: Int = x86_pending_use(ref state.registers.uses, choice.evicted, state.position);
+    let pair: X86RegisterPair = x86_register_pair_for(ref state.registers, choice.evicted);
+    if (pair.low != X86Register.None && pair.high != X86Register.None) {
+        if (next_use != X86_NO_NEXT_USE && !x86_spill_wide_value(ref state, choice.evicted, ref output)) {
+            return "x86_64 cannot spill this 128-bit value";
+        }
+        x86_forget_register_value(ref state.registers, choice.evicted);
+        return "";
+    }
+
     if (next_use == X86_NO_NEXT_USE || x86_rematerializable(ref program, choice.evicted) || x86_stack_offset(ref state.stack, choice.evicted) != 0) {
         x86_clear_register(ref state.registers, choice.register);
         return "";
@@ -1759,7 +1783,15 @@ func x86_emit_edge_moves(
         registers.append(state.registers.bindings[binding_index]);
         binding_index++;
     }
-    state.registers = X86RegisterPlan(uses=state.registers.uses, bindings=registers);
+    let wide_low: Vector(X86Register) = [];
+    let wide_high: Vector(X86Register) = [];
+    binding_index = 0;
+    while (binding_index < state.registers.wide_low.length()) {
+        wide_low.append(state.registers.wide_low[binding_index]);
+        wide_high.append(state.registers.wide_high[binding_index]);
+        binding_index++;
+    }
+    state.registers = X86RegisterPlan(uses=state.registers.uses, bindings=registers, wide_low=wide_low, wide_high=wide_high);
     state.spills = x86_copy_spill_plan(ref state.spills);
 
     if (x86_incoming_register(ref state.registers.uses, target.parameters[0]) != X86Register.None) {
@@ -1882,6 +1914,15 @@ func x86_load_wide_half(ref program: WirModule, value_id: WirValueID, high: Bool
     if (!x86_wide_integer(ref program, value.type_id)) {
         return "value is not a 128-bit integer";
     }
+
+    let pair: X86RegisterPair = x86_register_pair_for(ref state.registers, value_id);
+    if (pair.low != X86Register.None && pair.high != X86Register.None) {
+        let source: X86Register = pair.low;
+        if high { source = pair.high; }
+        if (source != destination) { x86_mov_register64(ref output, destination, source); }
+        return "";
+    }
+
     let offset = x86_stack_offset(ref state.stack, value_id);
     if (offset != 0) {
         if high { offset += 8; }
@@ -1906,19 +1947,52 @@ func x86_load_wide_half(ref program: WirModule, value_id: WirValueID, high: Bool
 func x86_store_wide_pair(value_id: WirValueID, low: X86Register, high: X86Register, ref state: X86BlockState, ref output: X86CodeBuffer) -> Bool {
     let offset = x86_stack_offset(ref state.stack, value_id);
     if (offset == 0) { return false; }
+
+    if (x86_bind_register_pair(ref state.registers, value_id, low, high, true)) {
+        return true;
+    }
+
     return x86_store_scalar(ref output, low, X86Register.RBP, offset, 8) &&
            x86_store_scalar(ref output, high, X86Register.RBP, offset + 8, 8);
 }
 
-func x86_prepare_wide_scratch(ref program: WirModule, ref state: X86BlockState, ref output: X86CodeBuffer) -> String {
-    let clobbers: UInt64 = x86_register_clobber(X86Register.RAX) |
-                             x86_register_clobber(X86Register.RCX) |
+func x86_spill_wide_value(ref state: X86BlockState, value_id: WirValueID, ref output: X86CodeBuffer) -> Bool {
+    let pair: X86RegisterPair = x86_register_pair_for(ref state.registers, value_id);
+    if (pair.low == X86Register.None || pair.high == X86Register.None) {
+        return true;
+    }
+    if (!x86_register_pair_dirty(ref state.registers, value_id)) {
+        return true;
+    }
+
+    let offset: Int = x86_stack_offset(ref state.stack, value_id);
+    if (offset == 0 ||
+        !x86_store_scalar(ref output, pair.low, X86Register.RBP, offset, 8) ||
+        !x86_store_scalar(ref output, pair.high, X86Register.RBP, offset + 8, 8)) {
+        return false;
+    }
+
+    x86_mark_register_pair_clean(ref state.registers, value_id);
+    return true;
+}
+
+func x86_prepare_wide_scratch(ref program: WirModule, ref state: X86BlockState, ref output: X86CodeBuffer, keep_result_pair: Bool = false) -> String {
+    let clobbers: UInt64 = x86_register_clobber(X86Register.RCX) |
                              x86_register_clobber(X86Register.RDX) |
                              x86_register_clobber(X86Register.R8) |
                              x86_register_clobber(X86Register.R9) |
-                             x86_register_clobber(X86Register.R10) |
                              x86_register_clobber(X86Register.R11);
+    if (!keep_result_pair) {
+        clobbers |= x86_register_clobber(X86Register.RAX) |
+                    x86_register_clobber(X86Register.R10);
+    }
     return x86_prepare_clobbers(ref program, ref state, clobbers, ref output);
+}
+
+func x86_can_reuse_wide_result(ref state: X86BlockState, value: WirValueID) -> Bool {
+    let pair: X86RegisterPair = x86_register_pair_for(ref state.registers, value);
+    return pair.low == X86Register.RAX && pair.high == X86Register.R10 &&
+           x86_next_use(ref state.registers.uses, value, state.position) == X86_NO_NEXT_USE;
 }
 
 func x86_shift_wide_immediate(ref output: X86CodeBuffer, opcode: WirOpcode, amount: Int) -> Void {
@@ -2315,11 +2389,15 @@ func x86_lower_instruction(ref program: WirModule,
         if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
             return "128-bit integer operation requires two operands and a result";
         }
-        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output);
+        let reuse_left: Bool = x86_can_reuse_wide_result(ref state, instruction.operands[0]);
+        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output, reuse_left);
         if (prepare_error.length() != 0) { return prepare_error; }
-        let load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
-        if (load_error.length() == 0) {
-            load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+        let load_error = "";
+        if (!reuse_left) {
+            load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
+            if (load_error.length() == 0) {
+                load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+            }
         }
         if (load_error.length() == 0) {
             load_error = x86_load_wide_half(ref program, instruction.operands[1], false, X86Register.R11, ref state, ref output);
@@ -2363,11 +2441,15 @@ func x86_lower_instruction(ref program: WirModule,
         if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
             return "128-bit unary operation requires one operand and a result";
         }
-        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output);
+        let reuse_source: Bool = x86_can_reuse_wide_result(ref state, instruction.operands[0]);
+        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output, reuse_source);
         if (prepare_error.length() != 0) { return prepare_error; }
-        let load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
-        if (load_error.length() == 0) {
-            load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+        let load_error = "";
+        if (!reuse_source) {
+            load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
+            if (load_error.length() == 0) {
+                load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+            }
         }
         if (load_error.length() != 0) { return load_error; }
         x86_unary_register(ref output, X86Register.RAX, 2, true);
@@ -2390,11 +2472,15 @@ func x86_lower_instruction(ref program: WirModule,
         if (instruction.operands.length() != 2 || instruction.result == NO_WIR_VALUE) {
             return "128-bit shift requires two operands and a result";
         }
-        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output);
+        let reuse_source: Bool = x86_can_reuse_wide_result(ref state, instruction.operands[0]);
+        let prepare_error = x86_prepare_wide_scratch(ref program, ref state, ref output, reuse_source);
         if (prepare_error.length() != 0) { return prepare_error; }
-        let load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
-        if (load_error.length() == 0) {
-            load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+        let load_error = "";
+        if (!reuse_source) {
+            load_error = x86_load_wide_half(ref program, instruction.operands[0], false, X86Register.RAX, ref state, ref output);
+            if (load_error.length() == 0) {
+                load_error = x86_load_wide_half(ref program, instruction.operands[0], true, X86Register.R10, ref state, ref output);
+            }
         }
         if (load_error.length() != 0) { return load_error; }
         let amount: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
@@ -4250,13 +4336,19 @@ func x86_lower_function_with_layouts(
             if (state.message.length() != 0) {
                 return x86_lowering_error("function '" + function.name + "', block '" + block.name + "', instruction " + instruction_index + " (opcode " + Int(instruction.opcode) + "): " + state.message);
             }
-            if (instruction.result != NO_WIR_VALUE && x86_flag(cross, instruction.result) && !x86_memory_value(ref program, instruction.type_id)) {
-                // write the defining value before its register can be reused
-                let register: X86Register = x86_register_for(ref state.registers, instruction.result);
-                let offset: Int = x86_stack_offset(ref stack, instruction.result);
-                let size: Int = x86_scalar_size(ref program, instruction.type_id);
-                if (register == X86Register.None || offset == 0 || !x86_store_scalar(ref output, register, X86Register.RBP, offset, size)) {
-                    return x86_lowering_error("the x86_64 lowering could not save a cross-block value");
+            if (instruction.result != NO_WIR_VALUE && x86_flag(cross, instruction.result)) {
+                if (x86_wide_integer(ref program, instruction.type_id)) {
+                    if (!x86_spill_wide_value(ref state, instruction.result, ref output)) {
+                        return x86_lowering_error("the x86_64 lowering could not save a cross-block Int128 value");
+                    }
+                } else if (!x86_memory_value(ref program, instruction.type_id)) {
+                    // write the defining value before its register can be reused
+                    let register: X86Register = x86_register_for(ref state.registers, instruction.result);
+                    let offset: Int = x86_stack_offset(ref stack, instruction.result);
+                    let size: Int = x86_scalar_size(ref program, instruction.type_id);
+                    if (register == X86Register.None || offset == 0 || !x86_store_scalar(ref output, register, X86Register.RBP, offset, size)) {
+                        return x86_lowering_error("the x86_64 lowering could not save a cross-block value");
+                    }
                 }
             }
 

@@ -56,6 +56,33 @@ func main() -> Int {
         return 1;
     }
 
+    x86_clear_register(ref plan, X86Register.R8);
+    x86_clear_register(ref plan, X86Register.R9);
+    if (!x86_bind_register_pair(ref plan, far, X86Register.R8, X86Register.R9, true)) {
+        print("FAIL: allocator did not bind an Int128 register pair");
+        return 1;
+    }
+
+    let pair: X86RegisterPair = x86_register_pair_for(ref plan, far);
+    if (pair.low != X86Register.R8 || pair.high != X86Register.R9 || !x86_register_pair_dirty(ref plan, far)) {
+        print("FAIL: Int128 register pair mapping is incomplete");
+        return 1;
+    }
+
+    x86_mark_register_pair_clean(ref plan, far);
+    if (x86_register_pair_dirty(ref plan, far)) {
+        print("FAIL: spilled Int128 register pair stayed dirty");
+        return 1;
+    }
+
+    x86_clear_register(ref plan, X86Register.R8);
+    pair = x86_register_pair_for(ref plan, far);
+    if (pair.low != X86Register.None || pair.high != X86Register.None ||
+        x86_register_for(ref plan, far) != X86Register.None) {
+        print("FAIL: allocator released only half of an Int128 pair");
+        return 1;
+    }
+
     print("PASS: x86_64 register allocator");
     return 0;
 }

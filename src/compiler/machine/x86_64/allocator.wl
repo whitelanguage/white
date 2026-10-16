@@ -26,9 +26,13 @@ struct X86UseTable(
 
 struct X86ValueRange(base: Int, count: Int)
 
+struct X86RegisterPair(low: X86Register, high: X86Register)
+
 struct X86RegisterBinding(
     register: X86Register,
-    value: WirValueID
+    value: WirValueID,
+    dirty: Bool,
+    wide: Bool
 )
 
 struct X86RegisterChoice(
@@ -38,7 +42,9 @@ struct X86RegisterChoice(
 
 struct X86RegisterPlan(
     uses: X86UseTable,
-    bindings: Vector(X86RegisterBinding)
+    bindings: Vector(X86RegisterBinding),
+    wide_low: Vector(X86Register),
+    wide_high: Vector(X86Register)
 )
 
 struct X86SpillBinding(
@@ -350,27 +356,36 @@ func x86_allocatable_register(register: X86Register) -> Bool {
 
 func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
     let bindings: Vector(X86RegisterBinding) = [];
+    let wide_low: Vector(X86Register) = [];
+    let wide_high: Vector(X86Register) = [];
     let registers: Vector(X86Register) = x86_allocatable_registers();
 
     let i = 0;
 
+    while (i < uses.queues.length()) {
+        wide_low.append(X86Register.None);
+        wide_high.append(X86Register.None);
+        i++;
+    }
+
+    i = 0;
     while (i < registers.length()) {
-        bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE));
+        bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE, dirty=false, wide=false));
         i++;
     }
     // RCX and RDX still belong to shifts, division and the memory emitters.
     // R8/R9 are ordinary caller-saved registers now that those users declare
     // their clobbers instead of borrowing the registers behind the allocator.
-    bindings.append(X86RegisterBinding(register=X86Register.RCX, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.RDX, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM0, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM1, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM2, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM3, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM4, value=NO_WIR_VALUE));
-    bindings.append(X86RegisterBinding(register=X86Register.XMM5, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.RCX, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.RDX, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM0, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM1, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM2, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM3, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM4, value=NO_WIR_VALUE, dirty=false, wide=false));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM5, value=NO_WIR_VALUE, dirty=false, wide=false));
 
-    return X86RegisterPlan(uses=uses, bindings=bindings);
+    return X86RegisterPlan(uses=uses, bindings=bindings, wide_low=wide_low, wide_high=wide_high);
 }
 
 func x86_new_register_plan(ref program: WirModule, order: Vector(WirBlockID)) -> X86RegisterPlan {
@@ -392,24 +407,20 @@ func x86_register_for(ref plan: X86RegisterPlan, value: WirValueID) -> X86Regist
 }
 
 func x86_bind_register(ref plan: X86RegisterPlan, register: X86Register, value: WirValueID) -> Void {
+    x86_forget_register_value(ref plan, value);
+
     let i = 0;
-
-    while (i < plan.bindings.length()) {
-        let binding: X86RegisterBinding = plan.bindings[i];
-
-        if (binding.value == value) {
-            binding.value = NO_WIR_VALUE;
-            plan.bindings[i] = binding;
-        }
-        i++;
-    }
-
-    i = 0;
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
 
         if (binding.register == register) {
+            if (binding.value != NO_WIR_VALUE) {
+                x86_forget_register_value(ref plan, binding.value);
+            }
+            binding = plan.bindings[i];
             binding.value = value;
+            binding.dirty = false;
+            binding.wide = false;
             plan.bindings[i] = binding;
 
             return;
@@ -419,10 +430,24 @@ func x86_bind_register(ref plan: X86RegisterPlan, register: X86Register, value: 
 }
 
 func x86_clear_register(ref plan: X86RegisterPlan, register: X86Register) -> Void {
-    x86_bind_register(ref plan, register, NO_WIR_VALUE);
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        if (plan.bindings[i].register == register) {
+            let value: WirValueID = plan.bindings[i].value;
+            if (value != NO_WIR_VALUE) {
+                x86_forget_register_value(ref plan, value);
+            }
+            return;
+        }
+        i++;
+    }
 }
 
 func x86_forget_register_value(ref plan: X86RegisterPlan, value: WirValueID) -> Void {
+    if (value == NO_WIR_VALUE) {
+        return;
+    }
+
     let i: Int = 0;
 
     while (i < plan.bindings.length()) {
@@ -430,6 +455,88 @@ func x86_forget_register_value(ref plan: X86RegisterPlan, value: WirValueID) -> 
 
         if (binding.value == value) {
             binding.value = NO_WIR_VALUE;
+            binding.dirty = false;
+            binding.wide = false;
+            plan.bindings[i] = binding;
+        }
+        i++;
+    }
+
+    let value_index: Int = x86_use_index(ref plan.uses, value);
+    if (value_index >= 0 && value_index < plan.wide_low.length()) {
+        plan.wide_low[value_index] = X86Register.None;
+        plan.wide_high[value_index] = X86Register.None;
+    }
+}
+
+func x86_bind_register_pair(ref plan: X86RegisterPlan, value: WirValueID, low: X86Register, high: X86Register, dirty: Bool) -> Bool {
+    if (low == X86Register.None || high == X86Register.None || low == high) {
+        return false;
+    }
+
+    let low_index: Int = -1;
+    let high_index: Int = -1;
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        if (plan.bindings[i].register == low) { low_index = i; }
+        if (plan.bindings[i].register == high) { high_index = i; }
+        i++;
+    }
+    let value_index: Int = x86_use_index(ref plan.uses, value);
+    if (low_index < 0 || high_index < 0 || value_index < 0 || value_index >= plan.wide_low.length()) {
+        return false;
+    }
+
+    let low_value: WirValueID = plan.bindings[low_index].value;
+    let high_value: WirValueID = plan.bindings[high_index].value;
+    if (low_value != NO_WIR_VALUE) { x86_forget_register_value(ref plan, low_value); }
+    if (high_value != NO_WIR_VALUE && high_value != low_value) { x86_forget_register_value(ref plan, high_value); }
+    x86_forget_register_value(ref plan, value);
+
+    let low_binding: X86RegisterBinding = plan.bindings[low_index];
+    low_binding.value = value;
+    low_binding.dirty = dirty;
+    low_binding.wide = true;
+    plan.bindings[low_index] = low_binding;
+
+    let high_binding: X86RegisterBinding = plan.bindings[high_index];
+    high_binding.value = value;
+    high_binding.dirty = dirty;
+    high_binding.wide = true;
+    plan.bindings[high_index] = high_binding;
+
+    plan.wide_low[value_index] = low;
+    plan.wide_high[value_index] = high;
+    return true;
+}
+
+func x86_register_pair_for(ref plan: X86RegisterPlan, value: WirValueID) -> X86RegisterPair {
+    let index: Int = x86_use_index(ref plan.uses, value);
+    if (index < 0 || index >= plan.wide_low.length()) {
+        return X86RegisterPair(low=X86Register.None, high=X86Register.None);
+    }
+
+    return X86RegisterPair(low=plan.wide_low[index], high=plan.wide_high[index]);
+}
+
+func x86_register_pair_dirty(ref plan: X86RegisterPlan, value: WirValueID) -> Bool {
+    let pair: X86RegisterPair = x86_register_pair_for(ref plan, value);
+    if (pair.low == X86Register.None || pair.high == X86Register.None) { return false; }
+
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        if (plan.bindings[i].register == pair.low) { return plan.bindings[i].dirty; }
+        i++;
+    }
+    return false;
+}
+
+func x86_mark_register_pair_clean(ref plan: X86RegisterPlan, value: WirValueID) -> Void {
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        let binding: X86RegisterBinding = plan.bindings[i];
+        if (binding.value == value && binding.wide) {
+            binding.dirty = false;
             plan.bindings[i] = binding;
         }
         i++;
@@ -442,7 +549,16 @@ func x86_reset_registers(ref plan: X86RegisterPlan) -> Void {
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
         binding.value = NO_WIR_VALUE;
+        binding.dirty = false;
+        binding.wide = false;
         plan.bindings[i] = binding;
+        i++;
+    }
+
+    i = 0;
+    while (i < plan.wide_low.length()) {
+        plan.wide_low[i] = X86Register.None;
+        plan.wide_high[i] = X86Register.None;
         i++;
     }
 }
@@ -455,8 +571,7 @@ func x86_release_dead_registers(ref plan: X86RegisterPlan, position: Int) -> Voi
 
         if (binding.value != NO_WIR_VALUE &&
             x86_next_use(ref plan.uses, binding.value, position) == X86_NO_NEXT_USE) {
-            binding.value = NO_WIR_VALUE;
-            plan.bindings[i] = binding;
+            x86_forget_register_value(ref plan, binding.value);
         }
 
         i++;
