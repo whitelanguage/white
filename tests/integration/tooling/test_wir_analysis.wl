@@ -23,10 +23,10 @@ func analysis_type(arena: AstArena, value: String, pos: Position) -> NodeID {
 func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let structs: Dict(String, StructInfo) = Dict();
-    let struct_ids: Dict(String, StructInfo) = Dict();
+    let struct_ids: Dict(Int, StructInfo) = Dict();
     let info: StructInfo = StructInfo(name="Pair", type_id=100, fields=null, llvm_name="%struct.Pair", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false);
     structs.put("Pair", info);
-    struct_ids.put("100", info);
+    struct_ids.put(100, info);
     let source: Compiler = Compiler(arena=arena, struct_table=structs, struct_id_map=struct_ids, named_types=Dict(), named_type_ids=Dict(), generic_bindings=Dict(), ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), current_package_prefix="", all_modules=[]);
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
     let fields: Vector(ParamNode) = [
@@ -70,7 +70,7 @@ func main() -> Int {
 
     let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=null, llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=null, interfaces=null);
     source.struct_table.put("Box", class_info);
-    source.struct_id_map.put("101", class_info);
+    source.struct_id_map.put(101, class_info);
     let default_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=Token(type=TOK_INT, value="1", line=1, col=1), pos=pos));
     let class_field: NodeID = add_var_decl_node(ref arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=analysis_token("value"), type_node=analysis_type(arena, "Int", pos), value=default_value, is_const=false, annotations=[], pos=pos, alloc_id=0));
     let class_node: NodeID = add_class_def_node(ref arena, ClassDefNode(type=NODE_CLASS_DEF, pos=pos, name_tok=analysis_token("Box"), type_params=[], parent_tok=NO_NODE, interfaces=[], fields=[class_field], methods=[], annotations=[]));

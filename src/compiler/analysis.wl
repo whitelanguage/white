@@ -48,18 +48,18 @@ func value_struct_dependency(ref c: Compiler, type_id: Int) -> Int {
         return value_struct_dependency(ref c, named.underlying_type);
     }
 
-    let array: ArrayInfo = c.array_info_map.lookup("" + type_id);
+    let array: ArrayInfo = c.array_info_map.lookup(type_id);
     if (has_array_info(array)) {
         if (array.size < 0) { return 0; }
         return value_struct_dependency(ref c, array.base_type);
     }
 
-    let fallible: SymbolInfo = c.fallible_base_map.lookup("" + type_id);
+    let fallible: SymbolInfo = c.fallible_base_map.lookup(type_id);
     if (has_symbol(fallible)) {
         return value_struct_dependency(ref c, fallible.type);
     }
 
-    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    let info: StructInfo = c.struct_id_map.lookup(type_id);
     if (has_struct(info) && !info.is_class && !info.is_interface && !info.is_enum) {
         return info.type_id;
     }
@@ -162,7 +162,7 @@ func validate_class_interfaces(ref c: Compiler, info: StructInfo, pos: Position)
     let interface_index: Int = 0;
     while (info.interfaces is !null && interface_index < info.interfaces.length()) {
         let interface_type: TypeListNode = info.interfaces[interface_index];
-        let interface_info: StructInfo = c.struct_id_map.lookup("" + interface_type.type);
+        let interface_info: StructInfo = c.struct_id_map.lookup(interface_type.type);
         if (!has_struct(interface_info) || !interface_info.is_interface) {
             throw_type_error(pos, "Type " + get_type_name(ref c, interface_type.type) + " is not an interface.");
             return false;
@@ -199,7 +199,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
     let parent_info: StructInfo = StructInfo();
     if (has_node(node.parent_tok)) {
         let parent_type: Int = resolve_type(ref c, node.parent_tok);
-        parent_info = c.struct_id_map.lookup("" + parent_type);
+        parent_info = c.struct_id_map.lookup(parent_type);
         if (!has_struct(parent_info) || !parent_info.is_class) {
             throw_type_error(node.pos, "Type " + get_type_name(ref c, parent_type) + " is not a class.");
             return false;
@@ -212,7 +212,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
         if (parent_index >= 0) {
             if (!resolve_class_target(ref c, targets[parent_index], targets, path)) { return false; }
             set_module_context(ref c, target.module);
-            parent_info = c.struct_id_map.lookup("" + parent_type);
+            parent_info = c.struct_id_map.lookup(parent_type);
         }
         info.parent_id = parent_type;
     }

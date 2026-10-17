@@ -212,7 +212,7 @@ func x86_mark_return_registers(ref program: WirModule, order: Vector(WirBlockID)
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
             if (instruction.opcode == WirOpcode.Return && instruction.operands.length() == 1) {
                 let value_id: WirValueID = instruction.operands[0];
-                let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+                let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
                 if (x86_scalar_size(ref program, value.type_id) != 0) {
                     let preferred: X86Register = X86Register.RAX;
                     if (x86_scalar_float(ref program, value.type_id)) { preferred = X86Register.XMM0; }
@@ -530,7 +530,7 @@ func x86_wide_integer(ref program: WirModule, type_id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(type_id));
     if (index < 0 || index >= program.arena.types.length()) { return false; }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     return (type.kind == WirTypeKind.SignedInt || type.kind == WirTypeKind.UnsignedInt) && type.bits == 128;
 }
 
@@ -1238,7 +1238,7 @@ func x86_save_live_registers(ref program: WirModule, slots: Vector(X86StackSlot)
                 if (offset == 0) {
                     return "x86_64 spill storage is exhausted before a call";
                 }
-                let value: WirValue = program.arena.values[wir_id_index(UInt32(binding.value))];
+                let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(binding.value))];
                 let size: Int = x86_scalar_size(ref program, value.type_id);
                 if (size == 0 || !x86_store_scalar(ref output, binding.register, X86Register.RBP, offset, size)) {
                     return "x86_64 cannot spill this value before a call";
@@ -1302,7 +1302,7 @@ func x86_prepare_register(ref program: WirModule, ref state: X86BlockState, choi
         return "x86_64 spill storage is exhausted";
     }
 
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(choice.evicted))];
+    let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(choice.evicted))];
     let size: Int = x86_scalar_size(ref program, value.type_id);
     if (size == 0 || !x86_store_scalar(ref output, choice.register, X86Register.RBP, offset, size)) {
         return "x86_64 cannot spill this value";
@@ -1393,7 +1393,7 @@ func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction
     let sysv_cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
     while (i < function.parameters.length()) {
         let value_id: WirValueID = function.parameters[i];
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
         if (x86_scalar_size(ref program, value.type_id) != 0) {
             let incoming: X86Register = X86Register.None;
             if (x86_is_sysv_abi()) {
@@ -1434,7 +1434,7 @@ func x86_materialize_register_except(
         return X86RegisterResult(register=allocated, message="");
     }
 
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
     let floating: Bool = x86_scalar_float(ref program, value.type_id);
     let choice: X86RegisterChoice = x86_choose_register_class(ref program, ref state.registers, state.position, avoid, floating);
     let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
@@ -1483,7 +1483,7 @@ func x86_materialize_register_except(
             return X86RegisterResult(register=X86Register.None, message="value has no linkable address symbol");
         }
     } else if (value.kind == WirValueKind.Constant) {
-        let constant: WirConstant = program.arena.constants[wir_id_index(value.owner)];
+        let ptr constant: WirConstant = ref program.arena.constants[wir_id_index(value.owner)];
         if (constant.kind == WirConstKind.Zero) {
             x86_mov_register_imm32(ref output, choice.register, 0U);
         } else if (constant.kind == WirConstKind.Address) {
@@ -1837,7 +1837,7 @@ func x86_store_value(
     ref state: X86BlockState,
     ref output: X86CodeBuffer
 ) -> String {
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
     // copies read the home, a cached Int128 pair may still hold its newest bits.
     if (x86_wide_integer(ref program, value.type_id) && !x86_spill_wide_value(ref state, value_id, ref output)) {
         return "cannot save a 128-bit integer before a memory copy";
@@ -1910,7 +1910,7 @@ func x86_materialize_abi_value(
 }
 
 func x86_load_wide_half(ref program: WirModule, value_id: WirValueID, high: Bool, destination: X86Register, ref state: X86BlockState, ref output: X86CodeBuffer) -> String {
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
     if (!x86_wide_integer(ref program, value.type_id)) {
         return "value is not a 128-bit integer";
     }
@@ -2169,8 +2169,8 @@ func x86_lower_instruction(ref program: WirModule,
         if (instruction.operands.length() != 1 || instruction.result != NO_WIR_VALUE) {
             return "null check requires one operand and no result";
         }
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
-        let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+        let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(value.type_id))];
         if (type.kind != WirTypeKind.Pointer) {
             return "null check requires a pointer operand";
         }
@@ -2192,7 +2192,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
         let index_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
         let limit_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
-        let type: WirType = program.arena.types[wir_id_index(UInt32(index_value.type_id))];
+        let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(index_value.type_id))];
         let size: Int = x86_scalar_size(ref program, index_value.type_id);
         if (index_value.type_id != limit_value.type_id || size == 0 ||
             (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt)) {
@@ -2253,7 +2253,7 @@ func x86_lower_instruction(ref program: WirModule,
             return "atomic store requires one value, one address and no result";
         }
         let value_id: WirValueID = instruction.operands[0];
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
         let size: Int = x86_scalar_size(ref program, value.type_id);
         if (size == 0 || x86_scalar_float(ref program, value.type_id)) {
             return "the x86_64 backend supports atomic integer stores up to 64 bits";
@@ -2283,7 +2283,7 @@ func x86_lower_instruction(ref program: WirModule,
             return "atomic RMW requires one address, one value and one result";
         }
         let value_id: WirValueID = instruction.operands[1];
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
         let size: Int = x86_scalar_size(ref program, value.type_id);
         if (size == 0 || x86_scalar_float(ref program, value.type_id)) {
             return "the x86_64 backend supports atomic integer RMW operations up to 64 bits";
@@ -2627,7 +2627,7 @@ func x86_lower_instruction(ref program: WirModule,
     }
 
     if (instruction.opcode == WirOpcode.StructValue || instruction.opcode == WirOpcode.ArrayValue) {
-        let type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(instruction.type_id))];
         let layout: WirTypeLayout = state.layouts[wir_id_index(UInt32(instruction.type_id))];
         let home = x86_stack_offset(ref state.stack, instruction.result);
         let count = type.fields.length();
@@ -2684,7 +2684,7 @@ func x86_lower_instruction(ref program: WirModule,
             return "aggregate extraction requires two operands and a result";
         }
         let aggregate: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
-        let type: WirType = program.arena.types[wir_id_index(UInt32(aggregate.type_id))];
+        let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(aggregate.type_id))];
         let index: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))];
         let home = x86_stack_offset(ref state.stack, instruction.operands[0]);
         if (index.kind != WirValueKind.Integer) {
@@ -2704,7 +2704,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
 
         if (home == 0 && aggregate.kind == WirValueKind.Constant) {
-            let constant: WirConstant = program.arena.constants[wir_id_index(aggregate.owner)];
+            let ptr constant: WirConstant = ref program.arena.constants[wir_id_index(aggregate.owner)];
             if (constant.kind == WirConstKind.Aggregate && index.integer < UInt128(constant.elements.length())) {
                 let member: WirValueID = constant.elements[Int(index.integer)];
                 if (x86_memory_value(ref program, instruction.type_id)) {
@@ -4026,7 +4026,7 @@ func x86_lower_instruction(ref program: WirModule,
 
     if (instruction.opcode == WirOpcode.Return) {
         if (instruction.operands.length() == 1) {
-            let value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+            let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
             // both return ABIs may read the home directly, commit a dirty pair first.
             if (x86_wide_integer(ref program, value.type_id) &&
                 !x86_spill_wide_value(ref state, instruction.operands[0], ref output)) {

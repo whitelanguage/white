@@ -22,6 +22,10 @@ func main() -> Int {
 
     let order: Vector(WirBlockID) = [entry];
     let plan: X86RegisterPlan = x86_new_register_plan(ref program, order);
+    if (plan.wide_low.length() != plan.bindings.length() || plan.wide_high.length() != plan.bindings.length()) {
+        print("FAIL: pair state grew with the function value table");
+        return 1;
+    }
     let free: X86RegisterChoice = x86_choose_register(ref program, ref plan, 0);
     if (free.register != X86Register.RAX || free.evicted != NO_WIR_VALUE) {
         print("FAIL: allocator did not select the first free register");

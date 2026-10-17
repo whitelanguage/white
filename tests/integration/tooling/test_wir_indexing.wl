@@ -67,12 +67,12 @@ func indexing_contains(text: String, needle: String) -> Bool {
 }
 
 func main() -> Int {
-    let vectors: Dict(String, SymbolInfo) = Dict();
-    let arrays: Dict(String, ArrayInfo) = Dict();
-    let pointers: Dict(String, SymbolInfo) = Dict();
-    vectors.put("100", SymbolInfo(type=TYPE_INT));
-    arrays.put("101", ArrayInfo(base_type=TYPE_INT, size=-1, llvm_name=""));
-    pointers.put("102", SymbolInfo(type=TYPE_INT));
+    let vectors: Dict(Int, SymbolInfo) = Dict();
+    let arrays: Dict(Int, ArrayInfo) = Dict();
+    let pointers: Dict(Int, SymbolInfo) = Dict();
+    vectors.put(100, SymbolInfo(type=TYPE_INT));
+    arrays.put(101, ArrayInfo(base_type=TYPE_INT, size=-1, llvm_name=""));
+    pointers.put(102, SymbolInfo(type=TYPE_INT));
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=pointers, vector_base_map=vectors, array_info_map=arrays, struct_id_map=Dict());
     let pos: Position = indexing_position();
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

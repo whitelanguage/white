@@ -29,8 +29,8 @@ func aggregate_access(arena: AstArena, name: String, pos: Position) -> NodeID {
 func main() -> Int {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict());
     let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false)];
-    source.struct_id_map.put("103", StructInfo(name="Point", type_id=103, fields=fields, is_class=false, is_enum=false, is_interface=false));
-    source.array_info_map.put("104", ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
+    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    source.array_info_map.put(104, ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
 
     let pos: Position = aggregate_position();
     let seven: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=aggregate_token(TOK_INT, "7"), pos=pos));

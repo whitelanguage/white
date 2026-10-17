@@ -92,13 +92,13 @@ func stable_ref_target(ref c: Compiler, node: NodeID) -> Bool {
         let access: FieldAccessNode = get_field_access_node(ref c.arena, node);
         let owner_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.obj));
         if (is_pointer_type(ref c, owner_type)) { return false; }
-        let owner: StructInfo = c.struct_id_map.lookup("" + owner_type);
+        let owner: StructInfo = c.struct_id_map.lookup(owner_type);
         return has_struct(owner) && !owner.is_class && stable_ref_target(ref c, access.obj);
     }
     if (kind == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = get_index_access_node(ref c.arena, node);
         let target_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.target));
-        let array: ArrayInfo = c.array_info_map.lookup("" + target_type);
+        let array: ArrayInfo = c.array_info_map.lookup(target_type);
         return has_array_info(array) && array.size >= 0 && stable_ref_target(ref c, access.target);
     }
     return false;
@@ -215,7 +215,7 @@ func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
 
 func add_interface_type(ref c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
     if (type_id == TYPE_POISON) { return false; }
-    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    let info: StructInfo = c.struct_id_map.lookup(type_id);
     if (!has_struct(info) || !info.is_interface) {
         throw_type_error(pos, "Type " + get_type_name(ref c, type_id) + " is not an interface.");
         return false;
@@ -252,7 +252,7 @@ func class_has_interface(ref c: Compiler, class_info: StructInfo, target: Struct
         if (current.parent_id == 0) {
             break;
         }
-        current = c.struct_id_map.lookup("" + current.parent_id);
+        current = c.struct_id_map.lookup(current.parent_id);
     }
     return false;
 }
@@ -434,11 +434,11 @@ func validate_callable_value(info: FuncInfo, skip: Int, pos: Position, kind: Str
 }
 
 func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> Bool {
-    let actual_info: SymbolInfo = c.func_ret_map.lookup("" + actual);
-    let expected_info: SymbolInfo = c.func_ret_map.lookup("" + expected);
+    let actual_info: SymbolInfo = c.func_ret_map.lookup(actual);
+    let expected_info: SymbolInfo = c.func_ret_map.lookup(expected);
     if (!has_symbol(actual_info) || !has_symbol(expected_info)) {
-        actual_info = c.method_ret_map.lookup("" + actual);
-        expected_info = c.method_ret_map.lookup("" + expected);
+        actual_info = c.method_ret_map.lookup(actual);
+        expected_info = c.method_ret_map.lookup(expected);
     }
     if (!has_symbol(actual_info) || !has_symbol(expected_info)) { return false; }
     if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) {

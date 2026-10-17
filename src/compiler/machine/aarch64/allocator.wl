@@ -139,10 +139,10 @@ func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range:
         i++;
         let value_index = wir_id_index(UInt32(value_id));
         if (value_index < 0 || value_index >= program.arena.values.length()) { continue; }
-        let value: WirValue = program.arena.values[value_index];
+        let ptr value: WirValue = ref program.arena.values[value_index];
         if (value.kind != WirValueKind.Constant || walked.lookup(UInt32(value_id))) { continue; }
         walked.put(UInt32(value_id), true);
-        let constant: WirConstant = program.arena.constants[wir_id_index(value.owner)];
+        let ptr constant: WirConstant = ref program.arena.constants[wir_id_index(value.owner)];
         if (constant.kind == WirConstKind.Address) {
             a64_sparse_add(ref sparse, seen, range, constant.target);
             pending.append(constant.target);
@@ -201,9 +201,8 @@ func a64_record_use(ref table: A64UseTable, value: WirValueID, position: Int) ->
         return;
     }
 
-    let queue: A64UseQueue = table.queues[index];
+    let ptr queue: A64UseQueue = ref table.queues[index];
     queue.positions.append(position);
-    table.queues[index] = queue;
 }
 
 func a64_collect_uses(ref program: WirModule, order: Vector(WirBlockID)) -> A64UseTable {
@@ -292,7 +291,7 @@ func a64_use_precedes_definition(ref table: A64UseTable, value: WirValueID, posi
     let index: Int = a64_use_index(ref table, value);
     if (index < 0 || index >= table.queues.length()) { return false; }
 
-    let queue: A64UseQueue = table.queues[index];
+    let ptr queue: A64UseQueue = ref table.queues[index];
     return queue.positions.length() != 0 && queue.positions[0] < position;
 }
 
@@ -301,7 +300,7 @@ func a64_next_use(ref table: A64UseTable, value: WirValueID, position: Int) -> I
 
     if (index < 0 || index >= table.queues.length()) { return A64_NO_NEXT_USE; }
 
-    let queue: A64UseQueue = table.queues[index];
+    let ptr queue: A64UseQueue = ref table.queues[index];
     let cursor: Int = queue.cursor;
 
     while (cursor < queue.positions.length() && queue.positions[cursor] <= position) {
@@ -320,11 +319,10 @@ func a64_consume_use(ref table: A64UseTable, value: WirValueID, position: Int) -
         return;
     }
 
-    let queue: A64UseQueue = table.queues[index];
+    let ptr queue: A64UseQueue = ref table.queues[index];
     while (queue.cursor < queue.positions.length() && queue.positions[queue.cursor] <= position) {
         queue.cursor++;
     }
-    table.queues[index] = queue;
 }
 
 func a64_finish_instruction(ref values: A64ValueMap, instruction: WirInstruction) -> Void {

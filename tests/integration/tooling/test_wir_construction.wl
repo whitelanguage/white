@@ -31,8 +31,8 @@ func main() -> Int {
     let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false)];
     let point: StructInfo = StructInfo(name="Point", type_id=103, fields=fields, init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false);
     source.struct_table.put("Point", point);
-    source.struct_id_map.put("103", point);
-    source.array_info_map.put("104", ArrayInfo(base_type=TYPE_INT, size=3, llvm_name=""));
+    source.struct_id_map.put(103, point);
+    source.array_info_map.put(104, ArrayInfo(base_type=TYPE_INT, size=3, llvm_name=""));
 
     let pos: Position = construction_position();
     let point_callee: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=construction_token(TOK_IDENTIFIER, "Point"), pos=pos));

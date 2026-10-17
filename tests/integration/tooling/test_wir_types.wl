@@ -25,23 +25,23 @@ func main() -> Int {
         named_type_ids=Dict()
     );
 
-    source.ptr_base_map.put("100", SymbolInfo(reg="", type=TYPE_INT));
-    source.array_info_map.put("101", ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
-    source.vector_base_map.put("102", SymbolInfo(reg="", type=TYPE_CHAR));
+    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_INT));
+    source.array_info_map.put(101, ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
+    source.vector_base_map.put(102, SymbolInfo(reg="", type=TYPE_CHAR));
 
     let point_fields: Vector(Struct) = [];
     point_fields.append(FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false));
     point_fields.append(FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false));
-    source.struct_id_map.put("103", StructInfo(name="Point", type_id=103, fields=point_fields, is_class=false, is_enum=false, is_interface=false));
+    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=point_fields, is_class=false, is_enum=false, is_interface=false));
 
     let class_fields: Vector(Struct) = [];
     class_fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true));
     class_fields.append(FieldInfo(name="value", type=TYPE_INT, llvm_type="", offset=1, is_const=false));
-    source.struct_id_map.put("104", StructInfo(name="Box", type_id=104, fields=class_fields, is_class=true, is_enum=false, is_interface=false));
-    source.named_type_ids.put("105", NamedTypeInfo(name="NodeID", type_id=105, underlying_type=TYPE_UINT32, is_alias=false, resolved=true));
-    source.array_info_map.put("106", ArrayInfo(base_type=TYPE_BYTE, size=-1, llvm_name="slice"));
-    source.fallible_base_map.put("107", SymbolInfo(reg="", type=TYPE_INT));
-    source.func_ret_map.put("108", SymbolInfo(reg="", type=TYPE_INT, func_arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)]));
+    source.struct_id_map.put(104, StructInfo(name="Box", type_id=104, fields=class_fields, is_class=true, is_enum=false, is_interface=false));
+    source.named_type_ids.put(105, NamedTypeInfo(name="NodeID", type_id=105, underlying_type=TYPE_UINT32, is_alias=false, resolved=true));
+    source.array_info_map.put(106, ArrayInfo(base_type=TYPE_BYTE, size=-1, llvm_name="slice"));
+    source.fallible_base_map.put(107, SymbolInfo(reg="", type=TYPE_INT));
+    source.func_ret_map.put(108, SymbolInfo(reg="", type=TYPE_INT, func_arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)]));
 
     let program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
     let types: WirTypeMap = new_wir_type_map();

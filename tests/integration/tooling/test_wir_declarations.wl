@@ -13,7 +13,7 @@ import * from "../../../src/compiler/wir/lowering/declarations.wl"
 
 func main() -> Int {
     let source: Compiler = Compiler(ptr_base_map=Dict());
-    source.ptr_base_map.put("100", SymbolInfo(reg="", type=TYPE_BYTE));
+    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_BYTE));
     let program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
     let types: WirTypeMap = new_wir_type_map();
 

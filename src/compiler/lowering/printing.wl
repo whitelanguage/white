@@ -18,9 +18,9 @@ func is_printable_type(ref c: Compiler, type_id: Int) -> Bool {
         return true;
     }
     if (type_id < 100) { return false; }
-    return has_struct(c.struct_id_map.lookup("" + type_id)) ||
-           has_symbol(c.vector_base_map.lookup("" + type_id)) ||
-           has_array_info(c.array_info_map.lookup("" + type_id));
+    return has_struct(c.struct_id_map.lookup(type_id)) ||
+           has_symbol(c.vector_base_map.lookup(type_id)) ||
+           has_array_info(c.array_info_map.lookup(type_id));
 }
 
 func class_has_named_interface(ref c: Compiler, info: StructInfo, name: String) -> Bool {
@@ -29,7 +29,7 @@ func class_has_named_interface(ref c: Compiler, info: StructInfo, name: String) 
         let i: Int = 0;
         while (current.interfaces is !null && i < current.interfaces.length()) {
             let item: TypeListNode = current.interfaces[i];
-            let interface_info: StructInfo = c.struct_id_map.lookup("" + item.type);
+            let interface_info: StructInfo = c.struct_id_map.lookup(item.type);
             if (has_struct(interface_info) && interface_info.name == name) { return true; }
             i += 1;
         }
@@ -37,7 +37,7 @@ func class_has_named_interface(ref c: Compiler, info: StructInfo, name: String) 
         if (current.parent_id == 0) {
             break;
         }
-        current = c.struct_id_map.lookup("" + current.parent_id);
+        current = c.struct_id_map.lookup(current.parent_id);
     }
     return false;
 }
@@ -49,7 +49,7 @@ func interface_has_name(ref c: Compiler, info: StructInfo, name: String) -> Bool
     let i: Int = 0;
     while (info.interfaces is !null && i < info.interfaces.length()) {
         let item: TypeListNode = info.interfaces[i];
-        let parent: StructInfo = c.struct_id_map.lookup("" + item.type);
+        let parent: StructInfo = c.struct_id_map.lookup(item.type);
         if (has_struct(parent) && parent.name == name) { return true; }
         i += 1;
     }
@@ -304,7 +304,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
     }
 
     if (is_pointer_type(ref c, type_id)) {
-        let base_info: SymbolInfo = c.ptr_base_map.lookup("" + type_id);
+        let base_info: SymbolInfo = c.ptr_base_map.lookup(type_id);
         if (has_symbol(base_info) && base_info.type == TYPE_BYTE) {
             let hook_raw_str: String = get_mangled_symbol(ref c, "print_raw_string", pos);
 
@@ -320,7 +320,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
 
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
         if (origin_id >= 100) {
-            let s_info_real: StructInfo = c.struct_id_map.lookup("" + origin_id);
+            let s_info_real: StructInfo = c.struct_id_map.lookup(origin_id);
             if (has_struct(s_info_real)) {
                 let cast_reg: String = next_reg(ref c);
                 c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + reg + " to " + s_info_real.llvm_name + "*\n");
@@ -342,7 +342,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
     }
 
     if (type_id >= 100) {
-        let s_info: StructInfo = c.struct_id_map.lookup("" + type_id);
+        let s_info: StructInfo = c.struct_id_map.lookup(type_id);
         if (has_struct(s_info)) {
             if (compile_interface_display(ref c, reg, s_info, pos)) {
                 return;
@@ -362,13 +362,13 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
             return;
         }
 
-        let v_info: SymbolInfo = c.vector_base_map.lookup("" + type_id);
+        let v_info: SymbolInfo = c.vector_base_map.lookup(type_id);
         if (has_symbol(v_info)) {
             compile_print_vector_internal(ref c, reg, v_info, pos);
             return;
         }
 
-        let arr_info: ArrayInfo = c.array_info_map.lookup("" + type_id);
+        let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
         if (has_array_info(arr_info)) {
             compile_print_array_internal(ref c, reg, type_id, arr_info, pos);
             return;
@@ -640,7 +640,7 @@ func compile_print_array_internal(ref c: Compiler, arr_reg: String, type_id: Int
     c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + curr_idx + "\n");
 
     let val_reg: String = "";
-    if (has_array_info(c.array_info_map.lookup("" + elem_type))) {
+    if (has_array_info(c.array_info_map.lookup(elem_type))) {
         val_reg = slot_ptr;
     } else {
         val_reg = next_reg(ref c);

@@ -37,16 +37,16 @@ func main() -> Int {
     let point_type: Int = 100;
     let array_type: Int = 101;
     let buffer_type: Int = 102;
-    let structs: Dict(String, StructInfo) = Dict();
-    let arrays: Dict(String, ArrayInfo) = Dict();
-    let named: Dict(String, NamedTypeInfo) = Dict();
+    let structs: Dict(Int, StructInfo) = Dict();
+    let arrays: Dict(Int, ArrayInfo) = Dict();
+    let named: Dict(Int, NamedTypeInfo) = Dict();
     let fields: Vector(Struct) = [
         FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false),
         FieldInfo(name="label", type=TYPE_STRING, llvm_type="", offset=1, is_const=false)
     ];
-    structs.put("" + point_type, StructInfo(name="Point", type_id=point_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
-    arrays.put("" + array_type, ArrayInfo(base_type=point_type, size=2, llvm_name=""));
-    arrays.put("" + buffer_type, ArrayInfo(base_type=TYPE_BYTE, size=4096, llvm_name=""));
+    structs.put(point_type, StructInfo(name="Point", type_id=point_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    arrays.put(array_type, ArrayInfo(base_type=point_type, size=2, llvm_name=""));
+    arrays.put(buffer_type, ArrayInfo(base_type=TYPE_BYTE, size=4096, llvm_name=""));
     let source: Compiler = Compiler(arena=new_ast_arena(), struct_id_map=structs, array_info_map=arrays, named_type_ids=named);
     let pos: Position = static_position();
     let literal: NodeID = add_vector_lit_node(ref source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[ArgNode(val=static_point(source.arena, "1", pos), name="", is_spread=false), ArgNode(val=static_point(source.arena, "2", pos), name="", is_spread=false)], count=2, pos=pos));

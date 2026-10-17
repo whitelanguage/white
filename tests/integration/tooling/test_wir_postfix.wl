@@ -76,8 +76,8 @@ func check_postfix_statement() -> Bool {
 }
 
 func check_postfix_index() -> Bool {
-    let vectors: Dict(String, SymbolInfo) = Dict();
-    vectors.put("100", SymbolInfo(type=TYPE_INT));
+    let vectors: Dict(Int, SymbolInfo) = Dict();
+    vectors.put(100, SymbolInfo(type=TYPE_INT));
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), vector_base_map=vectors, array_info_map=Dict(), struct_id_map=Dict());
     let pos: Position = postfix_position();
     let target: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "values"), pos=pos));

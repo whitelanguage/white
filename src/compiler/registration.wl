@@ -46,7 +46,8 @@ func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
             );
             c.named_types.put(name, info);
             if (!decl.is_alias) {
-                c.named_type_ids.put("" + type_id, info);
+                c.named_type_ids.put(type_id, info);
+                c.type_revision++;
             }
         }
         i += 1;
@@ -109,7 +110,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
     i = 0;
     while (node.interfaces is !null && i < node.interfaces.length()) {
         let parent_id: Int = resolve_type(ref c, node.interfaces[i]);
-        let parent: StructInfo = c.struct_id_map.lookup("" + parent_id);
+        let parent: StructInfo = c.struct_id_map.lookup(parent_id);
         if (!has_struct(parent) || !parent.is_interface) {
             throw_type_error(pos, "Interface '" + info.name + "' can only inherit from another interface.");
             stack.drop();
@@ -119,7 +120,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
             stack.drop();
             return false;
         }
-        parent = c.struct_id_map.lookup("" + parent_id);
+        parent = c.struct_id_map.lookup(parent_id);
         if (!add_interface_type(ref c, info.interfaces, parent_id, pos)) {
             stack.drop();
             return false;
@@ -231,7 +232,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 interfaces=null
             );
             c.struct_table.put(s_name, info);
-            c.struct_id_map.put("" + new_id, info);
+            c.struct_id_map.put(new_id, info);
+            c.type_revision++;
         } else if (base == NODE_CLASS_DEF) {
             let c_node: ClassDefNode = get_class_def_node(ref c.arena, stmts[i]);
             let raw_name: String = c_node.name_tok.value;
@@ -285,7 +287,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 interfaces=null
             );
             c.struct_table.put(c_name, info);
-            c.struct_id_map.put("" + new_id, info);
+            c.struct_id_map.put(new_id, info);
+            c.type_revision++;
         } else if (base == NODE_INTERFACE_DEF) {
             let i_node: InterfaceDefNode = get_interface_def_node(ref c.arena, stmts[i]);
             let raw_name: String = i_node.name_tok.value;
@@ -360,7 +363,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 interfaces=null
             );
             c.struct_table.put(i_name, info);
-            c.struct_id_map.put("" + new_id, info);
+            c.struct_id_map.put(new_id, info);
+            c.type_revision++;
         } else if (base == NODE_ENUM_DEF) {
             let e_node: EnumDefNode = get_enum_def_node(ref c.arena, stmts[i]);
             let raw_name: String = e_node.name_tok.value;
@@ -393,7 +397,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 interfaces=null
             );
             c.struct_table.put(e_name, info);
-            c.struct_id_map.put("" + new_id, info);
+            c.struct_id_map.put(new_id, info);
+            c.type_revision++;
             if (info.is_error) {
                 c.error_types.append(info);
             }
@@ -522,7 +527,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 if (ret_type_id == TYPE_INT && p_len == 2) {
                     let first_arg: TypeListNode = arg_types[0];
                     let second_arg: TypeListNode = arg_types[1];
-                    let pointer_base: SymbolInfo = c.ptr_base_map.lookup("" + second_arg.type);
+                    let pointer_base: SymbolInfo = c.ptr_base_map.lookup(second_arg.type);
                     if (first_arg.type == TYPE_INT && has_symbol(pointer_base) &&
                         pointer_base.type == TYPE_STRING) {
                         valid_main = true;

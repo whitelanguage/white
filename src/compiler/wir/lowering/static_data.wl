@@ -62,7 +62,7 @@ func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, va
 
 func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     let repr: Int = get_repr_type(ref source, source_type);
-    let info: ArrayInfo = source.array_info_map.lookup("" + repr);
+    let info: ArrayInfo = source.array_info_map.lookup(repr);
     if (!has_array_info(info) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) {
         return NO_WIR_VALUE;
     }
@@ -94,7 +94,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
 
 func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     if (node_tag(node) != NODE_CALL || source.struct_id_map is null) { return NO_WIR_VALUE; }
-    let info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, source_type));
+    let info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
     if (!has_struct(info) || info.is_class || info.is_interface ||
         info.is_enum || has_node(info.init_body)) {
         return NO_WIR_VALUE;
@@ -201,10 +201,10 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
         return wir_const_float(ref program, type_id, value);
     }
-    if (source.array_info_map is !null && has_array_info(source.array_info_map.lookup("" + repr))) {
+    if (source.array_info_map is !null && has_array_info(source.array_info_map.lookup(repr))) {
         return wir_static_array(ref types, ref source, ref program, node, source_type, pos);
     }
-    if (source.struct_id_map is !null && has_struct(source.struct_id_map.lookup("" + repr))) {
+    if (source.struct_id_map is !null && has_struct(source.struct_id_map.lookup(repr))) {
         return wir_static_struct(ref types, ref source, ref program, node, source_type, pos);
     }
     return NO_WIR_VALUE;

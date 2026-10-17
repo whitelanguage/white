@@ -14,7 +14,7 @@ func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
     }
     if (is_pointer_type(ref c, type_id)) { return true; }
 
-    let info: StructInfo = c.struct_id_map.lookup("" + type_id);
+    let info: StructInfo = c.struct_id_map.lookup(type_id);
     if (has_struct(info)) {
         if (info.is_enum || info.is_interface) { return true; }
         if (info.is_class) {
@@ -22,7 +22,7 @@ func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
         }
         return false;
     }
-    if (has_symbol(c.func_ret_map.lookup("" + type_id)) || has_symbol(c.method_ret_map.lookup("" + type_id))) {
+    if (has_symbol(c.func_ret_map.lookup(type_id)) || has_symbol(c.method_ret_map.lookup(type_id))) {
         return true;
     }
     return false;
@@ -173,7 +173,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
 
-            let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
+            let class_info: StructInfo = c.struct_id_map.lookup(type_id);
             if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
                 label = "%class.hash." + type_id;
                 c.hash_types.put("" + type_id, StringConstant(id=type_id, value=""));
@@ -257,7 +257,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
 
     type_id = 1;
     while (type_id < c.type_counter) {
-        let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
+        let class_info: StructInfo = c.struct_id_map.lookup(type_id);
         if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
             class_equal_cases += "    i64 " + type_fingerprint(ref c, type_id) + ", label %class.equal." + type_id + "\n";
             class_equal_blocks += "class.equal." + type_id + ":\n";
@@ -393,7 +393,7 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
             let llvm_type: String = get_llvm_type_str(ref c, type_id);
             let hash_name: String = "@__wl_hash_value_" + type_id;
             let equal_name: String = "@__wl_values_equal_" + type_id;
-            let key_info: StructInfo = c.struct_id_map.lookup("" + repr_type);
+            let key_info: StructInfo = c.struct_id_map.lookup(repr_type);
             if (repr_type == TYPE_STRING) {
                 c.output_file.write("define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
                 c.output_file.write("entry:\n");
@@ -433,8 +433,8 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
 
                 let bits: String = "%bits";
                 if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR ||
-                    has_symbol(c.func_ret_map.lookup("" + repr_type)) ||
-                    has_symbol(c.method_ret_map.lookup("" + repr_type))) {
+                    has_symbol(c.func_ret_map.lookup(repr_type)) ||
+                    has_symbol(c.method_ret_map.lookup(repr_type))) {
                     c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
                 else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {

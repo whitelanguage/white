@@ -218,7 +218,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
     let type_id: Int = 100;
     while (type_id < source.type_counter) {
-        let info: StructInfo = source.struct_id_map.lookup("" + type_id);
+        let info: StructInfo = source.struct_id_map.lookup(type_id);
         let hashable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
         if hashable {
             let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
@@ -368,7 +368,7 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
     let type_id: Int = 100;
     while (type_id < source.type_counter) {
-        let info: StructInfo = source.struct_id_map.lookup("" + type_id);
+        let info: StructInfo = source.struct_id_map.lookup(type_id);
         let comparable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
         if comparable {
             let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
@@ -798,7 +798,7 @@ func wir_dict_typed_hash_function(ref types: WirTypeMap, ref source: Compiler, r
     if (repr == TYPE_STRING) {
         return wir_dict_string_hash_function(ref types, ref source, ref program, source_type);
     }
-    let info: StructInfo = source.struct_id_map.lookup("" + repr);
+    let info: StructInfo = source.struct_id_map.lookup(repr);
     if (has_struct(info) && info.is_class) {
         return wir_dict_class_hash_function(ref types, ref source, ref program, source_type, info);
     }
@@ -810,7 +810,7 @@ func wir_dict_typed_equal_function(ref types: WirTypeMap, ref source: Compiler, 
     if (repr == TYPE_STRING) {
         return wir_dict_string_equal_function(ref types, ref source, ref program, source_type);
     }
-    let info: StructInfo = source.struct_id_map.lookup("" + repr);
+    let info: StructInfo = source.struct_id_map.lookup(repr);
     if (has_struct(info) && info.is_class) {
         return wir_dict_class_equal_function(ref types, ref source, ref program, source_type, info);
     }

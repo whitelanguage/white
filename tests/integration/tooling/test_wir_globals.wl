@@ -72,7 +72,7 @@ func main() -> Int {
     let symbols: Dict(String, SymbolInfo) = Dict();
     let aliases: Dict(String, String) = Dict();
     let imported_aliases: Dict(String, String) = Dict();
-    let named_types: Dict(String, NamedTypeInfo) = Dict();
+    let named_types: Dict(Int, NamedTypeInfo) = Dict();
     let generics: Dict(String, SymbolInfo) = Dict();
     let locals: Dict(String, SymbolInfo) = Dict();
     symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false));

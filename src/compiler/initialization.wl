@@ -409,7 +409,7 @@ func class_requires_initialization(ref c: Compiler, info: StructInfo) -> Bool {
     }
 
     if (info.parent_id != 0) {
-        let parent: StructInfo = c.struct_id_map.lookup("" + info.parent_id);
+        let parent: StructInfo = c.struct_id_map.lookup(info.parent_id);
         return class_requires_initialization(ref c, parent);
     }
     return false;
@@ -961,7 +961,7 @@ func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, obje
 
     if (class_info.parent_id != 0) {
         let parent: StructInfo =
-            c.struct_id_map.lookup("" + class_info.parent_id);
+            c.struct_id_map.lookup(class_info.parent_id);
         emit_class_field_initializers(
             ref c,
             parent,

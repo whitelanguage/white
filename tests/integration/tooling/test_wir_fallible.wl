@@ -105,7 +105,7 @@ func check_throw() -> Bool {
     let source: Compiler = fallible_source(arena);
     let error_type: Int = 150;
     let fields: Vector(Struct) = [FieldInfo(name="Failure", type=error_type, llvm_type="i32", offset=1)];
-    source.struct_id_map.put("" + error_type, StructInfo(name="ProbeError", type_id=error_type, fields=fields, is_enum=true, is_error=true));
+    source.struct_id_map.put(error_type, StructInfo(name="ProbeError", type_id=error_type, fields=fields, is_enum=true, is_error=true));
     let fallible_int: Int = get_fallible_type_id(ref source, TYPE_INT);
     let pos: Position = fallible_position();
     let owner: NodeID = fallible_access(arena, "ProbeError", pos);

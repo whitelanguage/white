@@ -351,7 +351,7 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
             let access: FieldAccessNode = get_field_access_node(ref source.arena, call.callee);
             let owner_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
             let owner: StructInfo = StructInfo();
-            if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup("" + owner_type); }
+            if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup(owner_type); }
             if (has_struct(owner) && owner.is_class) {
                 let target: FuncInfo = FuncInfo();
                 let method_index: Int = 0;
@@ -401,14 +401,14 @@ func wir_generic_argument_type(ref state: WirFunctionLowering, ref source: Compi
     }
     let actual_type: Int = wir_argument_type(ref state, ref source, argument.val);
     if (parameter.pass_mode == PARAM_REF) {
-        let pointer: SymbolInfo = source.ptr_base_map.lookup("" + actual_type);
+        let pointer: SymbolInfo = source.ptr_base_map.lookup(actual_type);
         if (has_symbol(pointer)) { actual_type = pointer.type; }
     }
     if (!argument.is_spread || !parameter.is_variadic) { return actual_type; }
 
-    let array: ArrayInfo = source.array_info_map.lookup("" + get_repr_type(ref source, actual_type));
+    let array: ArrayInfo = source.array_info_map.lookup(get_repr_type(ref source, actual_type));
     if (has_array_info(array)) { return array.base_type; }
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + get_repr_type(ref source, actual_type));
+    let vector: SymbolInfo = source.vector_base_map.lookup(get_repr_type(ref source, actual_type));
     if (has_symbol(vector)) { return vector.type; }
     return actual_type;
 }
@@ -489,7 +489,7 @@ func wir_cast_needs_check(ref source: Compiler, source_type: Int, target_type: I
     target_type = get_repr_type(ref source, target_type);
     if (source_type == TYPE_ANY_ERROR) { source_type = TYPE_INT; }
     if (source.struct_id_map is !null) {
-        let info: StructInfo = source.struct_id_map.lookup("" + source_type);
+        let info: StructInfo = source.struct_id_map.lookup(source_type);
         if (has_struct(info) && info.is_enum) { source_type = TYPE_INT; }
     }
     if (target_type == TYPE_BOOL) {
@@ -1212,7 +1212,7 @@ func wir_implicit_numeric_cast(source_type: Int, target_type: Int) -> Bool {
 }
 
 func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, target_type: Int) -> WirExpr {
-    let variant: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, value.source_type));
+    let variant: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, value.source_type));
     if (!has_struct(variant) || variant.name != "$Variant") {
         return wir_no_expr();
     }
@@ -1231,7 +1231,7 @@ func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     if (target_wir == NO_WIR_TYPE) {
         return wir_no_expr();
     }
-    let target_info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, target_type));
+    let target_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, target_type));
     if (has_struct(target_info) && target_info.is_interface) {
         let high_slot: WirValueID = wir_field_address(ref program, state.block, value.value, 2, "", no_wir_location());
         let high: WirValueID = wir_load(ref program, state.block, high_slot, "", no_wir_location());
@@ -1352,7 +1352,7 @@ func wir_variant_drop_function(ref types: WirTypeMap, ref source: Compiler, ref 
 
 func wir_box_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, variant: StructInfo) -> WirExpr {
     let boxed_type: Int = get_repr_type(ref source, value.source_type);
-    let boxed_info: StructInfo = source.struct_id_map.lookup("" + boxed_type);
+    let boxed_info: StructInfo = source.struct_id_map.lookup(boxed_type);
     let boxed_enum: Bool = has_struct(boxed_info) && boxed_info.is_enum;
     let supported: Bool = value.source_type == TYPE_NULL || value.source_type == TYPE_NULLPTR ||
                           is_primitive_type(boxed_type) || is_ref_type(ref source, value.source_type) ||
@@ -1617,7 +1617,7 @@ func wir_class_tag_matches(ref state: WirFunctionLowering, ref source: Compiler,
     let matches: WirValueID = wir_const_bool(ref program, false);
     let candidate: Int = 100;
     while (candidate < source.type_counter) {
-        let info: StructInfo = source.struct_id_map.lookup("" + candidate);
+        let info: StructInfo = source.struct_id_map.lookup(candidate);
         if (has_struct(info) && info.is_class && is_subclass(ref source, candidate, target_type)) {
             let expected: WirValueID = wir_const_int(ref program, uint32_type, UInt128(UInt32(candidate)));
             let equal: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected, "", no_wir_location());
@@ -1891,7 +1891,7 @@ func wir_bind_interface_method(
 func wir_lower_bound_method(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, access: FieldAccessNode) -> WirMemberCall {
     let owner_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
     let owner: StructInfo = StructInfo();
-    if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup("" + owner_type); }
+    if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup(owner_type); }
     if (!has_struct(owner)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -1917,7 +1917,7 @@ func wir_lower_generic_method_value(
     let access: FieldAccessNode = get_field_access_node(ref source.arena, generic.base_type);
     let owner_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
     let owner: StructInfo = StructInfo();
-    if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup("" + owner_type); }
+    if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup(owner_type); }
     if (!has_struct(owner) || !owner.is_class) {
         state.errors.append("Generic methods can only be bound from class values");
         return WirMemberCall(handled=true, value=wir_no_expr());
@@ -2223,8 +2223,8 @@ func wir_cast_expr(
     let source_info: StructInfo = StructInfo();
     let target_info: StructInfo = StructInfo();
     if (source.struct_id_map is !null) {
-        source_info = source.struct_id_map.lookup("" + get_repr_type(ref source, value.source_type));
-        target_info = source.struct_id_map.lookup("" + get_repr_type(ref source, target_type));
+        source_info = source.struct_id_map.lookup(get_repr_type(ref source, value.source_type));
+        target_info = source.struct_id_map.lookup(get_repr_type(ref source, target_type));
     }
     if (has_struct(target_info) && target_info.name == "$Variant") {
         return wir_box_variant(ref state, ref types, ref source, ref program, value, target_info);
@@ -2251,10 +2251,10 @@ func wir_cast_expr(
         return wir_cast_expr(ref state, ref types, ref source, ref program, WirExpr(value=value.value, source_type=TYPE_INT), target_type, implicit);
     }
     let erased_callable: Bool = value.source_type == TYPE_GENERIC_FUNCTION || value.source_type == TYPE_GENERIC_METHOD;
-    let target_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + target_type))) ||
-                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup("" + target_type)));
-    let source_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + value.source_type))) ||
-                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup("" + value.source_type)));
+    let target_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup(target_type))) ||
+                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(target_type)));
+    let source_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup(value.source_type))) ||
+                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(value.source_type)));
     if (implicit && source_callable && target_callable && !callable_types_compatible(ref source, value.source_type, target_type)) {
         state.errors.append("incompatible callable types reached WIR conversion");
         return wir_no_expr();
@@ -2302,17 +2302,17 @@ func wir_cast_expr(
     }
     let target_array: ArrayInfo = ArrayInfo();
     if (source.array_info_map is !null) {
-        target_array = source.array_info_map.lookup("" + get_repr_type(ref source, target_type));
+        target_array = source.array_info_map.lookup(get_repr_type(ref source, target_type));
     }
     if (has_array_info(target_array) && target_array.size < 0) {
         let source_type: Int = get_repr_type(ref source, value.source_type);
         let source_array: ArrayInfo = ArrayInfo();
         let source_vector: SymbolInfo = SymbolInfo();
         if (source.array_info_map is !null) {
-            source_array = source.array_info_map.lookup("" + source_type);
+            source_array = source.array_info_map.lookup(source_type);
         }
         if (source.vector_base_map is !null) {
-            source_vector = source.vector_base_map.lookup("" + source_type);
+            source_vector = source.vector_base_map.lookup(source_type);
         }
         let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
         let zero: WirValueID = wir_const_int(ref program, size_type, UInt128(0U));
@@ -2415,7 +2415,7 @@ func wir_identity_operand(ref state: WirFunctionLowering, ref types: WirTypeMap,
 
     let info: StructInfo = StructInfo();
     if (source.struct_id_map is !null) {
-        info = source.struct_id_map.lookup("" + get_repr_type(ref source, value.source_type));
+        info = source.struct_id_map.lookup(get_repr_type(ref source, value.source_type));
     }
     if (has_struct(info) && info.is_interface) {
         return WirExpr(value=wir_field(ref program, state.block, value.value, 0, "", no_wir_location()), source_type=TYPE_ANYPTR);
@@ -2451,9 +2451,9 @@ func wir_lvalue_type(ref state: WirFunctionLowering, ref source: Compiler, node:
     if (kind == NODE_FIELD_ACCESS) {
         let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
         let object_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.obj));
-        let pointer: SymbolInfo = source.ptr_base_map.lookup("" + object_type);
+        let pointer: SymbolInfo = source.ptr_base_map.lookup(object_type);
         if (has_symbol(pointer)) { object_type = get_repr_type(ref source, pointer.type); }
-        let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+        let info: StructInfo = source.struct_id_map.lookup(object_type);
         if (!has_struct(info) || info.is_enum) { return TYPE_POISON; }
         let field: FieldInfo = find_field(info, access.field_name);
         if (has_field(field)) { return field.type; }
@@ -2463,13 +2463,13 @@ func wir_lvalue_type(ref state: WirFunctionLowering, ref source: Compiler, node:
         let access: IndexAccessNode = get_index_access_node(ref source.arena, node);
         let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
         if (target_type == TYPE_STRING) { return TYPE_BYTE; }
-        let pointer: SymbolInfo = source.ptr_base_map.lookup("" + target_type);
+        let pointer: SymbolInfo = source.ptr_base_map.lookup(target_type);
         if (has_symbol(pointer)) { return pointer.type; }
-        let info: ArrayInfo = source.array_info_map.lookup("" + target_type);
+        let info: ArrayInfo = source.array_info_map.lookup(target_type);
         if (has_array_info(info)) { return info.base_type; }
-        let vector: SymbolInfo = source.vector_base_map.lookup("" + target_type);
+        let vector: SymbolInfo = source.vector_base_map.lookup(target_type);
         if (has_symbol(vector)) { return vector.type; }
-        let owner: StructInfo = source.struct_id_map.lookup("" + target_type);
+        let owner: StructInfo = source.struct_id_map.lookup(target_type);
         if (has_struct(owner) && owner.is_class) {
             let method_index: Int = 0;
             while (owner.vtable is !null && method_index < owner.vtable.length()) {
@@ -2497,13 +2497,13 @@ func wir_stable_ref_target(ref state: WirFunctionLowering, ref source: Compiler,
         let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
         let owner_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.obj));
         if (is_pointer_type(ref source, owner_type)) { return false; }
-        let owner: StructInfo = source.struct_id_map.lookup("" + owner_type);
+        let owner: StructInfo = source.struct_id_map.lookup(owner_type);
         return has_struct(owner) && !owner.is_class && wir_stable_ref_target(ref state, ref source, access.obj);
     }
     if (kind == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = get_index_access_node(ref source.arena, node);
         let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
-        let array: ArrayInfo = source.array_info_map.lookup("" + target_type);
+        let array: ArrayInfo = source.array_info_map.lookup(target_type);
         return has_array_info(array) && array.size >= 0 && wir_stable_ref_target(ref state, ref source, access.target);
     }
     return false;
@@ -2574,7 +2574,7 @@ func wir_enum_member(ref types: WirTypeMap, ref source: Compiler, node_id: NodeI
         }
     }
     let resolved_type: Int = get_expr_type(ref source, node_id);
-    let info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, resolved_type));
+    let info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, resolved_type));
     if (has_struct(info) && info.is_enum) {
         let field: FieldInfo = find_field(info, node.field_name);
         if (has_field(field)) {
@@ -2600,7 +2600,7 @@ func wir_lvalue_const(ref state: WirFunctionLowering, ref source: Compiler, node
         let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
         if (wir_lvalue_const(ref state, ref source, access.obj)) { return true; }
         let object_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.obj));
-        let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+        let info: StructInfo = source.struct_id_map.lookup(object_type);
         let field: FieldInfo = find_field(info, access.field_name);
         return has_field(field) && field.is_const;
     }
@@ -2613,7 +2613,7 @@ func wir_lvalue_const(ref state: WirFunctionLowering, ref source: Compiler, node
 func wir_field_const(ref state: WirFunctionLowering, ref source: Compiler, object: NodeID, name: String) -> Bool {
     if (wir_lvalue_const(ref state, ref source, object)) { return true; }
     let object_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, object));
-    let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+    let info: StructInfo = source.struct_id_map.lookup(object_type);
     let field: FieldInfo = find_field(info, name);
     return has_field(field) && field.is_const;
 }
@@ -2636,12 +2636,12 @@ func wir_addressable_node(ref source: Compiler, node: NodeID) -> Bool {
 func wir_lower_field_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, object_node: NodeID, name: String) -> WirExpr {
     let object_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, object_node));
     let indirect: Bool = false;
-    let pointer: SymbolInfo = source.ptr_base_map.lookup("" + object_type);
+    let pointer: SymbolInfo = source.ptr_base_map.lookup(object_type);
     if (has_symbol(pointer)) {
         object_type = get_repr_type(ref source, pointer.type);
         indirect = true;
     }
-    let info: StructInfo = source.struct_id_map.lookup("" + object_type);
+    let info: StructInfo = source.struct_id_map.lookup(object_type);
     if (!has_struct(info) || info.is_interface || info.is_enum) {
         state.errors.append("field '" + name + "' has no addressable owner for source type " + object_type + " in WIR lowering");
         return wir_no_expr();
@@ -2684,7 +2684,7 @@ func wir_lower_index_lvalue(
         return wir_no_expr();
     }
 
-    let pointer: SymbolInfo = source.ptr_base_map.lookup("" + target_type);
+    let pointer: SymbolInfo = source.ptr_base_map.lookup(target_type);
     if (has_symbol(pointer)) {
         if (pointer.type == TYPE_VOID) {
             state.errors.append("Void pointer reached WIR lowering with an index operation");
@@ -2698,7 +2698,7 @@ func wir_lower_index_lvalue(
         return WirExpr(value=wir_index_address(ref program, state.block, target.value, index.value, "", no_wir_location()), source_type=pointer.type);
     }
 
-    let info: ArrayInfo = source.array_info_map.lookup("" + target_type);
+    let info: ArrayInfo = source.array_info_map.lookup(target_type);
     if (has_array_info(info)) {
         if (info.size >= 0) {
             let target: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, target_node);
@@ -2735,7 +2735,7 @@ func wir_lower_index_lvalue(
         return WirExpr(value=wir_index_address(ref program, state.block, data, absolute, "", no_wir_location()), source_type=info.base_type);
     }
 
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + target_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(target_type);
     if (has_symbol(vector)) {
         let target: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, target_node);
         if (target.value == NO_WIR_VALUE) {
@@ -2757,7 +2757,7 @@ func wir_lower_index_lvalue(
 
 func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, access: IndexAccessNode, preserve_fallible: Bool) -> WirExpr {
     let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
-    let owner: StructInfo = source.struct_id_map.lookup("" + target_type);
+    let owner: StructInfo = source.struct_id_map.lookup(target_type);
     if (has_struct(owner) && owner.is_class) {
         let has_get: Bool = false;
         let i: Int = 0;
@@ -2979,11 +2979,11 @@ func wir_generic_constructor(ref source: Compiler, node: NodeID) -> GenericTempl
 func wir_lower_array_literal(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, expected_type: Int) -> WirExpr {
     let source_type: Int = get_repr_type(ref source, expected_type);
     let vector: SymbolInfo = SymbolInfo();
-    if (source.vector_base_map is !null) { vector = source.vector_base_map.lookup("" + source_type); }
+    if (source.vector_base_map is !null) { vector = source.vector_base_map.lookup(source_type); }
     if (has_symbol(vector)) {
         return wir_lower_vector_literal(ref state, ref types, ref source, ref program, node, source_type, vector.type);
     }
-    let info: ArrayInfo = source.array_info_map.lookup("" + source_type);
+    let info: ArrayInfo = source.array_info_map.lookup(source_type);
     if (!has_array_info(info) || info.size < 0) {
         state.errors.append("array literal reached WIR lowering without a fixed-array target type");
         return wir_no_expr();
@@ -3352,8 +3352,8 @@ func wir_lower_variadic_source(
     }
 
     let source_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, argument.val));
-    let array: ArrayInfo = source.array_info_map.lookup("" + source_type);
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + source_type);
+    let array: ArrayInfo = source.array_info_map.lookup(source_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(source_type);
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
     let zero: WirValueID = wir_const_int(ref program, size_type, UInt128(0U));
 
@@ -3414,7 +3414,7 @@ func wir_lower_variadic_pack(
     arguments: Vector(ArgNode),
     slice_type: Int
 ) -> WirExpr {
-    let slice: ArrayInfo = source.array_info_map.lookup("" + get_repr_type(ref source, slice_type));
+    let slice: ArrayInfo = source.array_info_map.lookup(get_repr_type(ref source, slice_type));
     if (!has_array_info(slice) || slice.size >= 0) {
         state.errors.append("Variadic parameter does not have an Array view type in WIR lowering");
         return wir_no_expr();
@@ -3974,8 +3974,8 @@ func wir_lower_slice_access(ref state: WirFunctionLowering, ref types: WirTypeMa
         return WirExpr(value=result, source_type=target.source_type);
     }
 
-    let array: ArrayInfo = source.array_info_map.lookup("" + target_type);
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + target_type);
+    let array: ArrayInfo = source.array_info_map.lookup(target_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(target_type);
     if (!has_array_info(array) && !has_symbol(vector)) {
         state.errors.append("type " + get_type_name(ref source, target.source_type) + " reached unsupported slice lowering");
         return wir_no_expr();
@@ -4120,7 +4120,7 @@ func wir_call_class_field_initializers(
     object: WirValueID
 ) -> Void {
     if (info.parent_id != 0) {
-        let parent: StructInfo = source.struct_id_map.lookup("" + info.parent_id);
+        let parent: StructInfo = source.struct_id_map.lookup(info.parent_id);
         if (has_struct(parent)) {
             wir_call_class_field_initializers(ref state, ref types, ref source, ref program, parent, object);
         }
@@ -4291,8 +4291,8 @@ func wir_lower_class_constructor(ref state: WirFunctionLowering, ref types: WirT
 }
 
 func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr, target_type: Int) -> WirExpr {
-    let class_info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, value.source_type));
-    let interface_info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, target_type));
+    let class_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, value.source_type));
+    let interface_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, target_type));
     if (!has_struct(class_info) || !class_info.is_class || !has_struct(interface_info) || !interface_info.is_interface) {
         return wir_no_expr();
     }
@@ -4409,7 +4409,7 @@ func wir_lower_length_call(
         return WirMemberCall(handled=true, value=WirExpr(value=wir_load(ref program, state.block, length_address, "", no_wir_location()), source_type=TYPE_INT));
     }
 
-    let array: ArrayInfo = source.array_info_map.lookup("" + source_type);
+    let array: ArrayInfo = source.array_info_map.lookup(source_type);
     if (has_array_info(array)) {
         if (array.size >= 0) {
             let int_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, TYPE_INT);
@@ -4429,7 +4429,7 @@ func wir_lower_length_call(
         return WirMemberCall(handled=true, value=wir_size_to_int(ref state, ref types, ref source, ref program, length));
     }
 
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + source_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(source_type);
     if (has_symbol(vector)) {
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
         let length: WirValueID = wir_load(ref program, state.block, wir_field_address(ref program, state.block, value.value, 0, "", no_wir_location()), "", no_wir_location());
@@ -4533,7 +4533,7 @@ func wir_lower_vector_append(
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     let source_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.obj));
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + source_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(source_type);
     if (!has_symbol(vector)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -4660,7 +4660,7 @@ func wir_lower_vector_drop(
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     let source_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.obj));
-    let vector: SymbolInfo = source.vector_base_map.lookup("" + source_type);
+    let vector: SymbolInfo = source.vector_base_map.lookup(source_type);
     if (!has_symbol(vector)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -4888,12 +4888,12 @@ func wir_lower_super_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
         state.errors.append("super reached WIR lowering outside a method");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
-    let current: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, self.source_type));
+    let current: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, self.source_type));
     if (!has_struct(current) || !current.is_class || current.parent_id == 0) {
         state.errors.append("super reached WIR lowering in a class without a parent");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
-    let parent: StructInfo = source.struct_id_map.lookup("" + current.parent_id);
+    let parent: StructInfo = source.struct_id_map.lookup(current.parent_id);
     if (!has_struct(parent)) {
         state.errors.append("parent class metadata is unavailable during WIR lowering");
         return WirMemberCall(handled=true, value=wir_no_expr());
@@ -4962,7 +4962,7 @@ func wir_lower_class_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
     }
     let access: FieldAccessNode = get_field_access_node(ref source.arena, call.callee);
     let object_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, access.obj));
-    let owner: StructInfo = source.struct_id_map.lookup("" + object_type);
+    let owner: StructInfo = source.struct_id_map.lookup(object_type);
     if (!has_struct(owner) || has_field(find_field(owner, access.field_name))) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -5074,7 +5074,7 @@ func wir_lower_generic_method_call(ref state: WirFunctionLowering, ref types: Wi
     if (source.struct_id_map is null || source.generic_methods is null) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
-    let owner: StructInfo = source.struct_id_map.lookup("" + owner_type);
+    let owner: StructInfo = source.struct_id_map.lookup(owner_type);
     if (!has_struct(owner) || !owner.is_class) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -5530,7 +5530,7 @@ func wir_lower_protocol_comparison(
     if (left.source_type != right.source_type || source.struct_id_map is null) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
-    let owner: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, left.source_type));
+    let owner: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, left.source_type));
     if (!has_struct(owner) || !owner.is_class) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
@@ -5582,7 +5582,7 @@ func wir_lower_map_literal(ref state: WirFunctionLowering, ref types: WirTypeMap
     let literal: MapLitNode = get_map_lit_node(ref source.arena, node);
     let dict_info: StructInfo = StructInfo();
     if (expected_type != TYPE_AUTO && expected_type != TYPE_POISON) {
-        dict_info = source.struct_id_map.lookup("" + get_repr_type(ref source, expected_type));
+        dict_info = source.struct_id_map.lookup(get_repr_type(ref source, expected_type));
     }
     if (!is_typed_dict(ref source, dict_info)) {
         dict_info = source.struct_table.lookup("Dict");
@@ -5693,7 +5693,7 @@ func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeM
         return wir_lower_array_literal(ref state, ref types, ref source, ref program, node, expected_type);
     }
     if (has_node(node) && node_tag(node) == NODE_CALL && expected_type >= 100 && source.generic_instance_templates is !null) {
-        let expected_info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, expected_type));
+        let expected_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, expected_type));
         let expected_template: GenericTemplate = source.generic_instance_templates.lookup("" + get_repr_type(ref source, expected_type));
         if (has_struct(expected_info) && has_template(expected_template)) {
             let call: CallNode = get_call_node(ref source.arena, node);
@@ -5864,7 +5864,7 @@ func wir_compare_errors(ref state: WirFunctionLowering, ref types: WirTypeMap, r
 
 func wir_is_enum_type(ref source: Compiler, source_type: Int) -> Bool {
     if (source_type == TYPE_GENERIC_ENUM) { return true; }
-    let info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, source_type));
+    let info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
     return has_struct(info) && info.is_enum;
 }
 
@@ -6244,7 +6244,7 @@ func wir_print_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     }
 
     let info: StructInfo = StructInfo();
-    if (source.struct_id_map is !null) { info = source.struct_id_map.lookup("" + source_type); }
+    if (source.struct_id_map is !null) { info = source.struct_id_map.lookup(source_type); }
     if (has_struct(info)) {
         if (info.is_enum) {
             return wir_print_enum(ref state, ref types, ref source, ref program, value.value, info);
@@ -6262,12 +6262,12 @@ func wir_print_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
         }
     }
     let vector: SymbolInfo = SymbolInfo();
-    if (source.vector_base_map is !null) { vector = source.vector_base_map.lookup("" + source_type); }
+    if (source.vector_base_map is !null) { vector = source.vector_base_map.lookup(source_type); }
     if (has_symbol(vector)) {
         return wir_print_vector(ref state, ref types, ref source, ref program, value.value, vector.type);
     }
     let array: ArrayInfo = ArrayInfo();
-    if (source.array_info_map is !null) { array = source.array_info_map.lookup("" + source_type); }
+    if (source.array_info_map is !null) { array = source.array_info_map.lookup(source_type); }
     if (has_array_info(array)) {
         return wir_print_array(ref state, ref types, ref source, ref program, value.value, source_type, array);
     }
@@ -6409,8 +6409,8 @@ func wir_lower_print_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
         }
         if (argument.is_spread) {
             let container_type: Int = get_repr_type(ref source, wir_argument_type(ref state, ref source, argument.val));
-            let array: ArrayInfo = source.array_info_map.lookup("" + container_type);
-            let vector: SymbolInfo = source.vector_base_map.lookup("" + container_type);
+            let array: ArrayInfo = source.array_info_map.lookup(container_type);
+            let vector: SymbolInfo = source.vector_base_map.lookup(container_type);
             let element_type: Int = TYPE_POISON;
             if (has_array_info(array)) { element_type = array.base_type; }
             else if (has_symbol(vector)) { element_type = vector.type; }
@@ -6610,12 +6610,12 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let owner_type: Int = get_repr_type(ref source, object_source_type);
         let indirect: Bool = false;
-        let pointer: SymbolInfo = source.ptr_base_map.lookup("" + owner_type);
+        let pointer: SymbolInfo = source.ptr_base_map.lookup(owner_type);
         if (has_symbol(pointer)) {
             owner_type = get_repr_type(ref source, pointer.type);
             indirect = true;
         }
-        let owner: StructInfo = source.struct_id_map.lookup("" + owner_type);
+        let owner: StructInfo = source.struct_id_map.lookup(owner_type);
         let field: FieldInfo = find_field(owner, access.field_name);
         if (!has_struct(owner) || owner.is_interface || owner.is_enum || !has_field(field)) {
             let owner_name: String = "type " + owner_type;
@@ -6664,7 +6664,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let level: Int = 0;
         while (level < dereference.level) {
-            let pointer: SymbolInfo = source.ptr_base_map.lookup("" + value.source_type);
+            let pointer: SymbolInfo = source.ptr_base_map.lookup(value.source_type);
             if (!has_symbol(pointer) || pointer.type == TYPE_VOID) {
                 throw_type_error(dereference.pos, "Attempt to dereference non-pointer.");
                 return wir_no_expr();
@@ -6988,7 +6988,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             }
             let source_info: StructInfo = StructInfo();
             if (source.struct_id_map is !null) {
-                source_info = source.struct_id_map.lookup("" + get_repr_type(ref source, value.source_type));
+                source_info = source.struct_id_map.lookup(get_repr_type(ref source, value.source_type));
             }
             let conversion: FuncInfo = FuncInfo();
             if (has_struct(source_info) && source_info.is_class) {
@@ -7135,10 +7135,10 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 return wir_no_expr();
             }
             if (source.func_ret_map is !null) {
-                signature_info = source.func_ret_map.lookup("" + indirect.source_type);
+                signature_info = source.func_ret_map.lookup(indirect.source_type);
             }
             if (!has_symbol(signature_info) && source.method_ret_map is !null) {
-                signature_info = source.method_ret_map.lookup("" + indirect.source_type);
+                signature_info = source.method_ret_map.lookup(indirect.source_type);
                 if (has_symbol(signature_info)) { callable_name = "method value"; }
             }
             if (!has_symbol(signature_info)) {
@@ -7318,10 +7318,10 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     if (has_node(node.value)) {
         value = wir_lower_expected_expr(ref state, ref types, ref source, ref program, node.value, source_type);
     } else {
-        let info: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, source_type));
-        let array: ArrayInfo = source.array_info_map.lookup("" + get_repr_type(ref source, source_type));
-        let vector: SymbolInfo = source.vector_base_map.lookup("" + get_repr_type(ref source, source_type));
-        let callable: SymbolInfo = source.func_ret_map.lookup("" + get_repr_type(ref source, source_type));
+        let info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
+        let array: ArrayInfo = source.array_info_map.lookup(get_repr_type(ref source, source_type));
+        let vector: SymbolInfo = source.vector_base_map.lookup(get_repr_type(ref source, source_type));
+        let callable: SymbolInfo = source.func_ret_map.lookup(get_repr_type(ref source, source_type));
         if (!has_struct(info) || info.is_enum || info.is_interface || has_array_info(array) || has_symbol(vector) || has_symbol(callable)) {
             state.errors.append("local '" + node.name_tok.value + "' reached WIR lowering without an initializer");
             return;
@@ -7339,10 +7339,10 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         return;
     }
     if (source_type == TYPE_AUTO) { source_type = value.source_type; }
-    let source_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + value.source_type))) ||
-                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup("" + value.source_type)));
-    let target_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup("" + source_type))) ||
-                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup("" + source_type)));
+    let source_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup(value.source_type))) ||
+                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(value.source_type)));
+    let target_callable: Bool = (source.func_ret_map is !null && has_symbol(source.func_ret_map.lookup(source_type))) ||
+                                (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(source_type)));
     if (source_callable && target_callable && !callable_types_compatible(ref source, value.source_type, source_type)) {
         throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(ref source, source_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
         return;
@@ -7537,7 +7537,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             return;
         }
         let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, statement.target));
-        let owner: StructInfo = source.struct_id_map.lookup("" + target_type);
+        let owner: StructInfo = source.struct_id_map.lookup(target_type);
         if (has_struct(owner) && owner.is_class) {
             let has_put: Bool = false;
             let method_index: Int = 0;
@@ -7588,7 +7588,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let level: Int = 0;
         while (level + 1 < dereference.level) {
-            let base: SymbolInfo = source.ptr_base_map.lookup("" + pointer.source_type);
+            let base: SymbolInfo = source.ptr_base_map.lookup(pointer.source_type);
             if (!has_symbol(base) || base.type == TYPE_VOID) {
                 state.errors.append("invalid pointer assignment reached WIR lowering");
                 return;
@@ -7597,7 +7597,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             pointer = WirExpr(value=wir_load(ref program, state.block, pointer.value, "", no_wir_location()), source_type=base.type);
             level++;
         }
-        let target: SymbolInfo = source.ptr_base_map.lookup("" + pointer.source_type);
+        let target: SymbolInfo = source.ptr_base_map.lookup(pointer.source_type);
         if (!has_symbol(target) || target.type == TYPE_VOID) {
             state.errors.append("pointer assignment target is not a typed pointer in WIR lowering");
             return;

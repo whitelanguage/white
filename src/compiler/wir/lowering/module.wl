@@ -175,7 +175,7 @@ func wir_queue_method_body(ref source: Compiler, fallback: StructInfo, method_in
     let owner: StructInfo = fallback;
     if (method_info.arg_types is !null && method_info.arg_types.length() != 0) {
         let receiver: TypeListNode = method_info.arg_types[0];
-        let declared: StructInfo = source.struct_id_map.lookup("" + get_repr_type(ref source, receiver.type));
+        let declared: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, receiver.type));
         if (has_struct(declared) && declared.is_class) { owner = declared; }
     }
     queue_generic_class_method(ref source, owner, method_info.base_name);
@@ -247,7 +247,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
     let interface_index: Int = 0;
     while (info.interfaces is !null && interface_index < info.interfaces.length()) {
         let interface_type: TypeListNode = info.interfaces[interface_index];
-        let interface_info: StructInfo = source.struct_id_map.lookup("" + interface_type.type);
+        let interface_info: StructInfo = source.struct_id_map.lookup(interface_type.type);
         if (!has_struct(interface_info) || !interface_info.is_interface) {
             types.errors.append("Class '" + info.name + "' contains an invalid interface entry");
             return;
@@ -294,7 +294,7 @@ func wir_declare_generic_classes(ref types: WirTypeMap, ref source: Compiler, re
     let i: Int = 0;
     while (source.generic_class_worklist is !null && i < source.generic_class_worklist.length()) {
         let instance: GenericClassInstance = source.generic_class_worklist[i];
-        let info: StructInfo = source.struct_id_map.lookup("" + instance.type_id);
+        let info: StructInfo = source.struct_id_map.lookup(instance.type_id);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
         let previous: GenericTemplate = use_generic_context(ref source, instance.template, instance.bindings);
         wir_declare_concrete_class(ref types, ref source, ref program, info);
@@ -309,7 +309,7 @@ func wir_refresh_generic_vtables(ref types: WirTypeMap, ref source: Compiler, re
     let i: Int = 0;
     while (source.generic_class_worklist is !null && i < source.generic_class_worklist.length()) {
         let instance: GenericClassInstance = source.generic_class_worklist[i];
-        let info: StructInfo = source.struct_id_map.lookup("" + instance.type_id);
+        let info: StructInfo = source.struct_id_map.lookup(instance.type_id);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
         let previous: GenericTemplate = use_generic_context(ref source, instance.template, instance.bindings);
         wir_emit_class_vtable_info(ref types, ref source, ref program, info);

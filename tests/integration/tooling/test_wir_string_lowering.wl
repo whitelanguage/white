@@ -100,7 +100,7 @@ func main() -> Int {
     let symbols: Dict(String, SymbolInfo) = Dict();
     let functions: Dict(String, FuncInfo) = Dict();
     let aliases: Dict(String, String) = Dict();
-    let named_types: Dict(String, NamedTypeInfo) = Dict();
+    let named_types: Dict(Int, NamedTypeInfo) = Dict();
     let generics: Dict(String, SymbolInfo) = Dict();
     let locals: Dict(String, SymbolInfo) = Dict();
     symbols.put("message", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=true));

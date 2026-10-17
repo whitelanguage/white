@@ -20,7 +20,7 @@ func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
     let structs: Dict(String, StructInfo) = Dict();
-    let struct_ids: Dict(String, StructInfo) = Dict();
+    let struct_ids: Dict(Int, StructInfo) = Dict();
     let functions: Dict(String, FuncInfo) = Dict();
     let int_type_node: NodeID = add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=class_token("Int"), pos=pos));
     let interface_method: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=pos, name_tok=class_token("get_value"), type_params=[], params=[], return_type=int_type_node, body=NO_NODE, is_override=false, annotations=[]);
@@ -42,8 +42,8 @@ func main() -> Int {
     class_info.vtable.append(method_info);
     structs.put("Box", class_info);
     structs.put("Reader", interface_info);
-    struct_ids.put("100", class_info);
-    struct_ids.put("101", interface_info);
+    struct_ids.put(100, class_info);
+    struct_ids.put(101, interface_info);
     functions.put("Box_get_value", method_info);
     functions.put("read", read_info);
     functions.put("read_interface", read_interface_info);

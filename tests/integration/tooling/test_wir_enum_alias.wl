@@ -22,8 +22,8 @@ func main() -> Int {
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
     let visible: Dict(String, String) = Dict();
     visible.put("platform_errors", "errors.");
-    let structs: Dict(String, StructInfo) = Dict();
-    structs.put("100", StructInfo(name="errors.Kind", type_id=100, is_enum=true));
+    let structs: Dict(Int, StructInfo) = Dict();
+    structs.put(100, StructInfo(name="errors.Kind", type_id=100, is_enum=true));
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=structs, current_file_visible_prefixes=visible, current_file_type_aliases=Dict(), global_type_aliases=Dict());
 
     let root: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=enum_alias_token("platform_errors"), pos=pos));

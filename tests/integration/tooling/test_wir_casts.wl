@@ -161,7 +161,7 @@ func check_fallible_cast() -> Bool {
     let error_type: Int = 150;
     let error_fields: Vector(Struct) = [FieldInfo(name="Overflow", type=error_type, llvm_type="i32", offset=8)];
     let error_info: StructInfo = StructInfo(name="Error", type_id=error_type, fields=error_fields, compiler_link_name="Error", is_enum=true, is_error=true);
-    source.struct_id_map.put("" + error_type, error_info);
+    source.struct_id_map.put(error_type, error_info);
     source.error_types.append(error_info);
 
     let pos: Position = cast_position();
@@ -232,7 +232,7 @@ func check_erased_struct_casts() -> Bool {
     let source: Compiler = Compiler(ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict(), func_table=Dict(), compiler_link=Dict());
     let record_type: Int = 180;
     let fields: Vector(Struct) = [FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=0, is_const=false)];
-    source.struct_id_map.put("" + record_type, StructInfo(name="Record", type_id=record_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    source.struct_id_map.put(record_type, StructInfo(name="Record", type_id=record_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
     let allocator: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C");
     source.func_table.put("memory_alloc", allocator);
     source.compiler_link.put("memory_alloc", "memory_alloc");

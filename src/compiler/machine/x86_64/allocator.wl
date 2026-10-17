@@ -43,6 +43,7 @@ struct X86RegisterChoice(
 struct X86RegisterPlan(
     uses: X86UseTable,
     bindings: Vector(X86RegisterBinding),
+    // pair halves belong to bindings, edge snapshots only copy the register bank.
     wide_low: Vector(X86Register),
     wide_high: Vector(X86Register)
 )
@@ -205,9 +206,8 @@ func x86_record_use(ref table: X86UseTable, value: WirValueID, position: Int) ->
         return;
     }
 
-    let queue: X86UseQueue = table.queues[index];
+    let ptr queue: X86UseQueue = ref table.queues[index];
     queue.positions.append(position);
-    table.queues[index] = queue;
 }
 
 func x86_prefer_register(ref table: X86UseTable, value: WirValueID, register: X86Register) -> Void {
@@ -217,9 +217,8 @@ func x86_prefer_register(ref table: X86UseTable, value: WirValueID, register: X8
         return;
     }
 
-    let queue: X86UseQueue = table.queues[index];
+    let ptr queue: X86UseQueue = ref table.queues[index];
     queue.preferred = register;
-    table.queues[index] = queue;
 }
 
 func x86_preferred_register(ref table: X86UseTable, value: WirValueID) -> X86Register {
@@ -290,7 +289,7 @@ func x86_next_use(ref table: X86UseTable, value: WirValueID, position: Int) -> I
 
     // x86_consume_uses moves the cursor as instructions are emitted, so this
     // search never starts again at the beginning of a long-lived value.
-    let queue: X86UseQueue = table.queues[index];
+    let ptr queue: X86UseQueue = ref table.queues[index];
     let cursor: Int = queue.cursor;
 
     while (cursor < queue.positions.length() && queue.positions[cursor] <= position) {
@@ -314,13 +313,12 @@ func x86_consume_uses(ref table: X86UseTable, value: WirValueID, position: Int) 
         return;
     }
 
-    let queue: X86UseQueue = table.queues[index];
+    let ptr queue: X86UseQueue = ref table.queues[index];
 
     while (queue.cursor < queue.positions.length() && queue.positions[queue.cursor] <= position) {
         queue.cursor++;
     }
 
-    table.queues[index] = queue;
 }
 
 func x86_consume_instruction(ref table: X86UseTable, instruction: WirInstruction, position: Int) -> Void {
@@ -362,13 +360,6 @@ func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
 
     let i = 0;
 
-    while (i < uses.queues.length()) {
-        wide_low.append(X86Register.None);
-        wide_high.append(X86Register.None);
-        i++;
-    }
-
-    i = 0;
     while (i < registers.length()) {
         bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE, dirty=false, wide=false));
         i++;
@@ -384,6 +375,13 @@ func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
     bindings.append(X86RegisterBinding(register=X86Register.XMM3, value=NO_WIR_VALUE, dirty=false, wide=false));
     bindings.append(X86RegisterBinding(register=X86Register.XMM4, value=NO_WIR_VALUE, dirty=false, wide=false));
     bindings.append(X86RegisterBinding(register=X86Register.XMM5, value=NO_WIR_VALUE, dirty=false, wide=false));
+
+    i = 0;
+    while (i < bindings.length()) {
+        wide_low.append(X86Register.None);
+        wide_high.append(X86Register.None);
+        i++;
+    }
 
     return X86RegisterPlan(uses=uses, bindings=bindings, wide_low=wide_low, wide_high=wide_high);
 }
@@ -458,14 +456,10 @@ func x86_forget_register_value(ref plan: X86RegisterPlan, value: WirValueID) -> 
             binding.dirty = false;
             binding.wide = false;
             plan.bindings[i] = binding;
+            plan.wide_low[i] = X86Register.None;
+            plan.wide_high[i] = X86Register.None;
         }
         i++;
-    }
-
-    let value_index: Int = x86_use_index(ref plan.uses, value);
-    if (value_index >= 0 && value_index < plan.wide_low.length()) {
-        plan.wide_low[value_index] = X86Register.None;
-        plan.wide_high[value_index] = X86Register.None;
     }
 }
 
@@ -483,7 +477,7 @@ func x86_bind_register_pair(ref plan: X86RegisterPlan, value: WirValueID, low: X
         i++;
     }
     let value_index: Int = x86_use_index(ref plan.uses, value);
-    if (low_index < 0 || high_index < 0 || value_index < 0 || value_index >= plan.wide_low.length()) {
+    if (low_index < 0 || high_index < 0 || value_index < 0 || value_index >= plan.uses.queues.length()) {
         return false;
     }
 
@@ -505,18 +499,22 @@ func x86_bind_register_pair(ref plan: X86RegisterPlan, value: WirValueID, low: X
     high_binding.wide = true;
     plan.bindings[high_index] = high_binding;
 
-    plan.wide_low[value_index] = low;
-    plan.wide_high[value_index] = high;
+    plan.wide_low[low_index] = low;
+    plan.wide_high[low_index] = high;
+    plan.wide_low[high_index] = low;
+    plan.wide_high[high_index] = high;
     return true;
 }
 
 func x86_register_pair_for(ref plan: X86RegisterPlan, value: WirValueID) -> X86RegisterPair {
-    let index: Int = x86_use_index(ref plan.uses, value);
-    if (index < 0 || index >= plan.wide_low.length()) {
-        return X86RegisterPair(low=X86Register.None, high=X86Register.None);
+    let i: Int = 0;
+    while (i < plan.bindings.length()) {
+        if (plan.bindings[i].value == value && plan.bindings[i].wide) {
+            return X86RegisterPair(low=plan.wide_low[i], high=plan.wide_high[i]);
+        }
+        i++;
     }
-
-    return X86RegisterPair(low=plan.wide_low[index], high=plan.wide_high[index]);
+    return X86RegisterPair(low=X86Register.None, high=X86Register.None);
 }
 
 func x86_register_pair_dirty(ref plan: X86RegisterPlan, value: WirValueID) -> Bool {
@@ -955,7 +953,7 @@ func x86_rematerializable(ref program: WirModule, value: WirValueID) -> Bool {
         let owner: Int = wir_id_index(program.arena.values[index].owner);
 
         if (owner < 0 || owner >= program.arena.constants.length()) { return false; }
-        let constant: WirConstant = program.arena.constants[owner];
+        let ptr constant: WirConstant = ref program.arena.constants[owner];
 
         return constant.kind == WirConstKind.Zero || constant.kind == WirConstKind.Address;
     }

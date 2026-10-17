@@ -344,8 +344,26 @@ func may_generic_postfix(ref p: Parser) -> Bool {
     lexer.collect_trivia = false;
 
     let depth: Int = 1;
+    let parens: Int = 0;
+    let brackets: Int = 0;
     let next: Token = WhitelangLexer.get_next_token(ref lexer);
     while (next.type != TOK_EOF && depth > 0) {
+        // a comparison must not borrow its closing '>' from a later statement.
+        // callable types and array sizes may nest, their closing delimiters stay local.
+        if (next.type == TOK_SEMICOLON || next.type == TOK_LBRACE || next.type == TOK_RBRACE ||
+            next.type == TOK_ASSIGN || next.type == TOK_AND || next.type == TOK_OR) {
+            return false;
+        }
+        if (next.type == TOK_LPAREN) { parens++; }
+        else if (next.type == TOK_RPAREN) {
+            if (parens == 0) { return false; }
+            parens--;
+        } else if (next.type == TOK_LBRACKET) {
+            brackets++;
+        } else if (next.type == TOK_RBRACKET) {
+            if (brackets == 0) { return false; }
+            brackets--;
+        }
         if (next.type == TOK_LT) { depth++; }
         else if (next.type == TOK_GT) { depth--; }
         else if (next.type == TOK_RSHIFT) {

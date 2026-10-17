@@ -71,7 +71,7 @@ func a64_scalar_width(ref program: WirModule, type_id: WirTypeID) -> Int {
     let index: Int = wir_id_index(UInt32(type_id));
     if (index < 0 || index >= program.arena.types.length()) { return 0; }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     if (type.kind == WirTypeKind.BoolType) { return 32; }
     if (type.kind == WirTypeKind.Pointer || type.kind == WirTypeKind.Function) { return 64; }
     if (type.kind == WirTypeKind.FloatType && (type.bits == 32 || type.bits == 64)) { return type.bits; }
@@ -88,7 +88,7 @@ func a64_integer_width(ref program: WirModule, type_id: WirTypeID) -> Int {
         return 0;
     }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) {
         return 0;
     }
@@ -105,7 +105,7 @@ func a64_integer_bits(ref program: WirModule, type_id: WirTypeID) -> Int {
         return 0;
     }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     if (type.kind == WirTypeKind.BoolType) {
         return 1;
     }
@@ -275,7 +275,7 @@ func a64_hfa_type(ref program: WirModule, type_id: WirTypeID, layouts: Vector(Wi
         return A64HFA(valid=false, bits=0, count=0);
     }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     if (type.kind == WirTypeKind.FloatType && (type.bits == 32 || type.bits == 64)) {
         return A64HFA(valid=true, bits=type.bits, count=1);
     }
@@ -351,7 +351,7 @@ func a64_argument_location(
         return A64ArgumentLocation(valid=false, on_stack=false, offset=-1, first=-1, count=0, floating=false, indirect=false);
     }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     let layout: WirTypeLayout = layouts[index];
     if (type.kind == WirTypeKind.Struct || type.kind == WirTypeKind.Array) {
         if (!layout.valid || layout.size == 0UL || layout.size > 2147483647UL) {
@@ -868,7 +868,7 @@ func a64_load_hfa_registers(ref output: A64CodeBuffer, home: A64StackSlot, first
     return true;
 }
 
-func a64_value_symbol(ref program: WirModule, value: WirValue) -> String {
+func a64_value_symbol(ref program: WirModule, ref value: WirValue) -> String {
     let owner: Int = wir_id_index(value.owner);
     if (value.kind == WirValueKind.Global && owner >= 0 && owner < program.arena.globals.length()) {
         return program.arena.globals[owner].name;
@@ -880,7 +880,7 @@ func a64_value_symbol(ref program: WirModule, value: WirValue) -> String {
     return "";
 }
 
-func a64_value_uses_got(ref program: WirModule, value: WirValue) -> Bool {
+func a64_value_uses_got(ref program: WirModule, ref value: WirValue) -> Bool {
     let owner: Int = wir_id_index(value.owner);
     if (value.kind == WirValueKind.Global && owner >= 0 && owner < program.arena.globals.length()) {
         let linkage: WirLinkage = program.arena.globals[owner].linkage;
@@ -896,7 +896,7 @@ func a64_value_uses_got(ref program: WirModule, value: WirValue) -> Bool {
 
 func a64_materialize_symbol(
     ref program: WirModule,
-    value: WirValue,
+    ref value: WirValue,
     addend: Long,
     homes: A64StackIndex,
     ref values: A64ValueMap,
@@ -905,8 +905,8 @@ func a64_materialize_symbol(
     let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
     if (register == A64Register.None) { return A64Register.None; }
 
-    let symbol: String = a64_value_symbol(ref program, value);
-    if (a64_value_uses_got(ref program, value)) {
+    let symbol: String = a64_value_symbol(ref program, ref value);
+    if (a64_value_uses_got(ref program, ref value)) {
         if (!a64_symbol_got_address(ref output, register, symbol)) { return A64Register.None; }
 
         if (addend > 0L && addend <= 4095L) {
@@ -937,7 +937,7 @@ func a64_materialize(
     let index: Int = wir_id_index(UInt32(value_id));
     if (index < 0 || index >= program.arena.values.length()) { return A64Register.None; }
 
-    let value: WirValue = program.arena.values[index];
+    let ptr value: WirValue = ref program.arena.values[index];
     let mapped: A64Register = a64_mapped_register(ref values, value_id);
     if (mapped != A64Register.None) { return mapped; }
 
@@ -961,7 +961,7 @@ func a64_materialize(
     }
 
     if (value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
-        let register: A64Register = a64_materialize_symbol(ref program, value, 0L, homes, ref values, ref output);
+        let register: A64Register = a64_materialize_symbol(ref program, ref program.arena.values[index], 0L, homes, ref values, ref output);
         if (register == A64Register.None || !a64_bind_value(ref values, value_id, register, false)) {
             return A64Register.None;
         }
@@ -974,7 +974,7 @@ func a64_materialize(
             return A64Register.None;
         }
 
-        let constant: WirConstant = program.arena.constants[constant_index];
+        let ptr constant: WirConstant = ref program.arena.constants[constant_index];
         if (constant.kind == WirConstKind.Address) {
             let target_index: Int = wir_id_index(UInt32(constant.target));
             if (target_index < 0 || target_index >= program.arena.values.length()) {
@@ -983,7 +983,7 @@ func a64_materialize(
             let target: WirValue = program.arena.values[target_index];
             let register: A64Register = a64_materialize_symbol(
                 ref program,
-                target,
+                ref target,
                 constant.addend,
                 homes,
                 ref values,
@@ -1103,7 +1103,7 @@ func a64_materialize_pair(
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
 
-    let value: WirValue = program.arena.values[index];
+    let ptr value: WirValue = ref program.arena.values[index];
     if (a64_integer_width(ref program, value.type_id) != 128) {
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);
     }
@@ -1176,7 +1176,7 @@ func a64_materialize_pair_into(
         return false;
     }
 
-    let value: WirValue = program.arena.values[index];
+    let ptr value: WirValue = ref program.arena.values[index];
     if (a64_integer_width(ref program, value.type_id) != 128) {
         return false;
     }
@@ -1507,7 +1507,7 @@ func a64_memory_width(ref program: WirModule, type_id: WirTypeID) -> Int {
         return 0;
     }
 
-    let type: WirType = program.arena.types[index];
+    let ptr type: WirType = ref program.arena.types[index];
     if (type.kind == WirTypeKind.BoolType) { return 8; }
     if (type.kind == WirTypeKind.Pointer || type.kind == WirTypeKind.Function) { return 64; }
     if (type.kind == WirTypeKind.FloatType) { return type.bits; }
@@ -1584,8 +1584,8 @@ func a64_store_value_at(
     ref values: A64ValueMap,
     ref output: A64CodeBuffer
 ) -> Bool {
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
+    let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(value_id))];
+    let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(value.type_id))];
     let width: Int = a64_memory_width(ref program, value.type_id);
 
     if (type.kind == WirTypeKind.Struct || type.kind == WirTypeKind.Array) {
@@ -1600,7 +1600,7 @@ func a64_store_value_at(
                 return false;
             }
 
-            let constant: WirConstant = program.arena.constants[constant_index];
+            let ptr constant: WirConstant = ref program.arena.constants[constant_index];
             if (constant.kind == WirConstKind.Zero) {
                 return a64_zero_memory(ref output, base, offset, Int(layout.size));
             }
@@ -1695,7 +1695,7 @@ func a64_load_value_at(
     ref values: A64ValueMap,
     ref output: A64CodeBuffer
 ) -> Bool {
-    let type: WirType = program.arena.types[wir_id_index(UInt32(type_id))];
+    let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(type_id))];
     let width: Int = a64_memory_width(ref program, type_id);
 
     if (type.kind == WirTypeKind.Struct || type.kind == WirTypeKind.Array) {
@@ -2140,7 +2140,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
     i = 0;
     while (i < function.parameters.length()) {
         let parameter: WirValueID = function.parameters[i];
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(parameter))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(parameter))];
         let location: A64ArgumentLocation = a64_argument_location(ref program, value.type_id, layouts, ref incoming_state);
         let home: A64StackSlot = a64_find_stack_slot(stack.homes, parameter);
         if (!location.valid || home.value == NO_WIR_VALUE) {
@@ -2252,7 +2252,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
     i = 0;
     while (i < stack.homes.slots.length()) {
         let home: A64StackSlot = stack.homes.slots[i];
-        let value: WirValue = program.arena.values[wir_id_index(UInt32(home.value))];
+        let ptr value: WirValue = ref program.arena.values[wir_id_index(UInt32(home.value))];
         if (value.kind == WirValueKind.Constant && a64_aggregate_type(ref program, value.type_id) &&
             !a64_store_value_at(
                 ref program,
@@ -2365,7 +2365,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 }
             } else if (instruction.opcode == WirOpcode.StructValue ||
                        instruction.opcode == WirOpcode.ArrayValue) {
-                let type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+                let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(instruction.type_id))];
                 let layout: WirTypeLayout = layouts[wir_id_index(UInt32(instruction.type_id))];
                 let home: A64StackSlot = a64_find_stack_slot(stack.homes, instruction.result);
                 let count: Int = type.fields.length();
@@ -2420,7 +2420,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
 
                 let aggregate_id: WirValueID = instruction.operands[0];
                 let aggregate: WirValue = program.arena.values[wir_id_index(UInt32(aggregate_id))];
-                let type: WirType = program.arena.types[wir_id_index(UInt32(aggregate.type_id))];
+                let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(aggregate.type_id))];
                 let layout: WirTypeLayout = layouts[wir_id_index(UInt32(aggregate.type_id))];
                 let home: A64StackSlot = a64_find_stack_slot(stack.homes, aggregate_id);
                 let index: WirValue = program.arena.values[
@@ -2455,7 +2455,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                         return a64_lowering_error("AArch64 constant aggregate member has no storage");
                     }
 
-                    let constant: WirConstant = program.arena.constants[constant_index];
+                    let ptr constant: WirConstant = ref program.arena.constants[constant_index];
                     if (constant.kind == WirConstKind.Zero) {
                         if (!a64_zero_memory(ref output, A64Register.SP, result_home.offset, result_home.size)) {
                             return a64_lowering_error("cannot extract an AArch64 zero aggregate member");
@@ -3200,7 +3200,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
 
                 let checked_id: WirValueID = instruction.operands[0];
                 let checked_type: WirTypeID = program.arena.values[wir_id_index(UInt32(checked_id))].type_id;
-                let type: WirType = program.arena.types[wir_id_index(UInt32(checked_type))];
+                let ptr type: WirType = ref program.arena.types[wir_id_index(UInt32(checked_type))];
                 let checked: A64Register = a64_materialize(ref program, checked_id, stack.homes, ref values, ref output);
                 if (type.kind != WirTypeKind.Pointer || checked == A64Register.None ||
                     !a64_compare_zero(ref output, checked, true) ||
