@@ -87,6 +87,7 @@ func a64_sparse_add(ref sparse: Vector(WirValueID), seen: Dict(UInt32, Int), ran
 func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range: A64ValueRange) -> Vector(WirValueID) {
     let sparse: Vector(WirValueID) = [];
     let seen: Dict(UInt32, Int) = Dict();
+    let pending: Vector(WirValueID) = [];
 
     if (order.length() == 0) { return sparse; }
 
@@ -110,6 +111,7 @@ func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range:
 
             while (operand_index < instruction.operands.length()) {
                 a64_sparse_add(ref sparse, seen, range, instruction.operands[operand_index]);
+                pending.append(instruction.operands[operand_index]);
                 operand_index++;
             }
 
@@ -119,6 +121,7 @@ func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range:
 
                 while (argument_index < instruction.edges[edge_index].arguments.length()) {
                     a64_sparse_add(ref sparse, seen, range, instruction.edges[edge_index].arguments[argument_index]);
+                    pending.append(instruction.edges[edge_index].arguments[argument_index]);
                     argument_index++;
                 }
                 edge_index++;
@@ -126,6 +129,31 @@ func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range:
             i++;
         }
         block_index++;
+    }
+
+    // aggregate initializers can load children that never occur as instruction operands.
+    let walked: Dict(UInt32, Bool) = Dict();
+    i = 0;
+    while (i < pending.length()) {
+        let value_id = pending[i];
+        i++;
+        let value_index = wir_id_index(UInt32(value_id));
+        if (value_index < 0 || value_index >= program.arena.values.length()) { continue; }
+        let value: WirValue = program.arena.values[value_index];
+        if (value.kind != WirValueKind.Constant || walked.lookup(UInt32(value_id))) { continue; }
+        walked.put(UInt32(value_id), true);
+        let constant: WirConstant = program.arena.constants[wir_id_index(value.owner)];
+        if (constant.kind == WirConstKind.Address) {
+            a64_sparse_add(ref sparse, seen, range, constant.target);
+            pending.append(constant.target);
+        } else if (constant.kind == WirConstKind.Aggregate) {
+            let child = 0;
+            while (child < constant.elements.length()) {
+                a64_sparse_add(ref sparse, seen, range, constant.elements[child]);
+                pending.append(constant.elements[child]);
+                child++;
+            }
+        }
     }
 
     return sparse;
@@ -360,12 +388,14 @@ func a64_float_work_register(index: Int) -> A64Register {
 }
 
 func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64ValueMap {
+// use the operand table's local slots, unrelated functions need no register entries here
+    let uses: A64UseTable = a64_collect_uses(ref program, order);
     let registers: Vector(A64Register) = [];
     let wide_high: Vector(A64Register) = [];
     let bindings: Vector(A64RegisterBinding) = [];
     let i: Int = 0;
 
-    while (i < program.arena.values.length()) {
+    while (i < uses.queues.length()) {
         registers.append(A64Register.None);
         wide_high.append(A64Register.None);
         i++;
@@ -387,7 +417,7 @@ func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64
         registers=registers,
         wide_high=wide_high,
         bindings=bindings,
-        uses=a64_collect_uses(ref program, order),
+        uses=uses,
         position=0,
         next_register=0,
         next_float_register=0
@@ -410,7 +440,7 @@ func a64_release_binding(ref values: A64ValueMap, index: Int) -> Void {
 
     let binding: A64RegisterBinding = values.bindings[index];
     if (binding.value != NO_WIR_VALUE) {
-        let value_index: Int = wir_id_index(UInt32(binding.value));
+        let value_index: Int = a64_use_index(ref values.uses, binding.value);
 
         if (value_index >= 0 && value_index < values.registers.length()) {
             if (binding.wide) {
@@ -529,7 +559,7 @@ func a64_claim_register(ref values: A64ValueMap, index: Int) -> A64Register {
 }
 
 func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64Register, dirty: Bool) -> Bool {
-    let index: Int = wir_id_index(UInt32(value_id));
+    let index: Int = a64_use_index(ref values.uses, value_id);
     if (index < 0 || index >= values.registers.length()) { return false; }
 
     let binding_index: Int = a64_binding_index(ref values, register);
@@ -552,7 +582,7 @@ func a64_bind_value(ref values: A64ValueMap, value_id: WirValueID, register: A64
 }
 
 func a64_mapped_register(ref values: A64ValueMap, value_id: WirValueID) -> A64Register {
-    let index: Int = wir_id_index(UInt32(value_id));
+    let index: Int = a64_use_index(ref values.uses, value_id);
     if (index < 0 || index >= values.registers.length()) { return A64Register.None; }
 
     return values.registers[index];
@@ -565,7 +595,7 @@ func a64_bind_register_pair(
     high: A64Register,
     dirty: Bool
 ) -> Bool {
-    let value_index: Int = wir_id_index(UInt32(value_id));
+    let value_index: Int = a64_use_index(ref values.uses, value_id);
     let low_index: Int = a64_binding_index(ref values, low);
     let high_index: Int = a64_binding_index(ref values, high);
     if (value_index < 0 || value_index >= values.registers.length() ||
@@ -584,7 +614,7 @@ func a64_bind_register_pair(
 }
 
 func a64_mapped_register_pair(ref values: A64ValueMap, value_id: WirValueID) -> A64RegisterPair {
-    let index: Int = wir_id_index(UInt32(value_id));
+    let index: Int = a64_use_index(ref values.uses, value_id);
     if (index < 0 || index >= values.registers.length() ||
         values.registers[index] == A64Register.None || values.wide_high[index] == A64Register.None) {
         return A64RegisterPair(low=A64Register.None, high=A64Register.None);

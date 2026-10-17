@@ -63,13 +63,8 @@ func wir_check_fallible_call(ref source: Compiler, call: CallNode, return_type: 
 }
 
 func wir_find_binding(ref state: WirFunctionLowering, name: String) -> WirBinding? {
-    let i: Int = state.bindings.length() - 1;
-    while (i >= 0) {
-        if (state.bindings[i].name == name) {
-            return state.bindings[i];
-        }
-        i--;
-    }
+    let index = wir_local_index(ref state, name);
+    if (index >= 0) { return state.bindings[index]; }
     throw Error.InvalidData;
 }
 
@@ -1064,6 +1059,8 @@ func wir_lower_catch(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     state.terminated = false;
     if (!normal_terminated) {
         state.bindings = normal_bindings;
+        state.binding_indices = null;
+        state.indexed_bindings = 0;
         state.owned_values = normal_owned;
     } else {
         wir_restore_bindings(ref state, parent_binding_count);
@@ -1079,6 +1076,8 @@ func wir_restore_bindings(ref state: WirFunctionLowering, length: Int) -> Void {
         i++;
     }
     state.bindings = bindings;
+    state.binding_indices = null;
+    state.indexed_bindings = 0;
 }
 
 func wir_numeric_opcode(source_type: Int, token: Int) -> WirOpcode {

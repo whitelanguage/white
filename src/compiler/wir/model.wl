@@ -272,6 +272,8 @@ struct WirArena(
     type_revision: Int,
     pointer_types: Vector(WirTypeID),
     scalar_types: Vector(WirTypeID),
+    shape_heads: Dict(UInt64, WirTypeID),
+    shape_links: Vector(WirTypeID),
     values: Vector(WirValue),
     instructions: Vector(WirInstruction),
     blocks: Vector(WirBlock),

@@ -403,13 +403,10 @@ func x86_block_order(function: WirFunction) -> Vector(WirBlockID) {
     return order;
 }
 
-func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -> Vector(Int) {
-    let counts: Vector(Int) = [];
+func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -> Dict(UInt32, Int) {
+// block IDs belong to the module, keep only this function's incoming edges
+    let counts: Dict(UInt32, Int) = Dict();
     let i: Int = 0;
-    while (i < program.arena.blocks.length()) {
-        counts.append(0);
-        i++;
-    }
 
     let block_index: Int = 0;
     while (block_index < order.length()) {
@@ -419,10 +416,8 @@ func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
             let edge_index: Int = 0;
             while (edge_index < instruction.edges.length()) {
-                let target: Int = wir_id_index(UInt32(instruction.edges[edge_index].target));
-                if (target >= 0 && target < counts.length()) {
-                    counts[target] = counts[target] + 1;
-                }
+                let target: UInt32 = UInt32(instruction.edges[edge_index].target);
+                counts.put(target, counts.lookup(target) + 1);
                 edge_index++;
             }
             i++;
@@ -432,7 +427,7 @@ func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -
     return counts;
 }
 
-func x86_carry_registers_to_next(ref program: WirModule, order: Vector(WirBlockID), predecessors: Vector(Int), block_index: Int) -> Bool {
+func x86_carry_registers_to_next(ref program: WirModule, order: Vector(WirBlockID), predecessors: Dict(UInt32, Int), block_index: Int) -> Bool {
     if (block_index + 1 >= order.length()) { return false; }
     let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
     if (block.instructions.length() == 0) { return false; }
@@ -444,7 +439,7 @@ func x86_carry_registers_to_next(ref program: WirModule, order: Vector(WirBlockI
     }
 
     let target_index: Int = wir_id_index(UInt32(terminator.edges[0].target));
-    if (target_index < 0 || target_index >= predecessors.length() || predecessors[target_index] != 1) {
+    if (target_index < 0 || target_index >= program.arena.blocks.length() || predecessors.lookup(UInt32(terminator.edges[0].target)) != 1) {
         return false;
     }
     return program.arena.blocks[target_index].parameters.length() == 0;
@@ -4298,7 +4293,7 @@ func x86_lower_function_with_layouts(
         return x86_lowering_error("the x86_64 lowering could not save function parameters");
     }
 
-    let predecessors: Vector(Int) = x86_predecessor_counts(ref program, order);
+    let predecessors: Dict(UInt32, Int) = x86_predecessor_counts(ref program, order);
     let carry_registers: Bool = false;
     block_index = 0;
     while (block_index < order.length()) {

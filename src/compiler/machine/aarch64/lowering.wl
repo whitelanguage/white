@@ -1902,22 +1902,20 @@ func a64_emit_atomic_rmw(
     return a64_conditional_branch(ref output, retry - branch, A64Condition.NotEqual);
 }
 
-func a64_block_offset(offsets: Vector(A64BlockOffset), block: WirBlockID) -> Int {
+func a64_patch_branches(ref output: A64CodeBuffer, offsets: Vector(A64BlockOffset), fixups: Vector(A64BranchFixup)) -> Bool {
+// one offset index serves every branch, zero is a valid code offset
+    let targets: Dict(UInt32, Int) = Dict();
     let i: Int = 0;
+
     while (i < offsets.length()) {
-        if (offsets[i].block == block) { return offsets[i].offset; }
+        targets.put(UInt32(offsets[i].block), offsets[i].offset + 1);
         i++;
     }
-
-    return -1;
-}
-
-func a64_patch_branches(ref output: A64CodeBuffer, offsets: Vector(A64BlockOffset), fixups: Vector(A64BranchFixup)) -> Bool {
-    let i: Int = 0;
+    i = 0;
 
     while (i < fixups.length()) {
         let fixup: A64BranchFixup = fixups[i];
-        let target: Int = a64_block_offset(offsets, fixup.target);
+        let target: Int = targets.lookup(UInt32(fixup.target)) - 1;
         if (target < 0 || !a64_patch_branch(ref output, fixup.offset, target, fixup.condition, fixup.conditional)) {
             return false;
         }
@@ -2088,6 +2086,10 @@ func a64_write_edge(ref program: WirModule, edge: WirEdge, stack: A64StackLayout
 }
 
 func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64LoweringResult {
+    return a64_lower_function_with_layouts(ref program, function_id, wir_type_layouts(program));
+}
+
+func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFuncID, layouts: Vector(WirTypeLayout)) -> A64LoweringResult {
     if (program.target != "aarch64-unknown-linux-gnu" || program.pointer_bits != 64) {
         return a64_lowering_error("the AArch64 backend does not support this target");
     }
@@ -2106,7 +2108,6 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
     a64_mark_edge_registers(ref program, function.blocks, ref values.uses);
     let offsets: Vector(A64BlockOffset) = [];
     let fixups: Vector(A64BranchFixup) = [];
-    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
     let stack: A64StackLayout = a64_stack_layout_with_uses(ref program, ref function, layouts, values.uses);
     if (stack.message.length() != 0) { return a64_lowering_error(stack.message); }
 
@@ -3642,6 +3643,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 }
 
 func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
+// lowering never adds types, all functions can share this layout table
+    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
     if (program.target != "aarch64-unknown-linux-gnu" || program.pointer_bits != 64) {
         return a64_module_error("the AArch64 machine backend does not support this target");
     }
@@ -3655,7 +3658,7 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
         let function: WirFunction = program.arena.functions[i];
         if (function.blocks.length() != 0) {
             let offset: Int = text.length();
-            let lowered: A64LoweringResult = a64_lower_function(ref program, WirFuncID(UInt32(i + 1)));
+            let lowered: A64LoweringResult = a64_lower_function_with_layouts(ref program, WirFuncID(UInt32(i + 1)), layouts);
             if (lowered.errors.length() != 0) {
                 return a64_module_error("in function '" + function.name + "': " + lowered.errors[0]);
             }
@@ -3679,7 +3682,7 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
         i++;
     }
 
-    let data: MachineDataResult = machine_emit_globals(ref program, wir_type_layouts(program), ".data.rel.ro", true);
+    let data: MachineDataResult = machine_emit_globals(ref program, layouts, ".data.rel.ro", true);
     if (data.message.length() != 0) { return a64_module_error(data.message); }
 
     i = 0;

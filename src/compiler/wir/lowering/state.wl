@@ -44,6 +44,8 @@ struct WirFunctionLowering(
     entry: WirBlockID,
     block: WirBlockID,
     bindings: Vector(WirBinding),
+    binding_indices: Dict(String, Int),
+    indexed_bindings: Int,
     loops: Vector(WirLoop),
     error_targets: Vector(WirErrorTarget),
     owned_values: Vector(WirOwnedValue),
@@ -51,6 +53,20 @@ struct WirFunctionLowering(
     terminated: Bool,
     next_block: Int
 )
+
+func wir_local_index(ref state: WirFunctionLowering, name: String) -> Int {
+// append-only scopes can extend the index, restoring a scope invalidates it
+    if (state.binding_indices is null || state.indexed_bindings > state.bindings.length()) {
+        state.binding_indices = Dict();
+        state.indexed_bindings = 0;
+    }
+    while (state.indexed_bindings < state.bindings.length()) {
+        let index = state.indexed_bindings;
+        state.binding_indices.put(state.bindings[index].name, index + 1);
+        state.indexed_bindings++;
+    }
+    return state.binding_indices.lookup(name) - 1;
+}
 
 func wir_no_expr() -> WirExpr {
     return WirExpr(value=NO_WIR_VALUE, source_type=TYPE_POISON);

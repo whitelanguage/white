@@ -20,13 +20,8 @@ func wir_reference_parameter(program: WirModule, binding: WirBinding) -> Bool {
 }
 
 func wir_capture_binding(ref state: WirFunctionLowering, name: String) -> WirBinding? {
-    let i: Int = state.bindings.length() - 1;
-    while (i >= 0) {
-        if (state.bindings[i].name == name) {
-            return state.bindings[i];
-        }
-        i--;
-    }
+    let index = wir_local_index(ref state, name);
+    if (index >= 0) { return state.bindings[index]; }
     throw Error.InvalidData;
 }
 

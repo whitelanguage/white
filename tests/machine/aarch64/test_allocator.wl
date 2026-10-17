@@ -11,6 +11,11 @@ import * from "../../../src/compiler/machine/aarch64/allocator.wl"
 func main() -> Int {
     let program: WirModule = new_wir_module("aarch64-unknown-linux-gnu", 64);
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
+    let noise: Int = 0;
+    while (noise < 4096) {
+        wir_const_int(ref program, int_type, UInt128(UInt32(noise + 100)));
+        noise++;
+    }
     let function_id: WirFuncID = wir_add_function(
         ref program,
         "uses",
@@ -46,7 +51,18 @@ func main() -> Int {
     );
     wir_return(ref program, entry, second, no_wir_location());
 
+    noise = 0;
+    while (noise < 4096) {
+        wir_const_int(ref program, int_type, UInt128(UInt32(noise + 10000)));
+        noise++;
+    }
+
     let values: A64ValueMap = a64_new_value_map(ref program, function.blocks);
+    if (values.registers.length() != values.uses.queues.length() || values.registers.length() > 16 ||
+        values.wide_high.length() != values.registers.length()) {
+        print("FAIL: unrelated module values enlarged the register map");
+        return 1;
+    }
     if (a64_next_use(ref values.uses, value, -1) != 0 ||
         a64_next_use(ref values.uses, first, -1) != 1 ||
         a64_next_use(ref values.uses, second, -1) != 2) {
