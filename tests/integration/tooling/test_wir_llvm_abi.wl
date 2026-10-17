@@ -25,7 +25,8 @@ func check_x64_abi() -> Bool {
     catch(err) { return false; }
     if (emitted.errors.length() != 0) { return false; }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndeclare void @__wl_retain(ptr)\ndeclare void @__wl_release(ptr)\n\ndeclare ccc i32 @c_func(ptr)\n\ndeclare win64cc ptr @system_func(i32)\n\ndefine internal i32 @caller(ptr %v5) {\nb1:\n  call void @__wl_retain(ptr %v5)\n  %v8 = call win64cc ptr @system_func(i32 7)\n  %v9 = call ccc i32 @c_func(ptr %v5)\n  call void @__wl_release(ptr %v5)\n  ret i32 %v9\n}\n";
-    return emitted.text == expected;
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    return emitted.text == layout + expected;
 }
 
 func check_indirect_c_abi() -> Bool {
@@ -42,7 +43,8 @@ func check_indirect_c_abi() -> Bool {
     catch(err) { return false; }
     if (emitted.errors.length() != 0) { return false; }
     let expected: String = "target triple = \"x86_64-unknown-linux-gnu\"\n\ndefine internal i32 @call_indirect(ptr %v1) {\nb1:\n  %v4 = call ccc i32 %v1(i32 9)\n  ret i32 %v4\n}\n";
-    return emitted.text == expected;
+    let layout: String = "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    return emitted.text == layout + expected;
 }
 
 func check_x86_system_abi() -> Bool {
@@ -52,7 +54,8 @@ func check_x86_system_abi() -> Bool {
     let emitted: WirLLVMResult = emit_wir_llvm(program)?;
     catch(err) { return false; }
     if (emitted.errors.length() != 0) { return false; }
-    return emitted.text == "target triple = \"i686-pc-windows-msvc\"\n\ndeclare x86_stdcallcc i32 @system_func(i32)\n";
+    let layout: String = "target datalayout = \"e-m:x-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32-a:0:32-S32\"\n";
+    return emitted.text == layout + "target triple = \"i686-pc-windows-msvc\"\n\ndeclare x86_stdcallcc i32 @system_func(i32)\n";
 }
 
 func main() -> Int {

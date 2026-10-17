@@ -45,7 +45,8 @@ func main() -> Int {
     catch(err) { print("FAIL: atomic LLVM emission failed"); return 1; }
     if (emitted.errors.length() != 0) { print("FAIL: valid atomic WIR was rejected: ", emitted.errors[0]); return 1; }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine internal i32 @atomic_counter() {\nb1:\n  %v2 = alloca i32\n  store atomic i32 0, ptr %v2 seq_cst, align 4\n  %v5 = load atomic i32, ptr %v2 acquire, align 4\n  %v6 = atomicrmw add ptr %v2, i32 1 monotonic\n  %v7 = atomicrmw sub ptr %v2, i32 1 acq_rel\n  ret i32 %v7\n}\n";
-    if (emitted.text != expected) { print("FAIL: atomic LLVM output is not stable"); print(emitted.text); return 1; }
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) { print("FAIL: atomic LLVM output is not stable"); print(emitted.text); return 1; }
     if (!rejects_invalid_load_order()) { print("FAIL: invalid atomic load order was accepted"); return 1; }
     print("PASS: WIR atomic operations");
     return 0;

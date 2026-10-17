@@ -34,7 +34,8 @@ func main() -> Int {
         return 1;
     }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine i32 @main() {\nb1:\n  br i1 true, label %b2, label %b3\nb2:\n  br label %b4\nb3:\n  br label %b4\nb4:\n  %v2 = phi i32 [ 42, %b2 ], [ 1, %b3 ]\n  ret i32 %v2\n}\n";
-    if (emitted.text != expected) {
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) {
         print("FAIL: WIR LLVM control-flow output is not stable");
         print(emitted.text);
         return 1;

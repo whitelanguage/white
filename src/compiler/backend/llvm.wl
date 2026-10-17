@@ -3,10 +3,53 @@ import "file"
 import "strings"
 
 
+func llvm_target_data_layout(target: String) -> String {
+// LLVM fixes implicit load/store alignment while parsing, before Clang selects the target
+    if (target == "armv7-unknown-linux-gnueabihf") {
+        return "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64";
+    }
+    if (target == "i686-pc-windows-msvc") {
+        return "e-m:x-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32-a:0:32-S32";
+    }
+    if (target == "i686-unknown-linux-gnu") {
+        return "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i128:128-f64:32:64-f80:32-n8:16:32-S128";
+    }
+    if (target == "x86_64-pc-windows-msvc") {
+        return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    if (target == "x86_64-unknown-linux-gnu") {
+        return "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    if (target == "aarch64-unknown-linux-gnu") {
+        return "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32";
+    }
+    if (target == "x86_64-apple-darwin") {
+        return "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    if (target == "arm64-apple-darwin" || target == "aarch64-apple-darwin") {
+        return "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32";
+    }
+    return "";
+}
+
 func llvm_line_end(text: String, start: Int) -> Int {
     let end: Int = start;
     while (end < text.length() && text[end] != '\n') { end++; }
     if (end < text.length()) { end++; }
+    return end;
+}
+
+func llvm_header_end(text: String) -> Int {
+// delayed type declarations belong after both target directives, LLVM rejects a later triple
+    let end: Int = 0;
+    while (end < text.length()) {
+        let next: Int = llvm_line_end(text, end);
+        if (!llvm_line_starts_with(text, end, next, "target triple = ") &&
+            !llvm_line_starts_with(text, end, next, "target datalayout = ")) {
+            break;
+        }
+        end = next;
+    }
     return end;
 }
 

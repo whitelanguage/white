@@ -25,7 +25,8 @@ func main() -> Int {
     if (emitted.errors.length() != 0) { print("FAIL: valid Float32 WIR was rejected"); return 1; }
 
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine internal float @one() {\nb1:\n  ret float 0x3FF0000000000000\n}\n";
-    if (emitted.text != expected) { print("FAIL: Float32 LLVM output is not stable"); return 1; }
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) { print("FAIL: Float32 LLVM output is not stable"); return 1; }
 
     print("PASS: WIR LLVM Float32 constants");
     return 0;

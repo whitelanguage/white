@@ -37,7 +37,8 @@ func main() -> Int {
     catch(err) { print("FAIL: static LLVM emission failed"); return 1; }
     if (emitted.errors.length() != 0) { print("FAIL: static WIR was rejected: ", emitted.errors[0]); return 1; }
     let expected_llvm: String = "target triple = \"x86_64-pc-windows-msvc\"\n\n%wir.t7 = type { ptr, i32, i32 }\n\n@.str.bytes = private constant [6 x i8] c\"White\\00\", align 1\n@.str.tail = private constant ptr getelementptr (i8, ptr @.str.bytes, i64 2)\n@.str = constant %wir.t7 {ptr @.str.bytes, i32 5, i32 5}, align 8\n@buffer = private global [4096 x i8] zeroinitializer, align 16\n\n";
-    if (emitted.text != expected_llvm) { print("FAIL: static LLVM output is not stable"); print(emitted.text); return 1; }
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected_llvm) { print("FAIL: static LLVM output is not stable"); print(emitted.text); return 1; }
 
     print("PASS: WIR static constants");
     return 0;

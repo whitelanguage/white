@@ -32,7 +32,8 @@ func main() -> Int {
     catch(err) { print("FAIL: LLVM emission failed"); return 1; }
     if (emitted.errors.length() != 0) { print("FAIL: valid scalar WIR was rejected: ", emitted.errors[0]); return 1; }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine internal i32 @add(i32 %v1, i32 %v2) {\nb1:\n  %v4 = add i32 %v1, %v2\n  ret i32 %v4\n}\n\ndefine internal i1 @float_equal(double %v5, double %v6) {\nb2:\n  %v8 = fadd double %v5, %v6\n  %v9 = fcmp oeq double %v8, %v6\n  %v10 = fcmp une double %v8, %v6\n  ret i1 %v9\n}\n\ndefine i32 @main() {\nb3:\n  %v14 = call i32 @add(i32 40, i32 2)\n  ret i32 %v14\n}\n";
-    if (emitted.text != expected) { print("FAIL: LLVM backend output is not stable"); print(emitted.text); return 1; }
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) { print("FAIL: LLVM backend output is not stable"); print(emitted.text); return 1; }
     print("PASS: WIR LLVM backend");
     return 0;
 }

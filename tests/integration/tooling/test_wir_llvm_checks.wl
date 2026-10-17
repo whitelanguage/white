@@ -44,7 +44,8 @@ func main() -> Int {
         return 1;
     }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndeclare void @llvm.trap()\n\ndefine i32 @main() {\nb1:\n  %v2 = alloca i32\n  %check.null.2 = icmp eq ptr %v2, null\n  br i1 %check.null.2, label %check.trap.2, label %check.cont.2\ncheck.trap.2:\n  call void @llvm.trap()\n  unreachable\ncheck.cont.2:\n  %check.bounds.low.3 = icmp slt i32 1, 0\n  %check.bounds.high.3 = icmp sge i32 1, 2\n  %check.bounds.3 = or i1 %check.bounds.low.3, %check.bounds.high.3\n  br i1 %check.bounds.3, label %check.trap.3, label %check.cont.3\ncheck.trap.3:\n  call void @llvm.trap()\n  unreachable\ncheck.cont.3:\n  ret i32 42\n}\n\ndefine internal i32 @checked(i32 %v6, i32 %v7) {\nb2:\n  %check.bounds.low.5 = icmp slt i32 %v6, 0\n  %check.bounds.high.5 = icmp sge i32 %v6, %v7\n  %check.bounds.5 = or i1 %check.bounds.low.5, %check.bounds.high.5\n  br i1 %check.bounds.5, label %check.trap.5, label %check.cont.5\ncheck.trap.5:\n  call void @llvm.trap()\n  unreachable\ncheck.cont.5:\n  br label %b3\nb3:\n  %v9 = phi i32 [ %v6, %check.cont.5 ]\n  ret i32 %v9\n}\n\ndefine internal i32 @checked_unsigned(i32 %v10, i32 %v11) {\nb4:\n  %check.bounds.8 = icmp uge i32 %v10, %v11\n  br i1 %check.bounds.8, label %check.trap.8, label %check.cont.8\ncheck.trap.8:\n  call void @llvm.trap()\n  unreachable\ncheck.cont.8:\n  ret i32 %v10\n}\n";
-    if (emitted.text != expected) {
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) {
         print("FAIL: WIR LLVM safety-check output is not stable");
         print(emitted.text);
         return 1;

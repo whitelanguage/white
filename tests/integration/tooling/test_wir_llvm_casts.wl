@@ -37,7 +37,8 @@ func main() -> Int {
         return 1;
     }
     let expected: String = "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine internal i64 @casts(i32 %v1, i32 %v2, i64 %v3, double %v4) {\nb1:\n  %v6 = sext i32 %v1 to i64\n  %v7 = zext i32 %v2 to i64\n  %v8 = trunc i64 %v3 to i32\n  %v9 = sitofp i32 %v1 to double\n  %v10 = fptosi double %v4 to i64\n  %v12 = zext i32 %v1 to i64\n  %v13 = add i64 %v6, %v7\n  %v14 = add i64 %v13, %v10\n  %v15 = add i64 %v14, %v12\n  ret i64 %v15\n}\n";
-    if (emitted.text != expected) {
+    let layout: String = "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n";
+    if (emitted.text != layout + expected) {
         print("FAIL: WIR LLVM cast output is not stable");
         print(emitted.text);
         return 1;

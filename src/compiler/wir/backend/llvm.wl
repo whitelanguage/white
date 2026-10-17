@@ -9,6 +9,7 @@ import * from "../storage.wl"
 import * from "llvm_windows.wl"
 import wir_lower_wide_conversions from "../numeric.wl"
 import * from "llvm_native.wl"
+import llvm_target_data_layout from "../../backend/llvm.wl"
 
 
 struct WirLLVMResult(text: String, errors: Vector(String))
@@ -1400,6 +1401,10 @@ func emit_wir_llvm(program: WirModule) -> WirLLVMResult? {
     }
     let output: strings.Builder = strings.Builder(4096);
 
+    let layout: String = llvm_target_data_layout(program.target);
+    if (layout.length() != 0) {
+        output.write("target datalayout = \"" + layout + "\"\n")?;
+    }
     output.write("target triple = \"")?;
     output.write(program.target)?;
     output.write("\"\n\n")?;
