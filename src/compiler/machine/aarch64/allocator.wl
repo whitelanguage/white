@@ -5,7 +5,7 @@ import * from "../../wir/model.wl"
 
 const A64_NO_NEXT_USE: Int = 2147483647;
 
-struct A64UseQueue(positions: Vector(Int), cursor: Int)
+struct A64UseQueue(positions: Vector(Int), cursor: Int, incoming: A64Register)
 
 struct A64UseTable(
     base: Int,
@@ -137,7 +137,7 @@ func a64_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) 
     let i: Int = 0;
 
     while (i < dense_count + sparse.length()) {
-        queues.append(A64UseQueue(positions=[], cursor=0));
+        queues.append(A64UseQueue(positions=[], cursor=0, incoming=A64Register.None));
         i++;
     }
 
@@ -158,6 +158,12 @@ func a64_use_index(ref table: A64UseTable, value: WirValueID) -> Int {
     }
 
     return table.sparse_indices.lookup(UInt32(value)) - 1;
+}
+
+func a64_incoming_register(ref table: A64UseTable, value: WirValueID) -> A64Register {
+    let index = a64_use_index(ref table, value);
+    if (index < 0 || index >= table.queues.length()) { return A64Register.None; }
+    return table.queues[index].incoming;
 }
 
 func a64_record_use(ref table: A64UseTable, value: WirValueID, position: Int) -> Void {

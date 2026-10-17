@@ -37,6 +37,7 @@ struct A64StackLayout(
     homes: A64StackIndex,
     frame_size: Int,
     result_pointer_offset: Int,
+    edge_scratch: Vector(Int),
     message: String
 )
 
@@ -173,6 +174,97 @@ func a64_aggregate_type(ref program: WirModule, type_id: WirTypeID) -> Bool {
 
     let kind: WirTypeKind = program.arena.types[index].kind;
     return kind == WirTypeKind.Struct || kind == WirTypeKind.Array;
+}
+
+func a64_mark_edge_registers(ref program: WirModule, order: Vector(WirBlockID), ref uses: A64UseTable) -> Void {
+// every predecessor agrees on the entry registers, back edges keep their parallel stack copies
+    let last_pred: Dict(UInt32, Int) = Dict();
+    let i = 0;
+    while (i < order.length()) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[i]))];
+        if (block.instructions.length() != 0) {
+            let term = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+            let j = 0;
+            while (j < term.edges.length()) {
+                last_pred.put(UInt32(term.edges[j].target), i + 1);
+                j++;
+            }
+        }
+        i++;
+    }
+
+    i = 1;
+    while (i < order.length()) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[i]))];
+        let pred = last_pred.lookup(UInt32(order[i]));
+        if (pred == 0 || pred > i || block.parameters.length() == 0 || block.parameters.length() > 14) {
+            i++;
+            continue;
+        }
+
+        let assigned: Vector(A64Register) = [];
+        let integers = 0;
+        let floats = 0;
+        let j = 0;
+        while (j < block.parameters.length()) {
+            let type = program.arena.values[wir_id_index(UInt32(block.parameters[j]))].type_id;
+            if (a64_scalar_width(ref program, type) == 0) { break; }
+            let reg = A64Register.None;
+            if (a64_scalar_float(ref program, type)) {
+                reg = a64_float_work_register(floats);
+                floats++;
+            } else {
+                reg = a64_work_register(integers);
+                integers++;
+            }
+            if (reg == A64Register.None) { break; }
+            assigned.append(reg);
+            j++;
+        }
+
+        // partial contracts complicate cycles between registers and homes.
+        // Fall back as a block if its parameters do not fit the volatile banks.
+        if (assigned.length() == block.parameters.length()) {
+            j = 0;
+            while (j < assigned.length()) {
+                let index = a64_use_index(ref uses, block.parameters[j]);
+                let queue = uses.queues[index];
+                queue.incoming = assigned[j];
+                uses.queues[index] = queue;
+                j++;
+            }
+        }
+        i++;
+    }
+}
+
+func a64_edge_scratch_sizes(ref program: WirModule, order: Vector(WirBlockID), layouts: Vector(WirTypeLayout), ref uses: A64UseTable) -> Vector(Int) {
+    let sizes: Vector(Int) = [];
+    let i = 0;
+    while (i < order.length()) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[i]))];
+        if (block.instructions.length() != 0) {
+            let term = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+            let j = 0;
+            while (j < term.edges.length()) {
+                let target = program.arena.blocks[wir_id_index(UInt32(term.edges[j].target))];
+                if (target.parameters.length() != 0 && a64_incoming_register(ref uses, target.parameters[0]) == A64Register.None) {
+                    let k = 0;
+                    while (k < target.parameters.length()) {
+                        let type = program.arena.values[wir_id_index(UInt32(target.parameters[k]))].type_id;
+                        let bytes = a64_stack_value_size(ref program, type, layouts);
+                        if (bytes <= 0) { return [-1]; }
+                        if (k == sizes.length()) { sizes.append(0); }
+                        if (bytes > sizes[k]) { sizes[k] = bytes; }
+                        k++;
+                    }
+                }
+                j++;
+            }
+        }
+        i++;
+    }
+    return sizes;
 }
 
 func a64_hfa_type(ref program: WirModule, type_id: WirTypeID, layouts: Vector(WirTypeLayout)) -> A64HFA {
@@ -360,11 +452,13 @@ func a64_outgoing_stack(ref program: WirModule, ref function: WirFunction, layou
 
 func a64_stack_error(message: String) -> A64StackLayout {
     let empty = a64_stack_index([], A64ValueRange(base=0, count=0));
-    return A64StackLayout(storage=empty, homes=empty, frame_size=0, result_pointer_offset=-1, message=message);
+    return A64StackLayout(storage=empty, homes=empty, frame_size=0, result_pointer_offset=-1, edge_scratch=[], message=message);
 }
 
 func a64_stack_layout(ref program: WirModule, ref function: WirFunction, layouts: Vector(WirTypeLayout)) -> A64StackLayout {
-    return a64_stack_layout_with_uses(ref program, ref function, layouts, a64_collect_uses(ref program, function.blocks));
+    let uses = a64_collect_uses(ref program, function.blocks);
+    a64_mark_edge_registers(ref program, function.blocks, ref uses);
+    return a64_stack_layout_with_uses(ref program, ref function, layouts, uses);
 }
 
 func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunction, layouts: Vector(WirTypeLayout), uses: A64UseTable) -> A64StackLayout {
@@ -390,7 +484,17 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
         }
     }
 
+    let scratch: Vector(Int) = [];
+    let sizes = a64_edge_scratch_sizes(ref program, function.blocks, layouts, ref uses);
     let i = 0;
+    while (i < sizes.length()) {
+        let offset = a64_reserve_stack(ref pool, sizes[i], 16);
+        if (offset < 0) { return a64_stack_error("AArch64 edge scratch area is too large"); }
+        scratch.append(offset);
+        i++;
+    }
+
+    i = 0;
     while (i < function.parameters.length()) {
         let param = function.parameters[i];
         let type = program.arena.values[wir_id_index(UInt32(param))].type_id;
@@ -488,7 +592,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     if (pool.size > 2147483632) { return a64_stack_error("AArch64 stack frame is too large"); }
     let range = a64_function_value_range(ref program, function.blocks);
     return A64StackLayout(storage=a64_stack_index(storage, range), homes=a64_stack_index(homes, range),
-        frame_size=a64_align(pool.size, 16), result_pointer_offset=result_pointer_offset, message="");
+        frame_size=a64_align(pool.size, 16), result_pointer_offset=result_pointer_offset, edge_scratch=scratch, message="");
 }
 
 func a64_stack_address(ref output: A64CodeBuffer, destination: A64Register, offset: Int) -> Bool {
@@ -1823,57 +1927,158 @@ func a64_patch_branches(ref output: A64CodeBuffer, offsets: Vector(A64BlockOffse
     return true;
 }
 
-func a64_write_edge(ref program: WirModule, edge: WirEdge, homes: A64StackIndex, layouts: Vector(WirTypeLayout), ref values: A64ValueMap, ref output: A64CodeBuffer) -> Bool {
-// Block arguments are copied through homes, this also handles swaps on loop edges.
+struct A64EdgeCopy(destination: A64Register, source: A64Register, offset: Int, width: Int, floating: Bool)
+
+func a64_repair_edge(copies: Vector(A64EdgeCopy), ref output: A64CodeBuffer) -> Bool {
+// target homes already hold a snapshot, a cycle can reload one source to free its register
+    let remaining = copies.length();
+    while (remaining != 0) {
+        let progress = false;
+        let i = 0;
+        while (i < copies.length()) {
+            let move = copies[i];
+            if (move.destination == A64Register.None) {
+                i++;
+                continue;
+            }
+            let blocked = false;
+            let j = 0;
+            while (j < copies.length()) {
+                if (j != i && copies[j].destination != A64Register.None && copies[j].source == move.destination) {
+                    blocked = true;
+                    break;
+                }
+                j++;
+            }
+            if (!blocked || move.source == move.destination) {
+                let copied = true;
+                if (move.source == A64Register.None) {
+                    if (move.floating) {
+                        copied = a64_load_float_at(ref output, move.destination, A64Register.SP, move.offset, move.width == 64);
+                    } else {
+                        copied = a64_load_integer_at(ref output, move.destination, A64Register.SP, move.offset, move.width);
+                    }
+                } else if (move.source != move.destination) {
+                    if (move.floating) {
+                        copied = a64_float_move(ref output, move.destination, move.source, move.width == 64);
+                    } else {
+                        copied = a64_mov_register(ref output, move.destination, move.source, move.width == 64);
+                    }
+                }
+                if (!copied) { return false; }
+                move.destination = A64Register.None;
+                copies[i] = move;
+                remaining--;
+                progress = true;
+            }
+            i++;
+        }
+        if (!progress) {
+            i = 0;
+            while (i < copies.length()) {
+                if (copies[i].destination != A64Register.None) {
+                    let move = copies[i];
+                    move.source = A64Register.None;
+                    copies[i] = move;
+                    break;
+                }
+                i++;
+            }
+        }
+    }
+    return true;
+}
+
+func a64_stage_edge_arg(ref program: WirModule, arg: WirValueID, offset: Int, stack: A64StackLayout, layouts: Vector(WirTypeLayout), ref values: A64ValueMap, ref output: A64CodeBuffer) -> Bool {
+    let type = program.arena.values[wir_id_index(UInt32(arg))].type_id;
+    let width = a64_scalar_width(ref program, type);
+    if (width != 0) {
+        // homes hold normalized scalars, narrow signed integers need all 32 bits.
+        let source = a64_materialize_address(ref program, arg, stack.storage, stack.homes, ref values, ref output);
+        if (source == A64Register.None) { return false; }
+        if (a64_scalar_float(ref program, type)) {
+            return a64_store_float_at(ref output, source, A64Register.SP, offset, width == 64);
+        }
+        return a64_store_integer_at(ref output, source, A64Register.SP, offset, width);
+    }
+    if (a64_aggregate_type(ref program, type) &&
+        !a64_zero_memory(ref output, A64Register.SP, offset, a64_stack_value_size(ref program, type, layouts))) {
+        return false;
+    }
+    return a64_store_value_at(ref program, arg, A64Register.SP, offset, stack.storage, stack.homes, layouts, ref values, ref output);
+}
+
+func a64_spill_edge_liveouts(ref program: WirModule, homes: A64StackIndex, ref values: A64ValueMap, ref output: A64CodeBuffer) -> Bool {
+// edge-only operands already get snapshots, preserve homes for uses beyond this terminator
+    let i = 0;
+    while (i < values.bindings.length()) {
+        let binding = values.bindings[i];
+        if (binding.value != NO_WIR_VALUE &&
+            (a64_next_use(ref values.uses, binding.value, values.position) != A64_NO_NEXT_USE ||
+             a64_use_precedes_definition(ref values.uses, binding.value, values.position))) {
+            if (!a64_spill_binding(ref program, homes, ref values, ref output, i)) { return false; }
+        }
+        i++;
+    }
+    return true;
+}
+
+func a64_write_edge(ref program: WirModule, edge: WirEdge, stack: A64StackLayout, layouts: Vector(WirTypeLayout), ref values: A64ValueMap, ref output: A64CodeBuffer) -> Bool {
     let block_index: Int = wir_id_index(UInt32(edge.target));
     if (block_index < 0 || block_index >= program.arena.blocks.length()) { return false; }
 
     let target: WirBlock = program.arena.blocks[block_index];
     if (target.parameters.length() != edge.arguments.length()) { return false; }
+    if (target.parameters.length() == 0) { return true; }
+
+    // copying edge registers changes their contents. Commit live-outs before
+    // that happens, both branch arms will then start from the same homes.
+    if (!a64_spill_edge_liveouts(ref program, stack.homes, ref values, ref output)) { return false; }
+    let registers = a64_incoming_register(ref values.uses, target.parameters[0]) != A64Register.None;
+    if (!registers && edge.arguments.length() > stack.edge_scratch.length()) { return false; }
 
     let i: Int = 0;
     while (i < edge.arguments.length()) {
-        let argument: WirValueID = edge.arguments[i];
-        let parameter: WirValueID = target.parameters[i];
-        let parameter_type: WirTypeID = program.arena.values[wir_id_index(UInt32(parameter))].type_id;
-        if (a64_aggregate_type(ref program, parameter_type)) {
-            let source: A64StackSlot = a64_find_stack_slot(homes, argument);
-            let destination: A64StackSlot = a64_find_stack_slot(homes, parameter);
-            let layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter_type))];
-            let temporary: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, false);
-            if (source.value == NO_WIR_VALUE || destination.value == NO_WIR_VALUE ||
-                !layout.valid || temporary == A64Register.None ||
-                !a64_zero_memory(ref output, A64Register.SP, destination.offset, destination.size) ||
-                !a64_copy_memory(
-                    ref output,
-                    A64Register.SP,
-                    destination.offset,
-                    A64Register.SP,
-                    source.offset,
-                    Int(layout.size),
-                    temporary
-                )) {
-                return false;
-            }
-
-            i++;
-            continue;
+        let offset = 0;
+        if registers {
+            let home = a64_find_stack_slot(stack.homes, target.parameters[i]);
+            if (home.value == NO_WIR_VALUE) { return false; }
+            offset = home.offset;
+        } else {
+            offset = stack.edge_scratch[i];
         }
+        if (!a64_stage_edge_arg(ref program, edge.arguments[i], offset, stack, layouts, ref values, ref output)) { return false; }
+        i++;
+    }
 
-        let width: Int = a64_integer_width(ref program, parameter_type);
-        if (width == 128) {
-            let pair: A64RegisterPair = a64_materialize_pair(ref program, argument, homes, ref values, ref output);
-            if (!a64_save_pair(ref values, ref output, homes, parameter, pair)) {
-                return false;
-            }
-
+    if registers {
+        // forward target parameter homes cannot alias their sources, each
+        // source dominates this edge and has a different fixed home.
+        let copies: Vector(A64EdgeCopy) = [];
+        i = 0;
+        while (i < target.parameters.length()) {
+            let param = target.parameters[i];
+            let type = program.arena.values[wir_id_index(UInt32(param))].type_id;
+            copies.append(A64EdgeCopy(destination=a64_incoming_register(ref values.uses, param),
+                source=a64_mapped_register(ref values, edge.arguments[i]), offset=a64_find_stack_slot(stack.homes, param).offset,
+                width=a64_scalar_width(ref program, type), floating=a64_scalar_float(ref program, type)));
             i++;
-            continue;
         }
+        let repaired = a64_repair_edge(copies, ref output);
+        // repair has overwritten source registers, their old bindings cannot
+        // be spilled by the terminator cleanup. Live-outs were saved above.
+        a64_clear_bindings(ref values);
+        return repaired;
+    }
 
-        width = a64_scalar_width(ref program, parameter_type);
-        let source: A64Register = a64_materialize(ref program, argument, homes, ref values, ref output);
-        if (source == A64Register.None || width == 0 || !a64_save_home(ref values, ref output, homes, parameter, source, width)) {
+    // all sources are staged before any target is overwritten, including
+    // aggregate and Int128 swaps on a self-edge.
+    a64_clear_bindings(ref values);
+    i = 0;
+    while (i < target.parameters.length()) {
+        let home = a64_find_stack_slot(stack.homes, target.parameters[i]);
+        if (home.value == NO_WIR_VALUE || !a64_copy_memory(ref output, A64Register.SP, home.offset,
+            A64Register.SP, stack.edge_scratch[i], home.size, A64Register.X9)) {
             return false;
         }
         i++;
@@ -1898,6 +2103,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
     }
     let output: A64CodeBuffer = a64_new_code_buffer();
     let values: A64ValueMap = a64_new_value_map(ref program, function.blocks);
+    a64_mark_edge_registers(ref program, function.blocks, ref values.uses);
     let offsets: Vector(A64BlockOffset) = [];
     let fixups: Vector(A64BranchFixup) = [];
     let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
@@ -2068,8 +2274,8 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
     i = 0;
     while (i < function.blocks.length()) {
         if (i != 0 && !carry) {
-            // joins, back edges and reordered blocks still enter through homes.
-            // Only a straight edge has the same register state at both ends.
+            // discard the predecessor's allocator state, a join can bind only
+            // the entry registers established by every incoming edge.
             a64_clear_bindings(ref values);
         }
 
@@ -2077,6 +2283,14 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
 
         let block_id: WirBlockID = function.blocks[i];
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+        let param = 0;
+        while (param < block.parameters.length()) {
+            let reg = a64_incoming_register(ref values.uses, block.parameters[param]);
+            if (reg != A64Register.None && !a64_bind_value(ref values, block.parameters[param], reg, false)) {
+                return a64_lowering_error("cannot bind the AArch64 block entry registers");
+            }
+            param++;
+        }
         offsets.append(A64BlockOffset(block=block_id, offset=output.bytes.length()));
 
         let instruction_index: Int = 0;
@@ -3266,7 +3480,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 a64_trap(ref output);
             } else if (instruction.opcode == WirOpcode.Jump) {
                 if (instruction.operands.length() != 0 || instruction.edges.length() != 1 ||
-                    !a64_write_edge(ref program, instruction.edges[0], stack.homes, layouts, ref values, ref output)) {
+                    !a64_write_edge(ref program, instruction.edges[0], stack, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower AArch64 jump arguments");
                 }
                 if (!carry && !a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
@@ -3295,7 +3509,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                     return a64_lowering_error("cannot encode AArch64 conditional branch");
                 }
 
-                if (!a64_write_edge(ref program, instruction.edges[0], stack.homes, layouts, ref values, ref output)) {
+                if (!a64_write_edge(ref program, instruction.edges[0], stack, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower the true AArch64 branch arguments");
                 }
                 if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
@@ -3310,7 +3524,7 @@ func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64Lo
                 }
 
                 a64_clear_bindings(ref values);
-                if (!a64_write_edge(ref program, instruction.edges[1], stack.homes, layouts, ref values, ref output)) {
+                if (!a64_write_edge(ref program, instruction.edges[1], stack, layouts, ref values, ref output)) {
                     return a64_lowering_error("cannot lower the false AArch64 branch arguments");
                 }
                 if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
