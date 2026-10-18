@@ -15,7 +15,7 @@ func main() -> Int {
     let int_pointer: WirTypeID = wir_pointer_type(ref program, int_type);
     let global_id: WirGlobalID = wir_add_global(ref program, "answer", int_type, wir_const_int(ref program, int_type, UInt128(42U)), WirLinkage.Internal, false);
     let answer_address: WirValueID = wir_const_address(ref program, int_pointer, wir_global_value(ref program, global_id), 0L);
-    wir_add_global(ref program, "answer_pointer", int_pointer, answer_address, WirLinkage.Internal, true);
+    wir_add_global(ref program, "answer_pointer", int_pointer, answer_address, WirLinkage.Exported, true);
 
     let function_id: WirFuncID = wir_add_function(ref program, "read_answer", [], int_type, false, WirLinkage.Exported, WirABI.C);
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);

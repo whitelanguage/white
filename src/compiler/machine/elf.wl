@@ -113,7 +113,8 @@ func elf_reloc_data(
 
 func elf64_object(input: MachineObject) -> Vector(Byte)? {
 // serialize a target's sections and final ELF relocation numbers as ELF64
-    if (input.machine == 0U || input.sections.length() == 0 || input.symbols.length() == 0) {
+    // an empty relocatable object still carries the null symbol and section.
+    if (input.machine == 0U) {
         throw Error.InvalidArgument;
     }
 

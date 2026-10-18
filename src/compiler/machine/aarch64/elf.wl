@@ -44,7 +44,13 @@ func a64_text_symbols(input: A64Object) -> Vector(Int)? {
         }
         i++;
     }
-    if (text_length < 0 || result.length() == 0) { throw Error.InvalidArgument; }
+    // reachability may leave only data, or nothing at all. Nonempty code still
+    // needs function boundaries before it can be split into ELF sections.
+    if (result.length() == 0) {
+        if (text_length > 0) { throw Error.InvalidArgument; }
+        return result;
+    }
+    if (text_length <= 0) { throw Error.InvalidArgument; }
 
     i = 0;
     while (i < result.length()) {

@@ -172,10 +172,15 @@ func machine_emit_globals(
     ref program: WirModule,
     layouts: Vector(WirTypeLayout),
     readonly_name: String,
-    readonly_writable: Bool
+    readonly_writable: Bool,
+    live: Vector(Bool) = null
 ) -> MachineDataResult {
 // The caller selects the target's read-only relocation section name. ELF uses
 // .data.rel.ro because loaders must write absolute addresses before RELRO seals it.
+    if (live is !null && live.length() != program.arena.globals.length()) {
+        return machine_data_error("global reachability does not match the module");
+    }
+
     let readonly: MachineSection = MachineSection(name=readonly_name, bytes=[], alignment=1, executable=false, writable=readonly_writable);
     let writable: MachineSection = MachineSection(name=".data", bytes=[], alignment=1, executable=false, writable=true);
     let symbols: Vector(MachineSymbol) = [];
@@ -185,6 +190,11 @@ func machine_emit_globals(
     let i: Int = 0;
 
     while (i < program.arena.globals.length()) {
+        if (live is !null && !live[i]) {
+            i++;
+            continue;
+        }
+
         let global: WirGlobal = program.arena.globals[i];
         if (global.linkage == WirLinkage.External) {
             symbols.append(MachineSymbol(name=global.name, section="", offset=0U, external=true, hidden=false));

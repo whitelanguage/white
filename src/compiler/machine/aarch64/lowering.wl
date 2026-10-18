@@ -6,6 +6,7 @@ import * from "stack.wl"
 import a64_argument_register, a64_pair_argument_index from "abi.wl"
 import * from "../../wir/model.wl"
 import wir_type_layouts from "../../wir/layout.wl"
+import WirReachability, wir_reachable_symbols from "../../wir/reachability.wl"
 import MachineSection, MachineSymbol from "../object.wl"
 import MachineDataResult, MachineDataRelocation, machine_emit_globals from "../data.wl"
 
@@ -3652,11 +3653,12 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
     let text: Vector(Byte) = [];
     let symbols: Vector(A64Symbol) = [];
     let relocations: Vector(A64Relocation) = [];
+    let reachable: WirReachability = wir_reachable_symbols(program);
     let i: Int = 0;
 
     while (i < program.arena.functions.length()) {
         let function: WirFunction = program.arena.functions[i];
-        if (function.blocks.length() != 0) {
+        if (reachable.functions[i] && function.blocks.length() != 0) {
             let offset: Int = text.length();
             let lowered: A64LoweringResult = a64_lower_function_with_layouts(ref program, WirFuncID(UInt32(i + 1)), layouts);
             if (lowered.errors.length() != 0) {
@@ -3676,13 +3678,13 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
                 relocation_index++;
             }
             symbols.append(A64Symbol(name=function.name, section=".text", offset=UInt32(offset), external=function.linkage == WirLinkage.Exported, hidden=function.linkage != WirLinkage.Exported));
-        } else if (function.linkage == WirLinkage.External) {
+        } else if (reachable.functions[i] && function.linkage == WirLinkage.External) {
             symbols.append(A64Symbol(name=function.name, section="", offset=0U, external=true, hidden=false));
         }
         i++;
     }
 
-    let data: MachineDataResult = machine_emit_globals(ref program, layouts, ".data.rel.ro", true);
+    let data: MachineDataResult = machine_emit_globals(ref program, layouts, ".data.rel.ro", true, reachable.globals);
     if (data.message.length() != 0) { return a64_module_error(data.message); }
 
     i = 0;
@@ -3696,10 +3698,6 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
         let relocation: MachineDataRelocation = data.relocations[i];
         relocations.append(A64Relocation(section=relocation.section, offset=relocation.offset, kind=A64RelocationKind.Abs64, symbol=relocation.symbol, addend=relocation.addend));
         i++;
-    }
-
-    if (symbols.length() == 0) {
-        return a64_module_error("the AArch64 module contains no defined functions");
     }
 
     let sections: Vector(A64Section) = [A64Section(name=".text", bytes=text, alignment=4, executable=true, writable=false)];
