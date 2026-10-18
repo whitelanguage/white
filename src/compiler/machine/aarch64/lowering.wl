@@ -1,6 +1,8 @@
 // src/compiler/machine/aarch64/lowering.wl
 import * from "model.wl"
 import * from "encoder.wl"
+import * from "memory.wl"
+import * from "fp.wl"
 import * from "allocator.wl"
 import * from "stack.wl"
 import a64_argument_register, a64_pair_argument_index from "abi.wl"
@@ -160,11 +162,6 @@ func a64_stack_value_alignment(type_id: WirTypeID, layouts: Vector(WirTypeLayout
     }
 
     return fallback;
-}
-
-func a64_scalar_float(ref program: WirModule, type_id: WirTypeID) -> Bool {
-    let index: Int = wir_id_index(UInt32(type_id));
-    return index >= 0 && index < program.arena.types.length() && program.arena.types[index].kind == WirTypeKind.FloatType;
 }
 
 func a64_aggregate_type(ref program: WirModule, type_id: WirTypeID) -> Bool {
@@ -594,67 +591,6 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     let range = a64_function_value_range(ref program, function.blocks);
     return A64StackLayout(storage=a64_stack_index(storage, range), homes=a64_stack_index(homes, range),
         frame_size=a64_align(pool.size, 16), result_pointer_offset=result_pointer_offset, edge_scratch=scratch, message="");
-}
-
-func a64_stack_address(ref output: A64CodeBuffer, destination: A64Register, offset: Int) -> Bool {
-    return a64_offset_address(ref output, destination, A64Register.SP, offset);
-}
-
-func a64_offset_address(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int) -> Bool {
-    if (offset < 0 || destination == A64Register.None || destination == A64Register.SP ||
-        base == A64Register.None || base == A64Register.ZR) {
-        return false;
-    }
-
-    let remaining: Int = offset;
-    let current: A64Register = base;
-    if (remaining == 0) {
-        return a64_add_immediate(ref output, destination, current, 0, true);
-    }
-
-    while (remaining != 0) {
-        let amount: Int = remaining;
-        if (amount > 4095) { amount = 4095; }
-        if (!a64_add_immediate(ref output, destination, current, amount, true)) {
-            return false;
-        }
-        remaining -= amount;
-        current = destination;
-    }
-
-    return true;
-}
-
-func a64_load_integer_at(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
-    if (a64_load_integer(ref output, destination, base, offset, width)) {
-        return true;
-    }
-    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
-           a64_load_integer(ref output, destination, A64Register.X16, 0, width);
-}
-
-func a64_store_integer_at(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, width: Int) -> Bool {
-    if (a64_store_integer(ref output, source, base, offset, width)) {
-        return true;
-    }
-    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
-           a64_store_integer(ref output, source, A64Register.X16, 0, width);
-}
-
-func a64_load_float_at(ref output: A64CodeBuffer, destination: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
-    if (a64_load_float(ref output, destination, base, offset, double)) {
-        return true;
-    }
-    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
-           a64_load_float(ref output, destination, A64Register.X16, 0, double);
-}
-
-func a64_store_float_at(ref output: A64CodeBuffer, source: A64Register, base: A64Register, offset: Int, double: Bool) -> Bool {
-    if (a64_store_float(ref output, source, base, offset, double)) {
-        return true;
-    }
-    return a64_offset_address(ref output, A64Register.X16, base, offset) &&
-           a64_store_float(ref output, source, A64Register.X16, 0, double);
 }
 
 func a64_spill_binding(
@@ -1522,58 +1458,6 @@ func a64_memory_width(ref program: WirModule, type_id: WirTypeID) -> Int {
     return 0;
 }
 
-func a64_copy_chunk(source_offset: Int, destination_offset: Int, remaining: Int) -> Int {
-    if (remaining >= 8 && source_offset % 8 == 0 && destination_offset % 8 == 0) { return 64; }
-    if (remaining >= 4 && source_offset % 4 == 0 && destination_offset % 4 == 0) { return 32; }
-    if (remaining >= 2 && source_offset % 2 == 0 && destination_offset % 2 == 0) { return 16; }
-    return 8;
-}
-
-func a64_zero_memory(ref output: A64CodeBuffer, base: A64Register, offset: Int, size: Int) -> Bool {
-    let written: Int = 0;
-    while (written < size) {
-        let width: Int = a64_copy_chunk(offset + written, offset + written, size - written);
-        if (!a64_store_integer_at(ref output, A64Register.ZR, base, offset + written, width)) {
-            return false;
-        }
-        written += width / 8;
-    }
-
-    return true;
-}
-
-func a64_copy_memory(
-    ref output: A64CodeBuffer,
-    destination_base: A64Register,
-    destination_offset: Int,
-    source_base: A64Register,
-    source_offset: Int,
-    size: Int,
-    temporary: A64Register
-) -> Bool {
-    let copied: Int = 0;
-    while (copied < size) {
-        let width: Int = a64_copy_chunk(source_offset + copied, destination_offset + copied, size - copied);
-        let loaded: Bool = a64_load_integer(ref output, temporary, source_base, source_offset + copied, width);
-        if (!loaded) {
-            loaded = a64_offset_address(ref output, A64Register.X16, source_base, source_offset + copied) &&
-                     a64_load_integer(ref output, temporary, A64Register.X16, 0, width);
-        }
-
-        let stored: Bool = a64_store_integer(ref output, temporary, destination_base, destination_offset + copied, width);
-        if (!stored) {
-            stored = a64_offset_address(ref output, A64Register.X17, destination_base, destination_offset + copied) &&
-                     a64_store_integer(ref output, temporary, A64Register.X17, 0, width);
-        }
-        if (!loaded || !stored) {
-            return false;
-        }
-        copied += width / 8;
-    }
-
-    return true;
-}
-
 func a64_store_value_at(
     ref program: WirModule,
     value_id: WirValueID,
@@ -1792,25 +1676,6 @@ func a64_instruction_uses_wide_int(ref program: WirModule, instruction: WirInstr
     return false;
 }
 
-func a64_is_float_comparison(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual ||
-           opcode == WirOpcode.FloatLess || opcode == WirOpcode.FloatLessEqual ||
-           opcode == WirOpcode.FloatGreater || opcode == WirOpcode.FloatGreaterEqual;
-}
-
-func a64_float_condition(opcode: WirOpcode) -> A64Condition {
-// FCMP's unordered flags make these conditions match WIR's ordered relations.
-// NotEqual is unordered-or-not-equal, the same rule used by the LLVM backend.
-    if (opcode == WirOpcode.Equal) { return A64Condition.Equal; }
-    if (opcode == WirOpcode.NotEqual) { return A64Condition.NotEqual; }
-    if (opcode == WirOpcode.FloatLess) { return A64Condition.Minus; }
-    if (opcode == WirOpcode.FloatLessEqual) { return A64Condition.UnsignedLowerOrSame; }
-    if (opcode == WirOpcode.FloatGreater) { return A64Condition.SignedGreater; }
-    if (opcode == WirOpcode.FloatGreaterEqual) { return A64Condition.SignedGreaterOrEqual; }
-
-    return A64Condition.Never;
-}
-
 func a64_emit_integer_binary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A64Register, left: A64Register, right: A64Register, wide: Bool) -> Bool {
     if (opcode == WirOpcode.Add) { return a64_add_register(ref output, destination, left, right, wide); }
     if (opcode == WirOpcode.Subtract) { return a64_sub_register(ref output, destination, left, right, wide); }
@@ -1823,22 +1688,6 @@ func a64_emit_integer_binary(ref output: A64CodeBuffer, opcode: WirOpcode, desti
     if (opcode == WirOpcode.UnsignedShiftRight) { return a64_shift_register(ref output, destination, left, right, 2, wide); }
 
     return false;
-}
-
-func a64_is_float_binary(opcode: WirOpcode) -> Bool {
-    return opcode == WirOpcode.Add || opcode == WirOpcode.Subtract ||
-           opcode == WirOpcode.Multiply || opcode == WirOpcode.FloatDivide;
-}
-
-func a64_emit_float_binary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A64Register, left: A64Register, right: A64Register, double: Bool) -> Bool {
-    let operation: Int = -1;
-    if (opcode == WirOpcode.Add) { operation = 0; }
-    if (opcode == WirOpcode.Subtract) { operation = 1; }
-    if (opcode == WirOpcode.Multiply) { operation = 2; }
-    if (opcode == WirOpcode.FloatDivide) { operation = 3; }
-    if (operation < 0) { return false; }
-
-    return a64_float_binary(ref output, destination, left, right, operation, double);
 }
 
 func a64_atomic_acquire(order: WirMemoryOrder) -> Bool {
