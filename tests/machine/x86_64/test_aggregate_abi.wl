@@ -7,6 +7,8 @@ import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86LoweringResult, X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func echo(ref program: WirModule, name: String, params: Vector(WirParam), selected: Int, result: WirTypeID) -> WirFuncID {

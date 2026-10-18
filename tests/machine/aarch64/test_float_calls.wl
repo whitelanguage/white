@@ -6,6 +6,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/machine/aarch64/model.wl"
 import * from "../../../src/compiler/machine/aarch64/lowering.wl"
+import a64_lower_module from "../../../src/compiler/machine/aarch64/module.wl"
 
 
 func main() -> Int {

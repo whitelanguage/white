@@ -8,6 +8,8 @@ import verify_wir from "../../../src/compiler/wir/verify.wl"
 import wir_emit_ownership_runtime from "../../../src/compiler/wir/lowering/ownership_runtime.wl"
 import X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func atomic_rmw(ref program: WirModule, name: String, i32: WirTypeID, pointer: WirTypeID, operation: WirAtomicOp) -> Void {

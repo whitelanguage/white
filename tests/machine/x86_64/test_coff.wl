@@ -6,7 +6,7 @@ import * from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
 import WirModule from "../../../src/compiler/wir/model.wl"
 import new_wir_module from "../../../src/compiler/wir/builder.wl"
-import X86ModuleResult, x86_lower_module from "../../../src/compiler/machine/x86_64/lowering.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 
 func read_u32(bytes: Vector(Byte), offset: Int) -> UInt32 {
     return UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8U) | (UInt32(bytes[offset + 2]) << 16U) | (UInt32(bytes[offset + 3]) << 24U);

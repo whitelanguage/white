@@ -4,7 +4,7 @@
 
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
-import WirReachability, wir_reachable_symbols from "../../../src/compiler/wir/reachability.wl"
+import WirReachability, wir_reachable_symbols from "../../../src/compiler/wir/deadcode.wl"
 
 func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

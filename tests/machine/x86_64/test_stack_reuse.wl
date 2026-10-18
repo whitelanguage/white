@@ -5,6 +5,10 @@
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import x86_block_order, x86_cross_block_values, X86ValueFlags from "../../../src/compiler/machine/x86_64/flow.wl"
+import X86LoweringResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_collect_stack_slots, x86_stack_slots_end, X86StackSlot from "../../../src/compiler/machine/x86_64/stack.wl"
+import x86_type_layouts from "../../../src/compiler/machine/x86_64/types.wl"
 
 func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

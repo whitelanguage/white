@@ -6,6 +6,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86LoweringResult from "../../../src/compiler/machine/x86_64/model.wl"
 
 func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);

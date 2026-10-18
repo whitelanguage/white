@@ -9,6 +9,10 @@ import * from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/encoder.wl"
 import * from "../../../src/compiler/machine/x86_64/allocator.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import x86_repair_edge, X86EdgeCopy from "../../../src/compiler/machine/x86_64/edges.wl"
+import x86_block_order, x86_mark_edge_registers, x86_mark_return_registers from "../../../src/compiler/machine/x86_64/flow.wl"
+import x86_store_scalar from "../../../src/compiler/machine/x86_64/memory.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func number(ref program: WirModule, value: Int) -> WirValueID {

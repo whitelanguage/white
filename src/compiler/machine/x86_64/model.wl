@@ -1,5 +1,8 @@
 // src/compiler/machine/x86_64/model.wl
 // src/compiler/machine/x86_64/model.wl
+import WirFuncID from "../../wir/model.wl"
+
+
 enum X86Register {
     None,
     RAX,
@@ -144,3 +147,30 @@ struct X86Object(
 func x86_is_xmm(register: X86Register) -> Bool {
     return Int(register) >= Int(X86Register.XMM0) && Int(register) <= Int(X86Register.XMM15);
 }
+
+struct X86CallFixup(
+    offset: Int,
+    target: WirFuncID
+)
+
+struct X86LoweringResult(
+    bytes: Vector(Byte),
+    errors: Vector(String),
+    calls: Vector(X86CallFixup),
+    relocations: Vector(X86Relocation)
+)
+
+struct X86FunctionCode(
+    function: WirFuncID,
+    offset: Int,
+    bytes: Vector(Byte),
+    calls: Vector(X86CallFixup)
+)
+
+struct X86ModuleResult(
+    bytes: Vector(Byte),
+    errors: Vector(String),
+    relocations: Vector(X86Relocation),
+    symbols: Vector(X86Symbol),
+    sections: Vector(X86CodeSection)
+)

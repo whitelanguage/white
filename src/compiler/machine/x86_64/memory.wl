@@ -2,6 +2,7 @@
 import * from "model.wl"
 import * from "encoder.wl"
 import x86_is_sysv_abi from "abi.wl"
+import * from "sse.wl"
 
 
 func x86_is_memop(name: String) -> Bool {
@@ -161,4 +162,51 @@ func x86_copy_memory(
 
 func x86_zero_memory(ref output: X86CodeBuffer, destination: X86Register, destination_offset: Int, size: Int, temporary: X86Register) -> Bool {
     return x86_transfer_memory(ref output, destination, destination_offset, X86Register.None, 0, size, temporary, true);
+}
+
+func x86_move_scalar(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, size: Int) -> Bool {
+    if (x86_is_xmm(destination) && x86_is_xmm(source)) {
+        return x86_sse_register(ref output, 16, destination, source, size);
+    }
+    if (x86_is_xmm(destination)) {
+        return x86_sse_bits(ref output, destination, source, size, true);
+    }
+    if (x86_is_xmm(source)) {
+        return x86_sse_bits(ref output, source, destination, size, false);
+    }
+    if (size == 8) {
+        x86_mov_register64(ref output, destination, source);
+        return true;
+    }
+    if (size == 1 || size == 2 || size == 4) {
+        x86_mov_register32(ref output, destination, source);
+        return true;
+    }
+
+    return false;
+}
+
+func x86_normalize_scalar(ref output: X86CodeBuffer, register: X86Register, size: Int, signed: Bool) -> Void {
+    if (x86_is_xmm(register)) { return; }
+    if (size == 1 || size == 2) {
+        x86_extend_register(ref output, register, register, size, signed);
+    }
+}
+
+func x86_load_scalar(ref output: X86CodeBuffer, destination: X86Register, base: X86Register, displacement: Int, size: Int, signed: Bool) -> Bool {
+    if (x86_is_xmm(destination)) {
+        return x86_sse_memory(ref output, 16, destination, base, displacement, size);
+    }
+    if (size != 1 && size != 2 && size != 4 && size != 8) { return false; }
+    x86_load_register_base_disp32(ref output, destination, base, displacement, size, signed);
+    return true;
+}
+
+func x86_store_scalar(ref output: X86CodeBuffer, source: X86Register, base: X86Register, displacement: Int, size: Int) -> Bool {
+    if (x86_is_xmm(source)) {
+        return x86_sse_memory(ref output, 17, source, base, displacement, size);
+    }
+    if (size != 1 && size != 2 && size != 4 && size != 8) { return false; }
+    x86_store_register_base_disp32(ref output, source, base, displacement, size);
+    return true;
 }

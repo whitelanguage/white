@@ -8,6 +8,8 @@ import verify_wir from "../../../src/compiler/wir/verify.wl"
 import X86Object, X86Register from "../../../src/compiler/machine/x86_64/model.wl"
 import X86CodeBuffer, x86_new_code_buffer, x86_call_register from "../../../src/compiler/machine/x86_64/encoder.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func number(ref program: WirModule, type_id: WirTypeID, value: Int) -> WirValueID {

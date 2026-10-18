@@ -1,4 +1,4 @@
-// src/compiler/wir/reachability.wl
+// src/compiler/wir/deadcode.wl
 
 import * from "model.wl"
 

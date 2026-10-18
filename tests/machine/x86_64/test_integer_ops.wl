@@ -6,6 +6,8 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func main() -> Int {

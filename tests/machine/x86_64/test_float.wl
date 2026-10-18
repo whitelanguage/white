@@ -9,6 +9,8 @@ import X86Object, X86Register from "../../../src/compiler/machine/x86_64/model.w
 import X86CodeBuffer, x86_new_code_buffer from "../../../src/compiler/machine/x86_64/encoder.wl"
 import * from "../../../src/compiler/machine/x86_64/sse.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func check_carry(ref program: WirModule, function: WirFuncID, block: WirBlockID, actual: WirValueID, expected: WirValueID, code: Int, carry: Vector(WirValueID)) -> WirBlockID {

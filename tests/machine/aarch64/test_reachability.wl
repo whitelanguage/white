@@ -7,10 +7,10 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import A64Object from "../../../src/compiler/machine/aarch64/model.wl"
-import a64_lower_module from "../../../src/compiler/machine/aarch64/lowering.wl"
+import a64_lower_module from "../../../src/compiler/machine/aarch64/module.wl"
 import a64_elf_object from "../../../src/compiler/machine/aarch64/elf.wl"
 import X86Object from "../../../src/compiler/machine/x86_64/model.wl"
-import x86_lower_module from "../../../src/compiler/machine/x86_64/lowering.wl"
+import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import elf_object from "../../../src/compiler/machine/x86_64/elf.wl"
 
 

@@ -1,4 +1,6 @@
 // src/compiler/machine/aarch64/model.wl
+
+
 enum A64Register {
     None,
     X0,
@@ -152,3 +154,16 @@ func a64_vec_code(register: A64Register) -> Int {
 
     return value - Int(A64Register.V0);
 }
+
+struct A64LoweringResult(
+    bytes: Vector(Byte),
+    errors: Vector(String),
+    relocations: Vector(A64Relocation)
+)
+
+struct A64ModuleResult(
+    errors: Vector(String),
+    sections: Vector(A64Section),
+    symbols: Vector(A64Symbol),
+    relocations: Vector(A64Relocation)
+)

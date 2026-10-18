@@ -10,6 +10,7 @@ import wir_type_layouts from "../../../src/compiler/wir/layout.wl"
 import * from "../../../src/compiler/machine/aarch64/allocator.wl"
 import * from "../../../src/compiler/machine/aarch64/stack.wl"
 import * from "../../../src/compiler/machine/aarch64/lowering.wl"
+import a64_lower_module from "../../../src/compiler/machine/aarch64/module.wl"
 import * from "../../../src/compiler/machine/aarch64/model.wl"
 import a64_elf_object from "../../../src/compiler/machine/aarch64/elf.wl"
 
