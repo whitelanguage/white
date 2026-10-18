@@ -13,6 +13,7 @@ import * from "dictionary_runtime.wl"
 import * from "closure_environment.wl"
 import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
+import has_index_refs, check_body_refs from "../../references.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
@@ -2504,7 +2505,10 @@ func wir_stable_ref_target(ref state: WirFunctionLowering, ref source: Compiler,
         let access: IndexAccessNode = get_index_access_node(ref source.arena, node);
         let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
         let array: ArrayInfo = source.array_info_map.lookup(target_type);
-        return has_array_info(array) && array.size >= 0 && wir_stable_ref_target(ref state, ref source, access.target);
+        let vector = source.vector_base_map.lookup(target_type);
+        let checked = source.ref_targets is !null && source.ref_targets.lookup(UInt32(node));
+        return ((has_array_info(array) && array.size >= 0) || (has_symbol(vector) && checked)) &&
+               wir_stable_ref_target(ref state, ref source, access.target);
     }
     return false;
 }
@@ -7922,6 +7926,19 @@ func wir_lower_block(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     }
     let block: BlockNode = get_block_node(ref source.arena, node);
     let binding_count: Int = state.bindings.length();
+    if (!state.reference_checked) {
+        state.reference_checked = true;
+        if (has_index_refs(ref source)) {
+            let inputs: Dict(String, SymbolInfo) = Dict();
+            let i = 0;
+            while (i < state.bindings.length()) {
+                let binding = state.bindings[i];
+                inputs.put(binding.name, SymbolInfo(reg="ref.check", type=binding.source_type, is_const=binding.is_const, is_reference=binding.is_reference));
+                i++;
+            }
+            if (!check_body_refs(ref source, node, inputs)) { return; }
+        }
+    }
     let i: Int = 0;
     while (i < block.stmts.length() && !state.terminated) {
         let temporary_count: Int = state.owned_values.length();

@@ -51,7 +51,8 @@ struct WirFunctionLowering(
     owned_values: Vector(WirOwnedValue),
     errors: Vector(String),
     terminated: Bool,
-    next_block: Int
+    next_block: Int,
+    reference_checked: Bool
 )
 
 func wir_local_index(ref state: WirFunctionLowering, name: String) -> Int {

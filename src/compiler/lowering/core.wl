@@ -26,6 +26,7 @@ import * from "../analysis.wl"
 import * from "ownership.wl"
 import * from "../modules.wl"
 import * from "../initialization.wl"
+import check_body_refs from "../references.wl"
 import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
@@ -1271,6 +1272,7 @@ func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
     hoist_allocas(ref c, node.body);
     check_local_init(ref c, node.body);
 
+    if (!check_body_refs(ref c, node.body, c.symbol_table.table)) { return void_result(); }
     compile_node(ref c, node.body);
 
     let has_term: Bool = must_terminate(ref c, node.body);
@@ -1387,6 +1389,7 @@ func compile_method_def(ref c: Compiler, class_name: String, node: MethodDefNode
     c.alloc_regs = [];
     hoist_allocas(ref c, node.body);
     check_local_init(ref c, node.body);
+    if (!check_body_refs(ref c, node.body, c.symbol_table.table)) { return void_result(); }
     compile_node(ref c, node.body);
 
     let has_term: Bool = must_terminate(ref c, node.body);
@@ -2113,6 +2116,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     c.alloc_regs = [];
     hoist_allocas(ref c, func_def.body);
     check_local_init(ref c, func_def.body);
+    if (!check_body_refs(ref c, func_def.body, c.symbol_table.table)) { return void_result(); }
     let lambda_terminates: Bool = must_terminate(ref c, func_def.body);
     compile_node(ref c, func_def.body);
 

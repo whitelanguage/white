@@ -320,7 +320,10 @@ struct Compiler(
     generic_method_key: String,
     generic_class_type: Int,
     erased_checks: Dict(String, StringConstant),
-    hash_types: Dict(String, StringConstant)
+    hash_types: Dict(String, StringConstant),
+    ref_targets: Dict(UInt32, Bool),
+    ref_files: Dict(String, Bool),
+    ref_scan: Int
 )
 
 struct ParsedModule(
