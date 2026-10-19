@@ -2088,7 +2088,16 @@ func x86_lower_function_with_layouts(
 
     let located_values: Int = analysis.located_values;
     let home_parameters: Bool = analysis.home_parameters;
-    if (indirect_return || order.length() > 1) { home_parameters = true; }
+    if (indirect_return || order.length() > 1) {
+        home_parameters = true;
+    }
+
+    let const_homes = x86_const_homes(ref program, order);
+    // constant initialization uses scratch registers before the first instruction
+    if (const_homes.length() != 0) {
+        home_parameters = true;
+    }
+
     let cross: X86ValueFlags = x86_cross_block_values(ref program, order);
     let block_index: Int = 0;
     while (block_index < order.length()) {
@@ -2116,6 +2125,9 @@ func x86_lower_function_with_layouts(
     if home_parameters { located_values += function.parameters.length(); }
     if (slots.length() != located_values) {
         return x86_lowering_error("the x86_64 lowering could not lay out a stack slot");
+    }
+    if (!x86_add_const_slots(ref program, const_homes, layouts, ref slots)) {
+        return x86_lowering_error("the x86_64 lowering could not lay out aggregate constants");
     }
     let value_range: X86ValueRange = x86_function_value_range(ref program, order);
     let stack: X86StackIndex = x86_stack_index(slots, value_range);
@@ -2210,6 +2222,13 @@ func x86_lower_function_with_layouts(
             message=""
         );
         let instruction_index: Int = 0;
+        if (block_index == 0) {
+            for (let i = 0; i < const_homes.length(); i++) {
+                let offset = x86_stack_offset(ref state.stack, const_homes[i]);
+                let message = x86_store_const(ref program, ref function, const_homes[i], X86Register.RBP, offset, slots, ref state, ref output);
+                if (message.length() != 0) { return x86_lowering_error(message); }
+            }
+        }
         while (instruction_index < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
             state.message = x86_lower_instruction(ref program, ref function, ref instruction, slots, scratch, frame_size, ref state, ref output, ref fixups, ref calls);

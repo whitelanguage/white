@@ -1030,6 +1030,11 @@ func wir_lower_catch(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     state.error_targets.append(WirErrorTarget(block=failure, address=error_address, binding_count=parent_binding_count, owned_count=state.owned_values.length()));
 
     wir_lower_stmt(ref state, ref types, ref source, ref program, node.stmt);
+    if (!state.terminated) {
+        // argument temporaries belong to this path, the catch edge never defined them.
+        // finish their cleanup before joining, including any blocks emitted by drop glue.
+        wir_cleanup_temporaries(ref state, ref source, ref program, parent_owned.length());
+    }
     let normal_end: WirBlockID = state.block;
     let normal_terminated: Bool = state.terminated;
     let normal_bindings: Vector(WirBinding) = wir_copy_bindings(state.bindings);

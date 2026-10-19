@@ -571,6 +571,50 @@ func x86_store_value(
     return "";
 }
 
+func x86_store_const(ref program: WirModule, ref function: WirFunction, value_id: WirValueID, base: X86Register, offset: Int, slots: Vector(X86StackSlot), ref state: X86BlockState, ref output: X86CodeBuffer) -> String {
+// initialize padding too, small aggregate ABIs load the complete bit pattern
+    let value = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (!x86_aggregate_type(ref program, value.type_id)) {
+        return x86_store_value(ref program, ref function, value_id, base, offset, slots, ref state, ref output);
+    }
+
+    let constant = program.arena.constants[wir_id_index(value.owner)];
+    let type = program.arena.types[wir_id_index(UInt32(value.type_id))];
+    let layout = state.layouts[wir_id_index(UInt32(value.type_id))];
+    let temp = x86_choose_register_except(ref program, ref state.registers, state.position, base);
+
+    let message = x86_prepare_memory_clobbers(ref program, ref state, Int(layout.size), temp.register, ref output);
+    if (message.length() != 0) {
+        return message;
+    }
+
+    if (!x86_zero_memory(ref output, base, offset, Int(layout.size), temp.register)) {
+        return "cannot initialize aggregate constant storage";
+    }
+
+    if (constant.kind == WirConstKind.Zero) { return ""; }
+    if (constant.kind != WirConstKind.Aggregate) { return "expected an aggregate constant"; }
+
+    let stride = 0;
+    if (type.kind == WirTypeKind.Array) {
+        stride = Int(state.layouts[wir_id_index(UInt32(type.element))].size);
+    }
+
+    for (let i = 0; i < constant.elements.length(); i++) {
+        let member = i * stride;
+        if (type.kind == WirTypeKind.Struct) {
+            member = Int(layout.field_offsets[i]);
+        }
+
+        message = x86_store_const(ref program, ref function, constant.elements[i], base, offset + member, slots, ref state, ref output);
+        if (message.length() != 0) {
+            return message;
+        }
+    }
+
+    return "";
+}
+
 func x86_materialize_abi_value(
     ref program: WirModule,
     ref function: WirFunction,

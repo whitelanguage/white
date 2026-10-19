@@ -59,10 +59,10 @@ func check_empty() -> Bool {
 
     // unnamed code still cannot be split into per-function sections.
     arm.sections[0].bytes = [Byte(192), Byte(3), Byte(95), Byte(214)];
-    let unnamed = A64Object(sections=[arm.sections[0]], symbols=[], relocations=[]);
-    a64_elf_object(unnamed)?;
-    catch(err) { return true; }
-    return false;
+    let rejected = false;
+    a64_elf_object(A64Object(sections=[arm.sections[0]], symbols=[], relocations=[]))?;
+    catch(err) { rejected = true; }
+    return rejected;
 }
 
 func main() -> Int {

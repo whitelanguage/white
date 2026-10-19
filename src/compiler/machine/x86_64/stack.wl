@@ -31,6 +31,60 @@ struct X86StackIndex(
 
 struct X86CallStorage(arguments: Vector(Int), result: Int, size: Int)
 
+func x86_const_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Vector(WirValueID) {
+// edge operands live outside the ordinary result range, reserve each constant once
+    let values: Vector(WirValueID) = [];
+    let seen: Dict(UInt32, Bool) = null;
+    for (let b = 0; b < order.length(); b++) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[b]))];
+        for (let i = 0; i < block.instructions.length(); i++) {
+            let inst = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            for (let e = -1; e < inst.edges.length(); e++) {
+                let operands = inst.operands;
+                if (e >= 0) { operands = inst.edges[e].arguments; }
+                for (let j = 0; j < operands.length(); j++) {
+                    let id = operands[j];
+                    let value = program.arena.values[wir_id_index(UInt32(id))];
+                    if (value.kind == WirValueKind.Constant && x86_aggregate_type(ref program, value.type_id) &&
+                        program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Aggregate &&
+                        (seen is null || !seen.lookup(UInt32(id)))) {
+                        if (seen is null) { seen = Dict(); }
+                        values.append(id);
+                        seen.put(UInt32(id), true);
+                    }
+                }
+            }
+        }
+    }
+
+    return values;
+}
+
+func x86_add_const_slots(ref program: WirModule, values: Vector(WirValueID), layouts: Vector(WirTypeLayout), ref slots: Vector(X86StackSlot)) -> Bool {
+    let offset = x86_stack_slots_end(slots);
+    for (let i = 0; i < values.length(); i++) {
+        let value = program.arena.values[wir_id_index(UInt32(values[i]))];
+        let layout = layouts[wir_id_index(UInt32(value.type_id))];
+        if (!layout.valid || layout.size > 2147483632UL) {
+            return false;
+        }
+
+        let size = Int(layout.size);
+        if (size == 0) {
+            size = 1;
+        }
+
+        if (size > 2147483647 - offset - (layout.alignment - 1)) {
+            return false;
+        }
+
+        offset = x86_align_frame_offset(offset + size, layout.alignment);
+        slots.append(X86StackSlot(value=values[i], offset=offset, size=size));
+    }
+
+    return true;
+}
+
 struct X86FunctionAnalysis(
     message: String,
     located_values: Int,
