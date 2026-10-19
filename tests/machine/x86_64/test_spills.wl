@@ -40,7 +40,7 @@ func main() -> Int {
     x86_claim_spill(ref spills, a);
     x86_claim_spill(ref spills, b);
     x86_bind_register(ref registers, X86Register.RAX, a);
-    let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=registers, spills=spills, stack=X86StackIndex(base=0, dense_count=0, sparse=[], offsets=[], sizes=[]), layouts=[], retain_function=NO_WIR_FUNC, release_function=NO_WIR_FUNC, null_function=NO_WIR_FUNC, bounds_function=NO_WIR_FUNC, return_pointer=0, position=0, message="");
+    let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=registers, spills=spills, stack=X86StackIndex(base=0, dense_count=0, sparse=null, offsets=[], sizes=[]), layouts=[], retain_function=NO_WIR_FUNC, release_function=NO_WIR_FUNC, null_function=NO_WIR_FUNC, bounds_function=NO_WIR_FUNC, return_pointer=0, position=0, message="");
     if (x86_claim_register_spill(ref state, c) != -8 || x86_spill_offset(ref spills, b) != -16 || x86_spill_offset(ref spills, a) != 0) {
         print("FAIL: reloaded spill copy was not reclaimed");
         return 1;

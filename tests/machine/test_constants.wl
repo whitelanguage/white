@@ -69,6 +69,22 @@ func build() -> WirModule {
     let data = wir_field(ref program, entry, pointer_value, 0, "data", no_wir_location());
     wir_return(ref program, entry, wir_load(ref program, entry, data, "loaded", no_wir_location()), no_wir_location());
 
+    let bytes_type = wir_array_type(ref program, byte, 4UL);
+    let raw = wir_const_bytes(ref program, bytes_type, "\0Aé");
+    let bytes_function = wir_add_function(ref program, "const_bytes", [], byte, false, WirLinkage.Exported, WirABI.C);
+    entry = wir_add_block(ref program, bytes_function, "entry", []);
+    let bytes_exit = wir_add_block(ref program, bytes_function, "exit", [wir_param("value", bytes_type)]);
+    wir_append(ref program, entry, WirOpcode.Jump, program.void_type, [], [wir_edge(bytes_exit, [raw])], no_wir_location());
+    let bytes_param = program.arena.blocks[wir_id_index(UInt32(bytes_exit))].parameters[0];
+    wir_return(ref program, bytes_exit, wir_index(ref program, bytes_exit, bytes_param, wir_const_int(ref program, int, UInt128(3U)), "byte", no_wir_location()), no_wir_location());
+
+    let nested_bytes = wir_struct_type(ref program, [byte, bytes_type]);
+    let raw_record = wir_const_aggregate(ref program, nested_bytes, [wir_const_int(ref program, byte, UInt128(7U)), raw]);
+    let nested_function = wir_add_function(ref program, "const_nested_bytes", [], byte, false, WirLinkage.Exported, WirABI.C);
+    entry = wir_add_block(ref program, nested_function, "entry", []);
+    let bytes_field = wir_field(ref program, entry, raw_record, 1, "raw", no_wir_location());
+    wir_return(ref program, entry, wir_index(ref program, entry, bytes_field, wir_const_int(ref program, int, UInt128(2U)), "byte", no_wir_location()), no_wir_location());
+
     return program;
 }
 

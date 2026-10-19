@@ -606,6 +606,18 @@ func a64_store_value_at(
             if (constant.kind == WirConstKind.Zero) {
                 return a64_zero_memory(ref output, base, offset, Int(layout.size));
             }
+            if (constant.kind == WirConstKind.Bytes) {
+                if (UInt64(constant.bytes.length()) != layout.size) { return false; }
+                let temp = a64_alloc_register(ref program, homes, ref values, ref output, false);
+                if (temp == A64Register.None) { return false; }
+                for (let i = 0; i < constant.bytes.length(); i++) {
+                    if (!a64_mov_immediate(ref output, temp, UInt64(constant.bytes[i]), false) ||
+                        !a64_store_integer_at(ref output, temp, base, offset + i, 8)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             if (constant.kind != WirConstKind.Aggregate ||
                 !a64_zero_memory(ref output, base, offset, Int(layout.size))) {
                 return false;

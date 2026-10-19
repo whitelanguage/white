@@ -11,6 +11,7 @@ import wir_type_layouts from "../../wir/layout.wl"
 import MachineSection, MachineSymbol from "../object.wl"
 import MachineDataResult, MachineDataRelocation, machine_emit_globals from "../data.wl"
 import * from "lowering.wl"
+import machine_lower_remainders from "../remainder.wl"
 
 
 func a64_module_error(message: String) -> A64ModuleResult {
@@ -18,11 +19,13 @@ func a64_module_error(message: String) -> A64ModuleResult {
 }
 
 func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
-// lowering never adds types, all functions can share this layout table
-    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
+// legalization finishes the type table before functions share its layouts
     if (program.target != "aarch64-unknown-linux-gnu" || program.pointer_bits != 64) {
         return a64_module_error("the AArch64 machine backend does not support this target");
     }
+    let rem_error = machine_lower_remainders(ref program);
+    if (rem_error.length() != 0) { return a64_module_error(rem_error); }
+    let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
 
     let text: Vector(Byte) = [];
     let symbols: Vector(A64Symbol) = [];

@@ -19,7 +19,7 @@ struct X86StackSlot(
 struct X86StackIndex(
     base: Int,
     dense_count: Int,
-    sparse: Vector(WirValueID),
+    sparse: Dict(UInt32, Int),
     offsets: Vector(Int),
     sizes: Vector(Int)
 )
@@ -41,7 +41,8 @@ func x86_const_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Vecto
                     let id = operands[j];
                     let value = program.arena.values[wir_id_index(UInt32(id))];
                     if (value.kind == WirValueKind.Constant && x86_aggregate_type(ref program, value.type_id) &&
-                        program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Aggregate &&
+                        (program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Aggregate ||
+                         program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Bytes) &&
                         (seen is null || !seen.lookup(UInt32(id)))) {
                         if (seen is null) { seen = Dict(); }
                         values.append(id);
@@ -270,7 +271,7 @@ func x86_stack_slots_end(slots: Vector(X86StackSlot)) -> Int {
 func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86StackIndex {
     let offsets: Vector(Int) = [];
     let sizes: Vector(Int) = [];
-    let sparse: Vector(WirValueID) = [];
+    let sparse: Dict(UInt32, Int) = null;
     let i = 0;
     while (i < range.count) {
         offsets.append(0);
@@ -283,9 +284,14 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
         let local: Int = index - range.base;
         if (local < 0 || local >= range.count) {
             local = offsets.length();
-            sparse.append(slots[i].value);
-            offsets.append(0);
-            sizes.append(0);
+            if (sparse is null) { sparse = Dict(); }
+            let previous = sparse.lookup(UInt32(slots[i].value));
+            if (previous != 0) { local = previous - 1; }
+            else {
+                sparse.put(UInt32(slots[i].value), local + 1);
+                offsets.append(0);
+                sizes.append(0);
+            }
         }
         offsets[local] = 0 - slots[i].offset;
         sizes[local] = slots[i].size;
@@ -297,11 +303,7 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
 func x86_stack_index_of(ref stack: X86StackIndex, value: WirValueID) -> Int {
     let index: Int = wir_id_index(UInt32(value));
     if (index >= stack.base && index < stack.base + stack.dense_count) { return index - stack.base; }
-    let i: Int = 0;
-    while (i < stack.sparse.length()) {
-        if (stack.sparse[i] == value) { return stack.dense_count + i; }
-        i++;
-    }
+    if (stack.sparse is !null) { return stack.sparse.lookup(UInt32(value)) - 1; }
     return -1;
 }
 

@@ -594,6 +594,16 @@ func x86_store_const(ref program: WirModule, ref function: WirFunction, value_id
     }
 
     if (constant.kind == WirConstKind.Zero) { return ""; }
+    if (constant.kind == WirConstKind.Bytes) {
+        if (UInt64(constant.bytes.length()) != layout.size) { return "byte constant length does not match its storage"; }
+        for (let i = 0; i < constant.bytes.length(); i++) {
+            x86_mov_register_imm32(ref output, temp.register, UInt32(constant.bytes[i]));
+            if (!x86_store_scalar(ref output, temp.register, base, offset + i, 1)) {
+                return "cannot initialize byte constant storage";
+            }
+        }
+        return "";
+    }
     if (constant.kind != WirConstKind.Aggregate) { return "expected an aggregate constant"; }
 
     let stride = 0;

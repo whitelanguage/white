@@ -12,6 +12,7 @@ import WirReachability, wir_reachable_symbols from "../../wir/deadcode.wl"
 import * from "lowering.wl"
 import * from "types.wl"
 import * from "values.wl"
+import machine_lower_remainders from "../remainder.wl"
 
 
 func x86_module_error(message: String) -> X86ModuleResult {
@@ -69,6 +70,8 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
         return x86_module_error("the x86_64 machine backend does not support this target");
     }
     x86_set_sysv_abi(is_linux);
+    let rem_error = machine_lower_remainders(ref program);
+    if (rem_error.length() != 0) { return x86_module_error(rem_error); }
     let codes: Vector(X86FunctionCode) = [];
     let layouts: Vector(WirTypeLayout) = x86_type_layouts(ref program);
     let relocations: Vector(X86Relocation) = [];
