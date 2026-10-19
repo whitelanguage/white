@@ -117,7 +117,10 @@ struct FuncInfo(
     abi_name: String,
     mutates_self: Bool,
     variadic_param: Int,
-    default_args: Vector(NodeID)
+    default_args: Vector(NodeID),
+    ref_body: NodeID,
+    ref_context: GenericTemplate,
+    ref_bindings: Dict(String, SymbolInfo)
 )
 
 struct VariadicSource(
@@ -323,7 +326,9 @@ struct Compiler(
     hash_types: Dict(String, StringConstant),
     ref_targets: Dict(UInt32, Bool),
     ref_files: Dict(String, Bool),
-    ref_scan: Int
+    ref_scan: Int,
+    ref_call_scan: Int,
+    ref_callees: Dict(String, Bool)
 )
 
 struct ParsedModule(
@@ -3797,7 +3802,10 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             compiler_link_name=link_name,
             mutates_self=true,
             variadic_param=variadic_param_index(method_node.params),
-            default_args=param_defaults(method_node.params)
+            default_args=param_defaults(method_node.params),
+            ref_body=method_node.body,
+            ref_context=template,
+            ref_bindings=bindings
         );
         c.func_table.put(method_key, func_info);
         let class_method: GenericTemplate = GenericTemplate(
@@ -4310,7 +4318,10 @@ func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: 
         abi_name="",
         mutates_self=false,
         variadic_param=variadic_param_index(node.params),
-        default_args=param_defaults(node.params)
+        default_args=param_defaults(node.params),
+        ref_body=node.body,
+        ref_context=template,
+        ref_bindings=bindings
     );
     c.func_table.put(key, info);
     c.generic_method_worklist.append(GenericMethodInstance(template=template, bindings=bindings, func_key=key, owner_name=owner.name, depth=c.generic_depth));
@@ -4371,7 +4382,10 @@ func register_generic_func(ref c: Compiler, template: GenericTemplate, types: Ve
         abi_name="",
         mutates_self=false,
         variadic_param=variadic_param_index(node.params),
-        default_args=param_defaults(node.params)
+        default_args=param_defaults(node.params),
+        ref_body=node.body,
+        ref_context=template,
+        ref_bindings=bindings
     );
     c.func_table.put(key, info);
     c.generic_worklist.append(GenericFuncInstance(template=template, bindings=bindings, func_key=key, depth=c.generic_depth));

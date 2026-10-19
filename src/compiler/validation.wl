@@ -101,7 +101,7 @@ func stable_ref_target(ref c: Compiler, node: NodeID) -> Bool {
         let array: ArrayInfo = c.array_info_map.lookup(target_type);
         let vector = c.vector_base_map.lookup(target_type);
         let checked = c.ref_targets is !null && c.ref_targets.lookup(UInt32(node));
-        return ((has_array_info(array) && array.size >= 0) || (has_symbol(vector) && checked)) &&
+        return ((has_array_info(array) && (array.size >= 0 || checked)) || (has_symbol(vector) && checked)) &&
                stable_ref_target(ref c, access.target);
     }
     return false;

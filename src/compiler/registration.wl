@@ -583,7 +583,9 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 compiler_link_name=sys_anns.compiler_link_name,
                 mutates_self=false,
                 variadic_param=variadic_param_index(params),
-                default_args=param_defaults(params)
+                default_args=param_defaults(params),
+                ref_body=f_node.body,
+                ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases)
             );
             if ((sys_anns.ann_flags & FLAG_ANN_COMP_LINK) != 0 && f_info.variadic_param > 0) {
                 throw_type_error(f_node.pos, "CompilerLink functions cannot declare variadic parameters.");
@@ -710,7 +712,9 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                     is_varargs=false,
                     mutates_self=method_mutates_self(ref c, m_node.body),
                     variadic_param=variadic_param_index(p_vec),
-                    default_args=param_defaults(p_vec)
+                    default_args=param_defaults(p_vec),
+                    ref_body=m_node.body,
+                    ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases)
                 );
                 c.func_table.put(m_key, f_info);
                 m_idx += 1;

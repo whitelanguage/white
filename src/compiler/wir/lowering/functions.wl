@@ -2507,7 +2507,7 @@ func wir_stable_ref_target(ref state: WirFunctionLowering, ref source: Compiler,
         let array: ArrayInfo = source.array_info_map.lookup(target_type);
         let vector = source.vector_base_map.lookup(target_type);
         let checked = source.ref_targets is !null && source.ref_targets.lookup(UInt32(node));
-        return ((has_array_info(array) && array.size >= 0) || (has_symbol(vector) && checked)) &&
+        return ((has_array_info(array) && (array.size >= 0 || checked)) || (has_symbol(vector) && checked)) &&
                wir_stable_ref_target(ref state, ref source, access.target);
     }
     return false;

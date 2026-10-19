@@ -1,7 +1,7 @@
 // Test: REFERENCE_CALL_EFFECTS
 // File: tests/diagnostics/failures/test_ref_call.wl
 // Focus: A helper can invalidate an element through a copied container owner.
-// Expected Error: "TypeError: Cannot call a function with unverified storage effects while element reference 'first' is active."
+// Expected Error: "TypeError: Cannot call 'append' while element reference 'first' is active."
 
 func grow(values: Vector(Int)) -> Void {
     values.append(3);

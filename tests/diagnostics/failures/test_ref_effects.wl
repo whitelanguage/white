@@ -1,7 +1,7 @@
 // Test: ELEMENT_REFERENCE_CALLABLE
 // File: tests/diagnostics/failures/test_ref_effects.wl
 // Focus: Calls through function values cannot hide mutations of referenced storage.
-// Expected Error: "TypeError: Cannot call a function with unverified storage effects while element reference 'first' is active."
+// Expected Error: "TypeError: Cannot call 'append' while element reference 'first' is active."
 
 func grow(values: Vector(Int)) -> Void {
     values.append(3);

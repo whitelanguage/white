@@ -15,10 +15,32 @@ class Counter {
         let first = ref values[0];
         first++;
     }
+
+    func read(values: Vector(Int), offset: Int = 0) -> Int {
+        return values[offset];
+    }
+}
+
+class Quiet {
+    deinit() {
+        print("dropping Quiet");
+    }
 }
 
 func count(values: Vector(Int)) -> Int {
     return values.length();
+}
+
+func grow(values: Vector(Int)) -> Void {
+    values.append(30);
+}
+
+func set_first(ref value: Int, amount: Int) -> Void {
+    value = amount;
+}
+
+func read_first<T>(values: Vector(T)) -> T {
+    return values[0];
 }
 
 func main() -> Int {
@@ -105,6 +127,41 @@ func main() -> Int {
     if (values[0] != 20 || values.length() != 8) {
         print("FAIL: Element reference control flow");
         return 1;
+    }
+
+    let alias = values;
+    alias = [40];
+    let quiet: Vector(Quiet) = [Quiet()];
+    let reader = count;
+    if true {
+        let first = ref values[0];
+        quiet.drop();
+        let copy = values;
+        copy = [35];
+        copy.append(36);
+        alias.append(41);
+        grow(alias);
+        if (reader(values) != 8 || read_first(values) != first || counter.read(values) != first || alias.length() != 3 || copy.length() != 2) {
+            print("FAIL: Verified calls and separated bindings");
+            return 1;
+        }
+    }
+
+    set_first(ref values[0], 45);
+    values.append(46);
+
+    let shared: Array(Int) = ref values[0:2];
+    let copied: Array(Int) = values[0:2];
+    if true {
+        let first = ref shared[0];
+        let independent = ref copied[0];
+        first = 50;
+        independent = 60;
+        alias.append(42);
+        if (values[0] != 50 || copied[0] != 60) {
+            print("FAIL: Slice element reference ownership");
+            return 1;
+        }
     }
 
     print("PASS: Scoped Vector references");

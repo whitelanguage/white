@@ -2601,7 +2601,9 @@ func register_class_methods(ref c: Compiler, class_name: String, class_type_id: 
             arg_types=arg_types, arg_names=arg_names, is_varargs=false,
             mutates_self=method_mutates_self(ref c, method_node.body),
             variadic_param=variadic_param_index(method_node.params),
-            default_args=param_defaults(method_node.params)
+            default_args=param_defaults(method_node.params),
+            ref_body=method_node.body,
+            ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases)
         );
         c.func_table.put(key, info);
         index += 1;
