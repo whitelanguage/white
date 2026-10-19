@@ -7,18 +7,13 @@ import x86_call_frame from "abi.wl"
 import X86SysVCallLayout, x86_plan_sysv_call from "abi/sysv.wl"
 import * from "flow.wl"
 import * from "types.wl"
+import * from "../homes.wl"
 
 
 struct X86StackSlot(
     value: WirValueID,
     offset: Int,
     size: Int
-)
-
-struct X86StackRegion(
-    offset: Int,
-    size: Int,
-    until: Int
 )
 
 struct X86StackIndex(
@@ -128,7 +123,7 @@ func x86_stack_slots_with_uses(
     uses: X86UseTable
 ) -> Vector(X86StackSlot) {
     let slots: Vector(X86StackSlot) = [];
-    let regions: Vector(X86StackRegion) = [];
+    let pool = StackHomes(size=0, regions=[], free=null, ends=[]);
     let offset = 0;
     if home_parameters {
         let param_index = 0;
@@ -174,9 +169,12 @@ func x86_stack_slots_with_uses(
     let block_index = 0;
     while (block_index < order.length()) {
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        let block_start = position;
+        pool.ends = [];
 
         let i = 0;
         while (i < block.instructions.length()) {
+            if (pool.ends.length() != 0) { stack_expire(ref pool, i); }
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
             if (instruction.opcode == WirOpcode.StackAlloc && instruction.result != NO_WIR_VALUE) {
                 let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
@@ -205,30 +203,13 @@ func x86_stack_slots_with_uses(
                     }
                 }
 
-                let selected: Int = -1;
-                let selected_size: Int = 2147483647;
-                let region_index: Int = 0;
-                while (!x86_flag(cross, instruction.result) && region_index < regions.length()) {
-                    let region: X86StackRegion = regions[region_index];
-                    if (region.until < position && region.size >= size && region.offset % layout.alignment == 0 && region.size < selected_size) {
-                        selected = region_index;
-                        selected_size = region.size;
-                    }
-                    region_index++;
-                }
-
-                if (selected >= 0) {
-                    let region: X86StackRegion = regions[selected];
-                    region.until = last_use;
-                    regions[selected] = region;
-                    slots.append(X86StackSlot(value=instruction.result, offset=region.offset, size=size));
-                } else if (!x86_flag(cross, instruction.result)) {
-                    if (size > 2147483647 - offset - (layout.alignment - 1)) {
-                        return [];
-                    }
-                    offset = x86_align_frame_offset(offset + size, layout.alignment);
-                    regions.append(X86StackRegion(offset=offset, size=size, until=last_use));
-                    slots.append(X86StackSlot(value=instruction.result, offset=offset, size=size));
+                if (!x86_flag(cross, instruction.result)) {
+                    pool.size = offset;
+                    if (pool.ends.length() == 0) { stack_begin_block(ref pool, block.instructions.length()); }
+                    let home = stack_reuse(ref pool, size, layout.alignment, last_use - block_start, true);
+                    if (home < 0) { return []; }
+                    offset = pool.size;
+                    slots.append(X86StackSlot(value=instruction.result, offset=home, size=size));
                 } else {
                     if (size > 2147483647 - offset - (layout.alignment - 1)) {
                         return [];
@@ -247,6 +228,7 @@ func x86_stack_slots_with_uses(
             position++;
             i++;
         }
+        if (pool.ends.length() != 0) { stack_expire(ref pool, block.instructions.length()); }
 
         i = 0;
         while (i < block.parameters.length()) {

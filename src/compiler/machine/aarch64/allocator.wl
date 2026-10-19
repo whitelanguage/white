@@ -1,5 +1,6 @@
 // src/compiler/machine/aarch64/allocator.wl
 import * from "model.wl"
+import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 
 
@@ -25,9 +26,7 @@ struct A64ValueMap(
     wide_high: Vector(A64Register),
     bindings: Vector(A64RegisterBinding),
     uses: A64UseTable,
-    position: Int,
-    next_register: Int,
-    next_float_register: Int
+    position: Int
 )
 
 func a64_include_value(value: WirValueID, ref first: Int, ref last: Int) -> Void {
@@ -416,9 +415,7 @@ func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64
         wide_high=wide_high,
         bindings=bindings,
         uses=uses,
-        position=0,
-        next_register=0,
-        next_float_register=0
+        position=0
     );
 }
 
@@ -489,13 +486,10 @@ func a64_clear_bindings(ref values: A64ValueMap) -> Void {
 
 func a64_reset_temporaries(ref values: A64ValueMap) -> Void {
     a64_clear_bindings(ref values);
-    values.next_register = 0;
-    values.next_float_register = 0;
 }
 
-func a64_select_register(ref values: A64ValueMap, floating: Bool) -> Int {
-// Keep the choice local and bounded. Go's SSA allocator makes the same basic
-// trade: prefer a free register, otherwise evict the value used farthest away.
+func a64_select_register(ref program: WirModule, ref values: A64ValueMap, floating: Bool) -> Int {
+// next use takes priority, equal distances prefer a value we can rebuild without a spill
     let first: Int = 0;
     let end: Int = 7;
     if floating {
@@ -505,6 +499,7 @@ func a64_select_register(ref values: A64ValueMap, floating: Bool) -> Int {
 
     let selected: Int = -1;
     let farthest: Int = -1;
+    let selected_remat = false;
     let i: Int = first;
 
     while (i < end) {
@@ -516,31 +511,17 @@ func a64_select_register(ref values: A64ValueMap, floating: Bool) -> Int {
             }
 
             let next: Int = a64_next_use(ref values.uses, binding.value, values.position - 1);
-            if (next == A64_NO_NEXT_USE) {
-                selected = i;
-                break;
-            }
-            if (next > farthest) {
+            let remat = machine_rematerializable(ref program, binding.value);
+            if (next > farthest || (next == farthest && remat && !selected_remat)) {
                 farthest = next;
                 selected = i;
+                selected_remat = remat;
             }
         }
         i++;
     }
 
-    if (selected < 0) {
-        // A few 128-bit sequences need more scratch names than this small
-        // bank contains. They were written to tolerate the old rotating
-        // aliases, keep that fallback until wide values get pair allocation.
-        if floating {
-            selected = 7 + (values.next_float_register % 7);
-            values.next_float_register++;
-        } else {
-            selected = values.next_register % 7;
-            values.next_register++;
-        }
-    }
-
+    // held registers belong to the current instruction, exhaustion must leave them intact.
     return selected;
 }
 

@@ -3,6 +3,7 @@
 // Focus: Index sparse homes, reuse dead temporaries and preserve addressed storage and live-outs.
 
 import "file"
+import * from "../../../src/compiler/machine/homes.wl"
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
@@ -33,24 +34,24 @@ func indexed() -> Bool {
 }
 
 func intervals() -> Bool {
-    let pool: A64HomePool = A64HomePool(size=0, regions=[], free=Dict(), ends=[]);
-    a64_begin_home_block(ref pool, 5);
-    let a = a64_reuse_home(ref pool, 8, 8, 1);
-    let b = a64_reuse_home(ref pool, 16, 16, 2);
-    a64_expire_homes(ref pool, 1);
-    let c = a64_reuse_home(ref pool, 8, 8, 3);
+    let pool: StackHomes = StackHomes(size=0, regions=[], free=Dict(), ends=[]);
+    stack_begin_block(ref pool, 5);
+    let a = stack_reuse(ref pool, 8, 8, 1);
+    let b = stack_reuse(ref pool, 16, 16, 2);
+    stack_expire(ref pool, 1);
+    let c = stack_reuse(ref pool, 8, 8, 3);
     if (a != 0 || b != 16 || c == a || b % 16 != 0) { return false; }
 
-    a64_expire_homes(ref pool, 2);
-    let d = a64_reuse_home(ref pool, 8, 8, 4);
-    a64_expire_homes(ref pool, 3);
-    let e = a64_reuse_home(ref pool, 16, 16, 4);
+    stack_expire(ref pool, 2);
+    let d = stack_reuse(ref pool, 8, 8, 4);
+    stack_expire(ref pool, 3);
+    let e = stack_reuse(ref pool, 16, 16, 4);
     if (d != a || e != b || pool.size != 40) { return false; }
-    a64_expire_homes(ref pool, 4);
-    a64_expire_homes(ref pool, 5);
+    stack_expire(ref pool, 4);
+    stack_expire(ref pool, 5);
 
     pool.size = 2147483640;
-    return a64_reserve_stack(ref pool, 16, 16) == -1;
+    return stack_reserve(ref pool, 16, 16) == -1;
 }
 
 func records(ref program: WirModule, block: WirBlockID, type: WirTypeID, int: WirTypeID, count: Int) -> WirValueID {

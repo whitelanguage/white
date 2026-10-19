@@ -8,6 +8,43 @@ import A64Register from "../../../src/compiler/machine/aarch64/model.wl"
 import * from "../../../src/compiler/machine/aarch64/allocator.wl"
 
 
+func policy(ref program: WirModule, ref values: A64ValueMap, plain: WirValueID, constant: WirValueID) -> Bool {
+    let i = 0;
+    for (i = 0; i < values.bindings.length(); i++) {
+        values.bindings[i].held = true;
+    }
+    if (a64_select_register(ref program, ref values, false) != -1 ||
+        a64_select_register(ref program, ref values, true) != -1) {
+        return false;
+    }
+    for (i = 0; i < values.bindings.length(); i++) {
+        if (!values.bindings[i].held) { return false; }
+    }
+
+    values.bindings[1].held = false;
+    values.bindings[8].held = false;
+    if (a64_select_register(ref program, ref values, false) != 1 ||
+        a64_select_register(ref program, ref values, true) != 8) {
+        return false;
+    }
+
+    values.bindings[8].held = true;
+    values.bindings[0].held = false;
+    values.bindings[0].value = plain;
+    values.bindings[1].value = constant;
+    values.position = A64_NO_NEXT_USE;
+    if (a64_select_register(ref program, ref values, false) != 1) { return false; }
+
+    values.bindings[7].held = false;
+    values.bindings[8].held = false;
+    values.bindings[7].value = plain;
+    values.bindings[8].value = constant;
+    if (a64_select_register(ref program, ref values, true) != 8) { return false; }
+
+    a64_reset_temporaries(ref values);
+    return true;
+}
+
 func main() -> Int {
     let program: WirModule = new_wir_module("aarch64-unknown-linux-gnu", 64);
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
@@ -74,7 +111,7 @@ func main() -> Int {
     let first_instruction: WirInstruction = program.arena.instructions[
         wir_id_index(UInt32(block.instructions[0]))
     ];
-    let binding_index: Int = a64_select_register(ref values, false);
+    let binding_index: Int = a64_select_register(ref program, ref values, false);
     let value_register: A64Register = a64_claim_register(ref values, binding_index);
     if (value_register == A64Register.None || !a64_bind_value(ref values, value, value_register, false) ||
         a64_mapped_register(ref values, value) != value_register) {
@@ -101,9 +138,9 @@ func main() -> Int {
         return 1;
     }
 
-    let low_index: Int = a64_select_register(ref values, false);
+    let low_index: Int = a64_select_register(ref program, ref values, false);
     let low: A64Register = a64_claim_register(ref values, low_index);
-    let high_index: Int = a64_select_register(ref values, false);
+    let high_index: Int = a64_select_register(ref program, ref values, false);
     let high: A64Register = a64_claim_register(ref values, high_index);
     if (!a64_bind_register_pair(ref values, first, low, high, true)) {
         print("FAIL: AArch64 register pair was not bound");
@@ -123,6 +160,11 @@ func main() -> Int {
     if (pair.low != A64Register.None || pair.high != A64Register.None ||
         values.bindings[a64_binding_index(ref values, high)].value != NO_WIR_VALUE) {
         print("FAIL: AArch64 register pair was only half released");
+        return 1;
+    }
+
+    if (!policy(ref program, ref values, first, one)) {
+        print("FAIL: AArch64 eviction ties or held register exhaustion");
         return 1;
     }
 

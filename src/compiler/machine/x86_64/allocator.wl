@@ -1,5 +1,6 @@
 // src/compiler/machine/x86_64/allocator.wl
 import * from "model.wl"
+import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 
 
@@ -791,7 +792,7 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
     while (i < function.parameters.length()) {
         let value_index: Int = x86_use_index(ref uses, function.parameters[i]);
 
-        if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(ref program, function.parameters[i])) {
+        if (value_index >= 0 && value_index < uses.queues.length() && !machine_rematerializable(ref program, function.parameters[i])) {
             let queue: X86UseQueue = uses.queues[value_index];
 
             if (queue.positions.length() != 0) {
@@ -814,7 +815,7 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
         while (i < block.parameters.length()) {
             let value_index: Int = x86_use_index(ref uses, block.parameters[i]);
 
-            if (value_index >= 0 && value_index < uses.queues.length() && !x86_rematerializable(ref program, block.parameters[i])) {
+            if (value_index >= 0 && value_index < uses.queues.length() && !machine_rematerializable(ref program, block.parameters[i])) {
                 let queue: X86UseQueue = uses.queues[value_index];
 
                 if (queue.positions.length() != 0) {
@@ -836,7 +837,7 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
             ];
 
             // count SSA results, not an opcode whitelist that can miss new conversions
-            if (instruction.result != NO_WIR_VALUE && !x86_rematerializable(ref program, instruction.result)) {
+            if (instruction.result != NO_WIR_VALUE && !machine_rematerializable(ref program, instruction.result)) {
                 let value_index: Int = x86_use_index(ref uses, instruction.result);
 
                 if (value_index >= 0 && value_index < uses.queues.length()) {
@@ -912,7 +913,7 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
                     let operand_index = 0;
 
                     while (operand_index < inputs) {
-                        if (x86_rematerializable(ref program, instruction.operands[operand_index])) {
+                        if (machine_rematerializable(ref program, instruction.operands[operand_index])) {
                             extra++;
                         }
                         operand_index++;
@@ -940,32 +941,6 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
     if (call_peak > required) { required = call_peak; }
 
     return required;
-}
-
-func x86_rematerializable(ref program: WirModule, value: WirValueID) -> Bool {
-    let index: Int = wir_id_index(UInt32(value));
-
-    if (index < 0 || index >= program.arena.values.length()) { return false; }
-
-    let kind: WirValueKind = program.arena.values[index].kind;
-
-    if (kind == WirValueKind.Constant) {
-        let owner: Int = wir_id_index(program.arena.values[index].owner);
-
-        if (owner < 0 || owner >= program.arena.constants.length()) { return false; }
-        let ptr constant: WirConstant = ref program.arena.constants[owner];
-
-        return constant.kind == WirConstKind.Zero || constant.kind == WirConstKind.Address;
-    }
-
-    if (kind == WirValueKind.Instruction) {
-        let owner: Int = wir_id_index(program.arena.values[index].owner);
-
-        return owner >= 0 && owner < program.arena.instructions.length() && program.arena.instructions[owner].opcode == WirOpcode.StackAlloc;
-    }
-
-    return kind == WirValueKind.Integer || kind == WirValueKind.FloatValue || kind == WirValueKind.BoolValue ||
-           kind == WirValueKind.Null    || kind == WirValueKind.Global     || kind == WirValueKind.Function;
 }
 
 func x86_choose_register(ref program: WirModule, ref plan: X86RegisterPlan, position: Int) -> X86RegisterChoice {
@@ -1001,7 +976,7 @@ func x86_choose_register_class(ref program: WirModule, ref plan: X86RegisterPlan
 
         let value: WirValueID = plan.bindings[i].value;
         let next_use: Int = x86_pending_use(ref plan.uses, value, position);
-        let remat: Bool = x86_rematerializable(ref program, value);
+        let remat: Bool = machine_rematerializable(ref program, value);
 
         if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {
             selected = i;
@@ -1043,7 +1018,7 @@ func x86_choose_register_avoiding(ref program: WirModule, ref plan: X86RegisterP
         if (x86_allocatable_register(binding.register) && !x86_is_xmm(binding.register) &&
             binding.register != first && binding.register != second) {
             let next_use: Int = x86_pending_use(ref plan.uses, binding.value, position);
-            let remat: Bool = x86_rematerializable(ref program, binding.value);
+            let remat: Bool = machine_rematerializable(ref program, binding.value);
 
             if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {
                 selected = i;

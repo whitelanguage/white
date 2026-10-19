@@ -98,7 +98,7 @@ func a64_alloc_register(
     ref output: A64CodeBuffer,
     floating: Bool
 ) -> A64Register {
-    let index: Int = a64_select_register(ref values, floating);
+    let index: Int = a64_select_register(ref program, ref values, floating);
     if (index < 0 || !a64_spill_binding(ref program, homes, ref values, ref output, index)) {
         return A64Register.None;
     }

@@ -1,5 +1,6 @@
 // src/compiler/machine/x86_64/lowering.wl
 import * from "model.wl"
+import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 import * from "encoder.wl"
 import * from "allocator.wl"
@@ -674,7 +675,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
 
         let offset: Int = x86_stack_offset(ref state.stack, instruction.operands[1]);
-        if (!x86_rematerializable(ref program, instruction.operands[1])) { offset = 0; }
+        if (!machine_rematerializable(ref program, instruction.operands[1])) { offset = 0; }
 
         let stored_value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
         if (x86_memory_value(ref program, stored_value.type_id)) {
@@ -725,7 +726,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
 
         let offset: Int = x86_stack_offset(ref state.stack, instruction.operands[0]);
-        if (!x86_rematerializable(ref program, instruction.operands[0])) { offset = 0; }
+        if (!machine_rematerializable(ref program, instruction.operands[0])) { offset = 0; }
 
         let size: Int = x86_scalar_size(ref program, instruction.type_id);
         if (size == 0 || (offset != 0 && size > x86_stack_size(ref state.stack, instruction.operands[0]))) {

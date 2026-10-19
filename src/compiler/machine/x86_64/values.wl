@@ -1,5 +1,6 @@
 // src/compiler/machine/x86_64/values.wl
 import * from "model.wl"
+import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 import * from "encoder.wl"
 import * from "allocator.wl"
@@ -190,7 +191,7 @@ func x86_save_live_registers(ref program: WirModule, slots: Vector(X86StackSlot)
 
         // argument setup may reuse scratch registers before all operands are read
         if (binding.value != NO_WIR_VALUE && needed) {
-            if (x86_rematerializable(ref program, binding.value) || x86_stack_offset(ref state.stack, binding.value) != 0) {
+            if (machine_rematerializable(ref program, binding.value) || x86_stack_offset(ref state.stack, binding.value) != 0) {
                 x86_clear_register(ref state.registers, binding.register);
             } else {
                 let offset: Int = x86_claim_spill(ref state.spills, binding.value);
@@ -246,7 +247,7 @@ func x86_prepare_register(ref program: WirModule, ref state: X86BlockState, choi
         return "";
     }
 
-    if (next_use == X86_NO_NEXT_USE || x86_rematerializable(ref program, choice.evicted) || x86_stack_offset(ref state.stack, choice.evicted) != 0) {
+    if (next_use == X86_NO_NEXT_USE || machine_rematerializable(ref program, choice.evicted) || x86_stack_offset(ref state.stack, choice.evicted) != 0) {
         x86_clear_register(ref state.registers, choice.register);
         return "";
     }
@@ -317,7 +318,7 @@ func x86_result_register_available(ref program: WirModule, ref state: X86BlockSt
     if (value == NO_WIR_VALUE || x86_pending_use(ref state.registers.uses, value, state.position) == X86_NO_NEXT_USE) {
         return true;
     }
-    return x86_rematerializable(ref program, value) || x86_stack_offset(ref state.stack, value) != 0 ||
+    return machine_rematerializable(ref program, value) || x86_stack_offset(ref state.stack, value) != 0 ||
            x86_spill_offset(ref state.spills, value) != 0;
 }
 
@@ -401,7 +402,7 @@ func x86_materialize_register_except(
     let signed: Bool = x86_scalar_signed(ref program, value.type_id);
     let home: Int = x86_stack_offset(ref state.stack, value_id);
     let spill: Int = x86_spill_offset(ref state.spills, value_id);
-    if (home != 0 && !x86_rematerializable(ref program, value_id)) {
+    if (home != 0 && !machine_rematerializable(ref program, value_id)) {
         x86_load_scalar(ref output, choice.register, X86Register.RBP, home, size, signed);
     } else if (spill != 0) {
         x86_load_scalar(ref output, choice.register, X86Register.RBP, spill, size, signed);
@@ -445,7 +446,7 @@ func x86_materialize_register_except(
         } else {
             return X86RegisterResult(register=X86Register.None, message="aggregate constants cannot be materialized in an integer register");
         }
-    } else if (value.kind == WirValueKind.Instruction && x86_rematerializable(ref program, value_id)) {
+    } else if (value.kind == WirValueKind.Instruction && machine_rematerializable(ref program, value_id)) {
         let offset: Int = x86_stack_offset(ref state.stack, value_id);
         if (offset == 0 || !x86_lea(ref output, choice.register, X86Register.RBP, X86Register.None, 1, offset)) {
             return X86RegisterResult(register=X86Register.None, message="stack allocation has no addressable storage");

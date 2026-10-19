@@ -310,9 +310,8 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
             if (a64_instruction_uses_wide_int(ref program, instruction) &&
                 (a64_is_integer_division(instruction.opcode) || instruction.opcode == WirOpcode.ShiftLeft ||
                  instruction.opcode == WirOpcode.SignedShiftRight || instruction.opcode == WirOpcode.UnsignedShiftRight)) {
-                // Pair lowering still uses a compact rotating scratch bank.
-                // The software divider owns fixed registers and the wide shift
-                // needs more scratch values than the current seven-register bank.
+                // these wide sequences own extra caller-saved scratch registers,
+                // preserve cached values before loading their fixed operands.
                 if (!a64_flush_registers(ref program, stack.homes, ref values, ref output)) {
                     return a64_lowering_error("cannot spill AArch64 scalar values before a wide instruction");
                 }
@@ -1008,8 +1007,10 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 let amount: A64RegisterPair = a64_materialize_pair(ref program, instruction.operands[1], stack.homes, ref values, ref output);
                 let destination: A64RegisterPair = a64_alloc_pair(ref program, stack.homes, ref values, ref output);
                 let count: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
-                let work: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
-                let cross: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
+                // four input words, two result words and count fill X9-X15.
+                // X0/X1 are free after entry arguments have reached their homes.
+                let work = A64Register.X0;
+                let cross = A64Register.X1;
                 if (source.low == A64Register.None || source.high == A64Register.None || amount.low == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
                     count == A64Register.None || work == A64Register.None || cross == A64Register.None ||

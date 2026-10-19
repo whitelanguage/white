@@ -87,6 +87,17 @@ func main() -> Int {
         return 1;
     }
 
+    x86_bind_register(ref plan, X86Register.RAX, near);
+    x86_bind_register(ref plan, X86Register.R8, first);
+    x86_bind_register(ref plan, X86Register.R9, second);
+    x86_bind_register(ref plan, X86Register.R10, far);
+    x86_bind_register(ref plan, X86Register.R11, third);
+    victim = x86_choose_register(ref program, ref plan, X86_NO_NEXT_USE);
+    if (victim.register != X86Register.R11 || victim.evicted != third) {
+        print("FAIL: equal eviction distances selected register ", Int(victim.register), " value ", UInt32(victim.evicted));
+        return 1;
+    }
+
     print("PASS: x86_64 register allocator");
     return 0;
 }

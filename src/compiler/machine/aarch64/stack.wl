@@ -5,6 +5,7 @@ import A64Register from "model.wl"
 import * from "abi.wl"
 import * from "flow.wl"
 import * from "types.wl"
+import * from "../homes.wl"
 
 
 struct A64StackSlot(value: WirValueID, offset: Int, size: Int)
@@ -16,14 +17,6 @@ struct A64StackIndex(
     sparse: Dict(UInt32, Int)
 )
 
-struct A64StackRegion(offset: Int, size: Int, alignment: Int, next: Int)
-
-struct A64HomePool(
-    size: Int,
-    regions: Vector(A64StackRegion),
-    free: Dict(UInt64, Int),
-    ends: Vector(Int)
-)
 
 func a64_stack_index(slots: Vector(A64StackSlot), range: A64ValueRange) -> A64StackIndex {
 // zero denotes a missing slot, SP+0 is a valid home after the outgoing arguments
@@ -69,70 +62,6 @@ func a64_find_stack_slot(stack: A64StackIndex, value: WirValueID) -> A64StackSlo
     return stack.slots[index - 1];
 }
 
-func a64_home_key(size: Int, alignment: Int) -> UInt64 {
-    return (UInt64(UInt32(size)) << 32UL) | UInt64(UInt32(alignment));
-}
-
-func a64_reserve_stack(ref pool: A64HomePool, bytes: Int, alignment: Int) -> Int {
-    if (bytes <= 0 || alignment <= 0) { return -1; }
-    let padding = (alignment - pool.size % alignment) % alignment;
-    if (bytes > 2147483647 - pool.size || padding > 2147483647 - pool.size - bytes) {
-        return -1;
-    }
-
-    let offset = pool.size + padding;
-    pool.size = offset + bytes;
-    return offset;
-}
-
-func a64_begin_home_block(ref pool: A64HomePool, count: Int) -> Void {
-    pool.ends = [];
-    let i = 0;
-    while (i <= count) {
-        pool.ends.append(0);
-        i++;
-    }
-}
-
-func a64_expire_homes(ref pool: A64HomePool, position: Int) -> Void {
-// each region appears on one expiry list, releasing homes costs one visit per lifetime
-    let index = pool.ends[position];
-    pool.ends[position] = 0;
-    while (index != 0) {
-        let region = pool.regions[index - 1];
-        let next = region.next;
-        let key = a64_home_key(region.size, region.alignment);
-        region.next = pool.free.lookup(key);
-        pool.regions[index - 1] = region;
-        pool.free.put(key, index);
-        index = next;
-    }
-}
-
-func a64_reuse_home(ref pool: A64HomePool, bytes: Int, alignment: Int, last: Int) -> Int {
-// exact layout buckets avoid a best-fit scan, input homes stay alive through the instruction
-    if (last < 0 || last + 1 >= pool.ends.length()) { return -1; }
-    let key = a64_home_key(bytes, alignment);
-    let index = pool.free.lookup(key);
-    let offset = -1;
-
-    if (index != 0) {
-        let region = pool.regions[index - 1];
-        pool.free.put(key, region.next);
-        offset = region.offset;
-    } else {
-        offset = a64_reserve_stack(ref pool, bytes, alignment);
-        if (offset < 0) { return -1; }
-        pool.regions.append(A64StackRegion(offset=offset, size=bytes, alignment=alignment, next=0));
-        index = pool.regions.length();
-    }
-
-    let region = pool.regions[index - 1];
-    region.next = pool.ends[last + 1];
-    pool.regions[index - 1] = region;
-    pool.ends[last + 1] = index;
-    return offset;
-}
 
 func a64_pinned_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Dict(UInt32, Bool) {
 // block-local intervals cannot describe loop live-outs or the lifetime of an escaped address
@@ -268,7 +197,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     let homes: Vector(A64StackSlot) = [];
     let seen: Dict(UInt32, Bool) = Dict();
     let pinned = a64_pinned_homes(ref program, function.blocks);
-    let pool: A64HomePool = A64HomePool(size=a64_outgoing_stack(ref program, ref function, layouts), regions=[], free=Dict(), ends=[]);
+    let pool: StackHomes = StackHomes(size=a64_outgoing_stack(ref program, ref function, layouts), regions=[], free=Dict(), ends=[]);
     if (pool.size < 0) { return a64_stack_error("AArch64 call has an unsupported argument type"); }
 
     let result_pointer_offset = -1;
@@ -280,7 +209,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
         let hfa = a64_hfa_type(ref program, signature.result, layouts);
         if ((result_type.kind == WirTypeKind.Struct || result_type.kind == WirTypeKind.Array) &&
             result_layout.valid && result_layout.size > 16UL && !hfa.valid) {
-            result_pointer_offset = a64_reserve_stack(ref pool, 8, 8);
+            result_pointer_offset = stack_reserve(ref pool, 8, 8);
             if (result_pointer_offset < 0) { return a64_stack_error("AArch64 stack frame is too large"); }
         }
     }
@@ -289,7 +218,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     let sizes = a64_edge_scratch_sizes(ref program, function.blocks, layouts, ref uses);
     let i = 0;
     while (i < sizes.length()) {
-        let offset = a64_reserve_stack(ref pool, sizes[i], 16);
+        let offset = stack_reserve(ref pool, sizes[i], 16);
         if (offset < 0) { return a64_stack_error("AArch64 edge scratch area is too large"); }
         scratch.append(offset);
         i++;
@@ -301,7 +230,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
         let type = program.arena.values[wir_id_index(UInt32(param))].type_id;
         let bytes = a64_stack_value_size(ref program, type, layouts);
         if (bytes == 0) { return a64_stack_error("AArch64 parameter home has an unsupported type"); }
-        let offset = a64_reserve_stack(ref pool, bytes, a64_stack_value_alignment(type, layouts, bytes));
+        let offset = stack_reserve(ref pool, bytes, a64_stack_value_alignment(type, layouts, bytes));
         if (offset < 0) { return a64_stack_error("AArch64 stack frame is too large"); }
 
         homes.append(A64StackSlot(value=param, offset=offset, size=bytes));
@@ -312,7 +241,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     i = 0;
     while (i < function.blocks.length()) {
         let block = program.arena.blocks[wir_id_index(UInt32(function.blocks[i]))];
-        a64_begin_home_block(ref pool, block.instructions.length());
+        stack_begin_block(ref pool, block.instructions.length());
 
         let param_index = 0;
         while (param_index < block.parameters.length()) {
@@ -320,7 +249,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
             let type = program.arena.values[wir_id_index(UInt32(param))].type_id;
             let bytes = a64_stack_value_size(ref program, type, layouts);
             if (bytes == 0) { return a64_stack_error("AArch64 block parameter home has an unsupported type"); }
-            let offset = a64_reserve_stack(ref pool, bytes, a64_stack_value_alignment(type, layouts, bytes));
+            let offset = stack_reserve(ref pool, bytes, a64_stack_value_alignment(type, layouts, bytes));
             if (offset < 0) { return a64_stack_error("AArch64 stack frame is too large"); }
 
             homes.append(A64StackSlot(value=param, offset=offset, size=bytes));
@@ -329,7 +258,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
 
         let j = 0;
         while (j < block.instructions.length()) {
-            a64_expire_homes(ref pool, j);
+            stack_expire(ref pool, j);
             let inst = program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
             if (inst.opcode == WirOpcode.StackAlloc) {
                 let pointer = program.arena.types[wir_id_index(UInt32(inst.type_id))];
@@ -341,7 +270,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
                     return a64_stack_error("AArch64 stack slot has an unsupported type");
                 }
 
-                let offset = a64_reserve_stack(ref pool, bytes, a64_stack_value_alignment(pointer.element, layouts, bytes));
+                let offset = stack_reserve(ref pool, bytes, a64_stack_value_alignment(pointer.element, layouts, bytes));
                 if (offset < 0) { return a64_stack_error("AArch64 stack frame is too large"); }
                 storage.append(A64StackSlot(value=inst.result, offset=offset, size=bytes));
             } else if (inst.result != NO_WIR_VALUE) {
@@ -350,7 +279,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
                     let alignment = a64_stack_value_alignment(inst.type_id, layouts, bytes);
                     let offset = -1;
                     if (pinned.lookup(UInt32(inst.result))) {
-                        offset = a64_reserve_stack(ref pool, bytes, alignment);
+                        offset = stack_reserve(ref pool, bytes, alignment);
                     } else {
                         let last = j;
                         let index = a64_use_index(ref uses, inst.result);
@@ -360,7 +289,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
                                 last += queue.positions[queue.positions.length() - 1] - position;
                             }
                         }
-                        offset = a64_reuse_home(ref pool, bytes, alignment, last);
+                        offset = stack_reuse(ref pool, bytes, alignment, last);
                     }
                     if (offset < 0) { return a64_stack_error("AArch64 stack home has an invalid lifetime or frame size"); }
                     homes.append(A64StackSlot(value=inst.result, offset=offset, size=bytes));
@@ -375,7 +304,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
                     a64_aggregate_type(ref program, value.type_id)) {
                     let bytes = a64_stack_value_size(ref program, value.type_id, layouts);
                     if (bytes == 0) { return a64_stack_error("AArch64 aggregate constant has an unsupported type"); }
-                    let offset = a64_reserve_stack(ref pool, bytes, a64_stack_value_alignment(value.type_id, layouts, bytes));
+                    let offset = stack_reserve(ref pool, bytes, a64_stack_value_alignment(value.type_id, layouts, bytes));
                     if (offset < 0) { return a64_stack_error("AArch64 stack frame is too large"); }
 
                     homes.append(A64StackSlot(value=operand, offset=offset, size=bytes));
@@ -386,7 +315,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
             position++;
             j++;
         }
-        a64_expire_homes(ref pool, block.instructions.length());
+        stack_expire(ref pool, block.instructions.length());
         i++;
     }
 

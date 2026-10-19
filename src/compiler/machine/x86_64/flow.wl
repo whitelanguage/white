@@ -1,5 +1,6 @@
 // src/compiler/machine/x86_64/flow.wl
 import * from "model.wl"
+import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 import * from "encoder.wl"
 import * from "allocator.wl"
@@ -217,7 +218,7 @@ func x86_mark_cross_uses(ref program: WirModule, block: WirBlockID, values: Vect
     let i = 0;
     while (i < values.length()) {
         let index: Int = wir_id_index(UInt32(values[i])) - base;
-        if (index >= 0 && index < definitions.length() && definitions[index] != 0U && definitions[index] != UInt32(block) && !x86_rematerializable(ref program, values[i])) {
+        if (index >= 0 && index < definitions.length() && definitions[index] != 0U && definitions[index] != UInt32(block) && !machine_rematerializable(ref program, values[i])) {
             cross.values[index] = true;
         }
 
