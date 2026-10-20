@@ -577,6 +577,9 @@ func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, p
     wir_declare_root_items(ref types, ref source, ref program, root);
     wir_emit_failure_runtime(ref types, ref source, ref program);
     wir_lower_root_items(ref types, ref source, ref program, root);
+    if (GLOBAL_ERROR_COUNT > 0) {
+        return WirLoweringResult(program=program, errors=[]);
+    }
     wir_emit_required_runtime(ref types, ref source, ref program);
     wir_emit_target_runtime(ref source, ref program, types.errors);
     wir_verify_lowering(ref types, program);

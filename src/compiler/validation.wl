@@ -6,6 +6,32 @@ import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
 
+func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: Position) -> Bool {
+// a fallible return still needs a valid success value, null never stands for an error
+    if (value_type == TYPE_POISON) { return false; }
+    let target = return_type;
+    if (is_fallible_type(ref c, target)) {
+        target = get_inner_fallible_type(ref c, target);
+    }
+
+    if (value_type == TYPE_NULLPTR && !is_pointer_type(ref c, target)) {
+        throw_type_error(pos, "'nullptr' can only be returned for explicit pointer types.");
+        return false;
+    }
+    if (value_type == TYPE_NULL) {
+        if (is_pointer_type(ref c, target)) {
+            throw_type_error(pos, "'null' cannot be returned for explicit pointer types. Use 'nullptr'.");
+            return false;
+        }
+        if (!is_nullable_reference_type(ref c, target)) {
+            throw_type_error(pos, "Type " + get_type_name(ref c, target) + " cannot be null.");
+            return false;
+        }
+    }
+
+    return true;
+}
+
 func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
     if (name is null || name.length() == 0) {
         return;

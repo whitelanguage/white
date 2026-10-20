@@ -12,6 +12,7 @@ import elf_object from "x86_64/elf.wl"
 import A64Object, A64ModuleResult from "aarch64/model.wl"
 import a64_lower_module from "aarch64/module.wl"
 import a64_elf_object from "aarch64/elf.wl"
+import GLOBAL_ERROR_COUNT from "../../frontend/diagnostics.wl"
 
 
 struct MachinePipelineResult(bytes: Vector(Byte), errors: Vector(String))
@@ -29,7 +30,7 @@ func lower_program_to_machine(
     }
 
     let lowered: WirLoweringResult = lower_program_to_wir(ref source, erased_modules, target, pointer_bits, verbose);
-    if (lowered.errors.length() != 0) {
+    if (GLOBAL_ERROR_COUNT > 0 || lowered.errors.length() != 0) {
         return MachinePipelineResult(bytes=[], errors=lowered.errors);
     }
 

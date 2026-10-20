@@ -2195,22 +2195,8 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
         let res: CompileResult = compile_node(ref c, node.value);
         c.expected_type = 0;
 
-        if (res.type == TYPE_NULLPTR) {
-            if (!is_pointer_type(ref c, c.current_ret_type)) {
-                throw_type_error(node.pos, "'nullptr' can only be returned for explicit pointer types.");
-                return void_result();
-            }
-            res.type = c.current_ret_type;
-        } else if (res.type == TYPE_NULL) {
-            if (is_pointer_type(ref c, c.current_ret_type)) {
-                throw_type_error(node.pos, "'null' cannot be returned for explicit pointer types. Use 'nullptr'.");
-                return void_result();
-            }
-            if (is_primitive_type(c.current_ret_type)) {
-                throw_type_error(node.pos, "Primitive types cannot be null.");
-                return void_result();
-            }
-            res.type = c.current_ret_type;
+        if (!check_null_return(ref c, res.type, c.current_ret_type, node.pos)) {
+            return void_result();
         }
 
         let is_ret_fallible: Bool = is_fallible_type(ref c, c.current_ret_type);

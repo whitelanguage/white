@@ -16,13 +16,14 @@ import find_interface_implementation from "../../analysis.wl"
 import has_index_refs, check_body_refs from "../../references.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
+import check_null_return from "../../validation.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
 import validate_explicit_literal_cast from "../../lowering/casts.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 import * from "../../../frontend/tokens.wl"
-import Position, no_position, throw_name_error, throw_type_error, throw_invalid_syntax, throw_overflow_error from "../../../frontend/diagnostics.wl"
+import Position, no_position, throw_name_error, throw_type_error, throw_invalid_syntax, throw_overflow_error, GLOBAL_ERROR_COUNT from "../../../frontend/diagnostics.wl"
 
 
 struct WirMemberCall(
@@ -7636,24 +7637,30 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         let function: WirFunction = program.arena.functions[wir_id_index(UInt32(state.function))];
         let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
         let result: WirExpr = wir_no_expr();
+        if (state.return_type == TYPE_VOID && has_node(statement.value)) {
+            throw_type_error(statement.pos, "Void function cannot return a value.");
+            return;
+        }
         if (is_fallible_type(ref source, state.return_type)) {
             let inner_type: Int = get_inner_fallible_type(ref source, state.return_type);
             let value: WirExpr = wir_no_expr();
             if (has_node(statement.value)) {
                 value = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
+                if (value.value == NO_WIR_VALUE) { return; }
+                if (!check_null_return(ref source, value.source_type, state.return_type, statement.pos)) { return; }
             }
             if (value.value != NO_WIR_VALUE && value.source_type == state.return_type) {
                 result = value;
                 wir_move_or_retain(ref state, ref source, ref program, result);
             } else if (inner_type == TYPE_VOID) {
                 if (value.value != NO_WIR_VALUE) {
-                    state.errors.append("fallible Void function reached WIR lowering with a return value");
+                    throw_type_error(statement.pos, "Void function cannot return a value.");
                     return;
                 }
                 result = WirExpr(value=wir_success_result(ref state, ref types, ref source, ref program, value), source_type=state.return_type);
             } else {
                 if (value.value == NO_WIR_VALUE) {
-                    state.errors.append("fallible function reached WIR lowering without a success value");
+                    throw_type_error(statement.pos, "Non-void function must return a value.");
                     return;
                 }
                 value = wir_cast_expr(ref state, ref types, ref source, ref program, value, inner_type, true);
@@ -7667,14 +7674,16 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             }
         } else if (has_node(statement.value)) {
             result = wir_lower_expected_expr(ref state, ref types, ref source, ref program, statement.value, state.return_type);
+            if (result.value == NO_WIR_VALUE) { return; }
+            if (!check_null_return(ref source, result.source_type, state.return_type, statement.pos)) { return; }
         }
         if (signature.result == program.void_type) {
             if (result.value != NO_WIR_VALUE) {
-                state.errors.append("Void function reached WIR lowering with a return value");
+                throw_type_error(statement.pos, "Void function cannot return a value.");
                 return;
             }
         } else if (result.value == NO_WIR_VALUE) {
-            state.errors.append("non-Void function reached WIR lowering without a return value");
+            throw_type_error(statement.pos, "Non-void function must return a value.");
             return;
         } else if (!is_fallible_type(ref source, state.return_type)) {
             result = wir_cast_expr(ref state, ref types, ref source, ref program, result, state.return_type, true);
@@ -7945,15 +7954,16 @@ func wir_lower_block(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
         }
     }
     let i: Int = 0;
-    while (i < block.stmts.length() && !state.terminated) {
+    let errors_before = GLOBAL_ERROR_COUNT;
+    while (i < block.stmts.length() && !state.terminated && GLOBAL_ERROR_COUNT == errors_before) {
         let temporary_count: Int = state.owned_values.length();
         wir_lower_stmt(ref state, ref types, ref source, ref program, block.stmts[i]);
-        if (!state.terminated) {
+        if (!state.terminated && GLOBAL_ERROR_COUNT == errors_before) {
             wir_cleanup_temporaries(ref state, ref source, ref program, temporary_count);
         }
         i++;
     }
-    if (!state.terminated) {
+    if (!state.terminated && GLOBAL_ERROR_COUNT == errors_before) {
         wir_cleanup_bindings(ref state, ref source, ref program, binding_count);
     }
     wir_restore_bindings(ref state, binding_count);
@@ -8012,7 +8022,10 @@ func wir_lower_function_body(ref types: WirTypeMap, ref source: Compiler, ref pr
         i++;
     }
 
+    let errors_before = GLOBAL_ERROR_COUNT;
     wir_lower_block(ref state, ref types, ref source, ref program, body);
+    // the failed body has a source diagnostic, its incomplete CFG is not a missing return
+    if (GLOBAL_ERROR_COUNT != errors_before) { return function_id; }
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     if (!state.terminated) {
         if (signature.result == program.void_type) {

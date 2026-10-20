@@ -549,6 +549,7 @@ func main(argc: Int, ptr argv: String) -> Int {
             print("Build Failed: Could not produce WIR output.");
             return 1;
         }
+        WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
             let error_index: Int = 0;
             while (error_index < result.errors.length()) {
