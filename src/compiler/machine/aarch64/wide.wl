@@ -139,6 +139,14 @@ func a64_wide_divide(ref output: A64CodeBuffer, signed: Bool, remainder: Bool) -
 }
 
 func a64_wide_unary(ref output: A64CodeBuffer, opcode: WirOpcode, destination: A64RegisterPair, source: A64RegisterPair, temporary: A64Register) -> Bool {
+    if (opcode == WirOpcode.Abs) {
+        // carry the high-half sign across both words, including the MIN bit pattern
+        return a64_mov_immediate(ref output, temporary, 63UL, true) &&
+               a64_shift_register(ref output, temporary, source.high, temporary, 1, true) &&
+               a64_mov_register(ref output, destination.low, source.low, true) &&
+               a64_mov_register(ref output, destination.high, source.high, true) &&
+               a64_apply_wide_sign(ref output, destination, temporary);
+    }
     if (!a64_invert_register(ref output, destination.low, source.low, true) ||
         !a64_invert_register(ref output, destination.high, source.high, true)) {
         return false;

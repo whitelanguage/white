@@ -313,7 +313,7 @@ func x86_lower_instruction(ref program: WirModule,
     }
 
     if (x86_wide_integer(ref program, instruction.type_id) &&
-        (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not)) {
+        (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not || instruction.opcode == WirOpcode.Abs)) {
         if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
             return "128-bit unary operation requires one operand and a result";
         }
@@ -328,13 +328,20 @@ func x86_lower_instruction(ref program: WirModule,
             }
         }
         if (load_error.length() != 0) { return load_error; }
-        x86_unary_register(ref output, X86Register.RAX, 2, true);
-        x86_unary_register(ref output, X86Register.R10, 2, true);
-        if (instruction.opcode == WirOpcode.Negate) {
-            x86_mov_register_imm32(ref output, X86Register.R11, 1U);
-            x86_add_register64(ref output, X86Register.RAX, X86Register.R11);
-            x86_mov_register_imm32(ref output, X86Register.R11, 0U);
-            x86_adc_register64(ref output, X86Register.R10, X86Register.R11);
+        if (instruction.opcode == WirOpcode.Abs) {
+            // the sign comes from the high half, MIN retains its two's-complement bits
+            x86_mov_register64(ref output, X86Register.R11, X86Register.R10);
+            x86_shift_register_imm8(ref output, X86Register.R11, Byte(63), 7, true);
+            x86_apply_wide_sign(ref output, X86Register.RAX, X86Register.R10, X86Register.R11);
+        } else {
+            x86_unary_register(ref output, X86Register.RAX, 2, true);
+            x86_unary_register(ref output, X86Register.R10, 2, true);
+            if (instruction.opcode == WirOpcode.Negate) {
+                x86_mov_register_imm32(ref output, X86Register.R11, 1U);
+                x86_add_register64(ref output, X86Register.RAX, X86Register.R11);
+                x86_mov_register_imm32(ref output, X86Register.R11, 0U);
+                x86_adc_register64(ref output, X86Register.R10, X86Register.R11);
+            }
         }
         if (!x86_store_wide_pair(instruction.result, X86Register.RAX, X86Register.R10, ref state, ref output)) {
             return "128-bit unary result has no storage";

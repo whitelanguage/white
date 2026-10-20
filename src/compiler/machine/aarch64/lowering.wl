@@ -1177,7 +1177,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                     return a64_lowering_error("cannot encode AArch64 integer comparison");
                 }
             } else if (a64_integer_width(ref program, instruction.type_id) == 128 &&
-                       (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not)) {
+                       (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not || instruction.opcode == WirOpcode.Abs)) {
                 if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
                     return a64_lowering_error("128-bit unary operation has an invalid WIR shape");
                 }
