@@ -33,12 +33,15 @@ func a64_add_immediate(ref output: A64CodeBuffer, destination: A64Register, sour
     let rd: Int = a64_gpr_code(destination);
     let rn: Int = a64_gpr_code(source);
 
+    let shifted = immediate > 4095 && immediate % 4096 == 0;
+    if shifted { immediate /= 4096; }
     if (rd < 0 || rn < 0 || immediate < 0 || immediate > 4095 || destination == A64Register.ZR || source == A64Register.ZR) {
         return false;
     }
 
     let word: UInt32 = 0x11000000U;
     if wide { word = 0x91000000U; }
+    if shifted { word |= 0x00400000U; }
     word |= UInt32(immediate << 10);
     word |= UInt32(rn << 5);
     word |= UInt32(rd);

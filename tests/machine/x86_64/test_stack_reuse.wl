@@ -20,6 +20,15 @@ func main() -> Int {
         return 1;
     }
 
+    let gaps = x86_stack_index([X86StackSlot(value=WirValueID(101U), offset=8, size=8),
+        X86StackSlot(value=WirValueID(999999U), offset=24, size=8)], X86ValueRange(base=100, count=1000000));
+    if (gaps.dense_count != 0 || gaps.offsets.length() != 2 ||
+        x86_stack_offset(ref gaps, WirValueID(101U)) != -8 ||
+        x86_stack_offset(ref gaps, WirValueID(999999U)) != -24) {
+        print("FAIL: sparse arena IDs enlarged the stack index");
+        return 1;
+    }
+
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let i64: WirTypeID = wir_signed_int_type(ref program, 64);
     let record: WirTypeID = wir_struct_type(ref program, [i64, i64, i64, i64]);

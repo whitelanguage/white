@@ -21,11 +21,8 @@ struct A64StackIndex(
 func a64_stack_index(slots: Vector(A64StackSlot), range: A64ValueRange) -> A64StackIndex {
 // zero denotes a missing slot, SP+0 is a valid home after the outgoing arguments
     let indices: Vector(Int) = [];
-    let sparse: Dict(UInt32, Int) = Dict();
-    let count = range.count;
-    // interleaved function construction can leave large gaps in arena IDs.
-    // Keep the dense part proportional to actual homes, put outliers in the map.
-    if (count > 256 && count / 4 > slots.length()) { count = 0; }
+    let sparse: Dict(UInt32, Int) = null;
+    let count = stack_index_count(range.count, slots.length());
 
     let i = 0;
     while (i < count) {
@@ -39,6 +36,7 @@ func a64_stack_index(slots: Vector(A64StackSlot), range: A64ValueRange) -> A64St
         if (local >= 0 && local < count) {
             indices[local] = i + 1;
         } else {
+            if (sparse is null) { sparse = Dict(); }
             sparse.put(UInt32(slots[i].value), i + 1);
         }
         i++;
@@ -52,7 +50,7 @@ func a64_find_stack_slot(stack: A64StackIndex, value: WirValueID) -> A64StackSlo
     let index = 0;
     if (local >= 0 && local < stack.indices.length()) {
         index = stack.indices[local];
-    } else {
+    } else if (stack.sparse is !null) {
         index = stack.sparse.lookup(UInt32(value));
     }
 
@@ -121,6 +119,7 @@ struct A64StackLayout(
     frame_size: Int,
     result_pointer_offset: Int,
     edge_scratch: Vector(Int),
+    spills: Vector(Int),
     message: String
 )
 
@@ -182,7 +181,7 @@ func a64_outgoing_stack(ref program: WirModule, ref function: WirFunction, layou
 
 func a64_stack_error(message: String) -> A64StackLayout {
     let empty = a64_stack_index([], A64ValueRange(base=0, count=0));
-    return A64StackLayout(storage=empty, homes=empty, frame_size=0, result_pointer_offset=-1, edge_scratch=[], message=message);
+    return A64StackLayout(storage=empty, homes=empty, frame_size=0, result_pointer_offset=-1, edge_scratch=[], spills=[], message=message);
 }
 
 func a64_stack_layout(ref program: WirModule, ref function: WirFunction, layouts: Vector(WirTypeLayout)) -> A64StackLayout {
@@ -238,6 +237,7 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
     }
 
     let position = 0;
+    let scalar_results = false;
     i = 0;
     while (i < function.blocks.length()) {
         let block = program.arena.blocks[wir_id_index(UInt32(function.blocks[i]))];
@@ -275,7 +275,8 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
                 storage.append(A64StackSlot(value=inst.result, offset=offset, size=bytes));
             } else if (inst.result != NO_WIR_VALUE) {
                 let bytes = a64_stack_value_size(ref program, inst.type_id, layouts);
-                if (bytes != 0) {
+                if (a64_scalar_width(ref program, inst.type_id) != 0) { scalar_results = true; }
+                if (bytes != 0 && (a64_scalar_width(ref program, inst.type_id) == 0 || pinned.lookup(UInt32(inst.result)))) {
                     let alignment = a64_stack_value_alignment(inst.type_id, layouts, bytes);
                     let offset = -1;
                     if (pinned.lookup(UInt32(inst.result))) {
@@ -319,8 +320,19 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
         i++;
     }
 
+    // scalar homes are claimed on eviction, keep enough space for live values
+    // at calls and the temporary needed before an instruction releases its inputs.
+    let spill_count = a64_spill_capacity(ref program, function.blocks, ref uses, 7);
+    if scalar_results { spill_count += 3; }
+    let spills: Vector(Int) = [];
+    for (let s = 0; s < spill_count; s++) {
+        let offset = stack_reserve(ref pool, 8, 8);
+        if (offset < 0) { return a64_stack_error("AArch64 spill area is too large"); }
+        spills.append(offset);
+    }
+
     if (pool.size > 2147483632) { return a64_stack_error("AArch64 stack frame is too large"); }
     let range = a64_function_value_range(ref program, function.blocks);
     return A64StackLayout(storage=a64_stack_index(storage, range), homes=a64_stack_index(homes, range),
-        frame_size=a64_align(pool.size, 16), result_pointer_offset=result_pointer_offset, edge_scratch=scratch, message="");
+        frame_size=a64_align(pool.size, 16), result_pointer_offset=result_pointer_offset, edge_scratch=scratch, spills=spills, message="");
 }

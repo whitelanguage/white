@@ -272,8 +272,9 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
     let offsets: Vector(Int) = [];
     let sizes: Vector(Int) = [];
     let sparse: Dict(UInt32, Int) = null;
+    let count = stack_index_count(range.count, slots.length());
     let i = 0;
-    while (i < range.count) {
+    while (i < count) {
         offsets.append(0);
         sizes.append(0);
         i++;
@@ -282,7 +283,7 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
     while (i < slots.length()) {
         let index: Int = wir_id_index(UInt32(slots[i].value));
         let local: Int = index - range.base;
-        if (local < 0 || local >= range.count) {
+        if (local < 0 || local >= count) {
             local = offsets.length();
             if (sparse is null) { sparse = Dict(); }
             let previous = sparse.lookup(UInt32(slots[i].value));
@@ -297,7 +298,7 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
         sizes[local] = slots[i].size;
         i++;
     }
-    return X86StackIndex(base=range.base, dense_count=range.count, sparse=sparse, offsets=offsets, sizes=sizes);
+    return X86StackIndex(base=range.base, dense_count=count, sparse=sparse, offsets=offsets, sizes=sizes);
 }
 
 func x86_stack_index_of(ref stack: X86StackIndex, value: WirValueID) -> Int {

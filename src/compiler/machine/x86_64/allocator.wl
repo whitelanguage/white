@@ -1,6 +1,7 @@
 // src/compiler/machine/x86_64/allocator.wl
 import * from "model.wl"
 import * from "../allocator.wl"
+import * from "../spill.wl"
 import * from "../../wir/model.wl"
 
 
@@ -743,204 +744,48 @@ func x86_reset_spills(ref plan: X86SpillPlan) -> Void {
     plan.free_count = plan.free.length();
 }
 
-func x86_mark_live_interval(ref before_changes: Vector(Int), ref after_changes: Vector(Int), start: Int, last: Int) -> Void {
-    if (start >= last) {
-        return;
-    }
-
-    if (start + 1 <= last) {
-        before_changes[start + 1] = before_changes[start + 1] + 1;
-        before_changes[last + 1] = before_changes[last + 1] - 1;
-    }
-
-    after_changes[start] = after_changes[start] + 1;
-    after_changes[last] = after_changes[last] - 1;
-}
-
 func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref uses: X86UseTable, register_count: Int) -> Int {
-// turn every value lifetime into +1/-1 events. The largest prefix sum is the
-// number of simultaneous spill homes, so frame space does not grow with the
-// total number of values in a function.
-    let instruction_count = 0;
-    let block_index = 0;
-
-    while (block_index < order.length()) {
-        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
-        instruction_count += block.instructions.length();
-        block_index++;
-    }
-
-    if (instruction_count == 0) {
-        return 0;
-    }
-
-    let before_changes: Vector(Int) = [];
-    let after_changes: Vector(Int) = [];
-    let call_changes: Vector(Int) = [];
-    let i = 0;
-
-    while (i <= instruction_count) {
-        before_changes.append(0);
-        after_changes.append(0);
-        call_changes.append(0);
-        i++;
-    }
-
-    let function_id: WirFuncID = program.arena.blocks[wir_id_index(UInt32(order[0]))].function;
-    let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
-    i = 0;
-    while (i < function.parameters.length()) {
-        let value_index: Int = x86_use_index(ref uses, function.parameters[i]);
-
-        if (value_index >= 0 && value_index < uses.queues.length() && !machine_rematerializable(ref program, function.parameters[i])) {
-            let queue: X86UseQueue = uses.queues[value_index];
-
+    if (order.length() == 0) { return 0; }
+    let intervals: Vector(MachineLiveInterval) = [];
+    let function = program.arena.functions[wir_id_index(UInt32(program.arena.blocks[wir_id_index(UInt32(order[0]))].function))];
+    for (let p = 0; p < function.parameters.length(); p++) {
+        let value = function.parameters[p];
+        let index = x86_use_index(ref uses, value);
+        if (index >= 0 && !machine_rematerializable(ref program, value)) {
+            let queue = uses.queues[index];
             if (queue.positions.length() != 0) {
-                let last: Int = queue.positions[queue.positions.length() - 1];
-                x86_mark_live_interval(ref before_changes, ref after_changes, 0, last);
-                call_changes[0] = call_changes[0] + 1;
-                call_changes[last + 1] = call_changes[last + 1] - 1;
+                intervals.append(MachineLiveInterval(start=0, last=queue.positions[queue.positions.length() - 1], input=true));
             }
         }
-
-        i++;
     }
 
     let position = 0;
-    block_index = 0;
-    while (block_index < order.length()) {
-        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
-        let block_start: Int = position;
-        i = 0;
-        while (i < block.parameters.length()) {
-            let value_index: Int = x86_use_index(ref uses, block.parameters[i]);
-
-            if (value_index >= 0 && value_index < uses.queues.length() && !machine_rematerializable(ref program, block.parameters[i])) {
-                let queue: X86UseQueue = uses.queues[value_index];
-
+    for (let b = 0; b < order.length(); b++) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[b]))];
+        for (let p2 = 0; p2 < block.parameters.length(); p2++) {
+            let value = block.parameters[p2];
+            let index = x86_use_index(ref uses, value);
+            if (index >= 0 && !machine_rematerializable(ref program, value)) {
+                let queue = uses.queues[index];
                 if (queue.positions.length() != 0) {
-                    let last: Int = queue.positions[queue.positions.length() - 1];
-                    x86_mark_live_interval(ref before_changes, ref after_changes, block_start, last);
-                    call_changes[block_start] = call_changes[block_start] + 1;
-                    call_changes[last + 1] = call_changes[last + 1] - 1;
+                    intervals.append(MachineLiveInterval(start=position, last=queue.positions[queue.positions.length() - 1], input=true));
                 }
             }
-
-            i++;
         }
-
-        let instruction_index = 0;
-
-        while (instruction_index < block.instructions.length()) {
-            let instruction: WirInstruction = program.arena.instructions[
-                wir_id_index(UInt32(block.instructions[instruction_index]))
-            ];
-
-            // count SSA results, not an opcode whitelist that can miss new conversions
-            if (instruction.result != NO_WIR_VALUE && !machine_rematerializable(ref program, instruction.result)) {
-                let value_index: Int = x86_use_index(ref uses, instruction.result);
-
-                if (value_index >= 0 && value_index < uses.queues.length()) {
-                    let queue: X86UseQueue = uses.queues[value_index];
-
-                    if (queue.positions.length() != 0) {
-                        let last: Int = queue.positions[queue.positions.length() - 1];
-                        x86_mark_live_interval(ref before_changes, ref after_changes, position, last);
-                        if (position < last) {
-                            call_changes[position + 1] = call_changes[position + 1] + 1;
-                            call_changes[last + 1] = call_changes[last + 1] - 1;
-                        }
-                    }
+        for (let j = 0; j < block.instructions.length(); j++) {
+            let inst = program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
+            let index = x86_use_index(ref uses, inst.result);
+            if (inst.result != NO_WIR_VALUE && index >= 0 && !machine_rematerializable(ref program, inst.result)) {
+                let queue = uses.queues[index];
+                if (queue.positions.length() != 0) {
+                    intervals.append(MachineLiveInterval(start=position, last=queue.positions[queue.positions.length() - 1], input=false));
                 }
             }
             position++;
-            instruction_index++;
         }
-        block_index++;
     }
 
-    let before = 0;
-    let after = 0;
-    let peak = 0;
-    let live_before_call = 0;
-    let call_peak = 0;
-    let scan_position = 0;
-    block_index = 0;
-    i = 0;
-    while (i < instruction_count) {
-        before += before_changes[i];
-        after += after_changes[i];
-        live_before_call += call_changes[i];
-        if (before > peak) { peak = before; }
-        if (after > peak) { peak = after; }
-        while (block_index < order.length()) {
-            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
-
-            if (i < scan_position + block.instructions.length()) {
-                let instruction: WirInstruction = program.arena.instructions[
-                    wir_id_index(UInt32(block.instructions[i - scan_position]))
-                ];
-                let saves_register_bank: Bool = instruction.opcode == WirOpcode.Call || instruction.opcode == WirOpcode.Retain ||
-                                                instruction.opcode == WirOpcode.Release ||
-                                                (instruction.opcode == WirOpcode.AtomicRmw &&
-                                                (instruction.atomic_op == WirAtomicOp.BitAnd || instruction.atomic_op == WirAtomicOp.BitOr ||
-                                                instruction.atomic_op == WirAtomicOp.BitXor));
-                if (saves_register_bank && live_before_call > call_peak) {
-                    call_peak = live_before_call;
-                }
-
-                // memory operations and edge staging need a temporary before their inputs die
-                let temporary = instruction.opcode == WirOpcode.Store || instruction.opcode == WirOpcode.Load ||
-                                instruction.opcode == WirOpcode.StructValue || instruction.opcode == WirOpcode.ArrayValue ||
-                                instruction.opcode == WirOpcode.Field || instruction.opcode == WirOpcode.Index;
-                let edge_index = 0;
-
-                while (!temporary && edge_index < instruction.edges.length()) {
-                    temporary = instruction.edges[edge_index].arguments.length() != 0;
-                    edge_index++;
-                }
-
-                if (temporary && before + 1 > peak) { peak = before + 1; }
-                if (instruction.opcode == WirOpcode.IndexAddress || instruction.opcode == WirOpcode.FieldAddress) {
-                    // LEA keeps its inputs alive while claiming a separate destination
-                    let extra = 1;
-                    let inputs = 1;
-
-                    if (instruction.opcode == WirOpcode.IndexAddress) {
-                        inputs = instruction.operands.length();
-                    }
-
-                    let operand_index = 0;
-
-                    while (operand_index < inputs) {
-                        if (machine_rematerializable(ref program, instruction.operands[operand_index])) {
-                            extra++;
-                        }
-                        operand_index++;
-                    }
-
-                    if (before + extra > peak) { peak = before + extra; }
-                }
-
-                break;
-            }
-            scan_position += block.instructions.length();
-            block_index++;
-        }
-        i++;
-    }
-
-    let required = 0;
-
-    if (peak > register_count) {
-        required = peak - register_count;
-        // next-use eviction can briefly keep the old value while claiming the result register
-        required++;
-    }
-
-    if (call_peak > required) { required = call_peak; }
-
-    return required;
+    return machine_spill_capacity(ref program, order, intervals, register_count);
 }
 
 func x86_choose_register(ref program: WirModule, ref plan: X86RegisterPlan, position: Int) -> X86RegisterChoice {

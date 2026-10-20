@@ -37,6 +37,12 @@ func main() -> Int {
         return 1;
     }
     let data: Vector(Byte) = [];
+    let call_code = X86CodeSection(name=".text", bytes=[Byte(232), Byte(0), Byte(0), Byte(0), Byte(0), Byte(195)], alignment=16, executable=true, writable=false);
+    coff_object(X86Object(sections=[call_code], symbols=[symbol], relocations=[
+        X86Relocation(section=".text", offset=1U, kind=X86RelocationKind.Call32, symbol="main", addend=0L)
+    ]))?;
+    catch(err) { print("FAIL: COFF call relocation was rejected"); return 1; }
+
     let relocations: Vector(X86Relocation) = [];
     let i: Int = 0;
     while (i < 65536) {

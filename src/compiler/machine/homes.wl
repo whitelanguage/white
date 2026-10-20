@@ -5,6 +5,14 @@ struct StackRegion(offset: Int, size: Int, alignment: Int, next: Int)
 struct StackHomes(size: Int, regions: Vector(StackRegion), free: Dict(UInt64, Int), ends: Vector(Int))
 
 
+func stack_index_count(count: Int, slots: Int) -> Int {
+// interleaved function construction can leave large gaps in arena IDs
+    if (count > 256 && count / 4 > slots) {
+        return 0;
+    }
+    return count;
+}
+
 func stack_home_key(size: Int, alignment: Int) -> UInt64 {
     return (UInt64(UInt32(size)) << 32UL) | UInt64(UInt32(alignment));
 }

@@ -2,9 +2,11 @@
 import * from "model.wl"
 import * from "../object.wl"
 import elf64_object from "../elf.wl"
+import machine_split_text from "../sections.wl"
 
 
 func x86_elf_reloc_type(kind: X86RelocationKind, external_call: Bool) -> UInt32 {
+    if (kind == X86RelocationKind.Call32) { return 4U; }
     if (kind == X86RelocationKind.Abs64) { return 1U; }
     if (kind == X86RelocationKind.Rel32) {
         if external_call { return 4U; }
@@ -20,20 +22,15 @@ func x86_elf_relocations(
     symbols: Vector(X86Symbol)
 ) -> Vector(MachineRelocation)? {
     let result: Vector(MachineRelocation) = [];
+    let undefined: Dict(String, Bool) = Dict();
+    for (let s = 0; s < symbols.length(); s++) {
+        if (symbols[s].section.length() == 0) { undefined.put(symbols[s].name, true); }
+    }
     let i: Int = 0;
 
     while (i < relocations.length()) {
         let source: X86Relocation = relocations[i];
-        let external_call: Bool = false;
-        let symbol_index: Int = 0;
-
-        while (symbol_index < symbols.length()) {
-            if (symbols[symbol_index].name == source.symbol) {
-                external_call = source.kind == X86RelocationKind.Rel32 && symbols[symbol_index].section.length() == 0;
-                break;
-            }
-            symbol_index++;
-        }
+        let external_call = source.kind == X86RelocationKind.Rel32 && undefined.lookup(source.symbol);
 
         let kind: UInt32 = x86_elf_reloc_type(source.kind, external_call);
         if (kind == 0U) { throw Error.InvalidArgument; }
@@ -41,7 +38,7 @@ func x86_elf_relocations(
         // ELF measures PC-relative x86 relocations from the immediate field.
         // Execution resumes four bytes later, therefore the RELA addend is -4.
         let addend: Long = source.addend;
-        if (source.kind == X86RelocationKind.Rel32) { addend -= 4L; }
+        if (source.kind == X86RelocationKind.Rel32 || source.kind == X86RelocationKind.Call32) { addend -= 4L; }
         result.append(MachineRelocation(section=source.section, offset=source.offset, kind=kind, symbol=source.symbol, addend=addend));
         i++;
     }
@@ -116,5 +113,6 @@ func elf_object(input: X86Object) -> Vector(Byte)? {
     }
 
     let relocations: Vector(MachineRelocation) = x86_elf_relocations(input.relocations, input.symbols)?;
-    return elf64_object(MachineObject(machine=62U, sections=sections, symbols=symbols, relocations=relocations))?;
+    let split = machine_split_text(MachineObject(machine=62U, sections=sections, symbols=symbols, relocations=relocations))?;
+    return elf64_object(split)?;
 }

@@ -10,6 +10,14 @@ import * from "stack.wl"
 import * from "types.wl"
 
 
+func a64_value_home(homes: A64StackIndex, ref values: A64ValueMap, value: WirValueID, bytes: Int, claim: Bool) -> A64StackSlot {
+    let home = a64_find_stack_slot(homes, value);
+    if (home.value != NO_WIR_VALUE) { return home; }
+    let slot = a64_spill_index(ref values, value, claim);
+    if (slot < 0) { return home; }
+    return A64StackSlot(value=value, offset=values.spills[slot].offset, size=bytes);
+}
+
 func a64_spill_binding(
     ref program: WirModule,
     homes: A64StackIndex,
@@ -17,9 +25,8 @@ func a64_spill_binding(
     ref output: A64CodeBuffer,
     index: Int
 ) -> Bool {
-// Values get a stack home during frame layout, but writing every result there
-// defeats the register cache. A dirty binding reaches its home only when the
-// register is needed for something else or control leaves the current block.
+// dirty bindings reach memory only on eviction or a control-flow boundary
+    // live-outs have fixed homes, local scalars claim a reusable spill slot here.
     if (index < 0 || index >= values.bindings.length()) {
         return false;
     }
@@ -29,13 +36,13 @@ func a64_spill_binding(
         return true;
     }
 
-    let home: A64StackSlot = a64_find_stack_slot(homes, binding.value);
     let value_index: Int = wir_id_index(UInt32(binding.value));
-    if (home.value == NO_WIR_VALUE || value_index < 0 || value_index >= program.arena.values.length()) {
+    if (value_index < 0 || value_index >= program.arena.values.length()) {
         return false;
     }
 
     if (binding.wide) {
+        let home = a64_find_stack_slot(homes, binding.value);
         let pair: A64RegisterPair = a64_mapped_register_pair(ref values, binding.value);
         if (home.size != 16 || pair.low == A64Register.None || pair.high == A64Register.None ||
             !a64_store_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) ||
@@ -67,6 +74,7 @@ func a64_spill_binding(
 
     let type_id: WirTypeID = program.arena.values[value_index].type_id;
     let width: Int = a64_scalar_width(ref program, type_id);
+    let home = a64_value_home(homes, ref values, binding.value, width / 8, true);
     if (width == 0 || home.size != width / 8) {
         return false;
     }
@@ -282,7 +290,7 @@ func a64_materialize(
 
     let floating: Bool = a64_scalar_float(ref program, value.type_id);
     let width: Int = a64_scalar_width(ref program, value.type_id);
-    let home: A64StackSlot = a64_find_stack_slot(homes, value_id);
+    let home: A64StackSlot = a64_value_home(homes, ref values, value_id, width / 8, false);
     if (home.value != NO_WIR_VALUE) {
         let register: A64Register = a64_alloc_register(ref program, homes, ref values, ref output, floating);
         let loaded: Bool = false;
@@ -560,12 +568,13 @@ func a64_save_pair(
 }
 
 func a64_save_home(ref values: A64ValueMap, ref output: A64CodeBuffer, homes: A64StackIndex, value: WirValueID, register: A64Register, width: Int) -> Bool {
-    let home: A64StackSlot = a64_find_stack_slot(homes, value);
-    if (home.value == NO_WIR_VALUE || width == 0 || home.size != width / 8) { return false; }
+    if (width == 0 || register == A64Register.None) { return false; }
 
     // ABI registers are outside the allocator bank and cannot carry a dirty
     // binding. Save those immediately, ordinary temporaries stay lazy.
     if (a64_binding_index(ref values, register) < 0) {
+        let home = a64_value_home(homes, ref values, value, width / 8, true);
+        if (home.value == NO_WIR_VALUE || home.size != width / 8) { return false; }
         if (a64_vec_code(register) >= 0) {
             return a64_store_float_at(ref output, register, A64Register.SP, home.offset, width == 64);
         }

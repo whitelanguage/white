@@ -12,6 +12,7 @@ import MachineSection, MachineSymbol from "../object.wl"
 import MachineDataResult, MachineDataRelocation, machine_emit_globals from "../data.wl"
 import * from "lowering.wl"
 import machine_lower_remainders from "../remainder.wl"
+import machine_layout_valid from "../layout.wl"
 
 
 func a64_module_error(message: String) -> A64ModuleResult {
@@ -20,7 +21,7 @@ func a64_module_error(message: String) -> A64ModuleResult {
 
 func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
 // legalization finishes the type table before functions share its layouts
-    if (program.target != "aarch64-unknown-linux-gnu" || program.pointer_bits != 64) {
+    if (program.target != "aarch64-unknown-linux-gnu" || !machine_layout_valid(program)) {
         return a64_module_error("the AArch64 machine backend does not support this target");
     }
     let rem_error = machine_lower_remainders(ref program);

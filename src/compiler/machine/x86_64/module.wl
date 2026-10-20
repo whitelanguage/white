@@ -13,6 +13,7 @@ import * from "lowering.wl"
 import * from "types.wl"
 import * from "values.wl"
 import machine_lower_remainders from "../remainder.wl"
+import machine_layout_valid from "../layout.wl"
 
 
 func x86_module_error(message: String) -> X86ModuleResult {
@@ -64,9 +65,10 @@ func x86_patch_calls(ref program: WirModule, ref output: X86CodeBuffer, codes: V
 }
 
 func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86ModuleResult {
+// required legalization runs here before functions share the final type layouts
     let is_windows: Bool = program.target == "x86_64-pc-windows-msvc";
     let is_linux: Bool = program.target == "x86_64-unknown-linux-gnu";
-    if ((!is_windows && !is_linux) || program.pointer_bits != 64 || !program.data_layout.valid || program.data_layout.pointer_bits != 64) {
+    if ((!is_windows && !is_linux) || !machine_layout_valid(program)) {
         return x86_module_error("the x86_64 machine backend does not support this target");
     }
     x86_set_sysv_abi(is_linux);
@@ -129,8 +131,10 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
             }
 
             let target: WirFunction = program.arena.functions[target_index];
-            if (target.linkage == WirLinkage.External) {
-                relocations.append(X86Relocation(section=".text", offset=UInt32(code.offset + call.offset), kind=X86RelocationKind.Rel32, symbol=target.name, addend=0L));
+            if (is_linux || target.linkage == WirLinkage.External) {
+                let kind = X86RelocationKind.Rel32;
+                if is_linux { kind = X86RelocationKind.Call32; }
+                relocations.append(X86Relocation(section=".text", offset=UInt32(code.offset + call.offset), kind=kind, symbol=target.name, addend=0L));
             }
             call_index++;
         }
@@ -164,7 +168,7 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
 
         function_index++;
     }
-    if (!x86_patch_calls(ref program, ref output, codes)) {
+    if (!is_linux && !x86_patch_calls(ref program, ref output, codes)) {
         return x86_module_error("the x86_64 lowering could not resolve a direct call target");
     }
     let object: X86Object = X86Object(sections=[X86CodeSection(name=".text", bytes=output.bytes, alignment=16, executable=true, writable=false)], symbols=symbols, relocations=relocations);

@@ -46,7 +46,13 @@ func main() -> Int {
         i++;
     }
 
-    if (a64_add_immediate(ref code, A64Register.X0, A64Register.X1, 4096, true) ||
+    if (!a64_add_immediate(ref code, A64Register.X0, A64Register.X1, 4096, true) ||
+        read_u32(code.bytes, expected.length() * 4) != 0x91400420U) {
+        print("FAIL: shifted ADD immediate was not encoded");
+        return 1;
+    }
+
+    if (a64_add_immediate(ref code, A64Register.X0, A64Register.X1, 4097, true) ||
         a64_branch(ref code, 2, false) ||
         a64_mov_register(ref code, A64Register.SP, A64Register.X0, true)) {
         print("FAIL: an invalid AArch64 encoding was accepted");
@@ -54,7 +60,7 @@ func main() -> Int {
     }
 
     if (!a64_branch_symbol(ref code, "puts", true) || code.relocations.length() != 1 ||
-        code.relocations[0].kind != A64RelocationKind.Call26 || code.relocations[0].offset != UInt32(expected.length() * 4)) {
+        code.relocations[0].kind != A64RelocationKind.Call26 || code.relocations[0].offset != UInt32((expected.length() + 1) * 4)) {
         print("FAIL: call relocation was not recorded");
         return 1;
     }

@@ -88,7 +88,8 @@ enum X86Opcode {
 enum X86RelocationKind {
     None,
     Rel32,
-    Abs64
+    Abs64,
+    Call32
 }
 
 // these records are encoder input, not another IR. WIR should not know which

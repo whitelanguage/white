@@ -85,7 +85,7 @@ func main() -> Int {
     let layouts = wir_type_layouts(program);
     let stack = a64_stack_layout(ref program, ref current, layouts);
     if (stack.message.length() != 0 || stack.frame_size > 64 || stack.frame_size % 16 != 0 ||
-        stack.homes.slots.length() != 512) {
+        stack.homes.slots.length() != 256) {
         print("FAIL: short-lived AArch64 homes were not reused, frame ", stack.frame_size);
         return 1;
     }

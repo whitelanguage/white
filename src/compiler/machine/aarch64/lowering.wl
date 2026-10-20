@@ -13,6 +13,7 @@ import * from "stack.wl"
 import * from "types.wl"
 import * from "values.wl"
 import * from "wide.wl"
+import machine_layout_valid from "../layout.wl"
 
 
 func a64_lowering_error(message: String) -> A64LoweringResult {
@@ -96,11 +97,12 @@ func a64_emit_atomic_rmw(
 }
 
 func a64_lower_function(ref program: WirModule, function_id: WirFuncID) -> A64LoweringResult {
+// standalone callers supply legalized WIR, module lowering inserts required helpers first
     return a64_lower_function_with_layouts(ref program, function_id, wir_type_layouts(program));
 }
 
 func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFuncID, layouts: Vector(WirTypeLayout)) -> A64LoweringResult {
-    if (program.target != "aarch64-unknown-linux-gnu" || program.pointer_bits != 64) {
+    if (program.target != "aarch64-unknown-linux-gnu" || !machine_layout_valid(program)) {
         return a64_lowering_error("the AArch64 backend does not support this target");
     }
 
@@ -120,6 +122,12 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
     let fixups: Vector(A64BranchFixup) = [];
     let stack: A64StackLayout = a64_stack_layout_with_uses(ref program, ref function, layouts, values.uses);
     if (stack.message.length() != 0) { return a64_lowering_error(stack.message); }
+
+    for (let s = 0; s < stack.spills.length(); s++) {
+        values.spills.append(A64SpillSlot(value=NO_WIR_VALUE, offset=stack.spills[s]));
+        values.free_spills.append(stack.spills.length() - s - 1);
+    }
+    values.free_count = values.free_spills.length();
 
     let has_call: Bool = false;
     let i: Int = 0;
@@ -168,9 +176,9 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 let incoming_offset: Int = stack.frame_size + 16 + location.offset;
                 let copied: Bool = false;
                 if (location.indirect) {
-                    copied = a64_load_integer_at(ref output, A64Register.X16, A64Register.SP, incoming_offset, 64) &&
+                    copied = a64_load_integer_at(ref output, A64Register.X10, A64Register.SP, incoming_offset, 64) &&
                              a64_zero_memory(ref output, A64Register.SP, home.offset, home.size) &&
-                             a64_copy_memory(ref output, A64Register.SP, home.offset, A64Register.X16, 0, Int(layout.size), A64Register.X9);
+                             a64_copy_memory(ref output, A64Register.SP, home.offset, A64Register.X10, 0, Int(layout.size), A64Register.X9);
                 } else {
                     copied = a64_zero_memory(ref output, A64Register.SP, home.offset, home.size) &&
                              a64_copy_memory(ref output, A64Register.SP, home.offset, A64Register.SP, incoming_offset, Int(layout.size), A64Register.X9);
@@ -224,7 +232,8 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 pair.high = a64_argument_register(location.first + 1, false);
                 loaded = pair.low != A64Register.None && pair.high != A64Register.None;
             }
-            if (!loaded || !a64_save_pair(ref values, ref output, stack.homes, parameter, pair)) {
+            if (!loaded || !a64_store_integer_at(ref output, pair.low, A64Register.SP, home.offset, 64) ||
+                !a64_store_integer_at(ref output, pair.high, A64Register.SP, home.offset + 8, 64)) {
                 return a64_lowering_error("cannot save an AArch64 128-bit argument pair");
             }
 
@@ -253,9 +262,18 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
         } else {
             incoming = a64_argument_register(location.first, floating);
         }
-        if (incoming == A64Register.None || !a64_save_home(ref values, ref output, stack.homes, parameter, incoming, width)) {
+        // later indirect parameters use X9/X10 while copying their incoming data,
+        // finish homing stack scalars before those scratch registers are touched.
+        let saved = false;
+        if floating {
+            saved = a64_store_float_at(ref output, incoming, A64Register.SP, home.offset, width == 64);
+        } else {
+            saved = a64_store_integer_at(ref output, incoming, A64Register.SP, home.offset, width);
+        }
+        if (incoming == A64Register.None || !saved) {
             return a64_lowering_error("cannot save an AArch64 argument register");
         }
+        a64_clobber_register(ref values, incoming);
         i++;
     }
 

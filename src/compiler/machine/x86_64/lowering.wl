@@ -15,6 +15,7 @@ import * from "stack.wl"
 import * from "types.wl"
 import * from "values.wl"
 import * from "wide.wl"
+import machine_layout_valid from "../layout.wl"
 
 
 func x86_lowering_error(message: String) -> X86LoweringResult {
@@ -2041,6 +2042,7 @@ func x86_lower_instruction(ref program: WirModule,
 }
 
 func x86_lower_function(ref program: WirModule, function_id: WirFuncID) -> X86LoweringResult {
+// standalone callers supply legalized WIR, module lowering inserts required helpers first
     return x86_lower_function_with_layouts(
         ref program,
         function_id,
@@ -2063,7 +2065,7 @@ func x86_lower_function_with_layouts(
 ) -> X86LoweringResult {
     let is_windows: Bool = program.target == "x86_64-pc-windows-msvc";
     let is_linux: Bool = program.target == "x86_64-unknown-linux-gnu";
-    if ((!is_windows && !is_linux) || program.pointer_bits != 64 || !program.data_layout.valid || program.data_layout.pointer_bits != 64) {
+    if ((!is_windows && !is_linux) || !machine_layout_valid(program)) {
         return x86_lowering_error("the x86_64 machine backend does not support this target");
     }
     let function_index: Int = wir_id_index(UInt32(function_id));

@@ -1,6 +1,7 @@
 // src/compiler/machine/aarch64/allocator.wl
 import * from "model.wl"
 import * from "../allocator.wl"
+import * from "../spill.wl"
 import * from "../../wir/model.wl"
 
 
@@ -21,13 +22,92 @@ struct A64RegisterPair(low: A64Register, high: A64Register)
 
 struct A64RegisterBinding(register: A64Register, value: WirValueID, held: Bool, dirty: Bool, wide: Bool)
 
+struct A64SpillSlot(value: WirValueID, offset: Int)
+
 struct A64ValueMap(
     registers: Vector(A64Register),
     wide_high: Vector(A64Register),
     bindings: Vector(A64RegisterBinding),
     uses: A64UseTable,
+    spill_indices: Vector(Int),
+    spills: Vector(A64SpillSlot),
+    free_spills: Vector(Int),
+    free_count: Int,
     position: Int
 )
+
+func a64_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref uses: A64UseTable, register_count: Int) -> Int {
+    if (order.length() == 0) { return 0; }
+    let intervals: Vector(MachineLiveInterval) = [];
+    let function = program.arena.functions[wir_id_index(UInt32(program.arena.blocks[wir_id_index(UInt32(order[0]))].function))];
+    for (let p = 0; p < function.parameters.length(); p++) {
+        let value = function.parameters[p];
+        let index = a64_use_index(ref uses, value);
+        if (index >= 0 && !machine_rematerializable(ref program, value)) {
+            let queue = uses.queues[index];
+            if (queue.positions.length() != 0) {
+                intervals.append(MachineLiveInterval(start=0, last=queue.positions[queue.positions.length() - 1], input=true));
+            }
+        }
+    }
+
+    let position = 0;
+    for (let b = 0; b < order.length(); b++) {
+        let block = program.arena.blocks[wir_id_index(UInt32(order[b]))];
+        for (let p2 = 0; p2 < block.parameters.length(); p2++) {
+            let value = block.parameters[p2];
+            let index = a64_use_index(ref uses, value);
+            if (index >= 0 && !machine_rematerializable(ref program, value)) {
+                let queue = uses.queues[index];
+                if (queue.positions.length() != 0) {
+                    intervals.append(MachineLiveInterval(start=position, last=queue.positions[queue.positions.length() - 1], input=true));
+                }
+            }
+        }
+        for (let j = 0; j < block.instructions.length(); j++) {
+            let inst = program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
+            let index = a64_use_index(ref uses, inst.result);
+            if (inst.result != NO_WIR_VALUE && index >= 0 && !machine_rematerializable(ref program, inst.result)) {
+                let queue = uses.queues[index];
+                if (queue.positions.length() != 0) {
+                    intervals.append(MachineLiveInterval(start=position, last=queue.positions[queue.positions.length() - 1], input=false));
+                }
+            }
+            position++;
+        }
+    }
+
+    return machine_spill_capacity(ref program, order, intervals, register_count);
+}
+
+func a64_spill_index(ref values: A64ValueMap, value: WirValueID, claim: Bool) -> Int {
+// fixed live-outs never enter this pool, block-local spills are released at their last use
+    let index = a64_use_index(ref values.uses, value);
+    if (index < 0 || index >= values.spill_indices.length()) { return -1; }
+    let slot = values.spill_indices[index] - 1;
+    if (slot >= 0 || !claim) { return slot; }
+    if (values.free_count == 0) { return -1; }
+
+    values.free_count--;
+    slot = values.free_spills[values.free_count];
+    let home = values.spills[slot];
+    home.value = value;
+    values.spills[slot] = home;
+    values.spill_indices[index] = slot + 1;
+    return slot;
+}
+
+func a64_expire_spill(ref values: A64ValueMap, value: WirValueID) -> Void {
+    let slot = a64_spill_index(ref values, value, false);
+    if (slot < 0 || a64_next_use(ref values.uses, value, values.position) != A64_NO_NEXT_USE) { return; }
+    let index = a64_use_index(ref values.uses, value);
+    let home = values.spills[slot];
+    home.value = NO_WIR_VALUE;
+    values.spills[slot] = home;
+    values.spill_indices[index] = 0;
+    values.free_spills[values.free_count] = slot;
+    values.free_count++;
+}
 
 func a64_include_value(value: WirValueID, ref first: Int, ref last: Int) -> Void {
     let index: Int = wir_id_index(UInt32(value));
@@ -329,6 +409,7 @@ func a64_finish_instruction(ref values: A64ValueMap, instruction: WirInstruction
 
     while (i < instruction.operands.length()) {
         a64_consume_use(ref values.uses, instruction.operands[i], values.position);
+        a64_expire_spill(ref values, instruction.operands[i]);
         i++;
     }
 
@@ -338,6 +419,7 @@ func a64_finish_instruction(ref values: A64ValueMap, instruction: WirInstruction
 
         while (j < instruction.edges[i].arguments.length()) {
             a64_consume_use(ref values.uses, instruction.edges[i].arguments[j], values.position);
+            a64_expire_spill(ref values, instruction.edges[i].arguments[j]);
             j++;
         }
         i++;
@@ -354,6 +436,7 @@ func a64_finish_instruction(ref values: A64ValueMap, instruction: WirInstruction
         i++;
     }
 
+    a64_expire_spill(ref values, instruction.result);
     values.position++;
 }
 
@@ -389,12 +472,14 @@ func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64
     let uses: A64UseTable = a64_collect_uses(ref program, order);
     let registers: Vector(A64Register) = [];
     let wide_high: Vector(A64Register) = [];
+    let spill_indices: Vector(Int) = [];
     let bindings: Vector(A64RegisterBinding) = [];
     let i: Int = 0;
 
     while (i < uses.queues.length()) {
         registers.append(A64Register.None);
         wide_high.append(A64Register.None);
+        spill_indices.append(0);
         i++;
     }
 
@@ -415,6 +500,10 @@ func a64_new_value_map(ref program: WirModule, order: Vector(WirBlockID)) -> A64
         wide_high=wide_high,
         bindings=bindings,
         uses=uses,
+        spill_indices=spill_indices,
+        spills=[],
+        free_spills=[],
+        free_count=0,
         position=0
     );
 }
