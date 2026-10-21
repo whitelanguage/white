@@ -244,10 +244,10 @@ func check_erased_struct_casts() -> Bool {
     let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=TYPE_VOID, entry=entry, block=entry, bindings=[], loops=[], error_targets=[], owned_values=[], errors=[], terminated=false, next_block=0);
     let record_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, record_type);
     let record: WirExpr = WirExpr(value=wir_const_zero(ref program, record_wir), source_type=record_type);
-    let erased: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, record, TYPE_GENERIC_STRUCT, true);
-    let restored: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, erased, record_type, false);
+    let erased: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, record, TYPE_GENERIC_STRUCT, true, cast_position());
+    let restored: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, erased, record_type, false, cast_position());
     if (restored.value == NO_WIR_VALUE) { return false; }
-    wir_cleanup_temporaries(ref state, ref source, ref program, 0);
+    wir_cleanup_temporaries(ref state, ref types, ref source, ref program, 0);
     wir_return(ref program, state.block, NO_WIR_VALUE, no_wir_location());
 
     if (types.errors.length() != 0 || state.errors.length() != 0) { return false; }

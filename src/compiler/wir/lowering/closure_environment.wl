@@ -113,7 +113,7 @@ func wir_closure_environment_drop(
         let capture: WirBinding = captures[i];
         if (wir_value_needs_drop(ref source, capture.source_type)) {
             let address: WirValueID = wir_field_address(ref program, state.block, environment, i + 2, "", no_wir_location());
-            wir_emit_ownership_slot(ref state, ref source, ref program, address, capture.source_type, false);
+            wir_emit_ownership_slot(ref state, ref types, ref source, ref program, address, capture.source_type, false);
         }
         i++;
     }
@@ -180,7 +180,7 @@ func wir_alloc_closure_environment(
         let capture: WirBinding = captures[i];
         let value: WirValueID = wir_load(ref program, state.block, capture.address, capture.name, no_wir_location());
         if (wir_value_needs_drop(ref source, capture.source_type)) {
-            wir_emit_ownership_value(ref state, ref source, ref program, value, capture.source_type, true);
+            wir_emit_ownership_value(ref state, ref types, ref source, ref program, value, capture.source_type, true);
         }
         let address: WirValueID = wir_field_address(ref program, state.block, environment, i + 2, "", no_wir_location());
         wir_store(ref program, state.block, value, address, no_wir_location());

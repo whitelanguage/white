@@ -3,6 +3,7 @@ import Dict from "dict"
 import * from "../../frontend/ast.wl"
 import * from "../../frontend/arena.wl"
 import * from "../context.wl"
+import * from "unions.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../validation.wl"
 import * from "dictionary.wl"
@@ -786,7 +787,46 @@ func emit_slice_copy(ref c: Compiler, elem_type: Int, source: String, start_i32:
     return emit_make_slice(ref c, elem_type, owner, data_slot, size_slot, "0", length);
 }
 
+func emit_union_ownership(ref c: Compiler, slot: String, type_id: Int, retain: Bool) -> Void {
+// the payload can contain stale pointers after reassignment, follow its tag only
+    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    let storage: String = get_llvm_type_str(ref c, type_id);
+    let tag_slot: String = next_reg(ref c);
+    let tag: String = next_reg(ref c);
+    c.output_file.write(c.indent + tag_slot + " = getelementptr inbounds " + storage + ", " + storage + "* " + slot + ", i32 0, i32 0\n");
+    c.output_file.write(c.indent + tag + " = load i32, i32* " + tag_slot + "\n");
+
+    let done: String = next_label(ref c);
+    let i: Int = 0;
+    while (i < union.members.length()) {
+        let member: Int = union.members[i];
+        if (needs_drop(ref c, member)) {
+            let active: String = next_label(ref c);
+            let next: String = next_label(ref c);
+            let matches: String = next_reg(ref c);
+            c.output_file.write(c.indent + matches + " = icmp eq i32 " + tag + ", " + i + "\n");
+            c.output_file.write(c.indent + "br i1 " + matches + ", label %" + active + ", label %" + next + "\n");
+            c.output_file.write("\n" + active + ":\n");
+
+            let payload: String = emit_union_payload(ref c, slot, type_id, member);
+            if retain { emit_retain_slot(ref c, payload, member); }
+            else { emit_drop_slot(ref c, payload, member); }
+
+            c.output_file.write(c.indent + "br label %" + done + "\n");
+            c.output_file.write("\n" + next + ":\n");
+        }
+        i++;
+    }
+    c.output_file.write(c.indent + "br label %" + done + "\n");
+    c.output_file.write("\n" + done + ":\n");
+}
+
 func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
+    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union.members is !null) {
+        if (needs_drop(ref c, type_id)) { emit_union_ownership(ref c, ptr_reg, type_id, false); }
+        return;
+    }
     if (is_fallible_type(ref c, type_id)) {
         let inner_type: Int = get_inner_fallible_type(ref c, type_id);
         if (!needs_drop(ref c, inner_type)) { return; }
@@ -853,6 +893,11 @@ func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
 }
 
 func emit_retain_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
+    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union.members is !null) {
+        if (needs_drop(ref c, type_id)) { emit_union_ownership(ref c, ptr_reg, type_id, true); }
+        return;
+    }
     if (is_fallible_type(ref c, type_id)) {
         let inner_type: Int = get_inner_fallible_type(ref c, type_id);
         if (!needs_drop(ref c, inner_type)) {

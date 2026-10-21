@@ -19,6 +19,7 @@ func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: 
         return false;
     }
     if (value_type == TYPE_NULL) {
+        if (union_member_index(ref c, target, TYPE_NULL) >= 0) { return true; }
         if (is_pointer_type(ref c, target)) {
             throw_type_error(pos, "'null' cannot be returned for explicit pointer types. Use 'nullptr'.");
             return false;

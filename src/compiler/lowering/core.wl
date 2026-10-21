@@ -19,6 +19,7 @@ import * from "../target_eval.wl"
 import * from "numeric.wl"
 import * from "../constants.wl"
 import * from "casts.wl"
+import * from "unions.wl"
 import * from "literals.wl"
 import * from "../validation.wl"
 import * from "../registration.wl"
@@ -186,6 +187,11 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     let var_name: String = node.name_tok.value;
 
     if (c.scope_depth == 0) {
+        let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, target_type_id));
+        if (union.members is !null) {
+            throw_type_error(node.pos, "Union global initializers are not implemented yet.");
+            return void_result();
+        }
         if reference_binding {
             throw_type_error(node.pos, "Reference bindings are only allowed for local variables.");
             return void_result();
@@ -2414,9 +2420,10 @@ func zero_value(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResul
     } else {
         let type_info: StructInfo = c.struct_id_map.lookup(type_id);
         let array_info: ArrayInfo = c.array_info_map.lookup(type_id);
+        let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
         if ((has_struct(type_info) && type_info.is_interface) ||
             (has_array_info(array_info) && array_info.size >= 0) ||
-            is_fallible_type(ref c, type_id) || is_value_struct(ref c, type_id)) {
+            is_fallible_type(ref c, type_id) || is_value_struct(ref c, type_id) || union.members is !null) {
             value = "zeroinitializer";
         }
     }
@@ -2453,8 +2460,10 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
             else {
                 let field_info: StructInfo = c.struct_id_map.lookup(f_curr.type);
                 let field_array: ArrayInfo = c.array_info_map.lookup(f_curr.type);
+                let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, f_curr.type));
                 if (is_fallible_type(ref c, f_curr.type) ||
                     is_value_struct(ref c, f_curr.type) ||
+                    union.members is !null ||
                     (has_struct(field_info) && field_info.is_interface) ||
                     (has_array_info(field_array) && field_array.size >= 0)) {
                     zero_val = "zeroinitializer";
@@ -5982,7 +5991,19 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
         return compile_extern_block(ref c, get_extern_block_node(ref c.arena, node));
     }
     if (base == NODE_VECTOR_LIT) {
-        return compile_vector_lit(ref c, get_vector_lit_node(ref c.arena, node));
+        let literal: VectorLitNode = get_vector_lit_node(ref c.arena, node);
+        let expected: Int = c.expected_type;
+        if (get_union_type(ref c, expected).members is !null) {
+            c.expected_type = union_vector_target(ref c, expected, node, literal.pos);
+            if (c.expected_type == TYPE_POISON) {
+                c.expected_type = expected;
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+            let result: CompileResult = compile_vector_lit(ref c, literal);
+            c.expected_type = expected;
+            return result;
+        }
+        return compile_vector_lit(ref c, literal);
     }
     if (base == NODE_INDEX_ACCESS) {
         return compile_index_access(ref c, get_index_access_node(ref c.arena, node), false);
@@ -6117,6 +6138,22 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let b_node: BinOpNode = get_binop_node(ref c.arena, node);
         let lhs_res: CompileResult = compile_node(ref c, b_node.left);
         let rhs_res: CompileResult = compile_node(ref c, b_node.right);
+
+        let left_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, lhs_res.type));
+        let right_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, rhs_res.type));
+        if (left_union.members is !null || right_union.members is !null) {
+            let result: CompileResult = CompileResult(reg="poison", type=TYPE_POISON);
+            if (left_union.members is !null && rhs_res.type == TYPE_NULL) {
+                result = emit_union_null_check(ref c, lhs_res, base == NODE_IS_NOT);
+            } else if (right_union.members is !null && lhs_res.type == TYPE_NULL) {
+                result = emit_union_null_check(ref c, rhs_res, base == NODE_IS_NOT);
+            } else {
+                throw_type_error(b_node.pos, "Union identity comparisons require a Null operand.");
+            }
+            emit_release_owned(ref c, lhs_res);
+            emit_release_owned(ref c, rhs_res);
+            return result;
+        }
 
         let l_reg: String = lhs_res.reg;
         let r_reg: String = rhs_res.reg;

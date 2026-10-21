@@ -1363,6 +1363,30 @@ func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> 
     return true;
 }
 
+func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Position) -> Int {
+// a single Vector arm supplies context for [], multiple arms need an exact match
+    let union: UnionInfo = get_union_type(ref c, target);
+    let candidate: Int = 0;
+    let count: Int = 0;
+    let i: Int = 0;
+    while (i < union.members.length()) {
+        let member: Int = union.members[i];
+        if (has_symbol(c.vector_base_map.lookup(member))) {
+            candidate = member;
+            count++;
+        }
+        i++;
+    }
+    if (count == 1) { return candidate; }
+
+    let inferred: Int = get_expr_type(ref c, node);
+    if (inferred != 0 && union_member_index(ref c, target, inferred) >= 0) {
+        return inferred;
+    }
+    throw_type_error(pos, "Cannot infer a Vector member for " + get_type_name(ref c, target) + ".");
+    return TYPE_POISON;
+}
+
 func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
 // the tag selects the live member, the payload reserves its size and alignment
     let union: UnionInfo = get_union_type(ref c, type_id);
@@ -1555,8 +1579,7 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
     }
     let union: UnionInfo = get_union_type(ref c, type_id);
     if (union.members is !null) {
-        throw_type_error(union.pos, "Union value lowering is not implemented yet.");
-        return "void";
+        return get_union_llvm_storage(ref c, type_id);
     }
     if (type_id == TYPE_NULL) { return "i8*"; }
     if (type_id == TYPE_INT) {
@@ -1992,6 +2015,17 @@ func needs_drop(ref c: Compiler, type_id: Int) -> Bool {
 }
 
 func type_needs_drop(ref c: Compiler, type_id: Int) -> Bool {
+    let repr: Int = get_repr_type(ref c, type_id);
+    if (repr != type_id) { return needs_drop(ref c, repr); }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            if (needs_drop(ref c, union.members[i])) { return true; }
+            i++;
+        }
+        return false;
+    }
     if (is_ref_type(ref c, type_id)) { return true; }
     if (is_fallible_type(ref c, type_id)) {
         return needs_drop(ref c, get_inner_fallible_type(ref c, type_id));
@@ -5806,7 +5840,7 @@ func analyze_captures(arena: AstArena, node: NodeID, scope: CaptureScope) -> Voi
             analyze_captures(arena, assign.value, scope);
         }
     }
-    else if (type == NODE_BINOP) {
+    else if (type == NODE_BINOP || type == NODE_IS || type == NODE_IS_NOT) {
         let binop: BinOpNode = get_binop_node(ref arena, node);
         analyze_captures(arena, binop.left, scope);
         analyze_captures(arena, binop.right, scope);

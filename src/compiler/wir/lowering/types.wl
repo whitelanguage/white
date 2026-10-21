@@ -244,8 +244,7 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
 
     let union: UnionInfo = get_union_type(ref source, source_type);
     if (union.members is !null) {
-        throw_type_error(union.pos, "Union value lowering is not implemented yet.");
-        return NO_WIR_TYPE;
+        return wir_cache_type(ref types, source_type, wir_union_storage(ref types, ref source, ref program, source_type));
     }
 
     let result: WirTypeID = NO_WIR_TYPE;

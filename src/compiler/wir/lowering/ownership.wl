@@ -3,6 +3,8 @@
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "state.wl"
+import * from "types.wl"
+import * from "unions.wl"
 import * from "../../context.wl"
 
 
@@ -57,7 +59,7 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
     return NO_WIR_VALUE;
 }
 
-func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int, retain: Bool) -> Void {
+func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int, retain: Bool) -> Void {
     if (!wir_value_needs_drop(ref source, source_type)) {
         return;
     }
@@ -70,13 +72,47 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
         wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [is_error], [wir_edge(end_block, []), wir_edge(payload_block, [])], no_wir_location());
         state.block = payload_block;
         let payload: WirValueID = wir_field(ref program, state.block, value, 2, "", no_wir_location());
-        wir_emit_ownership_value(ref state, ref source, ref program, payload, inner_type, retain);
+        wir_emit_ownership_value(ref state, ref types, ref source, ref program, payload, inner_type, retain);
         wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(end_block, [])], no_wir_location());
         state.block = end_block;
         return;
     }
 
     let repr: Int = get_repr_type(ref source, source_type);
+    let union: UnionInfo = get_union_type(ref source, repr);
+    if (union.members is !null) {
+        let storage: WirTypeID = wir_value_type(ref program, value);
+        let slot: WirValueID = wir_stack_alloc(ref program, state.entry, storage, "union.ownership", no_wir_location());
+        wir_store(ref program, state.block, value, slot, no_wir_location());
+        let tag: WirValueID = wir_field(ref program, state.block, value, 0, "", no_wir_location());
+        let tag_type: WirTypeID = wir_value_type(ref program, tag);
+        let done: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "union.ownership.end."), []);
+
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            let member: Int = union.members[i];
+            if (wir_value_needs_drop(ref source, member)) {
+                // only the selected arm owns a value, padding can contain old bits.
+                let active: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "union.ownership.member."), []);
+                let next: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "union.ownership.next."), []);
+                let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag,
+                    wir_const_int(ref program, tag_type, UInt128(UInt32(i))), "", no_wir_location());
+                wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [matches], [wir_edge(active, []), wir_edge(next, [])], no_wir_location());
+
+                state.block = active;
+                let payload: WirValueID = wir_union_payload(ref state, ref types, ref source, ref program, slot, member);
+                let member_value: WirValueID = wir_load(ref program, state.block, payload, "", no_wir_location());
+                wir_emit_ownership_value(ref state, ref types, ref source, ref program, member_value, member, retain);
+                wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [])], no_wir_location());
+
+                state.block = next;
+            }
+            i++;
+        }
+        wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [])], no_wir_location());
+        state.block = done;
+        return;
+    }
     let array: ArrayInfo = ArrayInfo();
     if (source.array_info_map is !null) { array = source.array_info_map.lookup(repr); }
     if (has_array_info(array) && array.size >= 0) {
@@ -85,7 +121,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
         while (i < array.size) {
             let index: WirValueID = wir_const_int(ref program, index_type, UInt128(UIntSize(i)));
             let element: WirValueID = wir_index(ref program, state.block, value, index, "", no_wir_location());
-            wir_emit_ownership_value(ref state, ref source, ref program, element, array.base_type, retain);
+            wir_emit_ownership_value(ref state, ref types, ref source, ref program, element, array.base_type, retain);
             i++;
         }
         return;
@@ -99,7 +135,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
             let field: FieldInfo = struct_info.fields[i];
             if (wir_value_needs_drop(ref source, field.type)) {
                 let field_value: WirValueID = wir_field(ref program, state.block, value, field.offset, "", no_wir_location());
-                wir_emit_ownership_value(ref state, ref source, ref program, field_value, field.type, retain);
+                wir_emit_ownership_value(ref state, ref types, ref source, ref program, field_value, field.type, retain);
             }
             i++;
         }
@@ -117,39 +153,39 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
     else { wir_release(ref program, state.block, pointer, no_wir_location()); }
 }
 
-func wir_emit_ownership_slot(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, address: WirValueID, source_type: Int, retain: Bool) -> Void {
+func wir_emit_ownership_slot(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, address: WirValueID, source_type: Int, retain: Bool) -> Void {
     if (!wir_value_needs_drop(ref source, source_type)) {
         return;
     }
     let value: WirValueID = wir_load(ref program, state.block, address, "", no_wir_location());
-    wir_emit_ownership_value(ref state, ref source, ref program, value, source_type, retain);
+    wir_emit_ownership_value(ref state, ref types, ref source, ref program, value, source_type, retain);
 }
 
-func wir_move_or_retain(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirExpr) -> Void {
+func wir_move_or_retain(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr) -> Void {
     if (!wir_value_needs_drop(ref source, value.source_type)) {
         return;
     }
     if (!wir_take_owned(ref state, value.value)) {
-        wir_emit_ownership_value(ref state, ref source, ref program, value.value, value.source_type, true);
+        wir_emit_ownership_value(ref state, ref types, ref source, ref program, value.value, value.source_type, true);
     }
 }
 
-func wir_cleanup_bindings(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, first: Int) -> Void {
+func wir_cleanup_bindings(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, first: Int) -> Void {
     let i: Int = state.bindings.length() - 1;
     while (i >= first) {
         let binding: WirBinding = state.bindings[i];
         if (binding.owns_value) {
-            wir_emit_ownership_slot(ref state, ref source, ref program, binding.address, binding.source_type, false);
+            wir_emit_ownership_slot(ref state, ref types, ref source, ref program, binding.address, binding.source_type, false);
         }
         i--;
     }
 }
 
-func wir_cleanup_temporaries(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, first: Int) -> Void {
+func wir_cleanup_temporaries(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, first: Int) -> Void {
     let i: Int = state.owned_values.length() - 1;
     while (i >= first) {
         let owned: WirOwnedValue = state.owned_values[i];
-        wir_emit_ownership_value(ref state, ref source, ref program, owned.value, owned.source_type, false);
+        wir_emit_ownership_value(ref state, ref types, ref source, ref program, owned.value, owned.source_type, false);
         i--;
     }
     let values: Vector(WirOwnedValue) = [];

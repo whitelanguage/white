@@ -8,6 +8,7 @@ import * from "../../context.wl"
 import * from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+import throw_type_error from "../../../frontend/diagnostics.wl"
 
 
 func wir_static_cast_target(ref source: Compiler, callee: NodeID) -> Int {
@@ -160,6 +161,11 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
     let repr: Int = get_repr_type(ref source, source_type);
     let kind: Int = node_tag(node);
+    let union: UnionInfo = get_union_type(ref source, repr);
+    if (union.members is !null) {
+        throw_type_error(pos, "Union global initializers are not implemented yet.");
+        return NO_WIR_VALUE;
+    }
 
     if (kind == NODE_CALL) {
         let call: CallNode = get_call_node(ref source.arena, node);
