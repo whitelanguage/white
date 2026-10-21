@@ -14,7 +14,7 @@ import * from "closure_environment.wl"
 import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
 import has_index_refs, check_body_refs from "../../references.wl"
-import parse_const_uint128, parse_decimal_float_literal, eval_const_long from "../../constants.wl"
+import parse_const_uint128, parse_decimal_float_literal, eval_const_long, check_layout_type from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
 import check_null_return from "../../validation.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
@@ -6526,19 +6526,16 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     if (kind == NODE_TYPE_LAYOUT) {
         let query: TypeLayoutNode = get_type_layout_node(ref source.arena, node);
         let source_type: Int = resolve_type(ref source, query.type_node);
-        if (source_type == TYPE_AUTO) {
-            let operation: String = "size";
-            if (query.is_align) { operation = "alignment"; }
-            throw_type_error(query.pos, "Type 'Auto' must be resolved before its " + operation + " can be determined.");
+        if (!check_layout_type(ref source, source_type, query.is_align, query.pos)) {
             return wir_no_expr();
         }
-        if (source_type == TYPE_VOID) {
-            let operation: String = "size";
-            if (query.is_align) { operation = "alignment"; }
-            throw_type_error(query.pos, "Type 'Void' has no " + operation + ".");
-            return wir_no_expr();
+        let type_id: WirTypeID = NO_WIR_TYPE;
+        let union: UnionInfo = get_union_type(ref source, get_repr_type(ref source, source_type));
+        if (union.members is !null) {
+            type_id = wir_union_storage(ref types, ref source, ref program, get_repr_type(ref source, source_type));
+        } else {
+            type_id = wir_lower_source_type(ref types, ref source, ref program, source_type);
         }
-        let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
         if (type_id == NO_WIR_TYPE) { return wir_no_expr(); }
         let layout: WirTypeLayout = wir_lowering_layout(ref types, program, type_id);
         if (!layout.valid) {

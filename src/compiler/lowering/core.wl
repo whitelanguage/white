@@ -5008,7 +5008,13 @@ func compile_type_layout(ref c: Compiler, node: TypeLayoutNode) -> CompileResult
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    let llvm_type: String = get_llvm_type_str(ref c, type_id);
+    let llvm_type: String = "";
+    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union.members is !null) {
+        llvm_type = get_union_llvm_storage(ref c, get_repr_type(ref c, type_id));
+    } else {
+        llvm_type = get_llvm_type_str(ref c, type_id);
+    }
     let size_ty: String = get_size_llvm_type();
     let value: String = "";
     if (node.is_align) {

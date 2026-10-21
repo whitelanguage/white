@@ -221,6 +221,15 @@ struct UnionInfo(
     pos: Position
 )
 
+struct UnionLayout(
+    valid: Bool,
+    size: Int,
+    alignment: Int,
+    payload_offset: Int,
+    payload_type: Int,
+    payload_count: Int
+)
+
 struct SliceParts(
     start: String,
     length: String,
@@ -1236,6 +1245,11 @@ func target_i64_align() -> Int {
     return 8;
 }
 
+func target_i128_align() -> Int {
+    if (get_target_arch() == sys.Arch.Arm) { return 8; }
+    return 16;
+}
+
 func any_error_align() -> Int {
     return target_i64_align();
 }
@@ -1317,6 +1331,87 @@ func add_union_member(ref c: Compiler, members: Vector(Int), type_id: Int, pos: 
     }
     members.append(type_id);
     return true;
+}
+
+func union_member_index(ref c: Compiler, union_type: Int, member_type: Int) -> Int {
+    let union: UnionInfo = get_union_type(ref c, union_type);
+    let i: Int = 0;
+    while (union.members is !null && i < union.members.length()) {
+        if (union.members[i] == member_type) { return i; }
+        i++;
+    }
+    return -1;
+}
+
+func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> Bool {
+// assignment preserves each concrete member, numeric conversions stay explicit
+    if (target_type == source_type) { return true; }
+    let target: UnionInfo = get_union_type(ref c, target_type);
+    if (target.members is null) { return false; }
+
+    let source: UnionInfo = get_union_type(ref c, source_type);
+    if (source.members is null) {
+        return union_member_index(ref c, target_type, source_type) >= 0;
+    }
+    let i: Int = 0;
+    while (i < source.members.length()) {
+        if (union_member_index(ref c, target_type, source.members[i]) < 0) {
+            return false;
+        }
+        i++;
+    }
+    return true;
+}
+
+func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
+// the tag selects the live member, the payload reserves its size and alignment
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is null) { return UnionLayout(); }
+
+    let payload_size: Int = 0;
+    let payload_align: Int = 1;
+    let i: Int = 0;
+    while (i < union.members.length()) {
+        let member: Int = union.members[i];
+        // Null has no payload, its tag distinguishes it from nullable members.
+        if (member != TYPE_NULL) {
+            let size: Int = get_type_size_bytes(ref c, member);
+            let alignment: Int = get_type_align_bytes(ref c, member);
+            if (size > payload_size) { payload_size = size; }
+            if (alignment > payload_align) { payload_align = alignment; }
+        }
+        i++;
+    }
+
+    let carrier: Int = TYPE_BYTE;
+    if (payload_align == 2) { carrier = TYPE_UINT16; }
+    else if (payload_align == 4) { carrier = TYPE_UINT32; }
+    else if (payload_align == 8) { carrier = TYPE_UINT64; }
+    else if (payload_align == 16) { carrier = TYPE_UINT128; }
+    else if (payload_align != 1) {
+        throw_type_error(union.pos, "Unsupported union payload alignment.");
+        return UnionLayout();
+    }
+
+    let carrier_size: Int = get_type_size_bytes(ref c, carrier);
+    let alignment: Int = payload_align;
+    if (alignment < 4) { alignment = 4; }
+    let offset: Int = align_to(4, payload_align);
+    if (payload_size < 0 || payload_size > 2147483647 - carrier_size - offset - alignment) {
+        throw_type_error(union.pos, "Union storage exceeds the supported size.");
+        return UnionLayout();
+    }
+
+    let count: Int = (payload_size + carrier_size - 1) / carrier_size;
+    let size: Int = align_to(offset + count * carrier_size, alignment);
+    return UnionLayout(valid=true, size=size, alignment=alignment,
+        payload_offset=offset, payload_type=carrier, payload_count=count);
+}
+
+func get_union_llvm_storage(ref c: Compiler, type_id: Int) -> String {
+    let layout: UnionLayout = get_union_layout(ref c, type_id);
+    if (!layout.valid) { return "void"; }
+    return "{ i32, [" + layout.payload_count + " x " + get_llvm_type_str(ref c, layout.payload_type) + "] }";
 }
 
 func type_key_before(left: String, right: String) -> Bool {
@@ -2828,6 +2923,14 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
     if (has_named_type(named)) {
         return get_type_size_bytes(ref c, named.underlying_type);
     }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        return get_union_layout(ref c, type_id).size;
+    }
+    // String's member table is a frontend placeholder, storage is still a pointer.
+    if (type_id == TYPE_STRING || type_id == TYPE_NULL || type_id == TYPE_ANYPTR || type_id == TYPE_NULLPTR) {
+        return get_pointer_size_bytes();
+    }
     if (type_id == TYPE_BOOL || type_id == TYPE_BYTE || type_id == TYPE_INT8) { return 1; }
     if (type_id == TYPE_INT16 || type_id == TYPE_UINT16) { return 2; }
     if (type_id == TYPE_INT || type_id == TYPE_UINT32 || type_id == TYPE_CHAR || type_id == TYPE_FLOAT32 || type_id == TYPE_GENERIC_ENUM) { return 4; }
@@ -2900,6 +3003,16 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
 
     if (type_id == target) { return true; }
 
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            if (value_layout_contains(ref c, union.members[i], target, seen)) { return true; }
+            i++;
+        }
+        return false;
+    }
+
     let array_info: ArrayInfo = c.array_info_map.lookup(type_id);
     if (has_array_info(array_info)) {
         if (array_info.size < 0) { return false; }
@@ -2931,10 +3044,17 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
     if (has_named_type(named)) {
         return get_type_align_bytes(ref c, named.underlying_type);
     }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        return get_union_layout(ref c, type_id).alignment;
+    }
+    if (type_id == TYPE_STRING || type_id == TYPE_NULL || type_id == TYPE_ANYPTR || type_id == TYPE_NULLPTR) {
+        return get_pointer_size_bytes();
+    }
     if (type_id == TYPE_BOOL || type_id == TYPE_BYTE || type_id == TYPE_INT8) { return 1; }
     if (type_id == TYPE_INT16 || type_id == TYPE_UINT16) { return 2; }
     if (type_id == TYPE_INT || type_id == TYPE_UINT32 || type_id == TYPE_CHAR || type_id == TYPE_FLOAT32 || type_id == TYPE_GENERIC_ENUM) { return 4; }
-    if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) { return 16; }
+    if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) { return target_i128_align(); }
     if (type_id == TYPE_INTSIZE || type_id == TYPE_UINTSIZE) {
         return get_pointer_size_bytes();
     }

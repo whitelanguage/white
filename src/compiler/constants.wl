@@ -13,8 +13,12 @@ func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Posit
     if (type_id == TYPE_POISON) { return false; }
     let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
     if (union.members is !null) {
-        throw_type_error(pos, "Union layout is not implemented yet.");
-        return false;
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            if (!check_layout_type(ref c, union.members[i], is_align, pos)) { return false; }
+            i++;
+        }
+        return get_union_layout(ref c, get_repr_type(ref c, type_id)).valid;
     }
     if (type_id == TYPE_VOID) {
         throw_type_error(pos, "Type 'Void' has no " + property + ".");

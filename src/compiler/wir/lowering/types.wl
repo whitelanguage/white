@@ -222,6 +222,19 @@ func wir_lower_array_type(ref types: WirTypeMap, ref source: Compiler, ref progr
     return wir_cache_type(ref types, source_type, wir_pointer_type(ref program, record));
 }
 
+func wir_union_storage(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirTypeID {
+// use an aligned integer array so payload addresses work for every member
+    let layout: UnionLayout = get_union_layout(ref source, source_type);
+    if (!layout.valid) { return NO_WIR_TYPE; }
+
+    let tag: WirTypeID = wir_unsigned_int_type(ref program, 32);
+    let carrier: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, layout.payload_type);
+    if (carrier == NO_WIR_TYPE) { return NO_WIR_TYPE; }
+    let payload: WirTypeID = wir_array_type(ref program, carrier, UIntSize(layout.payload_count));
+
+    return wir_struct_type(ref program, [tag, payload]);
+}
+
 func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirTypeID {
     if (source_type <= 0) {
         return wir_type_failure(ref types, source_type, "module '" + source.current_package_prefix + "'");
