@@ -2227,6 +2227,10 @@ func wir_cast_expr(
     implicit: Bool
 ) -> WirExpr {
     if (value.value == NO_WIR_VALUE || value.source_type == target_type) { return value; }
+    if (target_type == TYPE_NULL && value.source_type != TYPE_NULLPTR) {
+        throw_type_error(no_position(), "Type mismatch. Expected Null, got " + get_type_name(ref source, value.source_type) + ".");
+        return wir_no_expr();
+    }
     let source_info: StructInfo = StructInfo();
     let target_info: StructInfo = StructInfo();
     if (source.struct_id_map is !null) {
@@ -2347,29 +2351,35 @@ func wir_cast_expr(
     if (source_wir == NO_WIR_TYPE || target_wir == NO_WIR_TYPE) {
         return wir_no_expr();
     }
-    if (source_wir == target_wir) {
-        return WirExpr(value=value.value, source_type=target_type);
-    }
     let source_kind: WirTypeKind = program.arena.types[wir_id_index(UInt32(source_wir))].kind;
     let target_kind: WirTypeKind = program.arena.types[wir_id_index(UInt32(target_wir))].kind;
     let source_integer: Bool = source_kind == WirTypeKind.BoolType || source_kind == WirTypeKind.SignedInt || source_kind == WirTypeKind.UnsignedInt;
     let target_integer: Bool = target_kind == WirTypeKind.BoolType || target_kind == WirTypeKind.SignedInt || target_kind == WirTypeKind.UnsignedInt;
     if (value.source_type == TYPE_NULLPTR) {
         if (!is_pointer_type(ref source, target_type)) {
-            state.errors.append("nullptr reached WIR lowering with non-pointer target " + get_type_name(ref source, target_type));
+            throw_type_error(no_position(), "'nullptr' can only be assigned to explicit pointer types.");
             return wir_no_expr();
         }
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
     }
     if (value.source_type == TYPE_NULL) {
-        if (is_pointer_type(ref source, target_type) || !is_nullable_reference_type(ref source, target_type)) {
-            state.errors.append("null reached WIR lowering with non-reference target " + get_type_name(ref source, target_type));
+        if (is_pointer_type(ref source, target_type)) {
+            throw_type_error(no_position(), "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
+            return wir_no_expr();
+        }
+        if (!is_nullable_reference_type(ref source, target_type)) {
+            throw_type_error(no_position(), "Type " + get_type_name(ref source, target_type) + " cannot be null.");
             return wir_no_expr();
         }
         if (target_kind == WirTypeKind.Struct) {
             return WirExpr(value=wir_const_zero(ref program, target_wir), source_type=target_type);
         }
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
+    }
+    // Null and nullptr share pointer storage, check their source rules before
+    // accepting equal WIR types.
+    if (source_wir == target_wir) {
+        return WirExpr(value=value.value, source_type=target_type);
     }
     if (source_kind == WirTypeKind.Pointer && target_kind == WirTypeKind.Pointer) {
         let compatible: Bool = is_void_ptr(ref source, value.source_type) ||
@@ -7254,6 +7264,14 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         let declared: Int = resolve_type(ref source, node.type_node);
         if (declared != TYPE_AUTO) { source_type = declared; }
     }
+    if (source_type == TYPE_VOID) {
+        throw_type_error(node.pos, "Variable '" + node.name_tok.value + "' cannot have type Void.");
+        return;
+    }
+    if (source_type == TYPE_POISON) {
+        return;
+    }
+
     if (source_type == TYPE_AUTO && has_node(node.value) && node_tag(node.value) == NODE_CALL) {
         let call: CallNode = get_call_node(ref source.arena, node.value);
         let info: FuncInfo = wir_direct_function(ref state, ref source, call.callee);

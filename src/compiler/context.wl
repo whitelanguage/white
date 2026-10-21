@@ -215,6 +215,12 @@ struct NamedTypeInfo(
     resolved        : Bool
 )
 
+struct UnionInfo(
+    members: Vector(Int),
+    key: String,
+    pos: Position
+)
+
 struct SliceParts(
     start: String,
     length: String,
@@ -246,6 +252,8 @@ struct Compiler(
     struct_id_map: Dict(Int, StructInfo),
     named_types: Dict(String, NamedTypeInfo),
     named_type_ids: Dict(Int, NamedTypeInfo),
+    union_types: Dict(Int, UnionInfo),
+    union_cache: Dict(String, SymbolInfo),
     type_revision: Int,
     drop_cache: Vector(Int),
     indent: String,
@@ -439,6 +447,8 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         struct_id_map = Dict(),
         named_types = Dict(),
         named_type_ids = Dict(),
+        union_types = Dict(),
+        union_cache = Dict(),
         type_revision = 0,
         drop_cache = [],
         indent = "  ",
@@ -1275,6 +1285,130 @@ func same_repr_type(ref c: Compiler, left: Int, right: Int) -> Bool {
     return get_repr_type(ref c, left) == get_repr_type(ref c, right);
 }
 
+func get_union_type(ref c: Compiler, type_id: Int) -> UnionInfo {
+    if (type_id < 100 || c.union_types is null || c.union_types.length() == 0) {
+        return UnionInfo();
+    }
+    return c.union_types.lookup(type_id);
+}
+
+func add_union_member(ref c: Compiler, members: Vector(Int), type_id: Int, pos: Position) -> Bool {
+// aliases have already resolved, distinct named types keep their own identity
+    if (type_id == TYPE_POISON) { return false; }
+    if (type_id == TYPE_AUTO || type_id == TYPE_VOID || is_fallible_type(ref c, type_id)) {
+        throw_type_error(pos, "Union members must be value types, got " + get_type_name(ref c, type_id) + ".");
+        return false;
+    }
+
+    let nested: UnionInfo = get_union_type(ref c, type_id);
+    if (nested.members is !null) {
+        let i: Int = 0;
+        while (i < nested.members.length()) {
+            if (!add_union_member(ref c, members, nested.members[i], pos)) { return false; }
+            i++;
+        }
+        return true;
+    }
+
+    let i: Int = 0;
+    while (i < members.length()) {
+        if (members[i] == type_id) { return true; }
+        i++;
+    }
+    members.append(type_id);
+    return true;
+}
+
+func type_key_before(left: String, right: String) -> Bool {
+    let count: Int = left.length();
+    if (right.length() < count) { count = right.length(); }
+    let i: Int = 0;
+    while (i < count) {
+        if (left[i] != right[i]) { return left[i] < right[i]; }
+        i++;
+    }
+    return left.length() < right.length();
+}
+
+func get_union_type_id(ref c: Compiler, members: Vector(Int), pos: Position) -> Int {
+// sort by type spelling in the ABI, discovery order must not change a union's tag order
+    if (members.length() == 0) {
+        throw_type_error(pos, "A union must contain a value type.");
+        return TYPE_POISON;
+    }
+    if (members.length() == 1) { return members[0]; }
+    let keys: Vector(String) = [];
+    let i: Int = 0;
+    while (i < members.length()) {
+        keys.append(mangle_type(ref c, members[i]));
+        i++;
+    }
+    i = 1;
+    while (i < members.length()) {
+        let member: Int = members[i];
+        let key: String = keys[i];
+        let j: Int = i;
+        while (j > 0 && type_key_before(key, keys[j - 1])) {
+            members[j] = members[j - 1];
+            keys[j] = keys[j - 1];
+            j--;
+        }
+        members[j] = member;
+        keys[j] = key;
+        i++;
+    }
+
+    let key: String = "U" + members.length() + "_";
+    i = 0;
+    while (i < keys.length()) {
+        key += "" + keys[i].length() + "_" + keys[i];
+        i++;
+    }
+    let cached: SymbolInfo = c.union_cache.lookup(key);
+    if (has_symbol(cached)) { return cached.type; }
+
+    let type_id: Int = c.type_counter;
+    c.type_counter++;
+    c.union_types.put(type_id, UnionInfo(members=members, key=key, pos=pos));
+    c.union_cache.put(key, SymbolInfo(type=type_id));
+    c.type_revision++;
+    return type_id;
+}
+
+func instantiate_alias(ref c: Compiler, template: GenericTemplate, concrete: Vector(Struct), key: String, pos: Position) -> Int {
+// reuse the template's import context, T belongs to this alias even when its caller has a T
+    if (c.generic_depth >= 64) {
+        throw_type_error(pos, "Generic instantiation depth exceeds 64.");
+        return TYPE_POISON;
+    }
+    c.generic_instances.put(key, SymbolInfo(type=TYPE_POISON));
+    c.generic_depth++;
+    let bindings: Dict(String, SymbolInfo) = generic_bindings(template.type_params, concrete);
+    if (!check_generic_constraints(ref c, template, bindings, concrete, pos)) {
+        c.generic_depth--;
+        c.generic_instances.remove(key);
+        return TYPE_POISON;
+    }
+
+    let old_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
+    let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
+    let decl: TypeDeclNode = get_type_decl_node(ref c.arena, template.node);
+    let target: Int = resolve_type(ref c, decl.target_type);
+    c.generic_depth--;
+    restore_generic_context(ref c, previous, old_bindings);
+
+    if (target == TYPE_AUTO) {
+        throw_type_error(decl.pos, "A type declaration cannot use Auto as its underlying type.");
+        target = TYPE_POISON;
+    }
+    if (target == TYPE_POISON) {
+        c.generic_instances.remove(key);
+        return TYPE_POISON;
+    }
+    c.generic_instances.put(key, SymbolInfo(type=target));
+    return target;
+}
+
 func resolve_named_type(ref c: Compiler, info: NamedTypeInfo) -> Int {
     if (!has_named_type(info)) { return TYPE_POISON; }
     if (info.resolved) { return info.type_id; }
@@ -1324,6 +1458,12 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
     if (has_named_type(named)) {
         return get_llvm_type_str(ref c, named.underlying_type);
     }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        throw_type_error(union.pos, "Union value lowering is not implemented yet.");
+        return "void";
+    }
+    if (type_id == TYPE_NULL) { return "i8*"; }
     if (type_id == TYPE_INT) {
         return "i32";
     }
@@ -1447,6 +1587,17 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
 func get_type_name(ref c: Compiler, type_id: Int) -> String {
     let named: NamedTypeInfo = get_named_type(ref c, type_id);
     if (has_named_type(named)) { return named.name; }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        let name: String = "";
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            if (i > 0) { name += " | "; }
+            name += get_type_name(ref c, union.members[i]);
+            i++;
+        }
+        return "(" + name + ")";
+    }
     if (type_id == TYPE_INT) {
         return "Int";
     }
@@ -1470,7 +1621,7 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
         return "Char";
     }
     if (type_id == TYPE_NULL) {
-        return "null";
+        return "Null";
     }
     if (type_id == TYPE_NULLPTR){ return "nullptr"; }
     if (type_id == TYPE_POISON) {
@@ -1808,7 +1959,7 @@ func is_nullable_reference_type(ref c: Compiler, t: Int) -> Bool {
     if (has_named_type(named)) {
         return is_nullable_reference_type(ref c, named.underlying_type);
     }
-    if (t == TYPE_STRING || t == TYPE_ANYPTR || t == TYPE_NULLPTR ||
+    if (t == TYPE_NULL || t == TYPE_STRING || t == TYPE_ANYPTR || t == TYPE_NULLPTR ||
         t == TYPE_GENERIC_STRUCT || t == TYPE_GENERIC_CLASS ||
         t == TYPE_GENERIC_FUNCTION || t == TYPE_GENERIC_METHOD) {
         return true;
@@ -4400,6 +4551,20 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
     if (!has_node(node)) { return TYPE_VOID; }
     let base: Int = node_tag(node);
 
+    if (base == NODE_UNION_TYPE) {
+        let union: UnionTypeNode = get_union_type_node(ref c.arena, node);
+        let members: Vector(Int) = [];
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            let member: Int = resolve_type(ref c, union.members[i]);
+            if (!add_union_member(ref c, members, member, union.pos)) {
+                return TYPE_POISON;
+            }
+            i++;
+        }
+        return get_union_type_id(ref c, members, union.pos);
+    }
+
     if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = get_generic_type_node(ref c.arena, node);
         let base_node: Int = node_tag(generic.base_type);
@@ -4459,15 +4624,24 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let i: Int = 0;
         while (i < args.length()) {
             let arg_type: Int = resolve_type(ref c, args[i]);
+            if (arg_type == TYPE_POISON) { return TYPE_POISON; }
             concrete.append(TypeListNode(type=arg_type));
             instance_key += "$" + mangle_type(ref c, arg_type);
             i += 1;
         }
 
         let cached: SymbolInfo = c.generic_instances.lookup(instance_key);
-        if (has_symbol(cached)) { return cached.type; }
+        if (has_symbol(cached)) {
+            if (cached.type == TYPE_POISON && node_tag(template.node) == NODE_TYPE_DECL) {
+                throw_type_error(generic.pos, "Type alias '" + key + "' is recursive.");
+            }
+            return cached.type;
+        }
 
         let template_base: Int = node_tag(template.node);
+        if (template_base == NODE_TYPE_DECL) {
+            return instantiate_alias(ref c, template, concrete, instance_key, generic.pos);
+        }
         if (template_base == NODE_CLASS_DEF) {
             return register_generic_class(ref c, template, concrete, generic.pos);
         }
@@ -4627,6 +4801,7 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         if (name == "String") { return TYPE_STRING; }
         if (name == "Char") { return TYPE_CHAR; }
         if (name == "Void") { return TYPE_VOID; }
+        if (name == "Null") { return TYPE_NULL; }
         if (name == "Struct") { return TYPE_GENERIC_STRUCT; }
         if (name == "Function") { return TYPE_GENERIC_FUNCTION; }
         if (name == "Class") { return TYPE_GENERIC_CLASS; }
@@ -4822,6 +4997,9 @@ func mangle_type(ref c: Compiler, type_id: Int) -> String {
     if (has_named_type(named)) {
         return "N" + named.name.length() + named.name;
     }
+    let union: UnionInfo = get_union_type(ref c, type_id);
+    if (union.members is !null) { return union.key; }
+    if (type_id == TYPE_NULL) { return "Dn"; }
     if (type_id == TYPE_VOID) { return "v"; }
     if (type_id == TYPE_BOOL) {
         return "b";

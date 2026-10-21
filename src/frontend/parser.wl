@@ -198,6 +198,7 @@ func parse_type_decl(ref p: Parser) -> NodeID {
     let name_tok: Token = Token();
     let target_type: NodeID = NO_NODE;
     let is_alias: Bool = false;
+    let type_params: Vector(GenericParamNode) = [];
 
     if (p.current_tok.type == TOK_IDENTIFIER && peek_type(ref p) == TOK_ASSIGN) {
         name_tok = p.current_tok;
@@ -220,6 +221,9 @@ func parse_type_decl(ref p: Parser) -> NodeID {
         name_tok = p.current_tok;
         is_alias = true;
         parser_advance(ref p);
+        if (p.current_tok.type == TOK_LT) {
+            type_params = parse_type_params(ref p);
+        }
     }
 
     if (p.current_tok.type != TOK_SEMICOLON) {
@@ -229,7 +233,7 @@ func parse_type_decl(ref p: Parser) -> NodeID {
         parser_advance(ref p);
     }
 
-    return add_type_decl_node(ref p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, pos=pos));
+    return add_type_decl_node(ref p.arena, TypeDeclNode(type=NODE_TYPE_DECL, name_tok=name_tok, target_type=target_type, is_alias=is_alias, type_params=type_params, pos=pos));
 }
 
 func parser_advance(ref p: Parser) -> Void {
@@ -564,6 +568,18 @@ func parse_callable_type(ref p: Parser, tok: Token, is_method: Bool) -> NodeID {
 
 func parse_type_base_inner(ref p: Parser) -> NodeID {
 // parse a pointer in type position
+    if (p.current_tok.type == TOK_LPAREN) {
+        parser_advance(ref p);
+        let grouped: NodeID = parse_return_type(ref p);
+        if (p.current_tok.type != TOK_RPAREN) {
+            let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+            throw_invalid_syntax(pos, "Expected ')' after grouped type.");
+            return NO_NODE;
+        }
+        parser_advance(ref p);
+        return grouped;
+    }
+
     if (p.current_tok.type == TOK_PTR) {
         let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
         parser_advance(ref p); // skip ptr
@@ -659,6 +675,24 @@ func parse_type_base_inner(ref p: Parser) -> NodeID {
 }
 
 func parse_return_type(ref p: Parser) -> NodeID {
+    let first: NodeID = parse_type_member(ref p);
+    if (!has_node(first) || p.current_tok.type != TOK_BIT_OR) {
+        return first;
+    }
+
+    let pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
+    let members: Vector(NodeID) = [first];
+    while (p.current_tok.type == TOK_BIT_OR) {
+        parser_advance(ref p);
+        let member: NodeID = parse_type_member(ref p);
+        if (!has_node(member)) { return NO_NODE; }
+        members.append(member);
+    }
+    return add_union_type_node(ref p.arena, UnionTypeNode(type=NODE_UNION_TYPE, members=members, pos=pos));
+}
+
+func parse_type_member(ref p: Parser) -> NodeID {
+// array sizes and '?' belong to one member, parentheses can wrap the entire union
     let type_node: NodeID = parse_type_base(ref p);
     if (!has_node(type_node)) { return NO_NODE; }
 

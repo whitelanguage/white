@@ -11,6 +11,11 @@ func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Posit
     let property: String = "size";
     if is_align { property = "alignment"; }
     if (type_id == TYPE_POISON) { return false; }
+    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union.members is !null) {
+        throw_type_error(pos, "Union layout is not implemented yet.");
+        return false;
+    }
     if (type_id == TYPE_VOID) {
         throw_type_error(pos, "Type 'Void' has no " + property + ".");
         return false;

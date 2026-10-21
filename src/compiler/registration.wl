@@ -10,7 +10,7 @@ import * from "validation.wl"
 func is_builtin_type_name(name: String) -> Bool {
     return get_builtin_cast_target(name) != 0 || name == "Void" || name == "Auto" ||
            name == "Struct" || name == "Class" || name == "Function" ||
-           name == "Method" || name == "Enum";
+           name == "Method" || name == "Enum" || name == "Null";
 }
 
 func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
@@ -26,6 +26,19 @@ func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
                 has_struct(c.struct_table.lookup(name)) || has_template(c.generic_structs.lookup(name))) {
                 throw_name_error(decl.pos, "Type '" + name + "' is already defined.");
                 i += 1;
+                continue;
+            }
+
+            if (decl.type_params is !null && decl.type_params.length() > 0) {
+                let template: GenericTemplate = GenericTemplate(
+                    name=name, node=stmts[i], type_params=decl.type_params,
+                    prefix=c.current_package_prefix, dir=c.current_dir,
+                    visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces,
+                    types=c.current_file_type_aliases, funcs=c.current_file_func_aliases,
+                    globals=c.current_file_global_aliases
+                );
+                c.generic_structs.put(name, template);
+                i++;
                 continue;
             }
 
@@ -61,6 +74,10 @@ func resolve_named_types(ref c: Compiler, node: NodeID) -> Void {
     while (stmts is !null && i < stmts.length()) {
         if (node_tag(stmts[i]) == NODE_TYPE_DECL) {
             let decl: TypeDeclNode = get_type_decl_node(ref c.arena, stmts[i]);
+            if (decl.type_params is !null && decl.type_params.length() > 0) {
+                i++;
+                continue;
+            }
             let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
             resolve_named_type(ref c, info);
         }

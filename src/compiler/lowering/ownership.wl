@@ -332,6 +332,11 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
                 }
             }
 
+            // compile_var_decl reports the declaration error, no storage exists for Void.
+            if (target_type_id == TYPE_VOID || target_type_id == TYPE_POISON) {
+                return;
+            }
+
             if (c.hoist_scope.table is !null) {
                 c.hoist_scope.table.put(v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
             }

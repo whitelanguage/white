@@ -174,6 +174,9 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     }
 
     if (target_type_id == TYPE_VOID || target_type_id == TYPE_POISON) {
+        if (target_type_id == TYPE_VOID) {
+            throw_type_error(node.pos, "Variable '" + node.name_tok.value + "' cannot have type Void.");
+        }
         let curr_scope: Scope = c.symbol_table;
         curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
         return void_result();

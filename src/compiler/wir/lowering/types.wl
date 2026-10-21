@@ -4,6 +4,7 @@ import * from "../builder.wl"
 import wir_layout_type, wir_invalid_type_layout from "../layout.wl"
 import * from "../../context.wl"
 import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
+import throw_type_error from "../../../frontend/diagnostics.wl"
 
 
 struct WirTypeMap(
@@ -227,6 +228,12 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     }
     let cached: WirTypeID = wir_cached_type(ref types, source_type);
     if (cached != NO_WIR_TYPE) { return cached; }
+
+    let union: UnionInfo = get_union_type(ref source, source_type);
+    if (union.members is !null) {
+        throw_type_error(union.pos, "Union value lowering is not implemented yet.");
+        return NO_WIR_TYPE;
+    }
 
     let result: WirTypeID = NO_WIR_TYPE;
     if (source_type == TYPE_VOID) { result = program.void_type; }

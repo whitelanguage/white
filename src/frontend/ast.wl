@@ -62,6 +62,7 @@ const NODE_FALLIBLE_TYPE  : Int = 57;
 const NODE_TYPE_LAYOUT    : Int = 58;
 const NODE_GENERIC_TYPE   : Int = 59;
 const NODE_TYPE_DECL      : Int = 60;
+const NODE_UNION_TYPE     : Int = 61;
 
 const PARAM_VALUE : Int = 0;
 const PARAM_REF   : Int = 1;
@@ -226,7 +227,14 @@ struct TypeDeclNode(
     name_tok    : Token,
     target_type : NodeID,
     is_alias    : Bool,
+    type_params : Vector(GenericParamNode),
     pos         : Position
+)
+
+struct UnionTypeNode(
+    type    : Int,
+    members : Vector(NodeID),
+    pos     : Position
 )
 
 struct ParamNode(

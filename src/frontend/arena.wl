@@ -58,7 +58,8 @@ struct AstArena(
     fallible_type_nodes: Vector(FallibleTypeNode),
     type_layout_nodes: Vector(TypeLayoutNode),
     generic_type_nodes: Vector(GenericTypeNode),
-    type_decl_nodes: Vector(TypeDeclNode)
+    type_decl_nodes: Vector(TypeDeclNode),
+    union_type_nodes: Vector(UnionTypeNode)
 )
 
 func new_ast_arena() -> AstArena {
@@ -117,7 +118,8 @@ func new_ast_arena() -> AstArena {
         fallible_type_nodes=[],
         type_layout_nodes=[],
         generic_type_nodes=[],
-        type_decl_nodes=[]
+        type_decl_nodes=[],
+        union_type_nodes=[]
     );
 }
 
@@ -659,4 +661,14 @@ func add_type_decl_node(ref arena: AstArena, node: TypeDeclNode) -> NodeID {
 
 func get_type_decl_node(ref arena: AstArena, id: NodeID) -> TypeDeclNode {
     return arena.type_decl_nodes[node_slot(id)];
+}
+
+func add_union_type_node(ref arena: AstArena, node: UnionTypeNode) -> NodeID {
+    let slot: Int = arena.union_type_nodes.length();
+    arena.union_type_nodes.append(node);
+    return make_node_id(NODE_UNION_TYPE, slot);
+}
+
+func get_union_type_node(ref arena: AstArena, id: NodeID) -> UnionTypeNode {
+    return arena.union_type_nodes[node_slot(id)];
 }
