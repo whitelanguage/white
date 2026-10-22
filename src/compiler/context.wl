@@ -245,6 +245,8 @@ struct CaptureScope(
     captured_list: Vector(String)
 )
 
+struct FlowType(path: String, type: Int, unstable: Bool)
+
 struct Compiler(
     // shared state for discovery, checking and lowering, per-function state stays in Scope
     arena: AstArena,
@@ -263,6 +265,9 @@ struct Compiler(
     named_type_ids: Dict(Int, NamedTypeInfo),
     union_types: Dict(Int, UnionInfo),
     union_cache: Dict(String, SymbolInfo),
+    flow_types: Vector(FlowType),
+    flow_exposed: Vector(String),
+    flow_skip: NodeID,
     type_revision: Int,
     drop_cache: Vector(Int),
     indent: String,
@@ -1364,14 +1369,15 @@ func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> 
 }
 
 func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Position) -> Int {
-// a single Vector arm supplies context for [], multiple arms need an exact match
+// one container arm supplies context for [], multiple arms need an exact match
     let union: UnionInfo = get_union_type(ref c, target);
     let candidate: Int = 0;
     let count: Int = 0;
     let i: Int = 0;
     while (i < union.members.length()) {
         let member: Int = union.members[i];
-        if (has_symbol(c.vector_base_map.lookup(member))) {
+        let array = c.array_info_map.lookup(member);
+        if (has_symbol(c.vector_base_map.lookup(member)) || (has_array_info(array) && array.size >= 0)) {
             candidate = member;
             count++;
         }
@@ -1383,7 +1389,32 @@ func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Positi
     if (inferred != 0 && union_member_index(ref c, target, inferred) >= 0) {
         return inferred;
     }
-    throw_type_error(pos, "Cannot infer a Vector member for " + get_type_name(ref c, target) + ".");
+    throw_type_error(pos, "Cannot infer a container member for " + get_type_name(ref c, target) + ".");
+    return TYPE_POISON;
+}
+
+func union_map_target(ref c: Compiler, target: Int, node: NodeID, pos: Position) -> Int {
+// the annotated union chooses a typed dictionary before any keys are lowered
+    let union = get_union_type(ref c, target);
+    let candidate = 0;
+    let count = 0;
+    let i = 0;
+    while (i < union.members.length()) {
+        let member = get_repr_type(ref c, union.members[i]);
+        let info = c.struct_id_map.lookup(member);
+        let template: GenericTemplate = c.generic_instance_templates.lookup("" + member);
+        let dynamic = has_struct(info) && (info.name == "Dict" || info.name == "dict.Dict");
+        let typed = has_template(template) && (template.name == "Dict" || template.name.ends_with(".Dict"));
+        if (dynamic || typed) {
+            candidate = union.members[i];
+            count++;
+        }
+        i++;
+    }
+    if (count == 1) { return candidate; }
+    let inferred = get_expr_type(ref c, node);
+    if (count > 1 && inferred != 0 && union_member_index(ref c, target, inferred) >= 0) { return inferred; }
+    throw_type_error(pos, "Cannot infer a dictionary member for " + get_type_name(ref c, target) + ".");
     return TYPE_POISON;
 }
 
@@ -2418,9 +2449,25 @@ func needs_explicit_cast(ref c: Compiler, source_type: Int, target_type: Int) ->
     return true;
 }
 
+func flow_type(ref c: Compiler, node: NodeID) -> Int {
+// facts describe reads, the symbol's declared type still owns its storage and drop glue
+    if (c.flow_types is null || node == c.flow_skip || !has_node(node)) { return 0; }
+    let kind: Int = node_tag(node);
+    if (kind != NODE_VAR_ACCESS && kind != NODE_FIELD_ACCESS) { return 0; }
+    let path: String = format_ast_path(ref c, node);
+    let i: Int = c.flow_types.length();
+    while (i > 0) {
+        i--;
+        if (c.flow_types[i].path == path) { return c.flow_types[i].type; }
+    }
+    return 0;
+}
+
 func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     if (!has_node(node)) { return 0; }
     let base: Int = node_tag(node);
+    let narrowed: Int = flow_type(ref c, node);
+    if (narrowed != 0) { return narrowed; }
 
     if (base == NODE_INT) {
         let n: IntNode = get_int_node(ref c.arena, node);
@@ -2445,6 +2492,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         return TYPE_FLOAT;
     }
     if (base == NODE_BOOL) { return TYPE_BOOL; }
+    if (base == NODE_IS || base == NODE_IS_NOT) { return TYPE_BOOL; }
     if (base == NODE_TYPE_LAYOUT) { return TYPE_UINTSIZE; }
     if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = get_generic_type_node(ref c.arena, node);
@@ -2651,6 +2699,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     if (base == NODE_TRY_UNWRAP) {
         let t_node: TryUnwrapNode = get_try_unwrap_node(ref c.arena, node);
         let base_type: Int = get_expr_type(ref c, t_node.expr);
+        // the entry-slot walk can reach this before a guard resolves the receiver.
+        if (base_type == 0 || base_type == TYPE_POISON) { return base_type; }
         if (is_fallible_type(ref c, base_type)) {
             return get_inner_fallible_type(ref c, base_type);
         }

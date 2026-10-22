@@ -50,7 +50,8 @@ enum WirConstKind {
     Zero,
     Aggregate,
     Bytes,
-    Address
+    Address,
+    Storage
 }
 
 enum WirOpcode {
@@ -195,6 +196,7 @@ struct WirConstant(
     kind: WirConstKind,
     type_id: WirTypeID,
     elements: Vector(WirValueID),
+    offsets: Vector(UInt64),
     bytes: String,
     target: WirValueID,
     addend: Long

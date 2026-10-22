@@ -1,6 +1,8 @@
 // src/compiler/lowering/unions.wl
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
+import * from "../narrowing.wl"
+import NodeID from "../../frontend/ast.wl"
 
 
 func emit_union_payload(ref c: Compiler, slot: String, union_type: Int, member: Int) -> String {
@@ -14,6 +16,51 @@ func emit_union_payload(ref c: Compiler, slot: String, union_type: Int, member: 
     c.output_file.write(c.indent + payload + " = bitcast " + carrier + "* " + address + " to " + get_llvm_type_str(ref c, member) + "*\n");
 
     return payload;
+}
+
+func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> CompileResult {
+// a dominating check selected this member, no conversion or extra ownership is involved
+    if (member == TYPE_NULL) { return CompileResult(reg="null", type=TYPE_NULL); }
+    let storage = get_llvm_type_str(ref c, value.type);
+    let slot = next_reg(ref c);
+    c.output_file.write(c.indent + slot + " = alloca " + storage + "\n");
+    c.output_file.write(c.indent + "store " + storage + " " + value.reg + ", " + storage + "* " + slot + "\n");
+    let address = emit_union_payload(ref c, slot, value.type, member);
+    let array = c.array_info_map.lookup(member);
+    if (has_array_info(array) && array.size >= 0) {
+        return CompileResult(reg=address, type=member, is_const_access=value.is_const_access);
+    }
+    let result = next_reg(ref c);
+    let member_type = get_llvm_type_str(ref c, member);
+    c.output_file.write(c.indent + result + " = load " + member_type + ", " + member_type + "* " + address + "\n");
+    return CompileResult(reg=result, type=member, is_const_access=value.is_const_access);
+}
+
+func apply_flow_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
+    if (!flow_has_guard(ref c, condition)) { return; }
+    let guards: Vector(FlowGuard) = [];
+    flow_guards(ref c, condition, truth, guards);
+    let i = 0;
+    while (i < guards.length()) {
+        let guard = guards[i];
+        let old_skip = c.flow_skip;
+        c.flow_skip = guard.target;
+        let original = get_expr_type(ref c, guard.target);
+        c.flow_skip = old_skip;
+        let path = format_ast_path(ref c, guard.target);
+        let root = path;
+        let dot = 0;
+        while (dot < root.length() && root[dot] != Byte(46)) { dot++; }
+        if (dot < root.length()) { root = root.slice(0, dot); }
+        let symbol = find_symbol(ref c, root);
+        let unstable = flow_has_field(path) || !has_symbol(symbol);
+        if (has_symbol(symbol)) { unstable = unstable || symbol.reg.starts_with("@") || symbol.is_reference; }
+        unstable = unstable || flow_is_exposed(ref c, path);
+        if (!unstable || !flow_has_call(ref c, condition)) {
+            flow_record(ref c, guard.target, original, guard.present, unstable);
+        }
+        i++;
+    }
 }
 
 func emit_union_member(ref c: Compiler, slot: String, target: Int, member: Int, value: String) -> Void {
@@ -42,6 +89,12 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
 
     let source_union: UnionInfo = get_union_type(ref c, value.type);
     if (source_union.members is null) {
+        let array = c.array_info_map.lookup(value.type);
+        if (has_array_info(array) && array.size >= 0) {
+            let loaded = next_reg(ref c);
+            c.output_file.write(c.indent + loaded + " = load " + array.llvm_name + ", " + array.llvm_name + "* " + value.reg + "\n");
+            value.reg = loaded;
+        }
         emit_union_member(ref c, slot, target, value.type, value.reg);
     } else {
         let source_ty: String = get_llvm_type_str(ref c, value.type);

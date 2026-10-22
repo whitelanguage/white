@@ -20,6 +20,8 @@ import * from "numeric.wl"
 import * from "../constants.wl"
 import * from "casts.wl"
 import * from "unions.wl"
+import * from "../narrowing.wl"
+import emit_static_union from "static_storage.wl"
 import * from "literals.wl"
 import * from "../validation.wl"
 import * from "../registration.wl"
@@ -120,6 +122,15 @@ func compile_block(ref c: Compiler, node: BlockNode) -> CompileResult {
     }
 
     if (!is_root) {
+        // a shadowed name stops identifying this binding once its block ends.
+        if (c.flow_types is !null && c.flow_types.length() != 0) {
+            let table = c.symbol_table.table;
+            let slot = 0;
+            while (slot < table.capacity) {
+                if (table.hashes[slot] >= 2) { flow_forget(ref c, table.keys[slot], false); }
+                slot++;
+            }
+        }
         if terminated {
             if (c.symbol_table.parent >= 0) { c.symbol_table = c.scope_stack[c.symbol_table.parent]; }
             c.scope_depth -= 1;
@@ -189,7 +200,10 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     if (c.scope_depth == 0) {
         let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, target_type_id));
         if (union.members is !null) {
-            throw_type_error(node.pos, "Union global initializers are not implemented yet.");
+            emit_static_union(ref c, node, target_type_id)?;
+            catch(err) {
+                throw_type_error(node.pos, "Could not write global initializer.");
+            }
             return void_result();
         }
         if reference_binding {
@@ -407,7 +421,14 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
         throw_name_error(node.pos, "Variable '" + var_name + "' is already declared in this scope");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
-    let ptr_reg: String = c.alloc_regs[node.alloc_id];
+    let ptr_reg: String = "";
+    if (node.alloc_id < 0) {
+        ptr_reg = next_reg(ref c);
+        c.output_file.write(c.indent + ptr_reg + " = alloca " + llvm_ty_str + "\n");
+        if (needs_drop(ref c, target_type_id)) {
+            c.output_file.write(c.indent + "store " + llvm_ty_str + " zeroinitializer, " + llvm_ty_str + "* " + ptr_reg + "\n");
+        }
+    } else { ptr_reg = c.alloc_regs[node.alloc_id]; }
     let origin_id: Int = target_type_id;
 
     if reference_binding {
@@ -600,11 +621,16 @@ func compile_if(ref c: Compiler, node: IfNode) -> CompileResult {
 
     c.output_file.write("\n" + label_then + ":\n");
 
+    let incoming = flow_copy(c.flow_types);
+    apply_flow_guard(ref c, node.condition, true);
     compile_node(ref c, node.body);
+    let then_facts = flow_copy(c.flow_types);
     if (!then_terminates) {
         c.output_file.write(c.indent + "br label %" + label_merge + "\n");
     }
 
+    c.flow_types = flow_copy(incoming);
+    apply_flow_guard(ref c, node.condition, false);
     if (has_node(node.else_body)) {
         c.output_file.write("\n" + label_else + ":\n");
 
@@ -612,6 +638,11 @@ func compile_if(ref c: Compiler, node: IfNode) -> CompileResult {
         if (!else_terminates) {
             c.output_file.write(c.indent + "br label %" + label_merge + "\n");
         }
+    }
+
+    if (!then_terminates) {
+        if else_terminates { c.flow_types = then_facts; }
+        else { c.flow_types = flow_intersect(then_facts, c.flow_types); }
     }
 
     if needs_merge {
@@ -645,6 +676,7 @@ func compile_while(ref c: Compiler, node_id: NodeID) -> CompileResult {
 
     c.output_file.write("\n" + label_body + ":\n");
 
+    apply_flow_guard(ref c, node.condition, true);
     compile_node(ref c, node.body);
     if (!must_terminate(ref c, node.body)) {
         c.output_file.write(c.indent + "br label %" + label_cond + "\n");
@@ -694,6 +726,7 @@ func compile_for(ref c: Compiler, node_id: NodeID) -> CompileResult {
 
     c.output_file.write("\n" + label_body + ":\n");
 
+    if (has_node(node.cond)) { apply_flow_guard(ref c, node.cond, true); }
     compile_node(ref c, node.body);
 
     c.output_file.write(c.indent + "br label %" + label_step + "\n");
@@ -1185,6 +1218,17 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
 }
 
 func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
+    let saved = c.flow_types;
+    let exposed = c.flow_exposed;
+    c.flow_types = null;
+    c.flow_exposed = null;
+    let result = compile_func_body(ref c, node);
+    c.flow_types = saved;
+    c.flow_exposed = exposed;
+    return result;
+}
+
+func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
     if (node.type_params is !null && node.type_params.length() > 0 &&
         c.generic_func_key.length() == 0) {
         return void_result();
@@ -1312,6 +1356,17 @@ func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
 }
 
 func compile_method_def(ref c: Compiler, class_name: String, node: MethodDefNode) -> CompileResult {
+    let saved = c.flow_types;
+    let exposed = c.flow_exposed;
+    c.flow_types = null;
+    c.flow_exposed = null;
+    let result = compile_method_body(ref c, class_name, node);
+    c.flow_types = saved;
+    c.flow_exposed = exposed;
+    return result;
+}
+
+func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNode) -> CompileResult {
     let raw_name: String = method_base_name(ref c, node);
     let m_name: String = class_name + "_" + raw_name;
     if (c.generic_method_key.length() > 0) { m_name = c.generic_method_key; }
@@ -3393,6 +3448,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
         return void_result();
     }
 
+    let write_facts = flow_write_facts(ref c, node.obj);
     let object_type: Int = get_repr_type(ref c, get_expr_type(ref c, node.obj));
     let struct_type_id: Int = object_type;
     let struct_ptr_reg: String = "";
@@ -3413,7 +3469,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
         struct_type_id = get_repr_type(ref c, base_info.type);
         struct_ptr_reg = obj_res.reg;
     } else if (is_value_struct(ref c, object_type)) {
-        let object_lvalue: CompileResult = compile_lvalue_ptr(ref c, node.obj, node.pos);
+        let object_lvalue: CompileResult = compile_flow_lvalue(ref c, node.obj, node.pos);
         if (!has_result(object_lvalue) || object_lvalue.type == TYPE_POISON) {
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -3472,6 +3528,11 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
     c.expected_type = field.type;
     let val_res: CompileResult = compile_node(ref c, node.value);
     c.expected_type = 0;
+
+    if (!flow_write_valid(ref c, write_facts)) {
+        throw_type_error(node.pos, "Optional field assignment loses its null check while evaluating the assigned value.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
 
     val_res = emit_implicit_cast(ref c, val_res, field.type, node.pos);
 
@@ -3944,6 +4005,7 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
     if (has_result(target_res) && target_res.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
+
     let target_type: Int = get_repr_type(ref c, target_res.type);
 
     let s_info: StructInfo = c.struct_id_map.lookup(target_type);
@@ -4107,10 +4169,16 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
     check_out_index(ref c, node.target, node.index_node, node.pos);
-    let target_res: CompileResult = compile_node(ref c, node.target);
+    let write_facts: Vector(FlowType) = [];
+    let fixed_array = c.array_info_map.lookup(get_repr_type(ref c, get_expr_type(ref c, node.target)));
+    if (has_array_info(fixed_array) && fixed_array.size >= 0) { write_facts = flow_write_facts(ref c, node.target); }
+    let target_res: CompileResult = CompileResult();
+    if (write_facts.length() != 0) { target_res = compile_flow_lvalue(ref c, node.target, node.pos); }
+    else { target_res = compile_node(ref c, node.target); }
     if (has_result(target_res) && target_res.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
+
 
     let s_info: StructInfo = c.struct_id_map.lookup(target_res.type);
     if (has_struct(s_info) && s_info.is_class) {
@@ -4148,6 +4216,11 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
     if (index_res.type != TYPE_INT) {
         throw_type_error(node.pos, "Index must be an Integer.");
         return void_result();
+    }
+
+    if (!flow_write_valid(ref c, write_facts)) {
+        throw_type_error(node.pos, "Optional index assignment loses its null check while evaluating the index.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
     if (is_pointer_type(ref c, target_res.type)) {
@@ -4196,6 +4269,10 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
         c.expected_type = elem_type;
         let val_res: CompileResult = compile_node(ref c, node.value);
         c.expected_type = 0;
+        if (!flow_write_valid(ref c, write_facts)) {
+            throw_type_error(node.pos, "Optional index assignment loses its null check while evaluating the assigned value.");
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
         if (has_result(val_res) && val_res.type == TYPE_POISON) {
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -4693,6 +4770,16 @@ func compile_throw(ref c: Compiler, node: ThrowNode) -> CompileResult {
     return void_result();
 }
 
+func compile_flow_lvalue(ref c: Compiler, node: NodeID, pos: Position) -> CompileResult {
+// field writes use the payload in place, projecting a copied value would lose the write
+    let address = compile_lvalue_ptr(ref c, node, pos);
+    let member = flow_type(ref c, node);
+    if (member != 0 && member != TYPE_NULL && get_union_type(ref c, get_repr_type(ref c, address.type)).members is !null) {
+        return CompileResult(reg=emit_union_payload(ref c, address.reg, address.type, member), type=member, origin_type=member, is_const_access=address.is_const_access);
+    }
+    return address;
+}
+
 func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> CompileResult {
     if (!has_node(node)) {
         return CompileResult();
@@ -4849,7 +4936,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
                 obj_res = compile_node(ref c, f_acc.obj);
                 struct_ptr_reg = obj_res.reg;
             } else {
-                let obj_lvalue: CompileResult = compile_lvalue_ptr(ref c, f_acc.obj, f_acc.pos);
+                let obj_lvalue: CompileResult = compile_flow_lvalue(ref c, f_acc.obj, f_acc.pos);
                 if (!has_result(obj_lvalue) || obj_lvalue.type == TYPE_POISON) { return obj_lvalue; }
                 struct_type_id = get_repr_type(ref c, obj_lvalue.type);
                 struct_ptr_reg = obj_lvalue.reg;
@@ -5165,7 +5252,10 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
 
         c.output_file.write("\n" + label_rhs + ":\n");
 
+        let before_rhs = flow_copy(c.flow_types);
+        apply_flow_guard(ref c, node.left, op_type == TOK_AND);
         let right_res: CompileResult = compile_node(ref c, node.right);
+        c.flow_types = flow_intersect(before_rhs, c.flow_types);
         if (right_res.type != logic_type) {
             throw_type_error(node.pos, "Both logic operands must have type " + get_type_name(ref c, logic_type) + ".");
         }
@@ -5929,6 +6019,44 @@ func compile_builtin_protocol_call(ref c: Compiler, receiver: NodeID, receiver_t
 }
 
 func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
+    if (!has_node(node)) { return void_result(); }
+    let kind = node_tag(node);
+    let own_body = kind == NODE_FUNC_DEF || kind == NODE_CLASS_DEF;
+    let old_facts = c.flow_types;
+    let old_exposed = c.flow_exposed;
+    if own_body {
+        c.flow_types = null;
+        c.flow_exposed = null;
+    }
+    if (kind == NODE_WHILE || kind == NODE_FOR) { c.flow_types = null; }
+    if (kind == NODE_VAR_DECL) { flow_forget(ref c, get_var_decl_node(ref c.arena, node).name_tok.value, false); }
+    if (kind == NODE_REF) { flow_expose(ref c, get_ref_node(ref c.arena, node).node); }
+
+    let member = flow_type(ref c, node);
+    let result = compile_raw_node(ref c, node);
+    if (member != 0 && get_union_type(ref c, get_repr_type(ref c, result.type)).members is !null) {
+        result = emit_union_read(ref c, result, member);
+        if (needs_drop(ref c, member)) {
+            // an argument can replace the checked slot after its receiver has been loaded.
+            emit_retain_value(ref c, result.reg, member);
+            result.owns_ref = true;
+        }
+    }
+    if (kind == NODE_CALL) { flow_forget(ref c, "", true); }
+    if (kind == NODE_VAR_ASSIGN) { flow_forget(ref c, get_var_assign_node(ref c.arena, node).name_tok.value, false); }
+    if (kind == NODE_FIELD_ASSIGN) {
+        let field = get_field_assign_node(ref c.arena, node);
+        flow_forget(ref c, format_ast_path(ref c, field.obj) + "." + field.field_name, false);
+    }
+    if (kind == NODE_WHILE || kind == NODE_FOR || kind == NODE_CATCH) { c.flow_types = null; }
+    if own_body {
+        c.flow_types = old_facts;
+        c.flow_exposed = old_exposed;
+    }
+    return result;
+}
+
+func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
     if (!has_node(node)) {
         return void_result();
     }
@@ -5999,6 +6127,15 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 c.expected_type = expected;
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
+            let array = c.array_info_map.lookup(c.expected_type);
+            if (has_array_info(array) && array.size >= 0) {
+                let member = c.expected_type;
+                let slot = next_reg(ref c);
+                c.output_file.write(c.indent + slot + " = alloca " + array.llvm_name + "\n");
+                compile_array_literal(ref c, literal, member, slot);
+                c.expected_type = expected;
+                return CompileResult(reg=slot, type=member, owns_ref=true);
+            }
             let result: CompileResult = compile_vector_lit(ref c, literal);
             c.expected_type = expected;
             return result;
@@ -6015,6 +6152,18 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
         return compile_slice_access(ref c, get_slice_access_node(ref c.arena, node), false);
     }
     if (base == NODE_MAP_LIT) {
+        let expected = c.expected_type;
+        if (get_union_type(ref c, expected).members is !null) {
+            let literal = get_map_lit_node(ref c.arena, node);
+            c.expected_type = union_map_target(ref c, expected, node, literal.pos);
+            if (c.expected_type == TYPE_POISON) {
+                c.expected_type = expected;
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
+            let result = compile_map_lit(ref c, literal);
+            c.expected_type = expected;
+            return result;
+        }
         return compile_map_lit(ref c, get_map_lit_node(ref c.arena, node));
     }
     if (base == NODE_ENUM_DEF) {
@@ -6136,8 +6285,12 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
     if (base == NODE_IS || base == NODE_IS_NOT) {
         let b_node: BinOpNode = get_binop_node(ref c.arena, node);
+        let old_skip = c.flow_skip;
+        c.flow_skip = b_node.left;
         let lhs_res: CompileResult = compile_node(ref c, b_node.left);
+        c.flow_skip = b_node.right;
         let rhs_res: CompileResult = compile_node(ref c, b_node.right);
+        c.flow_skip = old_skip;
 
         let left_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, lhs_res.type));
         let right_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, rhs_res.type));

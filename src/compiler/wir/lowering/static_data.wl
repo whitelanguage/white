@@ -163,8 +163,26 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     let kind: Int = node_tag(node);
     let union: UnionInfo = get_union_type(ref source, repr);
     if (union.members is !null) {
-        throw_type_error(pos, "Union global initializers are not implemented yet.");
-        return NO_WIR_VALUE;
+        let member = get_expr_type(ref source, node);
+        if (kind == NODE_NULL) { member = TYPE_NULL; }
+        if (kind == NODE_VECTOR_LIT) { member = union_vector_target(ref source, repr, node, pos); }
+        if (!union_accepts_type(ref source, repr, member) || get_union_type(ref source, member).members is !null) {
+            throw_type_error(pos, "Global union initializer must have a concrete member type of " + get_type_name(ref source, source_type) + ".");
+            return NO_WIR_VALUE;
+        }
+        let tag = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(union_member_index(ref source, repr, member))));
+        let elements: Vector(WirValueID) = [tag];
+        let offsets: Vector(UInt64) = [0UL];
+        if (member != TYPE_NULL) {
+            let payload = wir_lower_static_value(ref types, ref source, ref program, node, member, pos);
+            if (payload == NO_WIR_VALUE) {
+                throw_type_error(pos, "Global variable initialisation must be a compile-time constant expression.");
+                return NO_WIR_VALUE;
+            }
+            elements.append(payload);
+            offsets.append(UInt64(get_union_layout(ref source, repr).payload_offset));
+        }
+        return wir_const_storage(ref program, type_id, elements, offsets);
     }
 
     if (kind == NODE_CALL) {

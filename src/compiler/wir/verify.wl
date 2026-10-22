@@ -1,7 +1,7 @@
 // src/compiler/wir/verify.wl
 import * from "model.wl"
 import wir_value_type from "builder.wl"
-import wir_type_layouts from "layout.wl"
+import wir_type_layouts, wir_type_layout from "layout.wl"
 
 
 func wir_type_valid(ref program: WirModule, id: WirTypeID) -> Bool {
@@ -256,6 +256,9 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
     }
 
     let type: WirType = program.arena.types[wir_id_index(UInt32(constant.type_id))];
+    if (constant.kind != WirConstKind.Storage && constant.offsets is !null && constant.offsets.length() != 0) {
+        wir_report(errors, "constant contains unused storage offsets");
+    }
     if (constant.kind == WirConstKind.Zero) {
         if (constant.elements.length() != 0 || constant.bytes.length() != 0 ||
             constant.target != NO_WIR_VALUE || constant.addend != 0L) {
@@ -316,6 +319,39 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
             }
             if (type.length != UIntSize(constant.bytes.length())) {
                 wir_report(errors, "byte constant length does not match its array type");
+            }
+        }
+    } else if (constant.kind == WirConstKind.Storage) {
+        if (constant.bytes.length() != 0 || constant.target != NO_WIR_VALUE || constant.addend != 0L) {
+            wir_report(errors, "storage constant contains unused payload data");
+        }
+        let layout = wir_type_layout(program, constant.type_id);
+        if (!layout.valid || (type.kind != WirTypeKind.Struct && type.kind != WirTypeKind.Array)) {
+            wir_report(errors, "storage constant requires a sized aggregate type");
+        }
+        if (constant.offsets is null || constant.offsets.length() != constant.elements.length()) {
+            wir_report(errors, "storage constant has the wrong offset count");
+        } else {
+            let end: UInt64 = 0UL;
+            let i = 0;
+            while (i < constant.elements.length()) {
+                let element_id = constant.elements[i];
+                if (!wir_is_constant_value(ref program, element_id)) {
+                    wir_report(errors, "storage constant contains a non-constant value");
+                } else {
+                    let element = program.arena.values[wir_id_index(UInt32(element_id))];
+                    let member = wir_type_layout(program, element.type_id);
+                    let offset = constant.offsets[i];
+                    if (!member.valid || offset < end || offset > layout.size || member.size > layout.size - offset) {
+                        wir_report(errors, "storage constant members overlap or exceed their storage");
+                    } else {
+                        end = offset + member.size;
+                    }
+                    if (element.kind == WirValueKind.Constant && wir_const_valid(ref program, WirConstID(element.owner))) {
+                        wir_check_constant(ref program, WirConstID(element.owner), states, errors);
+                    }
+                }
+                i++;
             }
         }
     } else if (constant.kind == WirConstKind.Address) {
@@ -637,6 +673,23 @@ func wir_check_aggregate_value(ref program: WirModule, instruction: WirInstructi
     }
 }
 
+func wir_static_operand(ref program: WirModule, value_id: WirValueID, depth: Int) -> Bool {
+// storage has a physical initializer layout, it cannot be materialized as an SSA aggregate
+    if (!wir_value_valid(ref program, value_id)) { return false; }
+    let value = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind != WirValueKind.Constant || !wir_const_valid(ref program, WirConstID(value.owner))) { return false; }
+    let constant = program.arena.constants[wir_id_index(value.owner)];
+    if (constant.kind == WirConstKind.Storage) { return true; }
+    if (constant.kind != WirConstKind.Aggregate) { return false; }
+    if (depth >= 128) { return true; }
+    let i = 0;
+    while (i < constant.elements.length()) {
+        if (wir_static_operand(ref program, constant.elements[i], depth + 1)) { return true; }
+        i++;
+    }
+    return false;
+}
+
 func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, block_id: WirBlockID, layouts: Vector(WirTypeLayout), errors: Vector(String)) -> Void {
     let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
     wir_check_location(ref program, instruction.location, errors);
@@ -645,6 +698,8 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
     while (i < instruction.operands.length()) {
         if (!wir_value_valid(ref program, instruction.operands[i])) {
             wir_report(errors, "instruction uses an unknown value");
+        } else if (wir_static_operand(ref program, instruction.operands[i], 0)) {
+            wir_report(errors, "static storage constant cannot be used as an instruction operand");
         }
         i++;
     }
@@ -667,6 +722,8 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
                 let parameter_id: WirValueID = target.parameters[argument_index];
                 if (!wir_value_valid(ref program, argument_id)) {
                     wir_report(errors, "branch passes an unknown value");
+                } else if (wir_static_operand(ref program, argument_id, 0)) {
+                    wir_report(errors, "static storage constant cannot be used as a branch argument");
                 } else if (!wir_value_valid(ref program, parameter_id)) {
                     wir_report(errors, "target block contains an unknown parameter");
                 } else if (program.arena.values[wir_id_index(UInt32(argument_id))].type_id != program.arena.values[wir_id_index(UInt32(parameter_id))].type_id) {

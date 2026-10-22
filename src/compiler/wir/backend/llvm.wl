@@ -3,7 +3,8 @@ import "strings"
 import * from "../model.wl"
 import * from "../verify.wl"
 import wir_value_type from "../builder.wl"
-import wir_type_layout from "../layout.wl"
+import wir_type_layout, wir_type_layouts from "../layout.wl"
+import * from "../storage.wl"
 import * from "llvm_windows.wl"
 
 
@@ -1132,6 +1133,94 @@ func llvm_write_function(output: strings.Builder, program: WirModule, function: 
     return;
 }
 
+func llvm_write_data_type(output: strings.Builder, program: WirModule, type_id: WirTypeID, legacy: Bool) -> Void? {
+    if (!legacy) { llvm_write_type(output, program, type_id)?; return; }
+    let type = program.arena.types[wir_id_index(UInt32(type_id))];
+    if (type.kind == WirTypeKind.Pointer) {
+        llvm_write_data_type(output, program, type.element, true)?;
+        output.write("*")?;
+    } else if (type.kind == WirTypeKind.Array) {
+        output.write("[" + String(type.length) + " x ")?;
+        llvm_write_data_type(output, program, type.element, true)?;
+        output.write("]")?;
+    } else if (type.kind == WirTypeKind.Struct) {
+        output.write("{ ")?;
+        let i = 0;
+        while (i < type.fields.length()) {
+            if (i != 0) { output.write(", ")?; }
+            llvm_write_data_type(output, program, type.fields[i], true)?;
+            i++;
+        }
+        output.write(" }")?;
+    } else { llvm_write_type(output, program, type_id)?; }
+    return;
+}
+
+func llvm_write_data_value(output: strings.Builder, program: WirModule, value_id: WirValueID, legacy: Bool) -> Void? {
+    if (!legacy) { llvm_write_value(output, program, value_id)?; return; }
+    let value = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind != WirValueKind.Constant) { llvm_write_value(output, program, value_id)?; return; }
+    let constant = program.arena.constants[wir_id_index(value.owner)];
+    if (constant.kind == WirConstKind.Address) {
+        let target = program.arena.values[wir_id_index(UInt32(constant.target))];
+        let global = program.arena.globals[wir_id_index(target.owner)];
+        output.write("bitcast (i8* getelementptr (i8, i8* bitcast (")?;
+        llvm_write_data_type(output, program, global.type_id, true)?;
+        output.write("* @" + global.name + " to i8*), i64 " + String(constant.addend) + ") to ")?;
+        llvm_write_data_type(output, program, value.type_id, true)?;
+        output.write(")")?;
+    } else if (constant.kind == WirConstKind.Aggregate) {
+        let type = program.arena.types[wir_id_index(UInt32(value.type_id))];
+        if (type.kind == WirTypeKind.Array) { output.write("[")?; }
+        else { output.write("{")?; }
+        let i = 0;
+        while (i < constant.elements.length()) {
+            if (i != 0) { output.write(", ")?; }
+            let member = program.arena.values[wir_id_index(UInt32(constant.elements[i]))];
+            llvm_write_data_type(output, program, member.type_id, true)?;
+            output.write(" ")?;
+            llvm_write_data_value(output, program, constant.elements[i], true)?;
+            i++;
+        }
+        if (type.kind == WirTypeKind.Array) { output.write("]")?; }
+        else { output.write("}")?; }
+    } else { llvm_write_value(output, program, value_id)?; }
+    return;
+}
+
+func llvm_write_storage(output: strings.Builder, program: WirModule, layouts: Vector(WirTypeLayout), parts: WirStorageParts, size: UInt64, type_only: Bool, legacy: Bool = false) -> Void? {
+// a packed initializer spells offsets exactly, the global retains its target alignment
+    output.write("<{ ")?;
+    let cursor: UInt64 = 0UL;
+    let first = true;
+    let i = 0;
+    while (i <= parts.elements.length()) {
+        let start = size;
+        if (i < parts.elements.length()) { start = parts.offsets[i]; }
+        if (start > cursor) {
+            if (!first) { output.write(", ")?; }
+            output.write("[" + String(start - cursor) + " x i8]")?;
+            if (!type_only) { output.write(" zeroinitializer")?; }
+            first = false;
+            cursor = start;
+        }
+        if (i < parts.elements.length()) {
+            if (!first) { output.write(", ")?; }
+            let value = program.arena.values[wir_id_index(UInt32(parts.elements[i]))];
+            llvm_write_data_type(output, program, value.type_id, legacy)?;
+            if (!type_only) {
+                output.write(" ")?;
+                llvm_write_data_value(output, program, parts.elements[i], legacy)?;
+            }
+            cursor += layouts[wir_id_index(UInt32(value.type_id))].size;
+            first = false;
+        }
+        i++;
+    }
+    output.write(" }>")?;
+    return;
+}
+
 func llvm_write_global(output: strings.Builder, program: WirModule, global: WirGlobal) -> Void? {
     output.write("@")?;
     output.write(global.name)?;
@@ -1160,14 +1249,26 @@ func llvm_write_global(output: strings.Builder, program: WirModule, global: WirG
 
     if (global.is_const) { output.write("constant ")?; } else { output.write("global ")?; }
 
-    llvm_write_type(output, program, global.type_id)?;
+    let storage = global.initializer != NO_WIR_VALUE && wir_has_storage(program, global.initializer);
+    let alignment = global.alignment;
+    if storage {
+        let layouts = wir_type_layouts(program);
+        let layout = layouts[wir_id_index(UInt32(global.type_id))];
+        let parts: WirStorageParts = WirStorageParts(elements=[], offsets=[]);
+        wir_storage_parts(program, layouts, global.initializer, 0UL, parts);
+        llvm_write_storage(output, program, layouts, parts, layout.size, true)?;
+        output.write(" ")?;
+        llvm_write_storage(output, program, layouts, parts, layout.size, false)?;
+        if (alignment == 0) { alignment = layout.alignment; }
+    } else {
+        llvm_write_type(output, program, global.type_id)?;
+        output.write(" ")?;
+        if (global.initializer == NO_WIR_VALUE) { output.write("zeroinitializer")?; } else { llvm_write_value(output, program, global.initializer)?; }
+    }
 
-    output.write(" ")?;
-    if (global.initializer == NO_WIR_VALUE) { output.write("zeroinitializer")?; } else { llvm_write_value(output, program, global.initializer)?; }
-
-    if (global.alignment != 0) {
+    if (alignment != 0) {
         output.write(", align ")?;
-        output.write_int(global.alignment)?;
+        output.write_int(alignment)?;
     }
 
     output.write("\n")?;

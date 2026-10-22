@@ -101,6 +101,27 @@ func machine_write_initializer(
     let constant: WirConstant = program.arena.constants[owner];
     if (constant.kind == WirConstKind.Zero) { return ""; }
 
+    if (constant.kind == WirConstKind.Storage) {
+        if (constant.offsets is null || constant.offsets.length() != constant.elements.length()) {
+            return "storage initializer has the wrong offset count";
+        }
+        let end: UInt64 = 0UL;
+        let i = 0;
+        while (i < constant.elements.length()) {
+            let member = program.arena.values[wir_id_index(UInt32(constant.elements[i]))];
+            let member_layout = layouts[wir_id_index(UInt32(member.type_id))];
+            let start = constant.offsets[i];
+            if (!member_layout.valid || start < end || start > layout.size || member_layout.size > layout.size - start) {
+                return "storage initializer members overlap or exceed their storage";
+            }
+            let message = machine_write_initializer(ref program, layouts, ref section, ref relocations, constant.elements[i], offset + Int(start), depth + 1);
+            if (message.length() != 0) { return message; }
+            end = start + member_layout.size;
+            i++;
+        }
+        return "";
+    }
+
     if (constant.kind == WirConstKind.Address) {
         let symbol: String = machine_address_symbol(ref program, constant.target);
         if (layout.size != 8UL || symbol.length() == 0) {

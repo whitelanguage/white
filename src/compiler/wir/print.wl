@@ -131,6 +131,19 @@ func wir_write_constant(output: strings.Builder, program: WirModule, constant: W
         }
 
         output.write("}")?;
+    } else if (constant.kind == WirConstKind.Storage) {
+        output.write("storage { ")?;
+        let i = 0;
+        while (i < constant.elements.length()) {
+            if (i != 0) { output.write(", ")?; }
+            output.write(String(constant.offsets[i]) + ": ")?;
+            let value = program.arena.values[wir_id_index(UInt32(constant.elements[i]))];
+            wir_write_type(output, program, value.type_id)?;
+            output.write(" ")?;
+            wir_write_value(output, program, constant.elements[i])?;
+            i++;
+        }
+        output.write(" }")?;
     } else if (constant.kind == WirConstKind.Address) {
         output.write("addr ")?;
 

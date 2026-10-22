@@ -309,6 +309,11 @@ func wir_const_address(ref program: WirModule, type_id: WirTypeID, target: WirVa
     return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Address, type_id=type_id, elements=[], bytes="", target=target, addend=addend));
 }
 
+func wir_const_storage(ref program: WirModule, type_id: WirTypeID, elements: Vector(WirValueID), offsets: Vector(UInt64)) -> WirValueID {
+// offsets belong to the target layout, padding has no relocations and stays zero
+    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Storage, type_id=type_id, elements=elements, offsets=offsets, bytes="", target=NO_WIR_VALUE, addend=0L));
+}
+
 func wir_add_function(ref program: WirModule, name: String, parameters: Vector(WirParam), result: WirTypeID, variadic: Bool, linkage: WirLinkage, abi: WirABI) -> WirFuncID {
     let function_id: WirFuncID = WirFuncID(UInt32(program.arena.functions.length() + 1));
     let parameter_types: Vector(WirTypeID) = [];

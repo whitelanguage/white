@@ -324,13 +324,14 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
 
             if (target_type_id == TYPE_AUTO) {
                 target_type_id = get_expr_type(ref c, v_node.value);
-                if (target_type_id == TYPE_POISON) {
-                    return;
+                // flow checks are not available during this walk, infer the read at its declaration.
+                // the final alloca pass still moves the resulting slot into entry.
+                v_node.alloc_id = -1;
+                c.arena.var_decl_nodes[node_slot(node)] = v_node;
+                if (target_type_id != TYPE_POISON && target_type_id != 0 && target_type_id != TYPE_AUTO && c.hoist_scope.table is !null) {
+                    c.hoist_scope.table.put(v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
                 }
-                if (target_type_id == 0 || target_type_id == TYPE_AUTO) {
-                    throw_type_error(v_node.pos, "Failed to statically infer type for 'Auto'. Please specify type explicitly.");
-                    return;
-                }
+                return;
             }
 
             // compile_var_decl reports the declaration error, no storage exists for Void.

@@ -161,7 +161,7 @@ func wir_trace_symbols(ref program: WirModule) -> WirReachability {
                     let constant: WirConstant = program.arena.constants[constant_index];
                     if (constant.kind == WirConstKind.Address) {
                         wir_queue_value(ref program, constant.target, ref value_live, ref value_queue);
-                    } else if (constant.kind == WirConstKind.Aggregate) {
+                    } else if (constant.kind == WirConstKind.Aggregate || constant.kind == WirConstKind.Storage) {
                         let element_index: Int = 0;
                         while (element_index < constant.elements.length()) {
                             wir_queue_value(ref program, constant.elements[element_index], ref value_live, ref value_queue);

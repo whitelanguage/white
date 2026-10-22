@@ -7,6 +7,7 @@ import * from "state.wl"
 import * from "types.wl"
 import * from "ownership.wl"
 import * from "unions.wl"
+import * from "../../narrowing.wl"
 import * from "static_data.wl"
 import * from "declarations.wl"
 import * from "globals.wl"
@@ -2469,6 +2470,8 @@ func wir_identity_value(ref state: WirFunctionLowering, ref types: WirTypeMap, r
 
 func wir_lvalue_type(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> Int {
     if (!has_node(node)) { return TYPE_POISON; }
+    let narrowed = flow_type(ref source, node);
+    if (narrowed != 0) { return narrowed; }
     let kind: Int = node_tag(node);
     if (kind == NODE_STRING) { return TYPE_STRING; }
     if (kind == NODE_VAR_ACCESS) {
@@ -2700,6 +2703,10 @@ func wir_lower_field_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMa
         if (object.value == NO_WIR_VALUE) {
             return wir_no_expr();
         }
+        let member = flow_type(ref source, object_node);
+        if (member != 0 && member != TYPE_NULL && get_union_type(ref source, get_repr_type(ref source, object.source_type)).members is !null) {
+            object = WirExpr(value=wir_union_payload(ref state, ref types, ref source, ref program, object.value, member), source_type=member);
+        }
     }
     return WirExpr(value=wir_field_address(ref program, state.block, object.value, field.offset, "", no_wir_location()), source_type=field.type);
 }
@@ -2713,8 +2720,15 @@ func wir_lower_index_lvalue(
     index_node: NodeID
 ) -> WirExpr {
     let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, target_node));
+    let write_facts: Vector(FlowType) = [];
+    let target_array = source.array_info_map.lookup(target_type);
+    if (has_array_info(target_array) && target_array.size >= 0) { write_facts = flow_write_facts(ref source, target_node); }
     let index: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, index_node);
     if (index.value == NO_WIR_VALUE) { return wir_no_expr(); }
+    if (!flow_write_valid(ref source, write_facts)) {
+        throw_type_error(no_position(), "Optional index assignment loses its null check while evaluating the index.");
+        return wir_no_expr();
+    }
     if (index.source_type != TYPE_INT) {
         state.errors.append("array index reached WIR lowering with a non-Int type");
         return wir_no_expr();
@@ -2740,6 +2754,10 @@ func wir_lower_index_lvalue(
             let target: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, target_node);
             if (target.value == NO_WIR_VALUE) {
                 return wir_no_expr();
+            }
+            let member = flow_type(ref source, target_node);
+            if (member != 0 && get_union_type(ref source, target.source_type).members is !null) {
+                target = WirExpr(value=wir_union_payload(ref state, ref types, ref source, ref program, target.value, member), source_type=member);
             }
             let length: WirValueID = wir_const_int(ref program, wir_lower_source_type(ref types, ref source, ref program, TYPE_INT), UInt128(UInt32(info.size)));
             wir_append(ref program, state.block, WirOpcode.BoundsCheck, program.void_type, [index.value, length], [], no_wir_location());
@@ -2904,6 +2922,7 @@ func wir_lower_address(
     }
     let reference: RefNode = get_ref_node(ref source.arena, node);
     let kind: Int = node_tag(reference.node);
+    flow_expose(ref source, reference.node);
     if (kind != NODE_VAR_ACCESS && kind != NODE_FIELD_ACCESS && kind != NODE_INDEX_ACCESS) {
         throw_invalid_syntax(pos, "Cannot take ref of r-value.");
         return wir_no_expr();
@@ -5730,7 +5749,10 @@ func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeM
             return wir_lower_array_literal(ref state, ref types, ref source, ref program, node, member);
         }
         if (node_tag(node) == NODE_MAP_LIT) {
-            return wir_lower_map_literal(ref state, ref types, ref source, ref program, node, get_expr_type(ref source, node));
+            let literal = get_map_lit_node(ref source.arena, node);
+            let member = union_map_target(ref source, expected_type, node, literal.pos);
+            if (member == TYPE_POISON) { return wir_no_expr(); }
+            return wir_lower_map_literal(ref state, ref types, ref source, ref program, node, member);
         }
     }
     if (has_node(node) && node_tag(node) == NODE_MAP_LIT) {
@@ -6507,7 +6529,53 @@ func wir_lower_print_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
     return WirExpr(value=NO_WIR_VALUE, source_type=TYPE_VOID);
 }
 
+func wir_apply_flow_guard(ref state: WirFunctionLowering, ref source: Compiler, condition: NodeID, truth: Bool) -> Void {
+    if (!flow_has_guard(ref source, condition)) { return; }
+    let guards: Vector(FlowGuard) = [];
+    flow_guards(ref source, condition, truth, guards);
+    let i = 0;
+    while (i < guards.length()) {
+        let guard = guards[i];
+        let old_skip = source.flow_skip;
+        source.flow_skip = guard.target;
+        let original = wir_lvalue_type(ref state, ref source, guard.target);
+        source.flow_skip = old_skip;
+        let path = format_ast_path(ref source, guard.target);
+        let root = expr_root_name(ref source, guard.target);
+        let local = wir_local_index(ref state, root);
+        let unstable = flow_has_field(path) || local < 0;
+        if (local >= 0) { unstable = unstable || state.bindings[local].is_reference; }
+        unstable = unstable || flow_is_exposed(ref source, path);
+        if (!unstable || !flow_has_call(ref source, condition)) {
+            flow_record(ref source, guard.target, original, guard.present, unstable);
+        }
+        i++;
+    }
+}
+
 func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
+    if (has_node(node) && node_tag(node) == NODE_REF) { flow_expose(ref source, get_ref_node(ref source.arena, node).node); }
+    let member = flow_type(ref source, node);
+    let result = wir_lower_raw_expr(ref state, ref types, ref source, ref program, node);
+    if (result.value != NO_WIR_VALUE && member != 0 && get_union_type(ref source, get_repr_type(ref source, result.source_type)).members is !null) {
+        if (member == TYPE_NULL) {
+            result = WirExpr(value=wir_null(ref program, wir_opaque_pointer(ref types, ref program)), source_type=TYPE_NULL);
+        } else {
+            let slot = wir_stack_alloc(ref program, state.entry, wir_value_type(ref program, result.value), "union.read", no_wir_location());
+            wir_store(ref program, state.block, result.value, slot, no_wir_location());
+            let payload = wir_union_payload(ref state, ref types, ref source, ref program, slot, member);
+            result = WirExpr(value=wir_load(ref program, state.block, payload, "", no_wir_location()), source_type=member);
+            if (wir_value_needs_drop(ref source, member)) {
+                wir_emit_ownership_value(ref state, ref types, ref source, ref program, result.value, member, true);
+                wir_track_owned(ref state, result.value, member);
+            }
+        }
+    }
+    if (has_node(node) && node_tag(node) == NODE_CALL) { flow_forget(ref source, "", true); }
+    return result;
+}
+
+func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
     if (!has_node(node)) {
         state.errors.append("expression is missing from the resolved AST");
         return wir_no_expr();
@@ -6733,8 +6801,12 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     }
     if (kind == NODE_IS || kind == NODE_IS_NOT) {
         let identity: BinOpNode = get_binop_node(ref source.arena, node);
+        let old_skip = source.flow_skip;
+        source.flow_skip = identity.left;
         let left: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, identity.left);
+        source.flow_skip = identity.right;
         let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, identity.right);
+        source.flow_skip = old_skip;
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) {
             return wir_no_expr();
         }
@@ -6875,8 +6947,11 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             }
 
             state.block = right_block;
+            let before_rhs = flow_copy(source.flow_types);
+            wir_apply_flow_guard(ref state, ref source, binary.left, binary.op_tok.type == TOK_AND);
             let right_owned_start: Int = state.owned_values.length();
             let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.right);
+            source.flow_types = flow_intersect(before_rhs, source.flow_types);
             if (right.value == NO_WIR_VALUE) { return wir_no_expr(); }
             if (right.source_type != TYPE_BOOL) {
                 state.errors.append("logical operator reached WIR lowering with a non-Bool right operand");
@@ -7495,6 +7570,20 @@ func wir_loop_has_break(ref source: Compiler, node: NodeID) -> Bool {
 }
 
 func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> Void {
+    if (!has_node(node)) { return; }
+    let kind = node_tag(node);
+    if (kind == NODE_WHILE || kind == NODE_FOR) { source.flow_types = null; }
+    if (kind == NODE_VAR_DECL) { flow_forget(ref source, get_var_decl_node(ref source.arena, node).name_tok.value, false); }
+    wir_lower_raw_stmt(ref state, ref types, ref source, ref program, node);
+    if (kind == NODE_VAR_ASSIGN) { flow_forget(ref source, get_var_assign_node(ref source.arena, node).name_tok.value, false); }
+    if (kind == NODE_FIELD_ASSIGN) {
+        let field = get_field_assign_node(ref source.arena, node);
+        flow_forget(ref source, format_ast_path(ref source, field.obj) + "." + field.field_name, false);
+    }
+    if (kind == NODE_WHILE || kind == NODE_FOR || kind == NODE_CATCH) { source.flow_types = null; }
+}
+
+func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> Void {
     if (state.terminated || !has_node(node)) { return; }
     let kind: Int = node_tag(node);
     if (kind == NODE_BLOCK) {
@@ -7605,12 +7694,17 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             throw_type_error(statement.pos, "Cannot modify value through const access '" + name + "'");
             return;
         }
+        let write_facts = flow_write_facts(ref source, statement.obj);
         let address: WirExpr = wir_lower_field_lvalue(ref state, ref types, ref source, ref program, statement.obj, statement.field_name);
         if (address.value == NO_WIR_VALUE) {
             return;
         }
         let value: WirExpr = wir_lower_expected_expr(ref state, ref types, ref source, ref program, statement.value, address.source_type);
         if (value.value == NO_WIR_VALUE) {
+            return;
+        }
+        if (!flow_write_valid(ref source, write_facts)) {
+            throw_type_error(statement.pos, "Optional field assignment loses its null check while evaluating the assigned value.");
             return;
         }
         value = wir_cast_expr(ref state, ref types, ref source, ref program, value, address.source_type, true, no_position());
@@ -7652,12 +7746,19 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 return;
             }
         }
+        let write_facts: Vector(FlowType) = [];
+        let array = source.array_info_map.lookup(target_type);
+        if (has_array_info(array) && array.size >= 0) { write_facts = flow_write_facts(ref source, statement.target); }
         let address: WirExpr = wir_lower_index_lvalue(ref state, ref types, ref source, ref program, statement.target, statement.index_node);
         if (address.value == NO_WIR_VALUE) {
             return;
         }
         let value: WirExpr = wir_lower_expected_expr(ref state, ref types, ref source, ref program, statement.value, address.source_type);
         if (value.value == NO_WIR_VALUE) { return; }
+        if (!flow_write_valid(ref source, write_facts)) {
+            throw_type_error(statement.pos, "Optional index assignment loses its null check while evaluating the assigned value.");
+            return;
+        }
         value = wir_cast_expr(ref state, ref types, ref source, ref program, value, address.source_type, true, no_position());
         if (value.value == NO_WIR_VALUE) {
             return;
@@ -7809,6 +7910,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             return;
         }
         let condition_owned: Vector(WirOwnedValue) = wir_copy_owned(state.owned_values);
+        let incoming = flow_copy(source.flow_types);
 
         let parent_bindings: Int = state.bindings.length();
         let then_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "if.then."), []);
@@ -7818,12 +7920,18 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
 
             state.block = then_block;
             state.terminated = false;
+            wir_apply_flow_guard(ref state, ref source, statement.condition, true);
             wir_lower_block(ref state, ref types, ref source, ref program, statement.body);
+            let then_facts = flow_copy(source.flow_types);
+            let then_terminated = state.terminated;
             if (!state.terminated) {
                 wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(merge_block, [])], no_wir_location());
             }
 
             wir_restore_bindings(ref state, parent_bindings);
+            source.flow_types = flow_copy(incoming);
+            wir_apply_flow_guard(ref state, ref source, statement.condition, false);
+            if (!then_terminated) { source.flow_types = flow_intersect(then_facts, source.flow_types); }
             state.block = merge_block;
             state.terminated = false;
             state.owned_values = condition_owned;
@@ -7836,14 +7944,18 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
 
         state.block = then_block;
         state.terminated = false;
+        wir_apply_flow_guard(ref state, ref source, statement.condition, true);
         wir_lower_block(ref state, ref types, ref source, ref program, statement.body);
         let then_end: WirBlockID = state.block;
         let then_terminated: Bool = state.terminated;
+        let then_facts = flow_copy(source.flow_types);
 
         wir_restore_bindings(ref state, parent_bindings);
         state.owned_values = wir_copy_owned(condition_owned);
         state.block = else_block;
         state.terminated = false;
+        source.flow_types = flow_copy(incoming);
+        wir_apply_flow_guard(ref state, ref source, statement.condition, false);
         if (node_tag(statement.else_body) == NODE_IF) {
             wir_lower_stmt(ref state, ref types, ref source, ref program, statement.else_body);
         } else {
@@ -7851,6 +7963,10 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let else_end: WirBlockID = state.block;
         let else_terminated: Bool = state.terminated;
+        if (!then_terminated) {
+            if else_terminated { source.flow_types = then_facts; }
+            else { source.flow_types = flow_intersect(then_facts, source.flow_types); }
+        }
 
         wir_restore_bindings(ref state, parent_bindings);
         if (then_terminated && else_terminated) {
@@ -7901,6 +8017,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         state.loops.append(WirLoop(continue_block=condition_block, break_block=end_block, binding_count=state.bindings.length()));
         state.block = body_block;
         state.terminated = false;
+        wir_apply_flow_guard(ref state, ref source, statement.condition, true);
         wir_lower_block(ref state, ref types, ref source, ref program, statement.body);
         if (!state.terminated) {
             wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(condition_block, [])], no_wir_location());
@@ -7961,6 +8078,7 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         state.loops.append(WirLoop(continue_block=step_block, break_block=end_block, binding_count=loop_bindings));
         state.block = body_block;
         state.terminated = false;
+        if (has_node(statement.cond)) { wir_apply_flow_guard(ref state, ref source, statement.cond, true); }
         wir_lower_block(ref state, ref types, ref source, ref program, statement.body);
         if (!state.terminated) {
             wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(step_block, [])], no_wir_location());
@@ -8048,10 +8166,29 @@ func wir_lower_block(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     if (!state.terminated && GLOBAL_ERROR_COUNT == errors_before) {
         wir_cleanup_bindings(ref state, ref types, ref source, ref program, binding_count);
     }
+    // remove facts for block locals before their names can resolve to an outer binding.
+    if (source.flow_types is !null && source.flow_types.length() != 0) {
+        let local = binding_count;
+        while (local < state.bindings.length()) {
+            flow_forget(ref source, state.bindings[local].name, false);
+            local++;
+        }
+    }
     wir_restore_bindings(ref state, binding_count);
 }
 
 func wir_lower_function_body(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: FuncInfo, body: NodeID) -> WirFuncID {
+    let saved_facts = source.flow_types;
+    let saved_exposed = source.flow_exposed;
+    source.flow_types = null;
+    source.flow_exposed = null;
+    let result = wir_lower_function_impl(ref types, ref source, ref program, info, body);
+    source.flow_types = saved_facts;
+    source.flow_exposed = saved_exposed;
+    return result;
+}
+
+func wir_lower_function_impl(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: FuncInfo, body: NodeID) -> WirFuncID {
     let function_id: WirFuncID = wir_find_function(program, info.name);
     if (function_id == NO_WIR_FUNC) {
         function_id = wir_lower_function_decl(ref types, ref source, ref program, info);
