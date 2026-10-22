@@ -26,8 +26,7 @@ func main() -> Int {
             print("FAIL: JSON encoder output");
             return 1;
         }
-        value = null;
-        encoded = null;
+        // the iteration scope drops both the array graph and its encoded bytes
         round += 1;
     }
     print("PASS: JSON value lifetime");

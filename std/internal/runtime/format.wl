@@ -19,7 +19,6 @@ func signed_decimal_digits(value: Long) -> Int {
 func format_long(value: Long) -> String {
     let length: Int = signed_decimal_digits(value);
     let result: String = runtime_string.alloc(Long(length));
-    if (result is null) { return null; }
 
     let ptr output: Byte = runtime_string.data(result);
     let negative: Bool = value < 0L;
@@ -56,7 +55,6 @@ func format_uint64(value: UInt64) -> String {
     }
 
     let result: String = runtime_string.alloc(Long(length));
-    if (result is null) { return null; }
     let ptr output: Byte = runtime_string.data(result);
     let work: UInt64 = value;
     let pos: Int = length - 1;
@@ -90,7 +88,6 @@ func format_uint128(value: UInt128) -> String {
 func format_uint128_magnitude(value: UInt128, negative: Bool) -> String {
 // convert four base-2^32 limbs into five base-10^9 chunks
     let storage: String = runtime_string.alloc(20L);
-    if (storage is null) { return null; }
     let ptr chunks: UInt32 = runtime_string.data(storage);
     let clear_idx: Int = 0;
     while (clear_idx < 5) {
@@ -125,7 +122,6 @@ func format_uint128_magnitude(value: UInt128, negative: Bool) -> String {
     if negative { length += 1; }
 
     let result: String = runtime_string.alloc(Long(length));
-    if (result is null) { return null; }
     let ptr output: Byte = runtime_string.data(result);
 
     if negative { output[0] = Byte(45); }
@@ -163,7 +159,6 @@ func format_float(value: Float) -> String {
     let whole: String = format_long(whole_value);
     if negative {
         let signed_whole: String = runtime_string.alloc(Long(whole.length()) + 1L);
-        if (signed_whole is null) { return null; }
         let ptr signed_bytes: Byte = runtime_string.data(signed_whole);
         let ptr whole_bytes: Byte = runtime_string.data(whole);
         signed_bytes[0] = Byte(45);
@@ -176,7 +171,6 @@ func format_float(value: Float) -> String {
     }
 
     let fraction: String = runtime_string.alloc(7L);
-    if (fraction is null) { return null; }
     let ptr output: Byte = runtime_string.data(fraction);
     output[0] = Byte(46);
 
@@ -187,7 +181,6 @@ func format_float(value: Float) -> String {
         pos -= 1;
     }
     let result: String = runtime_string.alloc(Long(whole.length() + fraction.length()));
-    if (result is null) { return null; }
     let ptr result_bytes: Byte = runtime_string.data(result);
     let ptr whole_bytes: Byte = runtime_string.data(whole);
     let ptr fraction_bytes: Byte = runtime_string.data(fraction);

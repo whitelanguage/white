@@ -7,7 +7,7 @@ import "process"
 
 
 func main() -> Int {
-    let wl_path: String = sys.env.get_env("WL_PATH");
+    let wl_path: Optional(String) = sys.env.get_env("WL_PATH");
     if (wl_path is null || wl_path.length() == 0) {
         print("FAIL: native environment lookup");
         return 1;

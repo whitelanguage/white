@@ -2,19 +2,22 @@
 // low-level String storage access shared by the standard library
 
 import "memory.wl" as memory
+import "process.wl" as process
+import Error from "errors"
 
 
 const __STRING_TYPE_ID: Int = 5;
 const __OBJECT_HEADER_SIZE: Int = 8;
 
-func alloc(length: Long) -> String {
-    if (length < 0L || length > 2147483647L) { return null; }
+func try_alloc(length: Long) -> String? {
+// allocation failure is an error, every returned String owns valid storage
+    if (length < 0L || length > 2147483647L) { throw Error.InvalidArgument; }
 
     let pointer_size: Int = Int(size_of(AnyPtr));
     let value_size: Int = pointer_size + 8;
     let storage_size: Long = Long(__OBJECT_HEADER_SIZE + value_size) + length + 1L;
     let storage: AnyPtr = memory.mem_alloc_zeroed(UIntSize(storage_size));
-    if (storage is nullptr) { return null; }
+    if (storage is nullptr) { throw Error.OutOfMemory; }
 
     let ptr header: Int = storage;
     header[0] = 0;
@@ -32,6 +35,18 @@ func alloc(length: Long) -> String {
     lengths[1] = Int(length);
 
     let result: String = value;
+    return result;
+}
+
+func alloc(length: Long) -> String {
+// implicit String conversions cannot propagate errors through their existing ABI
+    let result: String = try_alloc(length)?;
+    catch(err) {
+        // this path cannot allocate another String just to print the failure.
+        process.write_err("fatal: String allocation failed\n");
+        process.process_exit(1);
+        return "";
+    }
     return result;
 }
 
@@ -56,18 +71,25 @@ func set_length(value: String, length: Int) -> Void {
     bytes[length] = Byte(0);
 }
 
-func from_c_string(value: AnyPtr) -> String {
-    if (value is nullptr) { return null; }
+func from_c_string(value: AnyPtr) -> String? {
+    if (value is nullptr) { throw Error.InvalidArgument; }
     let ptr source: Byte = value;
     let length: Int = 0;
     while (source[length] != Byte(0)) {
-        if (length == 2147483647) { return null; }
+        if (length == 2147483647) { throw Error.Overflow; }
         length += 1;
     }
 
-    let result: String = alloc(Long(length));
-    if (result is null) { return null; }
+    let result: String = try_alloc(Long(length))?;
     memory.mem_copy(data(result), value, UIntSize(length));
+    return result;
+}
+
+func copy(value: String) -> String? {
+// fallible callers can copy bytes without going through an infallible slice operation
+    if (value is null) { throw Error.InvalidArgument; }
+    let result: String = try_alloc(Long(value.length()))?;
+    memory.mem_copy(data(result), data(value), UIntSize(value.length()));
     return result;
 }
 
@@ -114,7 +136,10 @@ func is_native_text(value: String) -> Bool {
 func encode_utf8_char(value: Char) -> String {
 // encode one Unicode scalar as UTF-8
     let scalar: Int = Int(value);
-    if (scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343)) { return null; }
+    if (scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343)) {
+        process.panic("Invalid Unicode scalar");
+        return "";
+    }
 
     let width: Int = 1;
     if (scalar > 127) { width = 2; }
@@ -122,7 +147,6 @@ func encode_utf8_char(value: Char) -> String {
     if (scalar > 65535) { width = 4; }
 
     let result: String = alloc(Long(width));
-    if (result is null) { return null; }
     let ptr bytes: Byte = data(result);
 
     if (width == 1) {

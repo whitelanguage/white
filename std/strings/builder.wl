@@ -4,21 +4,29 @@ import Error from "errors"
 import StringError from "errors.wl"
 import "internal/runtime/memory" as memory
 import "internal/runtime/string" as runtime_string
+import Optional from "builtin/type"
 
 
 class Builder {
 // grows one UTF-8 buffer and turns it into an ordinary String when build is called
-    let __storage: String = null;
+    let __storage: Optional(String) = null;
     let __length: Int = 0;
     let __capacity: Int = 0;
 
     init(initial_capacity: Int) {
         if (initial_capacity < 64) { initial_capacity = 64; }
-        self.__storage = runtime_string.alloc(Long(initial_capacity));
-        if (self.__storage is !null) {
-            runtime_string.set_length(self.__storage, 0);
-            self.__capacity = initial_capacity;
-        }
+        let storage: String = runtime_string.try_alloc(Long(initial_capacity))?;
+        catch(err) { return; }
+        runtime_string.set_length(storage, 0);
+        self.__storage = storage;
+        self.__capacity = initial_capacity;
+    }
+
+    func __buffer() -> String? {
+    // keep a local owner while calls may change the builder's backing field
+        let storage: Optional(String) = self.__storage;
+        if (storage is null) { throw Error.OutOfMemory; }
+        return storage;
     }
 
     func __reserve(additional: Int) -> Void? {
@@ -39,12 +47,10 @@ class Builder {
             capacity *= 2;
         }
 
-        let replacement: String = runtime_string.alloc(Long(capacity));
-        if (replacement is null) {
-            throw Error.OutOfMemory;
-        }
+        let replacement: String = runtime_string.try_alloc(Long(capacity))?;
         if (self.__length > 0) {
-            memory.mem_copy(runtime_string.data(replacement), runtime_string.data(self.__storage), UIntSize(self.__length));
+            let storage: String = self.__buffer()?;
+            memory.mem_copy(runtime_string.data(replacement), runtime_string.data(storage), UIntSize(self.__length));
         }
         runtime_string.set_length(replacement, self.__length);
         self.__storage = replacement;
@@ -64,24 +70,27 @@ class Builder {
             throw Error.InvalidArgument;
         }
         let length: Int = value.length();
+        if (length == 0) { return; }
         self.__reserve(length)?;
+        let storage: String = self.__buffer()?;
         if (length > 0) {
-            let target: AnyPtr = runtime_string.data(self.__storage);
+            let target: AnyPtr = runtime_string.data(storage);
             let ptr target_bytes: Byte = target;
             memory.mem_copy(ref target_bytes[self.__length], runtime_string.data(value), UIntSize(length));
         }
         self.__length += length;
-        runtime_string.set_length(self.__storage, self.__length);
+        runtime_string.set_length(storage, self.__length);
         return;
     }
 
     func write_byte(value: Byte) -> Void? {
     // append one raw byte, build will reject the result if the final buffer is not UTF-8
         self.__reserve(1)?;
-        let ptr bytes: Byte = runtime_string.data(self.__storage);
+        let storage: String = self.__buffer()?;
+        let ptr bytes: Byte = runtime_string.data(storage);
         bytes[self.__length] = value;
         self.__length += 1;
-        runtime_string.set_length(self.__storage, self.__length);
+        runtime_string.set_length(storage, self.__length);
         return;
     }
 
@@ -96,8 +105,8 @@ class Builder {
         if (scalar > 2047) { width = 3; }
         if (scalar > 65535) { width = 4; }
         self.__reserve(width)?;
-
-        let ptr bytes: Byte = runtime_string.data(self.__storage);
+        let storage: String = self.__buffer()?;
+        let ptr bytes: Byte = runtime_string.data(storage);
         let offset: Int = self.__length;
         if (width == 1) {
             bytes[offset] = Byte(scalar);
@@ -115,7 +124,7 @@ class Builder {
             bytes[offset + 3] = Byte(128 | (scalar & 63));
         }
         self.__length += width;
-        runtime_string.set_length(self.__storage, self.__length);
+        runtime_string.set_length(storage, self.__length);
         return;
     }
 
@@ -135,12 +144,13 @@ class Builder {
         let width: Int = digits;
         if negative { width += 1; }
         self.__reserve(width)?;
+        let storage: String = self.__buffer()?;
 
         let start: Int = self.__length;
         let pos: Int = start + width - 1;
         let work: Long = value;
         if (!negative) { work = 0L - work; }
-        let ptr bytes: Byte = runtime_string.data(self.__storage);
+        let ptr bytes: Byte = runtime_string.data(storage);
         while true {
             bytes[pos] = Byte(Int(0L - (work % 10L)) + 48);
             work /= 10L;
@@ -151,7 +161,7 @@ class Builder {
         }
         if negative { bytes[start] = Byte(45); }
         self.__length += width;
-        runtime_string.set_length(self.__storage, self.__length);
+        runtime_string.set_length(storage, self.__length);
         return;
     }
 
@@ -163,10 +173,11 @@ class Builder {
             digits += 1;
         }
         self.__reserve(digits)?;
+        let storage: String = self.__buffer()?;
 
         let pos: Int = self.__length + digits - 1;
         let work: UInt64 = value;
-        let ptr bytes: Byte = runtime_string.data(self.__storage);
+        let ptr bytes: Byte = runtime_string.data(storage);
         while true {
             bytes[pos] = Byte(Int(work % UInt64(10)) + 48);
             work /= UInt64(10);
@@ -176,7 +187,7 @@ class Builder {
             pos -= 1;
         }
         self.__length += digits;
-        runtime_string.set_length(self.__storage, self.__length);
+        runtime_string.set_length(storage, self.__length);
         return;
     }
 
@@ -195,21 +206,24 @@ class Builder {
     func clear() -> Void {
     // retain the allocation so the builder can be reused
         self.__length = 0;
-        if (self.__storage is !null) {
-            runtime_string.set_length(self.__storage, 0);
+        let storage: Optional(String) = self.__storage;
+        if (storage is !null) {
+            runtime_string.set_length(storage, 0);
         }
     }
 
     func build() -> String? {
     // finish the current contents without exposing spare capacity
         // detach the buffer so later writes cannot mutate the returned String
-        if (self.__storage is null) {
-            throw Error.OutOfMemory;
+        let storage: Optional(String) = self.__storage;
+        if (storage is null) {
+            if (self.__length != 0) { throw Error.OutOfMemory; }
+            return "";
         }
-        runtime_string.set_length(self.__storage, self.__length);
-        if (!self.__storage.is_valid_utf8()) { throw StringError.InvalidUtf8; }
+        runtime_string.set_length(storage, self.__length);
+        if (!storage.is_valid_utf8()) { throw StringError.InvalidUtf8; }
 
-        let result: String = self.__storage;
+        let result: String = storage;
         self.__storage = null;
         self.__length = 0;
         self.__capacity = 0;

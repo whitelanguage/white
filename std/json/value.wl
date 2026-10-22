@@ -3,6 +3,8 @@
 import Dict from "dict"
 import Error from "errors"
 import JsonError from "errors.wl"
+import Optional from "builtin/type"
+import "internal/runtime/string" as runtime_string
 
 
 enum Kind {
@@ -16,8 +18,8 @@ enum Kind {
 
 class Object {
 // preserves insertion order, the index table only accelerates key lookup
-    let __values: Dict = null;
-    let __keys: Vector(String) = null;
+    let __values: Dict;
+    let __keys: Vector(String);
 
     init() {
         self.__values = Dict(8);
@@ -33,14 +35,14 @@ class Object {
         return self.__values.contains_key(key);
     }
 
-    func find(key: String) -> Value {
+    func find(key: String) -> Optional(Value) {
         if (!self.contains(key)) { return null; }
         let value: Value = self.__values.get(key);
         return value;
     }
 
     func get(key: String) -> Value? {
-        let value: Value = self.find(key);
+        let value: Optional(Value) = self.find(key);
         if (value is null) {
             throw JsonError.MissingKey;
         }
@@ -53,8 +55,7 @@ class Object {
             throw JsonError.InvalidValue;
         }
         if (!self.__values.contains_key(key)) {
-            let stored_key: String = key[:];
-            if (stored_key is null) { throw Error.OutOfMemory; }
+            let stored_key: String = runtime_string.copy(key)?;
             self.__keys.append(stored_key);
             self.__values.put(stored_key, value);
             return;
@@ -101,10 +102,10 @@ class Value {
     let __kind: Kind = Kind.Null;
     let __boolean: Bool = false;
     let __number: Float = 0.0;
-    let __number_text: String = null;
-    let __text: String = null;
-    let __array: Vector(Value) = null;
-    let __object: Object = null;
+    let __number_text: String = "";
+    let __text: String = "";
+    let __array: Optional(Vector(Value)) = null;
+    let __object: Optional(Object) = null;
 
     init(kind: Kind) {
         self.__kind = kind;
@@ -203,71 +204,82 @@ class Value {
         if (self.__kind != Kind.Object) {
             throw JsonError.TypeMismatch;
         }
-        return self.__object;
+        let object: Optional(Object) = self.__object;
+        if (object is null) { throw JsonError.InvalidValue; }
+        return object;
+    }
+
+    func __array_values() -> Vector(Value)? {
+        if (self.__kind != Kind.Array) { throw JsonError.TypeMismatch; }
+        let values: Optional(Vector(Value)) = self.__array;
+        if (values is null) { throw JsonError.InvalidValue; }
+        return values;
     }
 
     func length() -> Int? {
         if (self.__kind == Kind.Array) {
-            return self.__array.length();
+            let values: Vector(Value) = self.__array_values()?;
+            return values.length();
         }
         if (self.__kind == Kind.Object) {
-            return self.__object.length();
+            let object: Object = self.as_object()?;
+            return object.length();
         }
         throw JsonError.TypeMismatch;
         return 0;
     }
 
     func at(index: Int) -> Value? {
-        if (self.__kind != Kind.Array) {
-            throw JsonError.TypeMismatch;
-        }
-        if (index < 0 || index >= self.__array.length()) {
+        let values: Vector(Value) = self.__array_values()?;
+        if (index < 0 || index >= values.length()) {
             throw JsonError.IndexOutOfBounds;
         }
-        return self.__array[index];
+        return values[index];
     }
 
     func append(value: Value) -> Void? {
     // append to an array value, other kinds report TypeMismatch
-        if (self.__kind != Kind.Array) { throw JsonError.TypeMismatch; }
+        let values: Vector(Value) = self.__array_values()?;
         if (value is null) {
             throw JsonError.InvalidValue;
         }
-        self.__array.append(value);
+        values.append(value);
         return;
     }
 
     func get(key: String) -> Value? {
-        if (self.__kind != Kind.Object) {
-            throw JsonError.TypeMismatch;
-        }
-        return self.__object.get(key)?;
+        let object: Object = self.as_object()?;
+        return object.get(key)?;
     }
 
-    func find(key: String) -> Value {
+    func find(key: String) -> Optional(Value) {
         if (self.__kind != Kind.Object) { return null; }
-        return self.__object.find(key);
+        let object: Optional(Object) = self.__object;
+        if (object is null) { return null; }
+        return object.find(key);
     }
 
     func contains(key: String) -> Bool {
         if (self.__kind != Kind.Object) { return false; }
-        return self.__object.contains(key);
+        let object: Optional(Object) = self.__object;
+        if (object is null) { return false; }
+        return object.contains(key);
     }
 
     func set(key: String, value: Value) -> Void? {
-        if (self.__kind != Kind.Object) { throw JsonError.TypeMismatch; }
-        self.__object.set(key, value)?;
+        let object: Object = self.as_object()?;
+        object.set(key, value)?;
         return;
     }
 
     func remove(key: String) -> Bool? {
-        if (self.__kind != Kind.Object) { throw JsonError.TypeMismatch; }
-        return self.__object.remove(key);
+        let object: Object = self.as_object()?;
+        return object.remove(key);
     }
 
     func key_at(index: Int) -> String? {
-        if (self.__kind != Kind.Object) { throw JsonError.TypeMismatch; }
-        return self.__object.key_at(index)?;
+        let object: Object = self.as_object()?;
+        return object.key_at(index)?;
     }
 }
 
@@ -368,10 +380,7 @@ func number_from_text(source: String) -> Value? {
 // validate JSON number grammar before preserving the original spelling
 // keep the token text so large integers survive a parse/encode round trip
     let approximation: Float = __parse_number(source)?;
-    let copy: String = source[:];
-    if (copy is null) {
-        throw Error.OutOfMemory;
-    }
+    let copy: String = runtime_string.copy(source)?;
     let result: Value = Value(Kind.Number);
     result.__number = approximation;
     result.__number_text = copy;
@@ -385,17 +394,11 @@ func validate_number(source: String) -> Void? {
 
 func number(value: Float) -> Value? {
     let source: String = "" + value;
-    if (source is null) {
-        throw Error.OutOfMemory;
-    }
     return number_from_text(source)?;
 }
 
 func integer(value: Long) -> Value? {
     let source: String = "" + value;
-    if (source is null) {
-        throw Error.OutOfMemory;
-    }
     return number_from_text(source)?;
 }
 
@@ -403,10 +406,7 @@ func string(value: String) -> Value? {
     if (value is null || !value.is_valid_utf8()) {
         throw JsonError.InvalidUtf8;
     }
-    let copy: String = value[:];
-    if (copy is null) {
-        throw Error.OutOfMemory;
-    }
+    let copy: String = runtime_string.copy(value)?;
     let result: Value = Value(Kind.Text);
     result.__text = copy;
     return result;

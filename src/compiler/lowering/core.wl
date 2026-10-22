@@ -2055,9 +2055,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
 
     let temp_dir: String = "";
     if (get_target_os() == sys.Os.Windows) {
-        temp_dir = sys.env.get_env("TMP");
-        if (temp_dir is null) { temp_dir = sys.env.get_env("TEMP"); }
-        if (temp_dir is null) { temp_dir = "."; }
+        temp_dir = sys.env.get_or("TMP", sys.env.get_or("TEMP", "."));
         if (!temp_dir.ends_with("\\") && !temp_dir.ends_with("/")) { temp_dir += "\\"; }
     } else {
         temp_dir = "/tmp/";

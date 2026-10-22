@@ -13,9 +13,17 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("FAIL: Argument bounds were not checked");
         return 1;
     }
-    if (argc == 3 && (process.argument(argc, argv, 1) != "hello world" || process.argument(argc, argv, 2) != "你好")) {
-        print("FAIL: Native arguments were not decoded as UTF-8");
-        return 1;
+    if (argc == 3) {
+        let first: Optional(String) = process.argument(argc, argv, 1);
+        let second: Optional(String) = process.argument(argc, argv, 2);
+        if (first is null || second is null) {
+            print("FAIL: Native arguments are missing");
+            return 1;
+        }
+        if (first != "hello world" || second != "你好") {
+            print("FAIL: Native arguments were not decoded as UTF-8");
+            return 1;
+        }
     }
     print("PASS: Native process arguments");
     return 0;

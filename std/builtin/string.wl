@@ -168,7 +168,7 @@ func string_slice(self: String, start: Int, end: Int) -> String {
 
     let result_len: Int = end - start;
     let result: String = runtime_string.alloc(Long(result_len));
-    if (result is null || result_len == 0) { return result; }
+    if (result_len == 0) { return result; }
 
     let ptr source: Byte = runtime_string.data(self);
     let ptr output: Byte = runtime_string.data(result);
@@ -188,7 +188,6 @@ func string_concat(left: String, right: String) -> String {
     let right_len: Int = right.length();
     let total_len: Long = Long(left_len) + Long(right_len);
     let result: String = runtime_string.alloc(total_len);
-    if (result is null) { return null; }
 
     let ptr output: Byte = runtime_string.data(result);
     let ptr left_bytes: Byte = runtime_string.data(left);

@@ -60,6 +60,38 @@ func main() -> Int {
         return 1;
     }
 
+    if (root.find("missing") is !null) {
+        print("FAIL: Missing JSON member must have no value");
+        return 1;
+    }
+    root.set("empty", json.null_value())?;
+    catch(err) {
+        print("FAIL: Could not store JSON null");
+        return 1;
+    }
+    let empty: Optional(json.Value) = root.find("empty");
+    if (empty is null) {
+        print("FAIL: JSON null was confused with a missing member");
+        return 1;
+    }
+    if (!empty.is_null()) {
+        print("FAIL: JSON null changed kind during optional lookup");
+        return 1;
+    }
+    root.remove("empty")?;
+    catch(err) {
+        print("FAIL: Could not remove JSON member");
+        return 1;
+    }
+    if (empty is null) {
+        print("FAIL: Optional lookup lost its value after removal");
+        return 1;
+    }
+    if (root.find("empty") is !null || !empty.is_null()) {
+        print("FAIL: Optional lookup did not retain its JSON value");
+        return 1;
+    }
+
     print("PASS: JSON value model");
     return 0;
 }

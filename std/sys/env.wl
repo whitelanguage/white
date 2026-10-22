@@ -6,6 +6,8 @@ import "internal/platform/windows"
 import "internal/platform/posix"
 import "internal/platform/errors" as platform_errors
 import "internal/runtime/string" as runtime_string
+import "internal/runtime/process" as runtime_process
+import Optional from "builtin/type"
 import Error as CoreError from "errors"
 
 
@@ -41,11 +43,13 @@ func get(name: String) -> String? {
             throw CoreError.OutOfMemory;
         }
 
+        windows.SetLastError(0);
         let required: Int = windows.GetEnvironmentVariableW(wide_name, nullptr, 0);
         if (required <= 0) {
             let code: Int = windows.GetLastError();
             windows.free_utf16(wide_name);
             if (code == windows.ERROR_ENVVAR_NOT_FOUND) { throw Error.NotFound; }
+            if (code == 0) { return ""; }
             throw __from_platform(platform_errors.from_windows(code));
         }
 
@@ -55,37 +59,48 @@ func get(name: String) -> String? {
             throw CoreError.OutOfMemory;
         }
 
+        windows.SetLastError(0);
         let length: Int = windows.GetEnvironmentVariableW(wide_name, wide_value, required);
+        let code: Int = windows.GetLastError();
         windows.free_utf16(wide_name);
         if (length <= 0 || length >= required) {
-            let err: Error = __from_platform(platform_errors.last());
+            windows.free_utf16(wide_value);
+            if (length == 0 && code == 0) { return ""; }
+            throw __from_platform(platform_errors.from_windows(code));
+        }
+
+        let result: String = windows.utf16_to_utf8(wide_value, length)?;
+        catch(err) {
             windows.free_utf16(wide_value);
             throw err;
         }
-
-        let result: String = windows.utf16_to_utf8(wide_value, length);
         windows.free_utf16(wide_value);
-        if (result is null) {
-            throw CoreError.OutOfMemory;
-        }
         return result;
     }
 
     let native_value: AnyPtr = posix.getenv(runtime_string.data(name));
-    let result: String = runtime_string.from_c_string(native_value);
-    if (result is null) {
-        throw Error.NotFound;
-    }
+    if (native_value is nullptr) { throw Error.NotFound; }
+    let result: String = runtime_string.from_c_string(native_value)?;
     if (!runtime_string.is_native_text(result)) {
         throw Error.InvalidData;
     }
     return result;
 }
 
-func get_env(name: String) -> String {
+func get_env(name: String) -> Optional(String) {
     let result: String = get(name)?;
     catch(err) {
+        if (err == Error.NotFound) { return null; }
+        runtime_process.write_err("fatal: Could not read environment variable\n");
+        runtime_process.process_exit(1);
         return null;
     }
+    return result;
+}
+
+func get_or(name: String, fallback: String) -> String {
+// absence selects the fallback, invalid names and allocation failures still fail
+    let result: Optional(String) = get_env(name);
+    if (result is null) { return fallback; }
     return result;
 }

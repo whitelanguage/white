@@ -84,21 +84,21 @@ if (value.kind() == json.Kind.Array) {
 ```
 
 There are two forms of null to keep apart. `json.null_value()` constructs an
-actual JSON value. A null `json.Value` reference means that no value object
-exists at all.
+actual JSON value. The null arm of `Optional(json.Value)` means that no value
+object exists at all.
 
 ```rs
 let json_null: json.Value = json.null_value();
-let no_value: json.Value = null;
+let no_value: Optional(json.Value) = null;
 
 json_null.is_null(); // true
 json.encode(json_null)?; // "null"
-json.encode(no_value)?;  // JsonError.InvalidValue
+no_value is null; // true, there is no Value to encode
 ```
 
-This matters when using `find`. A missing member returns a null reference. A
-present member whose contents are JSON `null` returns a non-null `Value` with
-kind `Kind.Null`.
+This matters when using `find`. A missing member returns the null arm of an
+Optional. A present member whose contents are JSON `null` returns a `Value`
+with kind `Kind.Null`.
 
 ## Scalars
 
@@ -151,7 +151,7 @@ catch(err) {
 Use `find` when it is optional:
 
 ```rs
-let description: json.Value = root.find("description");
+let description: Optional(json.Value) = root.find("description");
 if (description is !null) {
     let text: String = String(description)?;
     catch(err) {
@@ -560,7 +560,7 @@ length()                    Int?
 at(index)                   Value?
 append(value)               Void?
 get(key)                    Value?
-find(key)                   Value or null
+find(key)                   Optional(Value)
 contains(key)               Bool
 set(key, value)             Void?
 remove(key)                 Bool?

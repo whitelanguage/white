@@ -7,6 +7,7 @@ import "internal/platform/posix"
 import "internal/platform/errors" as platform_errors
 import "internal/runtime/string" as runtime_string
 import "internal/runtime/memory" as runtime_memory
+import Optional from "builtin/type"
 
 
 error Error {
@@ -77,7 +78,7 @@ class File {
     let handle: AnyPtr = nullptr;
     let path: String = "";
     let __last_error: Error = Error.None;
-    let write_buffer: String = null;
+    let write_buffer: Optional(String) = null;
     let write_buffer_len: Int = 0;
 
     init(file_path: String, mode: String) {
@@ -155,7 +156,12 @@ class File {
         }
 
         let bytes_written: Int = 0;
-        if (windows.WriteFile(self.handle, runtime_string.data(self.write_buffer), self.write_buffer_len, ref bytes_written, nullptr) == 0) {
+        let buffer: Optional(String) = self.write_buffer;
+        if (buffer is null) {
+            self.__last_error = Error.InvalidState;
+            return false;
+        }
+        if (windows.WriteFile(self.handle, runtime_string.data(buffer), self.write_buffer_len, ref bytes_written, nullptr) == 0) {
             self.__last_error = __last_error();
             return false;
         }
@@ -185,8 +191,8 @@ class File {
                 throw self.__last_error;
             }
 
-            let buffer: String = runtime_string.alloc(size);
-            if (buffer is null) {
+            let buffer: String = runtime_string.try_alloc(size)?;
+            catch(err) {
                 self.__last_error = Error.OutOfMemory;
                 throw self.__last_error;
             }
@@ -214,8 +220,8 @@ class File {
         }
         posix.rewind(self.handle);
 
-        let buffer: String = runtime_string.alloc(Long(size));
-        if (buffer is null) {
+        let buffer: String = runtime_string.try_alloc(Long(size))?;
+        catch(err) {
             self.__last_error = Error.OutOfMemory;
             throw self.__last_error;
         }
@@ -305,17 +311,23 @@ class File {
             if (length <= 0L) {
                 return;
             }
-            if (self.write_buffer is null) {
-                self.write_buffer = runtime_string.alloc(65536L);
-                if (self.write_buffer is null) {
+            let buffer: Optional(String) = self.write_buffer;
+            if (buffer is null) {
+                let allocated: String = runtime_string.try_alloc(65536L)?;
+                catch(err) {
                     self.__last_error = Error.OutOfMemory;
                     return;
                 }
-                runtime_string.set_length(self.write_buffer, 0);
+                runtime_string.set_length(allocated, 0);
+                self.write_buffer = allocated;
+                buffer = allocated;
             }
 
+            // this owner keeps the buffer alive across flush calls
+            if (buffer is null) { return; }
+
             let ptr source: Byte = runtime_string.data(content);
-            let ptr target: Byte = runtime_string.data(self.write_buffer);
+            let ptr target: Byte = runtime_string.data(buffer);
             let source_idx: Int = 0;
             let content_len: Int = Int(length);
             while (source_idx < content_len) {

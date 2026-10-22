@@ -78,7 +78,7 @@ func clang_program() -> String {
     let command: String = "clang";
     if (sys.OS == sys.Os.Windows) { command = "clang.exe"; }
 
-    let wl_path: String = sys.env.get_env("WL_PATH");
+    let wl_path: Optional(String) = sys.env.get_env("WL_PATH");
     if (wl_path is null) { return command; }
 
     let portable: String = wl_path + "/tools/llvm/bin/clang";
@@ -113,10 +113,21 @@ func print_version(verbose: Bool) -> Void {
     }
 }
 
+func read_argument(argc: Int, ptr argv: String, index: Int) -> String {
+// argument indices are checked by the driver, a missing entry means argv is invalid
+    let value: Optional(String) = process.argument(argc, argv, index);
+    if (value is null) {
+        print("Error: Cannot read command-line argument.");
+        process.exit(1);
+        return "";
+    }
+    return value;
+}
+
 func has_argument(argc: Int, ptr argv: String, expected: String) -> Bool {
     let i: Int = 1;
     while (i < argc) {
-        if (process.argument(argc, argv, i) == expected) { return true; }
+        if (read_argument(argc, argv, i) == expected) { return true; }
         i += 1;
     }
     return false;
@@ -238,7 +249,7 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let i: Int = 1;
     while (i < argc) {
-        let arg: String = process.argument(argc, argv, i);
+        let arg: String = read_argument(argc, argv, i);
 
         if (arg == "--target-help") {
             print_target_help();
@@ -273,7 +284,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: --backend requires an argument");
                 return 1;
             }
-            cfg.backend = process.argument(argc, argv, i);
+            cfg.backend = read_argument(argc, argv, i);
         }
         else if (arg.starts_with("--backend=")) {
             if (arg.length() == 10) {
@@ -307,7 +318,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: --target requires an argument");
                 return 1;
             }
-            cfg.target_triple = process.argument(argc, argv, i);
+            cfg.target_triple = read_argument(argc, argv, i);
         }
         else if (arg.starts_with("--target=")) {
             if (arg.length() == 9) {
@@ -322,7 +333,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: --sysroot requires an argument");
                 return 1;
             }
-            cfg.sysroot = process.argument(argc, argv, i);
+            cfg.sysroot = read_argument(argc, argv, i);
             if (cfg.sysroot.length() == 0) {
                 print("Error: --sysroot requires an argument");
                 return 1;
@@ -341,7 +352,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: -o requires an argument");
                 return 1;
             }
-            cfg.output_file = process.argument(argc, argv, i);
+            cfg.output_file = read_argument(argc, argv, i);
         }
         else if (arg == "-L" || arg == "--library-path") {
             i++;
@@ -349,7 +360,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: " + arg + " requires an argument");
                 return 1;
             }
-            let library_path: String = process.argument(argc, argv, i);
+            let library_path: String = read_argument(argc, argv, i);
             if (library_path.length() == 0) {
                 print("Error: Library search path cannot be empty");
                 return 1;
@@ -365,7 +376,7 @@ func main(argc: Int, ptr argv: String) -> Int {
                 print("Error: --ldflags requires an argument");
                 return 1;
             }
-            let flags: Vector(String) = split_link_flags(process.argument(argc, argv, i));
+            let flags: Vector(String) = split_link_flags(read_argument(argc, argv, i));
             let flag_idx: Int = 0;
             while (flag_idx < flags.length()) {
                 cfg.extra_ldflags.append(flags[flag_idx]);
@@ -422,14 +433,12 @@ func main(argc: Int, ptr argv: String) -> Int {
         let temp_dir: String = "";
 
         if (sys.OS == sys.Os.Windows) {
-            temp_dir = sys.env.get_env("TMP");
-            if (temp_dir is null) { temp_dir = sys.env.get_env("TEMP"); }
-            if (temp_dir is null) { temp_dir = "."; }
+            temp_dir = sys.env.get_or("TMP", sys.env.get_or("TEMP", "."));
 
             if (!temp_dir.ends_with("\\") && !temp_dir.ends_with("/")) { temp_dir += "\\"; }
         } else {
-            temp_dir = sys.env.get_env("TMPDIR");
-            if (temp_dir is null || temp_dir.length() == 0) { temp_dir = "/tmp"; }
+            temp_dir = sys.env.get_or("TMPDIR", "/tmp");
+            if (temp_dir.length() == 0) { temp_dir = "/tmp"; }
             if (!temp_dir.ends_with("/")) { temp_dir += "/"; }
         }
 

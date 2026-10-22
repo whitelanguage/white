@@ -16,7 +16,7 @@ const __MAX_DEPTH: Int = 1024;
 
 class Decoder {
 // keeps byte offset and human-readable position together while decoding one document
-    let __source: String = null;
+    let __source: String;
     let __index: Int = 0;
     let __line: Int = 1;
     let __column: Int = 1;

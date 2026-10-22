@@ -5800,7 +5800,7 @@ func resolve_import_path(ref c: Compiler, raw_path: String, pos: Position) -> St
             final_path = to_normpath(c.current_dir + "/" + raw_path);
         }
 
-        let active_wl_path: String = sys.env.get_env("WL_PATH");
+        let active_wl_path: Optional(String) = sys.env.get_env("WL_PATH");
         if (active_wl_path is !null) {
             let std_root: String = import_security_path(to_normpath(active_wl_path + "/std"));
             let internal_root: String = std_root + "/internal";
@@ -5816,9 +5816,10 @@ func resolve_import_path(ref c: Compiler, raw_path: String, pos: Position) -> St
         return final_path;
     }
 
-    let wl_path: String = sys.env.get_env("WL_PATH");
+    let wl_path: Optional(String) = sys.env.get_env("WL_PATH");
     if (wl_path is null) {
         throw_environment_error("Missing 'WL_PATH' variable.");
+        return "";
     }
 
     let std_root: String = import_security_path(to_normpath(wl_path + "/std"));

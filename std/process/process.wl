@@ -8,6 +8,7 @@ import "internal/platform/errors" as platform_errors
 import "internal/runtime"
 import "internal/runtime/string" as runtime_string
 import Error as CoreError from "errors"
+import Optional from "builtin/type"
 
 
 error Error {
@@ -218,11 +219,17 @@ func shell(command: String) -> Int {
     return posix.system(runtime_string.data(command));
 }
 
-func argument(argc: Int, ptr argv: String, index: Int) -> String {
+func argument(argc: Int, ptr argv: String, index: Int) -> Optional(String) {
     if (argv is nullptr || index < 0 || index >= argc) { return null; }
     let raw_argv: AnyPtr = AnyPtr(argv);
     let ptr native_argv: AnyPtr = raw_argv;
-    return runtime_string.from_c_string(native_argv[index]);
+    let value: String = runtime_string.from_c_string(native_argv[index])?;
+    catch(err) {
+        runtime.write_err("fatal: Could not decode process argument\n");
+        runtime.process_exit(1);
+        return null;
+    }
+    return value;
 }
 
 func id() -> Int {

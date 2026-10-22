@@ -3,6 +3,7 @@
 
 import * from "../../sys/target.wl"
 import "internal/runtime/string" as runtime_string
+import Error from "errors"
 
 
 func startup_info_size() -> Int {
@@ -19,6 +20,7 @@ extern "system" {
     func HeapReAlloc(hHeap: AnyPtr, dwFlags: Int, lpMem: AnyPtr, dwBytes: UIntSize) -> AnyPtr;
     func HeapFree(hHeap: AnyPtr, dwFlags: Int, lpMem: AnyPtr) -> Int;
     func GetLastError() -> Int;
+    func SetLastError(code: Int) -> Void;
     func GetEnvironmentVariableW(lpName: AnyPtr, lpBuffer: AnyPtr, nSize: Int) -> Int;
     func CreateProcessW(
         lpApplicationName: AnyPtr,
@@ -121,18 +123,17 @@ func utf8_to_utf16(value: String) -> AnyPtr {
     return buffer;
 }
 
-func utf16_to_utf8(value: AnyPtr, length: Int) -> String {
-    if (OS != Os.Windows) { return null; }
-    if (value is nullptr || length < 0) { return null; }
-    if (length == 0) { return runtime_string.alloc(0L); }
+func utf16_to_utf8(value: AnyPtr, length: Int) -> String? {
+    if (OS != Os.Windows) { throw Error.Unsupported; }
+    if (value is nullptr || length < 0) { throw Error.InvalidArgument; }
+    if (length == 0) { return ""; }
 
     let utf8_length: Int = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, nullptr, 0, nullptr, nullptr);
-    if (utf8_length <= 0) { return null; }
+    if (utf8_length <= 0) { throw Error.InvalidArgument; }
 
-    let result: String = runtime_string.alloc(Long(utf8_length));
-    if (result is null) { return null; }
+    let result: String = runtime_string.try_alloc(Long(utf8_length))?;
     if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, runtime_string.data(result), utf8_length, nullptr, nullptr) <= 0) {
-        return null;
+        throw Error.InvalidArgument;
     }
     return result;
 }

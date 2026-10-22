@@ -76,6 +76,18 @@ func main() -> Int {
         return 1;
     }
 
+    output.clear();
+    output.write("")?;
+    catch(err) { return 1; }
+    let empty: String = output.build()?;
+    catch(err) { return 1; }
+    let empty_again: String = output.build()?;
+    catch(err) { return 1; }
+    if (empty != "" || empty_again != "") {
+        print("FAIL: An empty builder must produce an empty string");
+        return 1;
+    }
+
     print("PASS: String builder");
     return 0;
 }
