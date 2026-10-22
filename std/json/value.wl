@@ -36,8 +36,9 @@ class Object {
     }
 
     func find(key: String) -> Optional(Value) {
-        if (!self.contains(key)) { return null; }
-        let value: Value = self.__values.get(key);
+        if (key is null) { return null; }
+        let value: Value = self.__values.get(key)?;
+        catch(err) { return null; }
         return value;
     }
 

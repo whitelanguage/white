@@ -15,7 +15,8 @@ func main() -> Int {
     }
 
     values.put(1, 999);
-    let updated: Int = values[1];
+    let updated: Int = values[1]?;
+    catch(err) { return 1; }
     if (values.length() != 4096 || updated != 999) {
         print("FAIL: Dict update changed the table size");
         return 1;
@@ -54,7 +55,8 @@ func main() -> Int {
 
     i = 4096;
     while (i < 8192) {
-        let loaded: Int = values[i];
+        let loaded: Int = values[i]?;
+        catch(err) { return 1; }
         if (!values.contains_key(i) || loaded != i * 2) {
             print("FAIL: Dict lookup failed after rehash");
             return 1;

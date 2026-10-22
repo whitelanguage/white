@@ -62,7 +62,8 @@ func exercise() -> Bool {
 
     let values: Dict = Dict(1);
     values.put("record", original);
-    let erased: Record = values["record"];
+    let erased: Record = values["record"]?;
+    catch(err) { return false; }
     erased.value = 70;
     return original.value == 10 && erased.value == 70;
 }

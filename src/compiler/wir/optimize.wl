@@ -678,7 +678,14 @@ func wir_eliminate_repeated_checks(ref program: WirModule, ref removed: Vector(B
                     let checked = wir_resolve_alias(instruction.operands[0], ref aliases);
                     let length = wir_resolve_alias(instruction.operands[1], ref aliases);
                     let key = wir_check_pair(checked, length);
-                    if (wir_known_bounds_pass(ref program, checked, length) || bounds_generation.lookup(key) == generation) {
+                    let covered = wir_known_bounds_pass(ref program, checked, length);
+                    if (!covered) {
+                        let previous = 0;
+                        previous = bounds_generation.get(key)?;
+                        catch(err) { previous = 0; }
+                        covered = previous == generation;
+                    }
+                    if covered {
                         removed[index] = true;
                         stats.checks++;
                     } else {

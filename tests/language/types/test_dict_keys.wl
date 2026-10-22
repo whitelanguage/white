@@ -36,18 +36,30 @@ func main() -> Int {
         wide_unsigned: "uint128",
     };
 
-    let name: String = values[equal_text];
-    let int_value: String = values[1];
-    let long_value: String = values[1L];
-    let uint_value: String = values[1UL];
-    let bool_value: String = values[true];
-    let char_value: String = values['W'];
-    let enum_value: String = values[Mode.Read];
-    let zero_value: String = values[0.0];
-    let object_value: String = values[token];
-    let null_value: String = values[null];
-    let int128_value: String = values[wide_signed];
-    let uint128_value: String = values[wide_unsigned];
+    let name: String = values[equal_text]?;
+    catch(err) { return 1; }
+    let int_value: String = values[1]?;
+    catch(err) { return 1; }
+    let long_value: String = values[1L]?;
+    catch(err) { return 1; }
+    let uint_value: String = values[1UL]?;
+    catch(err) { return 1; }
+    let bool_value: String = values[true]?;
+    catch(err) { return 1; }
+    let char_value: String = values['W']?;
+    catch(err) { return 1; }
+    let enum_value: String = values[Mode.Read]?;
+    catch(err) { return 1; }
+    let zero_value: String = values[0.0]?;
+    catch(err) { return 1; }
+    let object_value: String = values[token]?;
+    catch(err) { return 1; }
+    let null_value: String = values[null]?;
+    catch(err) { return 1; }
+    let int128_value: String = values[wide_signed]?;
+    catch(err) { return 1; }
+    let uint128_value: String = values[wide_unsigned]?;
+    catch(err) { return 1; }
 
     let passed: Bool = values.length() == 12 && name == "white" && int_value == "int" && long_value == "long" && uint_value == "uint64" && bool_value == "bool" && char_value == "char" && enum_value == "enum" && zero_value == "zero" && object_value == "object" && null_value == "null" && int128_value == "int128" && uint128_value == "uint128";
     values.remove(1L);

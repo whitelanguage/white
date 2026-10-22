@@ -118,7 +118,10 @@ func x86_sparse_add(ref sparse: Vector(WirValueID), seen: Dict(UInt32, Int), ran
     let index: Int = wir_id_index(UInt32(value));
 
     if (index < 0 || (index >= range.base && index < range.base + range.count)) { return; }
-    if (seen.lookup(UInt32(value)) != 0) {
+    let previous = 0;
+    previous = seen.get(UInt32(value))?;
+    catch(err) { previous = 0; }
+    if (previous != 0) {
         return;
     }
     sparse.append(value);
@@ -198,7 +201,10 @@ func x86_use_index(ref table: X86UseTable, value: WirValueID) -> Int {
         return index - table.base;
     }
 
-    return table.sparse_indices.lookup(UInt32(value)) - 1;
+    let sparse_index = 0;
+    sparse_index = table.sparse_indices.get(UInt32(value))?;
+    catch(err) { sparse_index = 0; }
+    return sparse_index - 1;
 }
 
 func x86_record_use(ref table: X86UseTable, value: WirValueID, position: Int) -> Void {
@@ -641,7 +647,10 @@ func x86_spill_index(ref plan: X86SpillPlan, value: WirValueID) -> Int {
         return plan.indices[index - plan.base] - 1;
     }
 
-    return plan.sparse_indices.lookup(UInt32(value)) - 1;
+    let sparse_index = 0;
+    sparse_index = plan.sparse_indices.get(UInt32(value))?;
+    catch(err) { sparse_index = 0; }
+    return sparse_index - 1;
 }
 
 func x86_set_spill_index(ref plan: X86SpillPlan, value: WirValueID, binding: Int) -> Void {

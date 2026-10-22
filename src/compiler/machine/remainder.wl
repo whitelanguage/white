@@ -106,7 +106,9 @@ func machine_lower_remainders(ref program: WirModule) -> String {
             return "floating remainder requires f32 or f64";
         }
         if (helpers is null) { helpers = Dict(); }
-        let helper = helpers.lookup(UInt32(instruction.type_id));
+        let helper = NO_WIR_FUNC;
+        helper = helpers.get(UInt32(instruction.type_id))?;
+        catch(err) { helper = NO_WIR_FUNC; }
         if (helper == NO_WIR_FUNC) {
             helper = machine_rem_helper(ref program, instruction.type_id);
             helpers.put(UInt32(instruction.type_id), helper);

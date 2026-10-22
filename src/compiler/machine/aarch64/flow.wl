@@ -36,7 +36,9 @@ func a64_mark_edge_registers(ref program: WirModule, order: Vector(WirBlockID), 
     i = 1;
     while (i < order.length()) {
         let block = program.arena.blocks[wir_id_index(UInt32(order[i]))];
-        let pred = last_pred.lookup(UInt32(order[i]));
+        let pred = 0;
+        pred = last_pred.get(UInt32(order[i]))?;
+        catch(err) { pred = 0; }
         if (pred == 0 || pred > i || block.parameters.length() == 0 || block.parameters.length() > 14) {
             i++;
             continue;
@@ -91,7 +93,10 @@ func a64_patch_branches(ref output: A64CodeBuffer, offsets: Vector(A64BlockOffse
 
     while (i < fixups.length()) {
         let fixup: A64BranchFixup = fixups[i];
-        let target: Int = targets.lookup(UInt32(fixup.target)) - 1;
+        let target: Int = 0;
+        target = targets.get(UInt32(fixup.target))?;
+        catch(err) { target = 0; }
+        target--;
         if (target < 0 || !a64_patch_branch(ref output, fixup.offset, target, fixup.condition, fixup.conditional)) {
             return false;
         }

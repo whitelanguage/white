@@ -71,7 +71,9 @@ func elf_section_index(sections: Vector(ElfSection), name: String) -> Int {
 }
 
 func elf_add_string(ref table: Vector(Byte), name: String, ref offsets: Dict(String, Int)) -> Int {
-    let old: Int = offsets.lookup(name);
+    let old: Int = 0;
+    old = offsets.get(name)?;
+    catch(err) { old = 0; }
 
     if (old != 0 || name.length() == 0) { return old; }
     let offset: Int = table.length();
@@ -98,7 +100,9 @@ func elf_reloc_data(
 
     while (i < indices.length()) {
         let relocation: MachineRelocation = relocations[indices[i]];
-        let symbol: Int = symbols.lookup(relocation.symbol);
+        let symbol: Int = 0;
+        symbol = symbols.get(relocation.symbol)?;
+        catch(err) { symbol = 0; }
 
         if (symbol == 0 || relocation.kind == 0U) { throw Error.InvalidArgument; }
         elf_u64(ref out, UInt64(relocation.offset));
@@ -168,7 +172,9 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
 
     i = 0;
     while (i < input.relocations.length()) {
-        let section: Int = section_numbers.lookup(input.relocations[i].section);
+        let section: Int = 0;
+        section = section_numbers.get(input.relocations[i].section)?;
+        catch(err) { section = 0; }
         if (section == 0) { throw Error.InvalidArgument; }
         reloc_groups[section - 1].append(i);
         i += 1;
@@ -215,14 +221,19 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     i = 0;
     while (i < input.symbols.length()) {
         let symbol: MachineSymbol = input.symbols[i];
-        let section: Int = section_numbers.lookup(symbol.section);
+        let section: Int = 0;
+        section = section_numbers.get(symbol.section)?;
+        catch(err) { section = 0; }
         let bind_type: UInt32 = 16U;
         let visibility: Byte = Byte(0);
 
         if (symbol.section == ".text" || symbol.section.starts_with(".text.")) { bind_type += 2U; }
         else if (symbol.section.length() != 0) { bind_type += 1U; }
         if (symbol.hidden) { visibility = Byte(2); }
-        elf_u32(ref symtab, UInt32(stroffsets.lookup(symbol.name)));
+        let name_offset = 0;
+        name_offset = stroffsets.get(symbol.name)?;
+        catch(err) { name_offset = 0; }
+        elf_u32(ref symtab, UInt32(name_offset));
         symtab.append(Byte(bind_type));
         symtab.append(visibility);
         elf_u16(ref symtab, UInt32(section));
@@ -236,8 +247,12 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
     i = 0;
     while (i < reloc_names.length()) {
         let target: String = reloc_names[i].slice(5, reloc_names[i].length());
-        let section_number: Int = section_numbers.lookup(reloc_names[i]);
-        let target_number: Int = section_numbers.lookup(target);
+        let section_number: Int = 0;
+        section_number = section_numbers.get(reloc_names[i])?;
+        catch(err) { section_number = 0; }
+        let target_number: Int = 0;
+        target_number = section_numbers.get(target)?;
+        catch(err) { target_number = 0; }
 
         if (section_number == 0 || target_number == 0) { throw Error.InvalidArgument; }
         let reloc: Vector(Byte) = elf_reloc_data(input.relocations, reloc_groups[target_number - 1], sym_indices)?;
@@ -326,7 +341,10 @@ func elf64_object(input: MachineObject) -> Vector(Byte)? {
 
     i = 0;
     while (i < sections.length()) {
-        elf_u32(ref output, UInt32(shoffsets.lookup(sections[i].name)));
+        let name_offset = 0;
+        name_offset = shoffsets.get(sections[i].name)?;
+        catch(err) { name_offset = 0; }
+        elf_u32(ref output, UInt32(name_offset));
         elf_u32(ref output, sections[i].kind);
         elf_u64(ref output, sections[i].flags);
         elf_u64(ref output, 0UL);

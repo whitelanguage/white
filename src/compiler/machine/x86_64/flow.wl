@@ -65,7 +65,9 @@ func x86_mark_edge_registers(ref program: WirModule, order: Vector(WirBlockID), 
     i = 1;
     while (i < order.length()) {
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[i]))];
-        let pred: Int = last_pred.lookup(UInt32(order[i]));
+        let pred: Int = 0;
+        pred = last_pred.get(UInt32(order[i]))?;
+        catch(err) { pred = 0; }
         if (pred == 0 || pred > i || block.parameters.length() == 0 || block.parameters.length() > integers.length() + floats.length()) {
             i++;
             continue;
@@ -177,7 +179,10 @@ func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -
             let edge_index: Int = 0;
             while (edge_index < instruction.edges.length()) {
                 let target: UInt32 = UInt32(instruction.edges[edge_index].target);
-                counts.put(target, counts.lookup(target) + 1);
+                let count = 0;
+                count = counts.get(target)?;
+                catch(err) { count = 0; }
+                counts.put(target, count + 1);
                 edge_index++;
             }
             i++;
@@ -199,9 +204,13 @@ func x86_carry_registers_to_next(ref program: WirModule, order: Vector(WirBlockI
     }
 
     let target_index: Int = wir_id_index(UInt32(terminator.edges[0].target));
-    if (target_index < 0 || target_index >= program.arena.blocks.length() || predecessors.lookup(UInt32(terminator.edges[0].target)) != 1) {
+    if (target_index < 0 || target_index >= program.arena.blocks.length()) {
         return false;
     }
+    let count = 0;
+    count = predecessors.get(UInt32(terminator.edges[0].target))?;
+    catch(err) { count = 0; }
+    if (count != 1) { return false; }
     return program.arena.blocks[target_index].parameters.length() == 0;
 }
 
@@ -287,7 +296,10 @@ func x86_patch_branches(ref output: X86CodeBuffer, offsets: Vector(X86BlockOffse
     }
     i = 0;
     while (i < fixups.length()) {
-        let target: Int = targets.lookup(UInt32(fixups[i].target)) - 1;
+        let target: Int = 0;
+        target = targets.get(UInt32(fixups[i].target))?;
+        catch(err) { target = 0; }
+        target--;
         if (target < 0) { return false; }
 
         let displacement: Int = target - (fixups[i].offset + 4);

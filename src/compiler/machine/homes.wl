@@ -50,7 +50,8 @@ func stack_expire(ref pool: StackHomes, position: Int) -> Void {
         let next = region.next;
         let key = stack_home_key(region.size, region.alignment);
         if (pool.free is null) { pool.free = Dict(); }
-        region.next = pool.free.lookup(key);
+        region.next = pool.free.get(key)?;
+        catch(err) { region.next = 0; }
         pool.regions[index - 1] = region;
         pool.free.put(key, index);
         index = next;
@@ -63,7 +64,10 @@ func stack_reuse(ref pool: StackHomes, bytes: Int, alignment: Int, last: Int, fr
     // exact layout buckets keep lookup bounded, mixed layouts can use more frame space.
     let key = stack_home_key(bytes, alignment);
     let index = 0;
-    if (pool.free is !null) { index = pool.free.lookup(key); }
+    if (pool.free is !null) {
+        index = pool.free.get(key)?;
+        catch(err) { index = 0; }
+    }
     let offset = -1;
 
     if (index != 0) {

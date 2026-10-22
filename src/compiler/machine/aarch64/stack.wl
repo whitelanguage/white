@@ -51,7 +51,8 @@ func a64_find_stack_slot(stack: A64StackIndex, value: WirValueID) -> A64StackSlo
     if (local >= 0 && local < stack.indices.length()) {
         index = stack.indices[local];
     } else if (stack.sparse is !null) {
-        index = stack.sparse.lookup(UInt32(value));
+        index = stack.sparse.get(UInt32(value))?;
+        catch(err) { index = 0; }
     }
 
     if (index <= 0 || index > stack.slots.length()) {
@@ -86,7 +87,9 @@ func a64_pinned_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Dict
             let k = 0;
             while (k < inst.operands.length()) {
                 let value = UInt32(inst.operands[k]);
-                let owner = definitions.lookup(value);
+                let owner = 0U;
+                owner = definitions.get(value)?;
+                catch(err) { owner = 0U; }
                 if (owner != 0U && owner != UInt32(order[i])) { pinned.put(value, true); }
                 if (inst.opcode == WirOpcode.FieldAddress || inst.opcode == WirOpcode.IndexAddress ||
                     inst.opcode == WirOpcode.Bitcast) {
@@ -100,7 +103,9 @@ func a64_pinned_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Dict
                 let a = 0;
                 while (a < inst.edges[k].arguments.length()) {
                     let value = UInt32(inst.edges[k].arguments[a]);
-                    let owner = definitions.lookup(value);
+                    let owner = 0U;
+                    owner = definitions.get(value)?;
+                    catch(err) { owner = 0U; }
                     if (owner != 0U && owner != UInt32(order[i])) { pinned.put(value, true); }
                     a++;
                 }
@@ -276,10 +281,15 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
             } else if (inst.result != NO_WIR_VALUE) {
                 let bytes = a64_stack_value_size(ref program, inst.type_id, layouts);
                 if (a64_scalar_width(ref program, inst.type_id) != 0) { scalar_results = true; }
-                if (bytes != 0 && (a64_scalar_width(ref program, inst.type_id) == 0 || pinned.lookup(UInt32(inst.result)))) {
+                let pinned_home = false;
+                if (bytes != 0) {
+                    pinned_home = pinned.get(UInt32(inst.result))?;
+                    catch(err) { pinned_home = false; }
+                }
+                if (bytes != 0 && (a64_scalar_width(ref program, inst.type_id) == 0 || pinned_home)) {
                     let alignment = a64_stack_value_alignment(inst.type_id, layouts, bytes);
                     let offset = -1;
-                    if (pinned.lookup(UInt32(inst.result))) {
+                    if pinned_home {
                         offset = stack_reserve(ref pool, bytes, alignment);
                     } else {
                         let last = j;
@@ -301,8 +311,12 @@ func a64_stack_layout_with_uses(ref program: WirModule, ref function: WirFunctio
             while (operand_index < inst.operands.length()) {
                 let operand = inst.operands[operand_index];
                 let value = program.arena.values[wir_id_index(UInt32(operand))];
-                if (value.kind == WirValueKind.Constant && !seen.lookup(UInt32(operand)) &&
-                    a64_aggregate_type(ref program, value.type_id)) {
+                let recorded = false;
+                if (value.kind == WirValueKind.Constant) {
+                    recorded = seen.get(UInt32(operand))?;
+                    catch(err) { recorded = false; }
+                }
+                if (value.kind == WirValueKind.Constant && !recorded && a64_aggregate_type(ref program, value.type_id)) {
                     let bytes = a64_stack_value_size(ref program, value.type_id, layouts);
                     if (bytes == 0) { return a64_stack_error("AArch64 aggregate constant has an unsupported type"); }
                     let offset = stack_reserve(ref pool, bytes, a64_stack_value_alignment(value.type_id, layouts, bytes));

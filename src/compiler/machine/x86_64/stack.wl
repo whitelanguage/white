@@ -42,8 +42,13 @@ func x86_const_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Vecto
                     let value = program.arena.values[wir_id_index(UInt32(id))];
                     if (value.kind == WirValueKind.Constant && x86_aggregate_type(ref program, value.type_id) &&
                         (program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Aggregate ||
-                         program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Bytes) &&
-                        (seen is null || !seen.lookup(UInt32(id)))) {
+                         program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Bytes)) {
+                        let recorded = false;
+                        if (seen is !null) {
+                            recorded = seen.get(UInt32(id))?;
+                            catch(err) { recorded = false; }
+                        }
+                        if recorded { continue; }
                         if (seen is null) { seen = Dict(); }
                         values.append(id);
                         seen.put(UInt32(id), true);
@@ -286,7 +291,9 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
         if (local < 0 || local >= count) {
             local = offsets.length();
             if (sparse is null) { sparse = Dict(); }
-            let previous = sparse.lookup(UInt32(slots[i].value));
+            let previous = 0;
+            previous = sparse.get(UInt32(slots[i].value))?;
+            catch(err) { previous = 0; }
             if (previous != 0) { local = previous - 1; }
             else {
                 sparse.put(UInt32(slots[i].value), local + 1);
@@ -304,7 +311,12 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
 func x86_stack_index_of(ref stack: X86StackIndex, value: WirValueID) -> Int {
     let index: Int = wir_id_index(UInt32(value));
     if (index >= stack.base && index < stack.base + stack.dense_count) { return index - stack.base; }
-    if (stack.sparse is !null) { return stack.sparse.lookup(UInt32(value)) - 1; }
+    if (stack.sparse is !null) {
+        let slot = 0;
+        slot = stack.sparse.get(UInt32(value))?;
+        catch(err) { slot = 0; }
+        return slot - 1;
+    }
     return -1;
 }
 

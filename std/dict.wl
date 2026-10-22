@@ -184,19 +184,19 @@ class Dict {
         }
     }
 
-    func get(key: Variant) -> Variant {
-    // return null when the key is absent, use contains_key when null is a stored value
-        if (self.size == 0) { return null; }
+    func get(key: Variant) -> Variant? {
+    // null is a stored value, a missing key takes the error path
+        if (self.size == 0) { throw Error.KeyNotFound; }
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
         let idx: Int = hash & mask;
         while true {
             let current: Int = self.hashes[idx];
-            if (current == 0) { return null; }
+            if (current == 0) { throw Error.KeyNotFound; }
             if (current == hash && __keys_equal(self.keys[idx], key)) { return self.values[idx]; }
             idx = (idx + 1) & mask;
         }
-        return null;
+        throw Error.KeyNotFound;
     }
 
     func remove(key: Variant) -> Void {

@@ -107,7 +107,8 @@ func main() -> Int {
     }
     let dynamic: Dict = Dict(8);
     dynamic.put(Key(9), "nine");
-    let dynamic_value: String = dynamic.get(Key(9));
+    let dynamic_value: String = dynamic.get(Key(9))?;
+    catch(err) { print("FAIL: Dynamic Dict missing key"); return 1; }
     if (dynamic_value != "nine") {
         print("FAIL: Dynamic Dict protocol key");
         return 1;

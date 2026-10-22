@@ -65,7 +65,8 @@ func main() -> Int {
 
     let dynamic: Dict = Dict(1);
     dynamic.put("id", id);
-    let restored: UserID = dynamic["id"];
+    let restored: UserID = dynamic["id"]?;
+    catch(err) { return 1; }
 
     {
         let owner = Owner(Probe(12));

@@ -39,7 +39,10 @@ func wir_add_type(ref program: WirModule, value: WirType) -> WirTypeID {
         } else {
             key = wir_signature_key(value.parameters, value.result, value.variadic, value.abi);
         }
-        program.arena.shape_links[wir_id_index(UInt32(id))] = program.arena.shape_heads.lookup(key);
+        let previous: WirTypeID = NO_WIR_TYPE;
+        previous = program.arena.shape_heads.get(key)?;
+        catch(err) { previous = NO_WIR_TYPE; }
+        program.arena.shape_links[wir_id_index(UInt32(id))] = previous;
         program.arena.shape_heads.put(key, id);
     }
     if (value.kind == WirTypeKind.Pointer) {
@@ -126,7 +129,9 @@ func wir_pointer_type(ref program: WirModule, element: WirTypeID) -> WirTypeID {
 }
 
 func wir_array_type(ref program: WirModule, element: WirTypeID, length: UIntSize) -> WirTypeID {
-    let candidate: WirTypeID = program.arena.shape_heads.lookup(wir_array_key(element, length));
+    let candidate: WirTypeID = NO_WIR_TYPE;
+    candidate = program.arena.shape_heads.get(wir_array_key(element, length))?;
+    catch(err) { candidate = NO_WIR_TYPE; }
     let found: WirTypeID = NO_WIR_TYPE;
     while (candidate != NO_WIR_TYPE) {
         let index = wir_id_index(UInt32(candidate));
@@ -180,7 +185,9 @@ func wir_type_list_equal(left: Vector(WirTypeID), right: Vector(WirTypeID)) -> B
 }
 
 func wir_function_type(ref program: WirModule, parameters: Vector(WirTypeID), result: WirTypeID, variadic: Bool, abi: WirABI) -> WirTypeID {
-    let candidate: WirTypeID = program.arena.shape_heads.lookup(wir_signature_key(parameters, result, variadic, abi));
+    let candidate: WirTypeID = NO_WIR_TYPE;
+    candidate = program.arena.shape_heads.get(wir_signature_key(parameters, result, variadic, abi))?;
+    catch(err) { candidate = NO_WIR_TYPE; }
     let found: WirTypeID = NO_WIR_TYPE;
     while (candidate != NO_WIR_TYPE) {
         let index = wir_id_index(UInt32(candidate));

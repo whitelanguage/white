@@ -5,7 +5,7 @@ import "dict"
 
 
 struct Variant(hp: Int) {
-    this.hp = 100; 
+    this.hp = 100;
 }
 
 class Weapon {
@@ -39,19 +39,27 @@ func main() -> Int {
         "type_function": f_ptr,
     };
 
-    let r_int: Int = map["type_int"];
-    let r_float: Float = map["type_float"];
-    let r_bool: Bool = map["type_bool"];
-    let r_str: String = map["type_string"];
-    
+    let r_int: Int = map["type_int"]?;
+    catch(err) { return 1; }
+    let r_float: Float = map["type_float"]?;
+    catch(err) { return 1; }
+    let r_bool: Bool = map["type_bool"]?;
+    catch(err) { return 1; }
+    let r_str: String = map["type_string"]?;
+    catch(err) { return 1; }
+
     let prim_ok: Bool = (r_int == 42 && r_float == 3.1415 && r_bool == true && r_str == "WhiteLang_String");
 
-    let r_struct: Variant = map["type_struct"];
-    let r_class: Weapon = map["type_class"];
+    let r_struct: Variant = map["type_struct"]?;
+    catch(err) { return 1; }
+    let r_class: Weapon = map["type_class"]?;
+    catch(err) { return 1; }
     let comp_ok: Bool = (r_struct.hp == 888 && r_class.damage == 500);
 
-    let r_method: Method() -> Int = map["type_method"];
-    let r_func: Function() -> Int = map["type_function"];
+    let r_method: Method() -> Int = map["type_method"]?;
+    catch(err) { return 1; }
+    let r_func: Function() -> Int = map["type_function"]?;
+    catch(err) { return 1; }
     let clos_ok: Bool = (r_method() == 500 && r_func() == 999);
 
     if (prim_ok && comp_ok && clos_ok) {

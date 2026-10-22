@@ -217,7 +217,9 @@ func machine_lower_wide_conversions(ref program: WirModule) -> String {
         }
         if (helpers is null) { helpers = Dict(); }
         let key = "" + UInt32(source) + "." + UInt32(inst.type_id);
-        let helper = helpers.lookup(key);
+        let helper = NO_WIR_FUNC;
+        helper = helpers.get(key)?;
+        catch(err) { helper = NO_WIR_FUNC; }
         if (helper == NO_WIR_FUNC) {
             let name = "$machine.convert." + key;
             while (program.arena.function_names.contains_key(name)) { name += "."; }

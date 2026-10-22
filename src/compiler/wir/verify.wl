@@ -1212,10 +1212,10 @@ func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout),
                 seen_instructions[instruction_index] = true;
                 let terminator: Bool = wir_is_terminator(program.arena.instructions[instruction_index].opcode);
                 if (terminator && k + 1 != block.instructions.length()) {
-                    wir_report(errors, "terminator is not the last instruction in its block");
+                    wir_report(errors, "terminator is not the last instruction in block '" + block.name + "' of function '" + function.name + "'");
                 }
                 if (!terminator && k + 1 == block.instructions.length()) {
-                    wir_report(errors, "block does not end in a terminator");
+                    wir_report(errors, "block '" + block.name + "' of function '" + function.name + "' does not end in a terminator");
                 }
                 wir_check_instruction(ref program, instruction_id, block_id, layouts, errors);
                 k++;

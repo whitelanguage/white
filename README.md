@@ -100,6 +100,10 @@ V)` is fully typed and requires `K: Hash`; `Hash` inherits the `Equal` contract.
 The `protocol` package also defines comparison, display, cloning and iteration
 contracts used by generic code. The standard library is still small.
 
+Both dictionary forms use `get(key)?` or `dict[key]?` for reads. A missing key
+throws `dict.Error.KeyNotFound`. A stored `null` is a successful read. Handle
+the error in `catch` when a caller needs a default.
+
 ## Errors
 
 A fallible function returns `T?` or `Void?`. `?` either passes the value on or

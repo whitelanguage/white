@@ -1232,6 +1232,12 @@ func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     let tag_type: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let expected_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, target_type)));
     let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected_tag, "", no_wir_location());
+    // a stored null has a box with tag zero, get already distinguishes it from a missing key
+    if (is_nullable_reference_type(ref source, target_type) || is_pointer_type(ref source, target_type)) {
+        let null_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(0U));
+        let stored_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, null_tag, "", no_wir_location());
+        matches = wir_bool_or(ref program, state.block, matches, stored_null);
+    }
     wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
 
     let low_slot: WirValueID = wir_field_address(ref program, state.block, value.value, 1, "", no_wir_location());
@@ -8228,7 +8234,9 @@ func wir_lower_function_impl(ref types: WirTypeMap, ref source: Compiler, ref pr
         } else {
             let source_type: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_parameter.type);
             let address: WirValueID = wir_stack_alloc(ref program, entry, source_type, name + ".addr", no_wir_location());
-            wir_store(ref program, entry, parameter, address, no_wir_location());
+            // retaining an earlier aggregate can split the entry block to select a union arm.
+            // later parameters still get entry allocas, their stores belong to the live block.
+            wir_store(ref program, state.block, parameter, address, no_wir_location());
             // method receivers borrow the object held by the caller. Releasing self here
             // would make a deinitializer enter its own drop glue again.
             let is_receiver: Bool = i == 0 && name == "self";

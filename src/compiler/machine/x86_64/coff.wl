@@ -64,7 +64,9 @@ func coff_emit_symbol_name(ref output: Vector(Byte), name: String, offsets: Dict
         return coff_emit_name(ref output, name, 8);
     }
 
-    let offset: Int = offsets.lookup(name);
+    let offset: Int = 0;
+    offset = offsets.get(name)?;
+    catch(err) { offset = 0; }
 
     if (offset == 0) { return false; }
 
@@ -173,11 +175,13 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
             throw Error.InvalidArgument;
         }
 
-        if (section < 0 ||
-            UInt64(relocation.offset) + width > UInt64(input.sections[section].bytes.length()) ||
-            symbol_indices.lookup(relocation.symbol) == 0) {
+        if (section < 0 || UInt64(relocation.offset) + width > UInt64(input.sections[section].bytes.length())) {
             throw Error.InvalidArgument;
         }
+        let symbol_index = 0;
+        symbol_index = symbol_indices.get(relocation.symbol)?;
+        catch(err) { symbol_index = 0; }
+        if (symbol_index == 0) { throw Error.InvalidArgument; }
 
         if ((relocation.kind == X86RelocationKind.Rel32 || relocation.kind == X86RelocationKind.Call32) &&
             (relocation.addend < -2147483648L || relocation.addend > 2147483647L)) {
@@ -298,7 +302,10 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
                     k++;
                 }
                 coff_emit_u32(ref output, relocation.offset);
-                coff_emit_u32(ref output, UInt32(symbol_indices.lookup(relocation.symbol) - 1));
+                let symbol_index = 0;
+                symbol_index = symbol_indices.get(relocation.symbol)?;
+                catch(err) { symbol_index = 0; }
+                coff_emit_u32(ref output, UInt32(symbol_index - 1));
                 coff_emit_u16(ref output, kind);
             }
             j++;

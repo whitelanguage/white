@@ -61,7 +61,8 @@ func exercise_dict() -> Bool {
     i = 0;
     while (i < 40) {
         if (i != 2) {
-            let probe: Probe = values["key-" + i];
+            let probe: Probe = values["key-" + i]?;
+            catch(err) { return false; }
             let expected: Int = i;
             if (i == 1) { expected = 101; }
             if (probe.value != expected) { return false; }
@@ -77,7 +78,8 @@ func exercise_interface_variant() -> Bool {
     let valued: Valued = probe;
     values.put("interface", valued);
 
-    let loaded: Valued = values["interface"];
+    let loaded: Valued = values["interface"]?;
+    catch(err) { return false; }
     return loaded.get_value() == 88;
 }
 

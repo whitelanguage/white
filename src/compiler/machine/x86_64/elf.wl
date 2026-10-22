@@ -30,7 +30,11 @@ func x86_elf_relocations(
 
     while (i < relocations.length()) {
         let source: X86Relocation = relocations[i];
-        let external_call = source.kind == X86RelocationKind.Rel32 && undefined.lookup(source.symbol);
+        let external_call = false;
+        if (source.kind == X86RelocationKind.Rel32) {
+            external_call = undefined.get(source.symbol)?;
+            catch(err) { external_call = false; }
+        }
 
         let kind: UInt32 = x86_elf_reloc_type(source.kind, external_call);
         if (kind == 0U) { throw Error.InvalidArgument; }
@@ -60,7 +64,9 @@ func elf_reloc_data(
     while (i < mapped.length()) {
         let relocation: MachineRelocation = mapped[i];
         if (relocation.section == section) {
-            let symbol: Int = symbols.lookup(relocation.symbol);
+            let symbol: Int = 0;
+            symbol = symbols.get(relocation.symbol)?;
+            catch(err) { symbol = 0; }
             if (symbol == 0) { throw Error.InvalidArgument; }
 
             let offset: UInt64 = UInt64(relocation.offset);

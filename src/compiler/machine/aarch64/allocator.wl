@@ -157,7 +157,10 @@ func a64_sparse_add(ref sparse: Vector(WirValueID), seen: Dict(UInt32, Int), ran
     let index: Int = wir_id_index(UInt32(value));
 
     if (index < 0 || (index >= range.base && index < range.base + range.count)) { return; }
-    if (seen.lookup(UInt32(value)) != 0) { return; }
+    let previous = 0;
+    previous = seen.get(UInt32(value))?;
+    catch(err) { previous = 0; }
+    if (previous != 0) { return; }
 
     sparse.append(value);
     seen.put(UInt32(value), sparse.length());
@@ -219,7 +222,11 @@ func a64_sparse_values(ref program: WirModule, order: Vector(WirBlockID), range:
         let value_index = wir_id_index(UInt32(value_id));
         if (value_index < 0 || value_index >= program.arena.values.length()) { continue; }
         let ptr value: WirValue = ref program.arena.values[value_index];
-        if (value.kind != WirValueKind.Constant || walked.lookup(UInt32(value_id))) { continue; }
+        if (value.kind != WirValueKind.Constant) { continue; }
+        let visited = false;
+        visited = walked.get(UInt32(value_id))?;
+        catch(err) { visited = false; }
+        if visited { continue; }
         walked.put(UInt32(value_id), true);
         let ptr constant: WirConstant = ref program.arena.constants[wir_id_index(value.owner)];
         if (constant.kind == WirConstKind.Address) {
@@ -264,7 +271,10 @@ func a64_use_index(ref table: A64UseTable, value: WirValueID) -> Int {
         return index - table.base;
     }
 
-    return table.sparse_indices.lookup(UInt32(value)) - 1;
+    let sparse_index = 0;
+    sparse_index = table.sparse_indices.get(UInt32(value))?;
+    catch(err) { sparse_index = 0; }
+    return sparse_index - 1;
 }
 
 func a64_incoming_register(ref table: A64UseTable, value: WirValueID) -> A64Register {
@@ -338,7 +348,10 @@ func a64_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -
 
             while (j < term.edges.length()) {
                 let target: UInt32 = UInt32(term.edges[j].target);
-                counts.put(target, counts.lookup(target) + 1);
+                let count = 0;
+                count = counts.get(target)?;
+                catch(err) { count = 0; }
+                counts.put(target, count + 1);
                 j++;
             }
         }
@@ -362,7 +375,11 @@ func a64_carry_to_next(ref program: WirModule, order: Vector(WirBlockID), predec
     }
 
     let target: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[index + 1]))];
-    return target.parameters.length() == 0 && predecessors.lookup(UInt32(order[index + 1])) == 1;
+    if (target.parameters.length() != 0) { return false; }
+    let count = 0;
+    count = predecessors.get(UInt32(order[index + 1]))?;
+    catch(err) { count = 0; }
+    return count == 1;
 }
 
 func a64_use_precedes_definition(ref table: A64UseTable, value: WirValueID, position: Int) -> Bool {
