@@ -19,7 +19,7 @@ struct X86StackSlot(
 struct X86StackIndex(
     base: Int,
     dense_count: Int,
-    sparse: Dict(UInt32, Int),
+    sparse: Optional(Dict(UInt32, Int)),
     offsets: Vector(Int),
     sizes: Vector(Int)
 )
@@ -29,7 +29,7 @@ struct X86CallStorage(arguments: Vector(Int), result: Int, size: Int)
 func x86_const_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Vector(WirValueID) {
 // edge operands live outside the ordinary result range, reserve each constant once
     let values: Vector(WirValueID) = [];
-    let seen: Dict(UInt32, Bool) = null;
+    let seen: Optional(Dict(UInt32, Bool)) = null;
     for (let b = 0; b < order.length(); b++) {
         let block = program.arena.blocks[wir_id_index(UInt32(order[b]))];
         for (let i = 0; i < block.instructions.length(); i++) {
@@ -51,7 +51,7 @@ func x86_const_homes(ref program: WirModule, order: Vector(WirBlockID)) -> Vecto
                         if recorded { continue; }
                         if (seen is null) { seen = Dict(); }
                         values.append(id);
-                        seen.put(UInt32(id), true);
+                        if (seen is !null) { seen.put(UInt32(id), true); }
                     }
                 }
             }
@@ -276,7 +276,7 @@ func x86_stack_slots_end(slots: Vector(X86StackSlot)) -> Int {
 func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86StackIndex {
     let offsets: Vector(Int) = [];
     let sizes: Vector(Int) = [];
-    let sparse: Dict(UInt32, Int) = null;
+    let sparse: Optional(Dict(UInt32, Int)) = null;
     let count = stack_index_count(range.count, slots.length());
     let i = 0;
     while (i < count) {
@@ -292,11 +292,13 @@ func x86_stack_index(slots: Vector(X86StackSlot), range: X86ValueRange) -> X86St
             local = offsets.length();
             if (sparse is null) { sparse = Dict(); }
             let previous = 0;
-            previous = sparse.get(UInt32(slots[i].value))?;
-            catch(err) { previous = 0; }
+            if (sparse is !null) {
+                previous = sparse.get(UInt32(slots[i].value))?;
+                catch(err) { previous = 0; }
+            }
             if (previous != 0) { local = previous - 1; }
             else {
-                sparse.put(UInt32(slots[i].value), local + 1);
+                if (sparse is !null) { sparse.put(UInt32(slots[i].value), local + 1); }
                 offsets.append(0);
                 sizes.append(0);
             }

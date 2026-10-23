@@ -12,9 +12,16 @@ import x86_collect_stack_slots, x86_stack_slots_end, X86StackSlot, x86_stack_ind
 import x86_type_layouts from "../../../src/compiler/machine/x86_64/types.wl"
 
 func main() -> Int {
+    let dense = x86_stack_index([X86StackSlot(value=WirValueID(101U), offset=8, size=8)], X86ValueRange(base=100, count=3));
+    if (dense.sparse is !null || dense.dense_count != 3 ||
+        x86_stack_offset(ref dense, WirValueID(101U)) != -8 || x86_stack_offset(ref dense, NO_WIR_VALUE) != 0) {
+        print("FAIL: dense stack index allocated a sparse table");
+        return 1;
+    }
+
     let sparse = x86_stack_index([X86StackSlot(value=WirValueID(900001U), offset=16, size=8),
         X86StackSlot(value=WirValueID(900001U), offset=24, size=8)], X86ValueRange(base=0, count=1));
-    if (x86_stack_offset(ref sparse, WirValueID(900001U)) != -24 ||
+    if (sparse.sparse is null || x86_stack_offset(ref sparse, WirValueID(900001U)) != -24 ||
         x86_stack_offset(ref sparse, WirValueID(900002U)) != 0 || sparse.offsets.length() != 2) {
         print("FAIL: sparse stack index");
         return 1;

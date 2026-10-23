@@ -93,7 +93,7 @@ func machine_rem_helper(ref program: WirModule, type: WirTypeID) -> WirFuncID {
 func machine_lower_remainders(ref program: WirModule) -> String {
 // keep the original result IDs and locations, both encoders see ordinary calls
     let count = program.arena.instructions.length();
-    let helpers: Dict(UInt32, WirFuncID) = null;
+    let helpers: Optional(Dict(UInt32, WirFuncID)) = null;
     for (let i = 0; i < count; i++) {
         let instruction = program.arena.instructions[i];
         if (instruction.opcode != WirOpcode.FloatRemainder) { continue; }
@@ -107,11 +107,13 @@ func machine_lower_remainders(ref program: WirModule) -> String {
         }
         if (helpers is null) { helpers = Dict(); }
         let helper = NO_WIR_FUNC;
-        helper = helpers.get(UInt32(instruction.type_id))?;
-        catch(err) { helper = NO_WIR_FUNC; }
+        if (helpers is !null) {
+            helper = helpers.get(UInt32(instruction.type_id))?;
+            catch(err) { helper = NO_WIR_FUNC; }
+        }
         if (helper == NO_WIR_FUNC) {
             helper = machine_rem_helper(ref program, instruction.type_id);
-            helpers.put(UInt32(instruction.type_id), helper);
+            if (helpers is !null) { helpers.put(UInt32(instruction.type_id), helper); }
         }
 
         let callee = program.arena.functions[wir_id_index(UInt32(helper))];

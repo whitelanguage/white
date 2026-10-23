@@ -20,7 +20,7 @@ func indexed() -> Bool {
     let first = WirValueID(101U);
     let far = WirValueID(1000000U);
     let dense = a64_stack_index([A64StackSlot(value=first, offset=0, size=8)], A64ValueRange(base=100, count=3));
-    if (dense.indices.length() != 3 || a64_find_stack_slot(dense, first).value != first ||
+    if (dense.sparse is !null || dense.indices.length() != 3 || a64_find_stack_slot(dense, first).value != first ||
         a64_find_stack_slot(dense, WirValueID(100U)).value != NO_WIR_VALUE ||
         a64_find_stack_slot(dense, NO_WIR_VALUE).value != NO_WIR_VALUE) {
         return false;
@@ -28,7 +28,7 @@ func indexed() -> Bool {
 
     let sparse = a64_stack_index([A64StackSlot(value=first, offset=0, size=8),
         A64StackSlot(value=far, offset=16, size=16)], A64ValueRange(base=100, count=1000000));
-    return sparse.indices.length() == 0 && a64_find_stack_slot(sparse, first).offset == 0 &&
+    return sparse.sparse is !null && sparse.indices.length() == 0 && a64_find_stack_slot(sparse, first).offset == 0 &&
            a64_find_stack_slot(sparse, far).offset == 16 &&
            a64_find_stack_slot(sparse, WirValueID(500000U)).value == NO_WIR_VALUE;
 }

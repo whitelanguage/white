@@ -182,7 +182,7 @@ func machine_float_to_int128(ref program: WirModule, input: WirTypeID, output: W
 
 func machine_lower_wide_conversions(ref program: WirModule) -> String {
 // create each conversion body only when used, preserve source result IDs and locations
-    let helpers: Dict(String, WirFuncID) = null;
+    let helpers: Optional(Dict(String, WirFuncID)) = null;
     let count = program.arena.instructions.length();
     for (let i = 0; i < count; i++) {
         let inst = program.arena.instructions[i];
@@ -218,8 +218,10 @@ func machine_lower_wide_conversions(ref program: WirModule) -> String {
         if (helpers is null) { helpers = Dict(); }
         let key = "" + UInt32(source) + "." + UInt32(inst.type_id);
         let helper = NO_WIR_FUNC;
-        helper = helpers.get(key)?;
-        catch(err) { helper = NO_WIR_FUNC; }
+        if (helpers is !null) {
+            helper = helpers.get(key)?;
+            catch(err) { helper = NO_WIR_FUNC; }
+        }
         if (helper == NO_WIR_FUNC) {
             let name = "$machine.convert." + key;
             while (program.arena.function_names.contains_key(name)) { name += "."; }
@@ -228,7 +230,7 @@ func machine_lower_wide_conversions(ref program: WirModule) -> String {
             } else {
                 helper = machine_float_to_int128(ref program, source, inst.type_id, name);
             }
-            helpers.put(key, helper);
+            if (helpers is !null) { helpers.put(key, helper); }
         }
         let callee = program.arena.functions[wir_id_index(UInt32(helper))];
         inst.opcode = WirOpcode.Call;

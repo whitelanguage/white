@@ -14,14 +14,14 @@ struct A64StackIndex(
     slots: Vector(A64StackSlot),
     base: Int,
     indices: Vector(Int),
-    sparse: Dict(UInt32, Int)
+    sparse: Optional(Dict(UInt32, Int))
 )
 
 
 func a64_stack_index(slots: Vector(A64StackSlot), range: A64ValueRange) -> A64StackIndex {
 // zero denotes a missing slot, SP+0 is a valid home after the outgoing arguments
     let indices: Vector(Int) = [];
-    let sparse: Dict(UInt32, Int) = null;
+    let sparse: Optional(Dict(UInt32, Int)) = null;
     let count = stack_index_count(range.count, slots.length());
 
     let i = 0;
@@ -37,7 +37,7 @@ func a64_stack_index(slots: Vector(A64StackSlot), range: A64ValueRange) -> A64St
             indices[local] = i + 1;
         } else {
             if (sparse is null) { sparse = Dict(); }
-            sparse.put(UInt32(slots[i].value), i + 1);
+            if (sparse is !null) { sparse.put(UInt32(slots[i].value), i + 1); }
         }
         i++;
     }
