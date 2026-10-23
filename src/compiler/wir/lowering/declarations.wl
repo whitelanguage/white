@@ -84,8 +84,8 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
         i++;
     }
     let signature: WirTypeID = wir_function_type(ref program, parameter_types, result, info.is_varargs, abi);
-    let existing_id: WirFuncID = program.arena.function_names.lookup(info.name);
-    if (existing_id != NO_WIR_FUNC && linkage == WirLinkage.External) {
+    let existing_id: Optional(WirFuncID) = program.arena.function_names.lookup(info.name);
+    if (existing_id is !null && linkage == WirLinkage.External) {
         let existing: WirFunction = program.arena.functions[wir_id_index(UInt32(existing_id))];
         if (existing.linkage == WirLinkage.External && existing.type_id == signature && existing.abi == abi) { return existing_id; }
         types.errors.append("Conflicting extern declaration for symbol '" + info.name + "'.");
@@ -99,16 +99,18 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
 }
 
 func wir_find_function(program: WirModule, name: String) -> WirFuncID {
-    return program.arena.function_names.lookup(name);
+    let found = program.arena.function_names.lookup(name);
+    if (found is !null) { return found; }
+    return NO_WIR_FUNC;
 }
 
-func wir_compiler_link_function(ref source: Compiler, name: String) -> FuncInfo {
+func wir_compiler_link_function(ref source: Compiler, name: String) -> Optional(FuncInfo) {
     if (source.compiler_link is null) {
-        return FuncInfo();
+        return null;
     }
-    let key: String = source.compiler_link.lookup(name);
+    let key: Optional(String) = source.compiler_link.lookup(name);
     if (key is null || key.length() == 0) {
-        return FuncInfo();
+        return null;
     }
     return source.func_table.lookup(key);
 }

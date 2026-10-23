@@ -27,7 +27,7 @@ func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> Comp
     c.output_file.write(c.indent + "store " + storage + " " + value.reg + ", " + storage + "* " + slot + "\n");
     let address = emit_union_payload(ref c, slot, value.type, member);
     let array = c.array_info_map.lookup(member);
-    if (has_array_info(array) && array.size >= 0) {
+    if ((array is !null) && array.size >= 0) {
         return CompileResult(reg=address, type=member, is_const_access=value.is_const_access);
     }
     let result = next_reg(ref c);
@@ -67,7 +67,7 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
     let found_source_union: Optional(UnionInfo) = get_union_type(ref c, value.type);
     if (found_source_union is null) {
         let array = c.array_info_map.lookup(value.type);
-        if (has_array_info(array) && array.size >= 0) {
+        if ((array is !null) && array.size >= 0) {
             let loaded = next_reg(ref c);
             c.output_file.write(c.indent + loaded + " = load " + array.llvm_name + ", " + array.llvm_name + "* " + value.reg + "\n");
             value.reg = loaded;

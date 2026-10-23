@@ -47,15 +47,17 @@ func main() -> Int {
     let other: WirTypeID = wir_function_type(ref program, [pointer, integer], integer, true, WirABI.C);
     let key = wir_signature_key([integer, pointer], integer, false, WirABI.White);
     let head = program.arena.shape_heads.lookup(key);
+    if (head is null) { print("FAIL: missing signature cache head"); return 1; }
+    let saved_head: WirTypeID = head;
     let link = program.arena.shape_links[wir_id_index(UInt32(other))];
     // force a collision, matching still needs parameter order, ABI and variadic state.
-    program.arena.shape_links[wir_id_index(UInt32(other))] = head;
+    program.arena.shape_links[wir_id_index(UInt32(other))] = saved_head;
     program.arena.shape_heads.put(key, other);
     if (wir_function_type(ref program, [integer, pointer], integer, false, WirABI.White) != signature) {
         print("FAIL: a signature hash collision changed the function type");
         return 1;
     }
-    program.arena.shape_heads.put(key, head);
+    program.arena.shape_heads.put(key, saved_head);
     program.arena.shape_links[wir_id_index(UInt32(other))] = link;
     if (wir_array_type(ref program, integer, UIntSize(13U)) == array ||
         wir_function_type(ref program, [integer, pointer], integer, true, WirABI.White) == signature ||
@@ -65,7 +67,8 @@ func main() -> Int {
     }
     let first: WirFuncID = wir_add_function(ref program, "duplicate", [], program.void_type, false, WirLinkage.Internal, WirABI.White);
     wir_add_function(ref program, "duplicate", [], program.void_type, false, WirLinkage.Internal, WirABI.White);
-    if (program.arena.function_names.lookup("duplicate") != first || program.arena.functions.length() != 2) {
+    let duplicate = program.arena.function_names.lookup("duplicate");
+    if (duplicate is null || duplicate != first || program.arena.functions.length() != 2) {
         print("FAIL: function index hid a duplicate declaration");
         return 1;
     }

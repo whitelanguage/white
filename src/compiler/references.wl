@@ -21,15 +21,15 @@ struct RefCheck(
 func ref_storage(ref c: Compiler, type_id: Int) -> Bool {
     type_id = get_repr_type(ref c, type_id);
     let array = c.array_info_map.lookup(type_id);
-    return has_symbol(c.vector_base_map.lookup(type_id)) || (has_array_info(array) && array.size < 0);
+    return (c.vector_base_map.lookup(type_id) is !null) || ((array is !null) && array.size < 0);
 }
 
 func ref_element(ref c: Compiler, type_id: Int) -> Int {
     type_id = get_repr_type(ref c, type_id);
     let array = c.array_info_map.lookup(type_id);
-    if (has_array_info(array)) { return array.base_type; }
+    if ((array is !null)) { return array.base_type; }
     let vector = c.vector_base_map.lookup(type_id);
-    if (has_symbol(vector)) { return vector.type; }
+    if ((vector is !null)) { return vector.type; }
     return 0;
 }
 
@@ -51,7 +51,8 @@ func ref_snapshot(ref state: RefCheck) -> Dict(String, Int) {
     let i = 0;
     while (i < state.slot_names.length()) {
         let key = state.slot_names[i];
-        copy.put(key, state.slots.lookup(key));
+        let owner = state.slots.lookup(key);
+        if (owner is !null) { copy.put(key, owner); }
         i++;
     }
     return copy;
@@ -61,9 +62,10 @@ func ref_merge(ref state: RefCheck, left: Dict(String, Int), left_ends: Bool, ri
     let i = 0;
     while (i < state.slot_names.length()) {
         let key = state.slot_names[i];
-        if (left.contains_key(key) && state.slots.contains_key(key)) {
-            let owner = left.lookup(key);
-            if (!left_ends && !right_ends) { ref_join(ref state, owner, state.slots.lookup(key)); }
+        let owner = left.lookup(key);
+        let other = state.slots.lookup(key);
+        if (owner is !null && other is !null) {
+            if (!left_ends && !right_ends) { ref_join(ref state, owner, other); }
             if (!left_ends) { state.slots.put(key, owner); }
         }
         i++;
@@ -102,7 +104,8 @@ func ref_publish(ref state: RefCheck, owner: Int) -> Void {
 
 func ref_allocation(ref state: RefCheck, node: NodeID) -> Int {
     let key = state.frame + "." + UInt32(node);
-    if (state.allocations.contains_key(key)) { return state.allocations.lookup(key); }
+    let existing = state.allocations.lookup(key);
+    if (existing is !null) { return existing; }
     let group = state.parents.length();
     state.parents.append(group);
     state.escaped.append(false);
@@ -119,8 +122,9 @@ func ref_owner(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Int {
     if (kind == NODE_VAR_ACCESS) {
         let name = get_var_access_node(ref c.arena, node).name_tok.value;
         let symbol = find_symbol(ref c, name);
-        if (has_symbol(symbol) && state.slots.contains_key(ref_slot(ref state, symbol.reg))) {
-            return ref_group(ref state, state.slots.lookup(ref_slot(ref state, symbol.reg)));
+        if ((symbol is !null) && state.slots.contains_key(ref_slot(ref state, symbol.reg))) {
+            let owner = state.slots.lookup(ref_slot(ref state, symbol.reg));
+            if (owner is !null) { return ref_group(ref state, owner); }
         }
     }
     if (kind == NODE_REF) {
@@ -168,15 +172,16 @@ func ref_plain_drop(ref c: Compiler, type_id: Int, depth: Int) -> Bool {
         }
         return true;
     }
-    let vector: SymbolInfo = c.vector_base_map.lookup(type_id);
-    if (has_symbol(vector)) { return ref_plain_drop(ref c, vector.type, depth + 1); }
-    let array: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(array)) { return ref_plain_drop(ref c, array.base_type, depth + 1); }
-    let record: StructInfo = c.struct_id_map.lookup(type_id);
-    if (!has_struct(record) || record.is_class || record.is_interface) { return false; }
+    let vector: Optional(SymbolInfo) = c.vector_base_map.lookup(type_id);
+    if ((vector is !null)) { return ref_plain_drop(ref c, vector.type, depth + 1); }
+    let array: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((array is !null)) { return ref_plain_drop(ref c, array.base_type, depth + 1); }
+    let record: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if (!(record is !null) || record.is_class || record.is_interface) { return false; }
+    let meta_record: StructInfo = record;
     let i = 0;
-    while (i < record.fields.length()) {
-        let field: FieldInfo = record.fields[i];
+    while (i < meta_record.fields.length()) {
+        let field: FieldInfo = meta_record.fields[i];
         if (!ref_plain_drop(ref c, field.type, depth + 1)) { return false; }
         i++;
     }
@@ -235,7 +240,7 @@ func has_index_refs(ref c: Compiler) -> Bool {
             if (node_tag(arg.val) == NODE_REF && node_tag(get_ref_node(ref c.arena, arg.val).node) == NODE_INDEX_ACCESS) {
                 let key = name + "." + i;
                 if (arg.name is !null) { key = name + "." + arg.name; }
-                if (!c.ref_callees.contains_key(name) || c.ref_callees.lookup(key)) {
+                if (!c.ref_callees.contains_key(name) || c.ref_callees.contains_key(key)) {
                     c.ref_files.put(call.pos.fn, true);
                 }
             }
@@ -262,18 +267,18 @@ func ref_register_params(ref c: Compiler, name: String, params: Vector(ParamNode
 func ref_owner_slot(ref c: Compiler, ref state: RefCheck, target: NodeID) -> String {
     if (node_tag(target) != NODE_VAR_ACCESS) { return ""; }
     let symbol = find_symbol(ref c, get_var_access_node(ref c.arena, target).name_tok.value);
-    if (!has_symbol(symbol)) { return ""; }
+    if (!(symbol is !null)) { return ""; }
     return ref_slot(ref state, symbol.reg);
 }
 
 func ref_stable_owner(ref c: Compiler, node: NodeID) -> Bool {
     if (node_tag(node) == NODE_VAR_ACCESS) {
-        return has_symbol(find_symbol(ref c, get_var_access_node(ref c.arena, node).name_tok.value));
+        return (find_symbol(ref c, get_var_access_node(ref c.arena, node).name_tok.value) is !null);
     }
     if (node_tag(node) == NODE_FIELD_ACCESS) {
         let access = get_field_access_node(ref c.arena, node);
         let owner = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, access.obj)));
-        return has_struct(owner) && !owner.is_class && ref_stable_owner(ref c, access.obj);
+        return (owner is !null) && !owner.is_class && ref_stable_owner(ref c, access.obj);
     }
     return false;
 }
@@ -305,14 +310,14 @@ func ref_scalar(ref c: Compiler, type_id: Int) -> Bool {
     let type = get_repr_type(ref c, type_id);
     let record = c.struct_id_map.lookup(type);
     return is_numeric_type(type) || type == TYPE_BOOL || type == TYPE_CHAR || type == TYPE_STRING ||
-           (has_struct(record) && record.is_enum);
+           ((record is !null) && record.is_enum);
 }
 
 func ref_scalar_expr(ref c: Compiler, node: NodeID) -> Bool {
     if (ref_scalar(ref c, get_expr_type(ref c, node))) { return true; }
     if (node_tag(node) == NODE_CALL) {
         let info = ref_resolve_call(ref c, get_call_node(ref c.arena, node));
-        return has_func(info) && ref_scalar(ref c, info.ret_type);
+        return (info is !null) && ref_scalar(ref c, info.ret_type);
     }
     if (node_tag(node) != NODE_FIELD_ACCESS) { return false; }
     let access = get_field_access_node(ref c.arena, node);
@@ -320,74 +325,75 @@ func ref_scalar_expr(ref c: Compiler, node: NodeID) -> Bool {
     let mapped = c.current_file_type_aliases.lookup(name);
     if (mapped is !null) { name = mapped; }
     let record = c.struct_table.lookup(name);
-    if (!has_struct(record)) { record = c.struct_table.lookup(c.current_package_prefix + name); }
-    return has_struct(record) && record.is_enum;
+    if (!(record is !null)) { record = c.struct_table.lookup(c.current_package_prefix + name); }
+    return (record is !null) && record.is_enum;
 }
 
-func ref_call_info(ref c: Compiler, callee: NodeID) -> FuncInfo {
+func ref_call_info(ref c: Compiler, callee: NodeID) -> Optional(FuncInfo) {
     let name = "";
     if (node_tag(callee) == NODE_VAR_ACCESS) {
         name = get_var_access_node(ref c.arena, callee).name_tok.value;
-        if (has_symbol(find_symbol(ref c, name))) { return FuncInfo(); }
+        if ((find_symbol(ref c, name) is !null)) { return null; }
     } else if (node_tag(callee) == NODE_FIELD_ACCESS) {
         name = format_ast_path(ref c, callee);
         let root = callee;
         while (node_tag(root) == NODE_FIELD_ACCESS) { root = get_field_access_node(ref c.arena, root).obj; }
         if (node_tag(root) == NODE_VAR_ACCESS) {
             let local = get_var_access_node(ref c.arena, root).name_tok.value;
-            if (has_symbol(find_symbol(ref c, local))) { return FuncInfo(); }
+            if ((find_symbol(ref c, local) is !null)) { return null; }
             let prefix = c.current_file_visible_prefixes.lookup(local);
             if (prefix is !null) { name = prefix + name.slice(local.length() + 1, name.length()); }
         }
     } else {
-        return FuncInfo();
+        return null;
     }
     let mapped = c.current_file_func_aliases.lookup(name);
     if (mapped is !null) { return c.func_table.lookup(mapped); }
     let info = c.func_table.lookup(c.current_package_prefix + name);
-    if (has_func(info)) { return info; }
+    if ((info is !null)) { return info; }
     return c.func_table.lookup(name);
 }
 
-func ref_resolve_call(ref c: Compiler, call: CallNode) -> FuncInfo {
+func ref_resolve_call(ref c: Compiler, call: CallNode) -> Optional(FuncInfo) {
     let info = ref_call_info(ref c, call.callee);
-    if (has_func(info)) { return info; }
+    if ((info is !null)) { return info; }
     if (node_tag(call.callee) == NODE_FIELD_ACCESS) {
         let access = get_field_access_node(ref c.arena, call.callee);
         let owner = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, access.obj)));
-        if (has_struct(owner) && owner.is_class) {
-            let template = c.generic_methods.lookup(owner.name + "_" + access.field_name);
-            if (has_template(template)) {
+        if ((owner is !null) && owner.is_class) {
+            let record: StructInfo = owner;
+            let template = c.generic_methods.lookup(record.name + "_" + access.field_name);
+            if ((template is !null)) {
                 let types = resolve_generic_method_args(ref c, template, call.type_args, call.args, call.pos);
-                if (types is null) { return FuncInfo(); }
-                return register_generic_method(ref c, template, owner, types, call.pos);
+                if (types is null) { return null; }
+                return register_generic_method(ref c, template, record, types, call.pos);
             }
-            info = c.func_table.lookup(owner.name + "_" + access.field_name);
-            if (has_func(info)) { return info; }
+            info = c.func_table.lookup(record.name + "_" + access.field_name);
+            if ((info is !null)) { return info; }
             let i = 0;
-            while (owner.vtable is !null && i < owner.vtable.length()) {
-                let member: FuncInfo = owner.vtable[i];
+            while (record.vtable is !null && i < record.vtable.length()) {
+                let member: FuncInfo = record.vtable[i];
                 if (member.base_name == access.field_name) { return member; }
                 i++;
             }
         }
     }
     if (node_tag(call.callee) == NODE_VAR_ACCESS &&
-        has_symbol(find_symbol(ref c, get_var_access_node(ref c.arena, call.callee).name_tok.value))) {
-        return FuncInfo();
+        (find_symbol(ref c, get_var_access_node(ref c.arena, call.callee).name_tok.value) is !null)) {
+        return null;
     }
     let name = generic_symbol_name(ref c, call.callee, true);
     let template = c.generic_funcs.lookup(name);
-    if (!has_template(template)) { return FuncInfo(); }
+    if (!(template is !null)) { return null; }
     let args = resolve_generic_args(ref c, template, call.type_args, call.args, call.pos);
-    if (args is null) { return FuncInfo(); }
+    if (args is null) { return null; }
     return register_generic_func(ref c, template, args, call.pos);
 }
 
-func ref_known_call(ref c: Compiler, ref state: RefCheck, call: CallNode) -> FuncInfo {
+func ref_known_call(ref c: Compiler, ref state: RefCheck, call: CallNode) -> Optional(FuncInfo) {
     if (node_tag(call.callee) == NODE_VAR_ACCESS) {
         let symbol = find_symbol(ref c, get_var_access_node(ref c.arena, call.callee).name_tok.value);
-        if (has_symbol(symbol)) { return state.functions.lookup(symbol.reg); }
+        if ((symbol is !null)) { return state.functions.lookup(symbol.reg); }
     }
     return ref_resolve_call(ref c, call);
 }
@@ -398,20 +404,20 @@ func ref_method_call(ref c: Compiler, call: CallNode, info: FuncInfo, receiver_t
     let access = get_field_access_node(ref c.arena, call.callee);
     if (receiver_type == 0) { receiver_type = get_expr_type(ref c, access.obj); }
     let actual = c.struct_id_map.lookup(get_repr_type(ref c, receiver_type));
-    return has_struct(actual) && actual.is_class;
+    return (actual is !null) && actual.is_class;
 }
 
-func ref_constructor(ref c: Compiler, callee: NodeID) -> StructInfo {
+func ref_constructor(ref c: Compiler, callee: NodeID) -> Optional(StructInfo) {
 // a namespace-qualified type name needs the module prefix, a local callable can shadow it
     let root = callee;
     while (node_tag(root) == NODE_FIELD_ACCESS) { root = get_field_access_node(ref c.arena, root).obj; }
     if (node_tag(root) != NODE_VAR_ACCESS ||
-        has_symbol(find_symbol(ref c, get_var_access_node(ref c.arena, root).name_tok.value))) {
-        return StructInfo();
+        (find_symbol(ref c, get_var_access_node(ref c.arena, root).name_tok.value) is !null)) {
+        return null;
     }
     let name = generic_symbol_name(ref c, callee, false);
     let record = c.struct_table.lookup(name);
-    if (!has_struct(record)) { record = c.struct_table.lookup(c.current_package_prefix + name); }
+    if (!(record is !null)) { record = c.struct_table.lookup(c.current_package_prefix + name); }
     return record;
 }
 
@@ -455,7 +461,7 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
             let target = get_ref_node(ref c.arena, argument).node;
             if (node_tag(target) == NODE_VAR_ACCESS) {
                 let symbol = find_symbol(ref c, get_var_access_node(ref c.arena, target).name_tok.value);
-                if (has_symbol(symbol)) { source = ref_slot(ref state, symbol.reg); }
+                if ((symbol is !null)) { source = ref_slot(ref state, symbol.reg); }
             }
         }
         owners.append(owner);
@@ -547,11 +553,12 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: 
         if (target == 0) { target = get_expr_type(ref c, access.obj); }
         target = get_repr_type(ref c, target);
         if (target == TYPE_STRING && access.field_name == "length") { return; }
-        if (has_symbol(c.vector_base_map.lookup(target))) {
+        let vector = c.vector_base_map.lookup(target);
+        if (vector is !null) {
             if (access.field_name == "length") { return; }
             if (access.field_name == "append" || access.field_name == "drop") {
                 ref_conflict(ref state, ref_owner(ref c, ref state, access.obj), call.pos, "call '" + access.field_name + "'", ref_element(ref c, target));
-                let element = c.vector_base_map.lookup(target).type;
+                let element = vector.type;
                 if (access.field_name == "drop" && !ref_drop_effects(ref c, ref state, element, call.pos, 0)) {
                     ref_error(ref state, call.pos, "drop a value with unverified storage effects");
                 }
@@ -564,15 +571,18 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: 
         let name = get_var_access_node(ref c.arena, call.callee).name_tok.value;
         let type = get_cast_target(ref c, name);
         let arg = call.args[0];
-        if (!has_symbol(find_symbol(ref c, name)) && ref_scalar(ref c, type) &&
+        if (!(find_symbol(ref c, name) is !null) && ref_scalar(ref c, type) &&
             ref_scalar_expr(ref c, arg.val)) { return; }
     }
 
-    if (!has_func(info)) { info = ref_known_call(ref c, ref state, call); }
+    if (!has_func(info)) {
+        let known = ref_known_call(ref c, ref state, call);
+        if (known is !null) { info = known; }
+    }
     if (!has_func(info)) {
         // record construction evaluates its field arguments, it has no hidden method body
         let record = ref_constructor(ref c, call.callee);
-        if (has_struct(record) && !record.is_class && !record.is_interface && !record.is_enum) { return; }
+        if ((record is !null) && !record.is_class && !record.is_interface && !record.is_enum) { return; }
     }
     if (has_func(info) && (info.ann_flags & FLAG_ANN_INTRINSIC) != 0 && info.base_name == "print") {
         let safe = true;
@@ -610,7 +620,8 @@ func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, i
     if (!ref_method_call(ref c, call, info, receiver_type)) { return; }
     let param: TypeListNode = info.arg_types[0];
     let owner = c.struct_id_map.lookup(param.type);
-    if (!has_struct(owner) || !owner.is_class) { return; }
+    if (!(owner is !null) || !owner.is_class) { return; }
+    let record: StructInfo = owner;
     let i = 0;
     while (i < c.struct_id_map.capacity) {
         if (c.struct_id_map.hashes[i] >= 2) {
@@ -618,11 +629,13 @@ func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, i
             if (candidate.is_class && candidate.parent_id != 0) {
                 let parent = candidate.parent_id;
                 let depth = 0;
-                while (parent != 0 && parent != owner.type_id && depth < 64) {
-                    parent = c.struct_id_map.lookup(parent).parent_id;
+                while (parent != 0 && parent != record.type_id && depth < 64) {
+                    let ancestor = c.struct_id_map.lookup(parent);
+                    if (ancestor is null) { break; }
+                    parent = ancestor.parent_id;
                     depth++;
                 }
-                if (parent == owner.type_id) {
+                if (parent == record.type_id) {
                     let index = 0;
                     while (candidate.vtable is !null && index < candidate.vtable.length()) {
                         let member: FuncInfo = candidate.vtable[index];
@@ -652,10 +665,11 @@ func ref_check_write(ref c: Compiler, ref state: RefCheck, type_id: Int, owner: 
                 let root = ref_group(ref state, owner);
                 let active = ref_group(ref state, use.owner);
                 let possible = root == active || (root == 0 && state.escaped[active]) || (active == 0 && state.escaped[root]);
+                let saved = state.slots.lookup(use.slot);
                 if (root != 0 && root == active && slot != use.slot && use.slot.length() > 0 &&
-                    state.slots.contains_key(use.slot) && ref_group(ref state, state.slots.lookup(use.slot)) == active) { kept = true; }
-                if (possible && (slot == use.slot || use.slot.length() == 0 || !state.slots.contains_key(use.slot) ||
-                     ref_group(ref state, state.slots.lookup(use.slot)) != ref_group(ref state, use.owner))) {
+                    saved is !null && ref_group(ref state, saved) == active) { kept = true; }
+                if (possible && (slot == use.slot || use.slot.length() == 0 || saved is null ||
+                     ref_group(ref state, saved) != ref_group(ref state, use.owner))) {
                     retained = false;
                 }
                 i++;
@@ -692,9 +706,10 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
     }
     if (ref_storage(ref c, type_id)) { return ref_drop_effects(ref c, ref state, ref_element(ref c, type_id), pos, depth + 1); }
     let record = c.struct_id_map.lookup(type_id);
-    if (!has_struct(record) || record.is_interface) { return false; }
-    if (!ref_drop_record(ref c, ref state, record, pos, depth)) { return false; }
-    if (!record.is_class) { return true; }
+    if (!(record is !null) || record.is_interface) { return false; }
+    let info: StructInfo = record;
+    if (!ref_drop_record(ref c, ref state, info, pos, depth)) { return false; }
+    if (!info.is_class) { return true; }
     let i = 0;
     while (i < c.struct_id_map.capacity) {
         if (c.struct_id_map.hashes[i] >= 2) {
@@ -702,11 +717,13 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
             if (candidate.is_class && candidate.parent_id != 0) {
                 let parent = candidate.parent_id;
                 let count = 0;
-                while (parent != 0 && parent != record.type_id && count < 64) {
-                    parent = c.struct_id_map.lookup(parent).parent_id;
+                while (parent != 0 && parent != info.type_id && count < 64) {
+                    let ancestor = c.struct_id_map.lookup(parent);
+                    if (ancestor is null) { return false; }
+                    parent = ancestor.parent_id;
                     count++;
                 }
-                if (parent == record.type_id && !ref_drop_record(ref c, ref state, candidate, pos, depth)) { return false; }
+                if (parent == info.type_id && !ref_drop_record(ref c, ref state, candidate, pos, depth)) { return false; }
             }
         }
         i++;
@@ -716,7 +733,7 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
 
 func ref_drop_record(ref c: Compiler, ref state: RefCheck, record: StructInfo, pos: Position, depth: Int) -> Bool {
     let deinit = c.func_table.lookup(record.name + "_$deinit");
-    if (has_func(deinit)) {
+    if ((deinit is !null)) {
         let call = CallNode(callee=NO_NODE, args=[], pos=pos);
         if (!ref_call_body(ref c, ref state, call, deinit)) { return false; }
     }
@@ -756,10 +773,11 @@ func ref_check_fields(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
         return;
     }
     let record = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
-    if (!has_struct(record) || record.is_enum) { return; }
+    if (!(record is !null) || record.is_enum) { return; }
+    let info: StructInfo = record;
     let i = 0;
-    while (record.fields is !null && i < record.fields.length()) {
-        let field: FieldInfo = record.fields[i];
+    while (info.fields is !null && i < info.fields.length()) {
+        let field: FieldInfo = info.fields[i];
         if (needs_drop(ref c, field.type)) { ref_check_fields(ref c, ref state, field.type, pos, depth + 1); }
         i++;
     }
@@ -845,7 +863,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
             type = get_expr_type(ref c, declaration.value);
             if (type == 0 && node_tag(declaration.value) == NODE_CALL) {
                 let record = ref_constructor(ref c, get_call_node(ref c.arena, declaration.value).callee);
-                if (has_struct(record)) { type = record.type_id; }
+                if ((record is !null)) { type = record.type_id; }
             }
         }
         if (!reference && state.active.length() > 0 && needs_drop(ref c, type) && !ref_plain_drop(ref c, type, 0)) {
@@ -857,19 +875,19 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
             if (reference && node_tag(get_ref_node(ref c.arena, declaration.value).node) == NODE_VAR_ACCESS) {
                 let name = get_var_access_node(ref c.arena, get_ref_node(ref c.arena, declaration.value).node).name_tok.value;
                 let source = find_symbol(ref c, name);
-                if (has_symbol(source)) { state.slot_refs.put(slot, ref_slot(ref state, source.reg)); }
+                if ((source is !null)) { state.slot_refs.put(slot, ref_slot(ref state, source.reg)); }
             }
             ref_set_slot(ref state, slot, ref_owner(ref c, ref state, declaration.value));
         }
         c.symbol_table.table.put(declaration.name_tok.value, SymbolInfo(reg=slot, type=type, is_const=declaration.is_const, is_reference=reference));
-        if (has_symbol(c.func_ret_map.lookup(type)) && has_node(declaration.value)) {
+        if ((c.func_ret_map.lookup(type) is !null) && has_node(declaration.value)) {
             // declarations keep a known direct target, assignments clear it conservatively
             let known = ref_call_info(ref c, declaration.value);
             if (node_tag(declaration.value) == NODE_VAR_ACCESS) {
                 let source = find_symbol(ref c, get_var_access_node(ref c.arena, declaration.value).name_tok.value);
-                if (has_symbol(source)) { known = state.functions.lookup(source.reg); }
+                if ((source is !null)) { known = state.functions.lookup(source.reg); }
             }
-            if (has_func(known)) { state.functions.put(slot, known); }
+            if ((known is !null)) { state.functions.put(slot, known); }
         }
         return false;
     }
@@ -877,16 +895,19 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         let assignment = get_var_assign_node(ref c.arena, node);
         ref_check_node(ref c, ref state, assignment.value);
         let symbol = find_symbol(ref c, assignment.name_tok.value);
-        if (has_symbol(symbol)) { state.functions.remove(symbol.reg); }
+        if (symbol is null) { return false; }
+        let target: SymbolInfo = symbol;
+        state.functions.remove(target.reg);
         let owner = 0;
-        if (has_symbol(symbol) && symbol.reg is !null && state.slots.contains_key(ref_slot(ref state, symbol.reg))) {
-            owner = state.slots.lookup(ref_slot(ref state, symbol.reg));
+        if (target.reg is !null && state.slots.contains_key(ref_slot(ref state, target.reg))) {
+            let existing = state.slots.lookup(ref_slot(ref state, target.reg));
+            if (existing is !null) { owner = existing; }
         }
-        ref_check_write(ref c, ref state, symbol.type, owner, assignment.pos, ref_slot(ref state, symbol.reg));
-        if (ref_storage(ref c, symbol.type)) {
+        ref_check_write(ref c, ref state, target.type, owner, assignment.pos, ref_slot(ref state, target.reg));
+        if (ref_storage(ref c, target.type)) {
             let next = ref_owner(ref c, ref state, assignment.value);
             if (state.collecting && state.loop_depth > 0) { ref_join(ref state, owner, next); }
-            ref_set_slot(ref state, symbol.reg, next);
+            ref_set_slot(ref state, target.reg, next);
         }
         return false;
     }
@@ -895,7 +916,9 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         ref_check_node(ref c, ref state, assignment.obj);
         ref_check_node(ref c, ref state, assignment.value);
         let owner = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, assignment.obj)));
-        let type = find_field(owner, assignment.field_name).type;
+        let field = find_field(owner, assignment.field_name);
+        if (field is null) { return false; }
+        let type = field.type;
         if (state.collecting && ref_storage(ref c, type)) {
             ref_publish(ref state, ref_owner(ref c, ref state, assignment.value));
         }
@@ -912,8 +935,8 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         let array = c.array_info_map.lookup(target);
         let vector = c.vector_base_map.lookup(target);
         let element = 0;
-        if (has_array_info(array)) { element = array.base_type; }
-        if (has_symbol(vector)) { element = vector.type; }
+        if ((array is !null)) { element = array.base_type; }
+        if ((vector is !null)) { element = vector.type; }
         if (state.collecting && ref_storage(ref c, element)) {
             ref_publish(ref state, ref_owner(ref c, ref state, assignment.value));
         }
@@ -933,17 +956,21 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
             probe++;
         }
         if (candidates && !state.collecting) {
-            info = ref_known_call(ref c, ref state, call);
+            let known = ref_known_call(ref c, ref state, call);
+            if (known is !null) { info = known; }
         }
         let arguments = call.args;
         let skip = 0;
         if (!state.collecting && (candidates || state.active.length() > 0)) {
-            if (!has_func(info)) { info = ref_known_call(ref c, ref state, call); }
+            if (!has_func(info)) {
+                let known = ref_known_call(ref c, ref state, call);
+                if (known is !null) { info = known; }
+            }
             if (candidates && !has_func(info)) {
                 let record = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, node)));
-                if (has_struct(record) && record.is_class) {
+                if ((record is !null) && record.is_class) {
                     let init = c.func_table.lookup(record.name + "_$init");
-                    if (has_func(init)) {
+                    if ((init is !null)) {
                         info = init;
                         skip = 1;
                     }
@@ -955,8 +982,8 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
                 if (has_bound_args(ordered)) { arguments = ordered.ordered; }
             } else if (candidates && !has_func(info)) {
                 let signature = c.func_ret_map.lookup(get_expr_type(ref c, call.callee));
-                if (!has_symbol(signature)) { signature = c.method_ret_map.lookup(get_expr_type(ref c, call.callee)); }
-                if (has_symbol(signature)) {
+                if (!(signature is !null)) { signature = c.method_ret_map.lookup(get_expr_type(ref c, call.callee)); }
+                if ((signature is !null)) {
                     let ordered = bind_callable_args(arguments, signature, call.pos);
                     if (has_bound_args(ordered)) { arguments = ordered.ordered; }
                     info = FuncInfo(name="$dynamic", arg_types=signature.func_arg_types, arg_names=signature.arg_names);

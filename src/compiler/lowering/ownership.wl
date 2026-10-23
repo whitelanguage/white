@@ -77,8 +77,8 @@ func emit_retain(ref c: Compiler, reg: String, type_id: Int) -> Void {
 
     if (!is_ref_type(ref c, type_id)) { return; }
 
-    let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(s_info) && s_info.is_interface) {
+    let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((s_info is !null) && s_info.is_interface) {
         let obj_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_retain(i8* " + obj_ptr + ")\n");
@@ -104,8 +104,8 @@ func emit_release(ref c: Compiler, reg: String, type_id: Int) -> Void {
         return;
     }
 
-    let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(s_info) && s_info.is_interface) {
+    let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((s_info is !null) && s_info.is_interface) {
         let obj_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + reg + ", 0\n");
         c.output_file.write(c.indent + "call void @__wl_release(i8* " + obj_ptr + ")\n");
@@ -575,7 +575,11 @@ func emit_slice_bounds_check(ref c: Compiler, start_reg: String, end_reg: String
 }
 
 func emit_slice_parts(ref c: Compiler, slice_reg: String, slice_type: Int, pos: Position) -> SliceParts {
-    let arr_info: ArrayInfo = c.array_info_map.lookup(slice_type);
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(slice_type);
+    if (arr_info is null) {
+        throw_type_error(pos, "Expected a slice type.");
+        return SliceParts();
+    }
     let elem_ty: String = get_llvm_type_str(ref c, arr_info.base_type);
     let slice_ty: String = arr_info.llvm_name;
     let size_ty: String = get_size_llvm_type();
@@ -638,7 +642,11 @@ func emit_slice_parts(ref c: Compiler, slice_reg: String, slice_type: Int, pos: 
 
 func emit_make_slice(ref c: Compiler, elem_type: Int, owner: String, data_slot: String, size_slot: String, start: String, length: String) -> CompileResult {
     let slice_type: Int = get_slice_type_id(ref c, elem_type);
-    let arr_info: ArrayInfo = c.array_info_map.lookup(slice_type);
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(slice_type);
+    if (arr_info is null) {
+        throw_internal_compiler_error(Position(), "Missing slice layout.");
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
     let elem_ty: String = get_llvm_type_str(ref c, elem_type);
     let slice_ty: String = arr_info.llvm_name;
     let size_ty: String = get_size_llvm_type();
@@ -858,23 +866,24 @@ func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
         return;
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info) && arr_info.size >= 0) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null) && arr_info.size >= 0) {
+        let meta_arr_info: ArrayInfo = arr_info;
         let i: Int = 0;
-        while (i < arr_info.size) {
+        while (i < meta_arr_info.size) {
             let elem_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
+            c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + meta_arr_info.llvm_name + ", " + meta_arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
 
-            emit_drop_slot(ref c, elem_ptr, arr_info.base_type);
+            emit_drop_slot(ref c, elem_ptr, meta_arr_info.base_type);
             i += 1;
         }
         return;
     }
 
     if (is_value_struct(ref c, type_id)) {
-        let info: StructInfo = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+        let info: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
         let i: Int = 0;
-        while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
+        while ((info is !null) && info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             if (needs_drop(ref c, field.type)) {
                 let field_ptr: String = next_reg(ref c);
@@ -931,23 +940,24 @@ func emit_retain_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
         return;
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info) && arr_info.size >= 0) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null) && arr_info.size >= 0) {
+        let meta_arr_info: ArrayInfo = arr_info;
         let i: Int = 0;
-        while (i < arr_info.size) {
+        while (i < meta_arr_info.size) {
             let elem_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
+            c.output_file.write(c.indent + elem_ptr + " = getelementptr inbounds " + meta_arr_info.llvm_name + ", " + meta_arr_info.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + i + "\n");
 
-            emit_retain_slot(ref c, elem_ptr, arr_info.base_type);
+            emit_retain_slot(ref c, elem_ptr, meta_arr_info.base_type);
             i += 1;
         }
         return;
     }
 
     if (is_value_struct(ref c, type_id)) {
-        let info: StructInfo = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+        let info: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
         let i: Int = 0;
-        while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
+        while ((info is !null) && info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             if (needs_drop(ref c, field.type)) {
                 let field_ptr: String = next_reg(ref c);
@@ -989,8 +999,8 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         return;
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info) && arr_info.size == -1) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null) && arr_info.size == -1) {
         let slice_ty: String = arr_info.llvm_name;
 
         c.output_file.write("  %slice = bitcast i8* %ptr to " + slice_ty + "*\n");
@@ -1003,8 +1013,8 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         return;
     }
 
-    let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (has_struct(variant_info) && type_id == variant_info.type_id) {
+    let variant_info: Optional(StructInfo) = c.struct_table.lookup("$Variant");
+    if ((variant_info is !null) && type_id == variant_info.type_id) {
         c.output_file.write("  %box = bitcast i8* %ptr to %struct.$Variant*\n");
         c.output_file.write("  %tag.slot = getelementptr inbounds %struct.$Variant, %struct.$Variant* %box, i32 0, i32 0\n");
         c.output_file.write("  %tag = load i64, i64* %tag.slot\n");
@@ -1035,8 +1045,8 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         return;
     }
 
-    let vec_info: SymbolInfo = c.vector_base_map.lookup(type_id);
-    if (has_symbol(vec_info)) {
+    let vec_info: Optional(SymbolInfo) = c.vector_base_map.lookup(type_id);
+    if ((vec_info is !null)) {
         let elem_type: Int = vec_info.type;
         let elem_ty: String = get_llvm_type_str(ref c, elem_type);
         let vec_ty: String = get_vector_llvm_type(ref c, elem_type);
@@ -1075,10 +1085,11 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         return;
     }
 
-    let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(s_info)) {
-        if (s_info.is_class) {
-            let methods: Vector(Struct) = s_info.vtable;
+    let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((s_info is !null)) {
+        let meta_s_info: StructInfo = s_info;
+        if (meta_s_info.is_class) {
+            let methods: Vector(Struct) = meta_s_info.vtable;
             let method_len: Int = 0;
             if (methods is !null) { method_len = methods.length(); }
             let method_i: Int = 0;
@@ -1101,9 +1112,9 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
             }
         }
 
-        c.output_file.write("  %object = bitcast i8* %ptr to " + s_info.llvm_name + "*\n");
+        c.output_file.write("  %object = bitcast i8* %ptr to " + meta_s_info.llvm_name + "*\n");
 
-        let fields: Vector(Struct) = s_info.fields;
+        let fields: Vector(Struct) = meta_s_info.fields;
         let field_len: Int = 0;
         if (fields is !null) { field_len = fields.length(); }
         let field_i: Int = 0;
@@ -1111,7 +1122,7 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
             let field: FieldInfo = fields[field_i];
             if (field.name != "_vptr" && needs_drop(ref c, field.type)) {
                 let field_ptr: String = next_reg(ref c);
-                c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* %object, i32 0, i32 " + field.offset + "\n");
+                c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* %object, i32 0, i32 " + field.offset + "\n");
 
                 emit_drop_slot(ref c, field_ptr, field.type);
             }
@@ -1197,21 +1208,21 @@ func compile_arc_hooks(ref c: Compiler) -> Void {
 
     emit_type_drop(ref c, TYPE_GENERIC_FUNCTION);
 
-    let variant_info: StructInfo = c.struct_table.lookup("$Variant");
-    if (has_struct(variant_info)) {
+    let variant_info: Optional(StructInfo) = c.struct_table.lookup("$Variant");
+    if ((variant_info is !null)) {
         emit_type_drop(ref c, variant_info.type_id);
     }
 
     let type_id: Int = 100;
     while (type_id < c.type_counter) {
         let should_emit: Bool = false;
-        let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-        if (has_array_info(arr_info) && arr_info.size == -1) { should_emit = true; }
-        if (has_symbol(c.vector_base_map.lookup(type_id))) { should_emit = true; }
+        let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+        if ((arr_info is !null) && arr_info.size == -1) { should_emit = true; }
+        if ((c.vector_base_map.lookup(type_id) is !null)) { should_emit = true; }
 
-        let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-        if (has_struct(s_info) && !s_info.is_enum && !s_info.is_interface) {
-            if (!has_struct(variant_info) || type_id != variant_info.type_id) { should_emit = true; }
+        let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+        if ((s_info is !null) && !s_info.is_enum && !s_info.is_interface) {
+            if (!(variant_info is !null) || type_id != variant_info.type_id) { should_emit = true; }
         }
 
         if should_emit { emit_type_drop(ref c, type_id); }
@@ -1241,11 +1252,11 @@ func emit_erased_check_helpers(ref c: Compiler) -> Void {
                     let accepted: Bool = candidate == expected;
                     if (!accepted) { accepted = callable_types_compatible(ref c, candidate, expected); }
 
-                    let expected_info: StructInfo = c.struct_id_map.lookup(expected);
-                if (!accepted && has_struct(expected_info) && expected_info.is_class) {
+                    let expected_info: Optional(StructInfo) = c.struct_id_map.lookup(expected);
+                if (!accepted && (expected_info is !null) && expected_info.is_class) {
                     accepted = is_subclass(ref c, candidate, expected);
                 }
-                if (!accepted && has_struct(expected_info) && !expected_info.is_class) {
+                if (!accepted && (expected_info is !null) && !expected_info.is_class) {
                     accepted = erased_struct_matches(candidate, expected);
                 }
                 if accepted {

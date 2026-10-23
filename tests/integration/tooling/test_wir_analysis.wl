@@ -43,7 +43,8 @@ func main() -> Int {
         print("FAIL: backend-independent struct analysis failed");
         return 1;
     }
-    info = source.struct_table.lookup("Pair");
+    info = source.struct_table.get("Pair")?;
+    catch(err) { print("FAIL: missing Pair metadata"); return 1; }
     let left: FieldInfo = info.fields[0];
     let right: FieldInfo = info.fields[1];
     if (info.fields.length() != 2 || left.type != TYPE_INT || right.type != TYPE_LONG) {
@@ -78,7 +79,8 @@ func main() -> Int {
     source.all_modules.append(ParsedModule(path="class.wl", prefix="", dir="", is_package=false, ast=class_root, visible=Dict(), namespaces=Dict(), types=Dict(), funcs=Dict(), globals=Dict(), imports=[]));
     analyze_declarations(ref source);
 
-    class_info = source.struct_table.lookup("Box");
+    class_info = source.struct_table.get("Box")?;
+    catch(err) { print("FAIL: missing Box metadata"); return 1; }
     let vptr_field: FieldInfo = class_info.fields[0];
     let value_field: FieldInfo = class_info.fields[1];
     if (class_info.fields.length() != 2 || vptr_field.name != "_vptr" || value_field.type != TYPE_INT) {

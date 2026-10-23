@@ -83,8 +83,8 @@ func bind_local_init(ref scope: LocalInitScope, node: VarDeclareNode) -> Void {
 func lookup_local_init(ref scope: LocalInitScope, name: String) -> String {
     let ptr current: LocalInitScope = ref scope;
     while (current is !nullptr) {
-        let info: SymbolInfo = current.table.lookup(name);
-        if (has_symbol(info)) {
+        let info: Optional(SymbolInfo) = current.table.lookup(name);
+        if ((info is !null)) {
             return info.reg;
         }
         current = current.parent;
@@ -396,10 +396,11 @@ func init_is_self(ref c: Compiler, node: NodeID) -> Bool {
     return access.name_tok.value == "self";
 }
 
-func class_requires_initialization(ref c: Compiler, info: StructInfo) -> Bool {
-    if (!has_struct(info) || !info.is_class || !has_node(info.init_body)) { return false; }
+func class_requires_initialization(ref c: Compiler, info: Optional(StructInfo)) -> Bool {
+    if (info is null || !info.is_class || !has_node(info.init_body)) { return false; }
+    let record: StructInfo = info;
 
-    let class_node: ClassDefNode = get_class_def_node(ref c.arena, info.init_body);
+    let class_node: ClassDefNode = get_class_def_node(ref c.arena, record.init_body);
     let fields: Vector(NodeID) = class_node.fields;
     let i: Int = 0;
     while (fields is !null && i < fields.length()) {
@@ -408,8 +409,8 @@ func class_requires_initialization(ref c: Compiler, info: StructInfo) -> Bool {
         i += 1;
     }
 
-    if (info.parent_id != 0) {
-        let parent: StructInfo = c.struct_id_map.lookup(info.parent_id);
+    if (record.parent_id != 0) {
+        let parent: Optional(StructInfo) = c.struct_id_map.lookup(record.parent_id);
         return class_requires_initialization(ref c, parent);
     }
     return false;
@@ -847,7 +848,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
     return InitFlow(initialized, false);
 }
 
-func check_class_initialization(ref c: Compiler, class_name: String, node: ClassDefNode, parent: StructInfo) -> Void {
+func check_class_initialization(ref c: Compiler, class_name: String, node: ClassDefNode, parent: Optional(StructInfo)) -> Void {
     let required: Vector(String) = [];
     let known_fields: Vector(String) = [];
     let initialized: Vector(String) = [];
@@ -960,8 +961,12 @@ func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, obje
     }
 
     if (class_info.parent_id != 0) {
-        let parent: StructInfo =
+        let parent: Optional(StructInfo) =
             c.struct_id_map.lookup(class_info.parent_id);
+        if (parent is null) {
+            throw_internal_compiler_error(no_position(), "Missing parent class metadata.");
+            return;
+        }
         emit_class_field_initializers(
             ref c,
             parent,
@@ -970,9 +975,9 @@ func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, obje
         );
     }
 
-    let initializer: FuncInfo =
+    let initializer: Optional(FuncInfo) =
         c.func_table.lookup(class_info.name + "_$field_init");
-    if (!has_func(initializer)) {
+    if (initializer is null) {
         return;
     }
     queue_generic_class_method(ref c, class_info, "$field_init");

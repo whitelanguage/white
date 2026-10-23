@@ -43,24 +43,24 @@ func extend_type_path(stack: Vector(Int), type_id: Int) -> Vector(Int) {
 }
 
 func value_struct_dependency(ref c: Compiler, type_id: Int) -> Int {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return value_struct_dependency(ref c, named.underlying_type);
     }
 
-    let array: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(array)) {
+    let array: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((array is !null)) {
         if (array.size < 0) { return 0; }
         return value_struct_dependency(ref c, array.base_type);
     }
 
-    let fallible: SymbolInfo = c.fallible_base_map.lookup(type_id);
-    if (has_symbol(fallible)) {
+    let fallible: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+    if ((fallible is !null)) {
         return value_struct_dependency(ref c, fallible.type);
     }
 
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(info) && !info.is_class && !info.is_interface && !info.is_enum) {
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((info is !null) && !info.is_class && !info.is_interface && !info.is_enum) {
         return info.type_id;
     }
     return 0;
@@ -72,14 +72,15 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
     if (node.type_params is !null && node.type_params.length() > 0) { return true; }
 
     let struct_name: String = c.current_package_prefix + node.name_tok.value;
-    let info: StructInfo = c.struct_table.lookup(struct_name);
-    if (!has_struct(info)) {
+    let info: Optional(StructInfo) = c.struct_table.lookup(struct_name);
+    if (!(info is !null)) {
         throw_type_error(node.pos, "Struct info missing for '" + struct_name + "'.");
         return false;
     }
-    if ((info.ann_flags & FLAG_ANN_INTRINSIC) != 0 || info.fields is !null) { return true; }
+    let meta_info: StructInfo = info;
+    if ((meta_info.ann_flags & FLAG_ANN_INTRINSIC) != 0 || meta_info.fields is !null) { return true; }
 
-    let path: Vector(Int) = extend_type_path(stack, info.type_id);
+    let path: Vector(Int) = extend_type_path(stack, meta_info.type_id);
 
     let fields: Vector(Struct) = [];
     let names: Dict(String, StringConstant) = Dict();
@@ -114,7 +115,7 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
                 set_module_context(ref c, target.module);
             }
         }
-        if (value_layout_contains(ref c, type_id, info.type_id, [])) {
+        if (value_layout_contains(ref c, type_id, meta_info.type_id, [])) {
             throw_type_error(parameter.pos, "Struct '" + struct_name + "' contains itself by value through field '" + name + "'. Use a pointer for recursive storage.");
             return false;
         }
@@ -123,12 +124,12 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
         i++;
     }
 
-    info.fields = fields;
-    store_struct(ref c, info);
+    meta_info.fields = fields;
+    store_struct(ref c, meta_info);
     return true;
 }
 
-func find_interface_implementation(ref c: Compiler, class_info: StructInfo, interface_info: StructInfo, required: MethodDefNode) -> FuncInfo {
+func find_interface_implementation(ref c: Compiler, class_info: StructInfo, interface_info: StructInfo, required: MethodDefNode) -> Optional(FuncInfo) {
     let i: Int = 0;
     while (class_info.vtable is !null && i < class_info.vtable.length()) {
         let candidate: FuncInfo = class_info.vtable[i];
@@ -155,23 +156,24 @@ func find_interface_implementation(ref c: Compiler, class_info: StructInfo, inte
         }
         i++;
     }
-    return FuncInfo();
+    return null;
 }
 
 func validate_class_interfaces(ref c: Compiler, info: StructInfo, pos: Position) -> Bool {
     let interface_index: Int = 0;
     while (info.interfaces is !null && interface_index < info.interfaces.length()) {
         let interface_type: TypeListNode = info.interfaces[interface_index];
-        let interface_info: StructInfo = c.struct_id_map.lookup(interface_type.type);
-        if (!has_struct(interface_info) || !interface_info.is_interface) {
+        let interface_info: Optional(StructInfo) = c.struct_id_map.lookup(interface_type.type);
+        if (!(interface_info is !null) || !interface_info.is_interface) {
             throw_type_error(pos, "Type " + get_type_name(ref c, interface_type.type) + " is not an interface.");
             return false;
         }
+        let meta_interface_info: StructInfo = interface_info;
 
         let method_index: Int = 0;
-        while (interface_info.vtable is !null && method_index < interface_info.vtable.length()) {
-            let required: MethodDefNode = interface_info.vtable[method_index];
-            if (!has_func(find_interface_implementation(ref c, info, interface_info, required))) {
+        while (meta_interface_info.vtable is !null && method_index < meta_interface_info.vtable.length()) {
+            let required: MethodDefNode = meta_interface_info.vtable[method_index];
+            if (!(find_interface_implementation(ref c, info, meta_interface_info, required) is !null)) {
                 throw_name_error(pos, "Class '" + info.name + "' does not implement interface method '" + required.name_tok.value + "'.");
                 return false;
             }
@@ -188,19 +190,20 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
     if (node.type_params is !null && node.type_params.length() > 0) { return true; }
 
     let class_name: String = c.current_package_prefix + node.name_tok.value;
-    let info: StructInfo = c.struct_table.lookup(class_name);
-    if (!has_struct(info) || !info.is_class) {
+    let info: Optional(StructInfo) = c.struct_table.lookup(class_name);
+    if (!(info is !null) || !info.is_class) {
         throw_type_error(node.pos, "Class info missing for '" + class_name + "'.");
         return false;
     }
-    if (info.fields is !null && info.vtable is !null && info.interfaces is !null) { return true; }
+    let meta_info: StructInfo = info;
+    if (meta_info.fields is !null && meta_info.vtable is !null && meta_info.interfaces is !null) { return true; }
 
-    let path: Vector(Int) = extend_type_path(stack, info.type_id);
-    let parent_info: StructInfo = StructInfo();
+    let path: Vector(Int) = extend_type_path(stack, meta_info.type_id);
+    let parent_info: Optional(StructInfo) = null;
     if (has_node(node.parent_tok)) {
         let parent_type: Int = resolve_type(ref c, node.parent_tok);
         parent_info = c.struct_id_map.lookup(parent_type);
-        if (!has_struct(parent_info) || !parent_info.is_class) {
+        if (!(parent_info is !null) || !parent_info.is_class) {
             throw_type_error(node.pos, "Type " + get_type_name(ref c, parent_type) + " is not a class.");
             return false;
         }
@@ -214,14 +217,15 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
             set_module_context(ref c, target.module);
             parent_info = c.struct_id_map.lookup(parent_type);
         }
-        info.parent_id = parent_type;
+        meta_info.parent_id = parent_type;
     }
 
     let interfaces: Vector(Struct) = [];
-    if (has_struct(parent_info)) {
+    if ((parent_info is !null)) {
+        let meta_parent_info: StructInfo = parent_info;
         let inherited_index: Int = 0;
-        while (parent_info.interfaces is !null && inherited_index < parent_info.interfaces.length()) {
-            let inherited: TypeListNode = parent_info.interfaces[inherited_index];
+        while (meta_parent_info.interfaces is !null && inherited_index < meta_parent_info.interfaces.length()) {
+            let inherited: TypeListNode = meta_parent_info.interfaces[inherited_index];
             if (!add_interface_type(ref c, interfaces, inherited.type, node.pos)) { return false; }
             inherited_index++;
         }
@@ -233,7 +237,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
         }
         declared_index++;
     }
-    info.interfaces = interfaces;
+    meta_info.interfaces = interfaces;
 
     check_class_initialization(ref c, class_name, node, parent_info);
 
@@ -241,18 +245,19 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
     let methods: Vector(Struct) = [];
     let names: Dict(String, StringConstant) = Dict();
     let offset: Int = 0;
-    if (has_struct(parent_info)) {
+    if ((parent_info is !null)) {
+        let meta_parent_info: StructInfo = parent_info;
         let i: Int = 0;
-        while (parent_info.fields is !null && i < parent_info.fields.length()) {
-            let field: FieldInfo = parent_info.fields[i];
+        while (meta_parent_info.fields is !null && i < meta_parent_info.fields.length()) {
+            let field: FieldInfo = meta_parent_info.fields[i];
             fields.append(FieldInfo(name=field.name, type=field.type, llvm_type="", offset=field.offset, is_const=field.is_const));
             names.put(field.name, StringConstant(id=0, value=field.name));
             offset++;
             i++;
         }
         i = 0;
-        while (parent_info.vtable is !null && i < parent_info.vtable.length()) {
-            methods.append(parent_info.vtable[i]);
+        while (meta_parent_info.vtable is !null && i < meta_parent_info.vtable.length()) {
+            methods.append(meta_parent_info.vtable[i]);
             i++;
         }
     } else {
@@ -269,7 +274,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
             throw_name_error(declaration.pos, "Field '" + field_name + "' is already defined in class '" + class_name + "'.");
             return false;
         }
-        if (has_func(find_method(methods, field_name))) {
+        if ((find_method(methods, field_name) is !null)) {
             throw_name_error(declaration.pos, "Class '" + class_name + "' cannot use '" + field_name + "' as both a field and a method.");
             return false;
         }
@@ -301,39 +306,40 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
             return false;
         }
         if ((method_node.type_params is null || method_node.type_params.length() == 0) && method_name != "$init" && method_name != "$field_init") {
-            let method_info: FuncInfo = c.func_table.lookup(class_name + "_" + method_name);
-            if (!has_func(method_info)) {
+            let method_info: Optional(FuncInfo) = c.func_table.lookup(class_name + "_" + method_name);
+            if (!(method_info is !null)) {
                 throw_internal_compiler_error(method_node.pos, "Method '" + class_name + "_" + method_name + "' was not registered.");
                 return false;
             }
-            if (method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0) {
+            let meta_method_info: FuncInfo = method_info;
+            if (meta_method_info.compiler_link_name is null || meta_method_info.compiler_link_name.length() == 0) {
                 let inherited_index: Int = 0;
                 let overridden: Bool = false;
                 while (inherited_index < methods.length()) {
                     let inherited: FuncInfo = methods[inherited_index];
                     if (inherited.base_name == method_name) {
-                        if (!same_method_signature(inherited, method_info)) {
+                        if (!same_method_signature(inherited, meta_method_info)) {
                             throw_type_error(method_node.pos, "Override of '" + method_name + "' does not match the parent method signature");
                             return false;
                         }
-                        methods[inherited_index] = method_info;
+                        methods[inherited_index] = meta_method_info;
                         overridden = true;
                         break;
                     }
                     inherited_index++;
                 }
                 if (!overridden) {
-                    methods.append(method_info);
+                    methods.append(meta_method_info);
                 }
             }
         }
         method_index++;
     }
 
-    info.fields = fields;
-    info.vtable = methods;
-    store_struct(ref c, info);
-    return validate_class_interfaces(ref c, info, node.pos);
+    meta_info.fields = fields;
+    meta_info.vtable = methods;
+    store_struct(ref c, meta_info);
+    return validate_class_interfaces(ref c, meta_info, node.pos);
 }
 
 func analyze_body_flow(ref c: Compiler, body: NodeID, result_node: NodeID, pos: Position) -> Void {
@@ -405,16 +411,16 @@ func analyze_declarations(ref c: Compiler) -> Void {
             if (node_tag(node) == NODE_STRUCT_DEF) {
                 let definition: StructDefNode = get_struct_def_node(ref c.arena, node);
                 if (definition.type_params is null || definition.type_params.length() == 0) {
-                    let info: StructInfo = c.struct_table.lookup(module.prefix + definition.name_tok.value);
-                    if (has_struct(info) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0) {
+                    let info: Optional(StructInfo) = c.struct_table.lookup(module.prefix + definition.name_tok.value);
+                    if ((info is !null) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0) {
                         struct_targets.append(TypeAnalysisTarget(node=node, module=module, type_id=info.type_id));
                     }
                 }
             } else if (node_tag(node) == NODE_CLASS_DEF) {
                 let definition: ClassDefNode = get_class_def_node(ref c.arena, node);
                 if (definition.type_params is null || definition.type_params.length() == 0) {
-                    let info: StructInfo = c.struct_table.lookup(module.prefix + definition.name_tok.value);
-                    if (has_struct(info)) {
+                    let info: Optional(StructInfo) = c.struct_table.lookup(module.prefix + definition.name_tok.value);
+                    if ((info is !null)) {
                         class_targets.append(TypeAnalysisTarget(node=node, module=module, type_id=info.type_id));
                     }
                 }

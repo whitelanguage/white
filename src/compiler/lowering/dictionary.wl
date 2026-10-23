@@ -14,15 +14,15 @@ func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
     }
     if (is_pointer_type(ref c, type_id)) { return true; }
 
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(info)) {
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((info is !null)) {
         if (info.is_enum || info.is_interface) { return true; }
         if (info.is_class) {
             return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$");
         }
         return false;
     }
-    if (has_symbol(c.func_ret_map.lookup(type_id)) || has_symbol(c.method_ret_map.lookup(type_id))) {
+    if ((c.func_ret_map.lookup(type_id) is !null) || (c.method_ret_map.lookup(type_id) is !null)) {
         return true;
     }
     return false;
@@ -32,18 +32,18 @@ func is_dynamic_dict(info: StructInfo) -> Bool {
     return has_struct(info) && (info.name == "dict.Dict" || info.name == "Dict");
 }
 
-func is_typed_dict(ref c: Compiler, info: StructInfo) -> Bool {
-    if (!has_struct(info)) { return false; }
+func is_typed_dict(ref c: Compiler, info: Optional(StructInfo)) -> Bool {
+    if (info is null) { return false; }
 
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
-    return has_template(template) && (template.name == "Dict" || template.name.ends_with(".Dict"));
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
+    return (template is !null) && (template.name == "Dict" || template.name.ends_with(".Dict"));
 }
 
 func is_generic_class(ref c: Compiler, info: StructInfo) -> Bool {
     if (!has_struct(info)) { return false; }
 
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
-    if (!has_template(template) || !has_node(template.node)) { return false; }
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
+    if (!(template is !null) || !has_node(template.node)) { return false; }
 
     let base: Int = node_tag(template.node);
     return base == NODE_CLASS_DEF;
@@ -57,13 +57,13 @@ func append_dict_key_case(ref c: Compiler, cases: String, seen: Dict(String, Str
 // keep the full name around so a 64-bit collision fails during compilation
     let fingerprint: UInt64 = type_fingerprint(ref c, type_id);
     let key: String = "" + fingerprint;
-    let previous: StringConstant = seen.lookup(key);
+    let previous: Optional(StringConstant) = seen.lookup(key);
     let type_name: String = runtime_type_name(ref c, type_id);
-    if (has_string_constant(previous) && previous.value != type_name) {
+    if ((previous is !null) && previous.value != type_name) {
         throw_internal_compiler_error(no_position(), "Dict key fingerprint collision between " + previous.value + " and " + type_name);
         return cases;
     }
-    if (has_string_constant(previous)) { return cases; }
+    if ((previous is !null)) { return cases; }
     seen.put(key, StringConstant(id=0, value=type_name));
     return cases + "    i64 " + fingerprint + ", label " + label + "\n";
 }
@@ -71,13 +71,13 @@ func append_dict_key_case(ref c: Compiler, cases: String, seen: Dict(String, Str
 func append_variant_ref_case(ref c: Compiler, cases: String, seen: Dict(String, StringConstant), type_id: Int) -> String {
     let fingerprint: UInt64 = type_fingerprint(ref c, type_id);
     let key: String = "" + fingerprint;
-    let previous: StringConstant = seen.lookup(key);
+    let previous: Optional(StringConstant) = seen.lookup(key);
     let type_name: String = runtime_type_name(ref c, type_id);
-    if (has_string_constant(previous) && previous.value != type_name) {
+    if ((previous is !null) && previous.value != type_name) {
         throw_internal_compiler_error(no_position(), "Variant fingerprint collision between " + previous.value + " and " + type_name);
         return cases;
     }
-    if (has_string_constant(previous)) { return cases; }
+    if ((previous is !null)) { return cases; }
     seen.put(key, StringConstant(id=0, value=type_name));
     return cases + "    i64 " + fingerprint + ", label %release\n";
 }
@@ -165,7 +165,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
     let seen_keys: Dict(String, StringConstant) = Dict();
     seen_keys.put("0", StringConstant(id=0, value="null"));
 
-    let hash_interface: StructInfo = c.struct_table.lookup("hashing.Hash");
+    let hash_interface: Optional(StructInfo) = c.struct_table.lookup("hashing.Hash");
     let type_id: Int = 1;
     while (type_id < c.type_counter) {
         if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(ref c, type_id)) {
@@ -173,8 +173,8 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
 
-            let class_info: StructInfo = c.struct_id_map.lookup(type_id);
-            if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
+            let class_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+            if ((class_info is !null) && class_info.is_class && (hash_interface is !null) && implements_interface(ref c, type_id, hash_interface.type_id)) {
                 label = "%class.hash." + type_id;
                 c.hash_types.put("" + type_id, StringConstant(id=type_id, value=""));
                 class_hash_blocks += "class.hash." + type_id + ":\n";
@@ -257,8 +257,8 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
 
     type_id = 1;
     while (type_id < c.type_counter) {
-        let class_info: StructInfo = c.struct_id_map.lookup(type_id);
-        if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
+        let class_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+        if ((class_info is !null) && class_info.is_class && (hash_interface is !null) && implements_interface(ref c, type_id, hash_interface.type_id)) {
             class_equal_cases += "    i64 " + type_fingerprint(ref c, type_id) + ", label %class.equal." + type_id + "\n";
             class_equal_blocks += "class.equal." + type_id + ":\n";
             class_equal_blocks += "  %class.left.addr." + type_id + " = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n";
@@ -393,7 +393,7 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
             let llvm_type: String = get_llvm_type_str(ref c, type_id);
             let hash_name: String = "@__wl_hash_value_" + type_id;
             let equal_name: String = "@__wl_values_equal_" + type_id;
-            let key_info: StructInfo = c.struct_id_map.lookup(repr_type);
+            let key_info: Optional(StructInfo) = c.struct_id_map.lookup(repr_type);
             if (repr_type == TYPE_STRING) {
                 c.output_file.write("define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
                 c.output_file.write("entry:\n");
@@ -426,15 +426,15 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
                 c.output_file.write("  ret i32 0\n");
                 c.output_file.write("}\n\n");
                 c.output_file.write("define internal i1 " + equal_name + "(%struct.$String* %left, %struct.$String* %right) {\nentry:\n  %result = call i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right)\n  ret i1 %result\n}\n\n");
-            } else if (has_struct(key_info) && key_info.is_class) {
+            } else if ((key_info is !null) && key_info.is_class) {
                 emit_class_hash_helpers(ref c, key_info, type_id, llvm_type, hash_name, equal_name);
             } else {
                 c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
 
                 let bits: String = "%bits";
                 if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR ||
-                    has_symbol(c.func_ret_map.lookup(repr_type)) ||
-                    has_symbol(c.method_ret_map.lookup(repr_type))) {
+                    (c.func_ret_map.lookup(repr_type) is !null) ||
+                    (c.method_ret_map.lookup(repr_type) is !null)) {
                     c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
                 else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {
@@ -448,7 +448,7 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
                 else if (repr_type == TYPE_FLOAT32) {
                     c.output_file.write("  %is.nan = fcmp uno float %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq float %key, 0.0\n  %raw = bitcast float %key to i32\n  %wide = zext i32 %raw to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %wide\n");
                 }
-                else if (has_struct(key_info) && key_info.is_enum) {
+                else if ((key_info is !null) && key_info.is_enum) {
                     c.output_file.write("  " + bits + " = zext i32 %key to i64\n");
                 }
                 else {
@@ -486,7 +486,7 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
 }
 
 func class_vtable_type(ref c: Compiler, info: StructInfo) -> String {
-    if (has_template(c.generic_instance_templates.lookup("" + info.type_id))) {
+    if ((c.generic_instance_templates.lookup("" + info.type_id) is !null)) {
         return generic_llvm_name("%vtable_type.__generic.", info.type_id);
     }
     return "%vtable_type." + info.name;

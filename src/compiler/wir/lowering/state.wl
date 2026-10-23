@@ -66,7 +66,9 @@ func wir_local_index(ref state: WirFunctionLowering, name: String) -> Int {
         state.binding_indices.put(state.bindings[index].name, index + 1);
         state.indexed_bindings++;
     }
-    return state.binding_indices.lookup(name) - 1;
+    let index = state.binding_indices.lookup(name);
+    if (index is !null) { return index - 1; }
+    return -1;
 }
 
 func wir_no_expr() -> WirExpr {

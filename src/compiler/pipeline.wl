@@ -29,7 +29,7 @@ func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> V
     compile_import(ref c, ImportNode(type=NODE_IMPORT, path_tok=builtin_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos));
     compile_import(ref c, ImportNode(type=NODE_IMPORT, path_tok=fake_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos));
 
-    if (!has_struct(c.struct_table.lookup("dict.Variant"))) {
+    if (!(c.struct_table.lookup("dict.Variant") is !null)) {
         throw_import_error(fake_pos, "Missing required intrinsic item '@CompilerIntrinsic struct Variant'. The standard library 'dict.wl' may be corrupted or missing.");
         return;
     }

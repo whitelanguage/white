@@ -307,10 +307,14 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
         return;
     }
 
-    let main_info: FuncInfo = c.func_table.lookup("main");
-    let exit_key: String = c.compiler_link.lookup("process_exit");
-    let exit_info: FuncInfo = c.func_table.lookup(exit_key);
-    if (!has_func(main_info) || !has_func(exit_info)) {
+    let main_info: Optional(FuncInfo) = c.func_table.lookup("main");
+    let exit_key: Optional(String) = c.compiler_link.lookup("process_exit");
+    if (exit_key is null) {
+        throw_internal_compiler_error(no_position(), "Missing process exit hook.");
+        return;
+    }
+    let exit_info: Optional(FuncInfo) = c.func_table.lookup(exit_key);
+    if (!(main_info is !null) || !(exit_info is !null)) {
         throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the native entry point.");
         return;
     }
@@ -324,11 +328,15 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
     if (argc == 0) {
         c.output_file.write("  %status = call i32 @main()\n");
     } else {
-        let args_key: String = c.compiler_link.lookup("startup_args");
-        let free_key: String = c.compiler_link.lookup("startup_args_free");
-        let args_info: FuncInfo = c.func_table.lookup(args_key);
-        let free_info: FuncInfo = c.func_table.lookup(free_key);
-        if (!has_func(args_info) || !has_func(free_info)) {
+        let args_key: Optional(String) = c.compiler_link.lookup("startup_args");
+        let free_key: Optional(String) = c.compiler_link.lookup("startup_args_free");
+        if (args_key is null || free_key is null) {
+            throw_internal_compiler_error(no_position(), "Missing Windows startup hooks.");
+            return;
+        }
+        let args_info: Optional(FuncInfo) = c.func_table.lookup(args_key);
+        let free_info: Optional(FuncInfo) = c.func_table.lookup(free_key);
+        if (!(args_info is !null) || !(free_info is !null)) {
             throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the Windows entry point.");
             return;
         }

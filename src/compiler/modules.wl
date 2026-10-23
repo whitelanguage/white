@@ -71,8 +71,8 @@ func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: 
 // readable prefixes are kept when possible, colliding file stems get a stable module id
     let stem: String = module_symbol_stem(canonical_name);
     let prefix: String = stem + ".";
-    let owner: StringConstant = c.module_prefix_owners.lookup(prefix);
-    if (!has_string_constant(owner) || owner.value == final_path) {
+    let owner: Optional(StringConstant) = c.module_prefix_owners.lookup(prefix);
+    if (!(owner is !null) || owner.value == final_path) {
         c.module_prefix_owners.put(prefix, StringConstant(id=0, value=final_path));
         return prefix;
     }
@@ -81,7 +81,7 @@ func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: 
         prefix = stem + "__m" + c.module_id + ".";
         c.module_id += 1;
         owner = c.module_prefix_owners.lookup(prefix);
-        if (!has_string_constant(owner) || owner.value == final_path) {
+        if (!(owner is !null) || owner.value == final_path) {
             c.module_prefix_owners.put(prefix, StringConstant(id=0, value=final_path));
             return prefix;
         }
@@ -94,8 +94,8 @@ func bind_loaded_prelude(ref c: Compiler, path: String, pos: Position) -> Void {
     if (final_path is null || final_path.length() == 0) {
         return;
     }
-    let loaded: StringConstant = c.imported_modules.lookup(final_path);
-    if (!has_string_constant(loaded)) {
+    let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
+    if (!(loaded is !null)) {
         return;
     }
     let star: Token = Token(type=TOK_MUL, value="*", line=pos.ln, col=pos.col);
@@ -121,9 +121,10 @@ func bind_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
         if (node.symbols is !null) {
             let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
             if (final_path is !null && final_path.length() > 0) {
-                let loaded: StringConstant = c.imported_modules.lookup(final_path);
-                if (has_string_constant(loaded)) {
-                    bind_import_symbols(ref c, node, loaded.value, true, false);
+                let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
+                if ((loaded is !null)) {
+                    let meta_loaded: StringConstant = loaded;
+                    bind_import_symbols(ref c, node, meta_loaded.value, true, false);
                     let module_name: String = node.path_tok.value;
                     let end: Int = module_name.length();
                     if (module_name.ends_with(".wl")) { end -= 3; }
@@ -160,8 +161,9 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
         let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
 
         if (final_path is !null && final_path.length() > 0) {
-            let loaded: StringConstant = c.imported_modules.lookup(final_path);
-            if (has_string_constant(loaded)) {
+            let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
+            if ((loaded is !null)) {
+                let meta_loaded: StringConstant = loaded;
                 let raw_path: String = node.path_tok.value;
                 let end: Int = raw_path.length();
                 if (raw_path.ends_with(".wl")) { end -= 3; }
@@ -177,15 +179,15 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
                 }
 
                 if (node.symbols is null) {
-                    let old_prefix: String = c.current_file_visible_prefixes.lookup(module_name);
-                    if (old_prefix is !null && old_prefix != loaded.value) {
+                    let old_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(module_name);
+                    if (old_prefix is !null && old_prefix != meta_loaded.value) {
                         throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
                     } else {
-                        c.current_file_visible_prefixes.put(module_name, loaded.value);
+                        c.current_file_visible_prefixes.put(module_name, meta_loaded.value);
                     }
                 } else {
                     unbind_namespace(ref c, module_name);
-                    bind_import_symbols(ref c, node, loaded.value, true, false);
+                    bind_import_symbols(ref c, node, meta_loaded.value, true, false);
                 }
             }
         }
@@ -232,9 +234,9 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         unbind_namespace(ref c, module_name);
     }
 
-    let loaded_module: StringConstant = c.imported_modules.lookup(final_path);
+    let loaded_module: Optional(StringConstant) = c.imported_modules.lookup(final_path);
     let import_prefix: String = "";
-    if (has_string_constant(loaded_module)) {
+    if ((loaded_module is !null)) {
         import_prefix = loaded_module.value;
     } else {
         import_prefix = reserve_module_prefix(ref c, canonical_name, final_path);
@@ -243,7 +245,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         if (c.current_file_namespaces.contains_key(module_name)) {
             unbind_namespace(ref c, module_name);
         }
-        let existing_prefix: String = c.current_file_visible_prefixes.lookup(module_name);
+        let existing_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(module_name);
         if (existing_prefix is !null && existing_prefix != import_prefix) {
             throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
             return;
@@ -251,7 +253,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         c.current_file_visible_prefixes.put(module_name, import_prefix);
     }
 
-    if (has_string_constant(loaded_module)) {
+    if ((loaded_module is !null)) {
         if (node.symbols is !null) {
             bind_import_symbols(ref c, node, import_prefix, true, false);
             unbind_namespace(ref c, module_name);

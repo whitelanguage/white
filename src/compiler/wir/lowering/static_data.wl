@@ -29,8 +29,8 @@ func wir_truncate_integer(value: UInt128, bits: Int) -> UInt128 {
 }
 
 func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, value: String) -> WirValueID {
-    let existing: WirValueID = types.string_values.lookup(value);
-    if (existing != NO_WIR_VALUE) { return existing; }
+    let existing: Optional(WirValueID) = types.string_values.lookup(value);
+    if (existing is !null) { return existing; }
 
     let id: Int = types.string_count;
     types.string_count++;
@@ -63,17 +63,18 @@ func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, va
 
 func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     let repr: Int = get_repr_type(ref source, source_type);
-    let info: ArrayInfo = source.array_info_map.lookup(repr);
-    if (!has_array_info(info) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) {
+    let info: Optional(ArrayInfo) = source.array_info_map.lookup(repr);
+    if (!(info is !null) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) {
         return NO_WIR_VALUE;
     }
+    let meta_info: ArrayInfo = info;
 
     let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     if (literal.elements.length() == 0) {
         return wir_const_zero(ref program, type_id);
     }
-    if (literal.elements.length() != info.size) {
+    if (literal.elements.length() != meta_info.size) {
         types.errors.append("Partially initialized static arrays are not supported by WIR yet");
         return NO_WIR_VALUE;
     }
@@ -85,7 +86,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
             types.errors.append("Static array initializer contains a named or spread element");
             return NO_WIR_VALUE;
         }
-        let value: WirValueID = wir_lower_static_value(ref types, ref source, ref program, argument.val, info.base_type, pos);
+        let value: WirValueID = wir_lower_static_value(ref types, ref source, ref program, argument.val, meta_info.base_type, pos);
         if (value == NO_WIR_VALUE) { return NO_WIR_VALUE; }
         elements.append(value);
         i++;
@@ -95,15 +96,16 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
 
 func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     if (node_tag(node) != NODE_CALL || source.struct_id_map is null) { return NO_WIR_VALUE; }
-    let info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
-    if (!has_struct(info) || info.is_class || info.is_interface ||
+    let info: Optional(StructInfo) = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
+    if (!(info is !null) || info.is_class || info.is_interface ||
         info.is_enum || has_node(info.init_body)) {
         return NO_WIR_VALUE;
     }
 
     let call: CallNode = get_call_node(ref source.arena, node);
+    let record: StructInfo = info;
     let field_count: Int = 0;
-    if (info.fields is !null) { field_count = info.fields.length(); }
+    if (record.fields is !null) { field_count = record.fields.length(); }
     let argument_count: Int = 0;
     if (call.args is !null) { argument_count = call.args.length(); }
     if (argument_count != field_count) {
@@ -130,12 +132,12 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
         let field_index: Int = i;
         if (argument.name is !null && argument.name.length() != 0) {
             saw_named = true;
-            let field: FieldInfo = find_field(info, argument.name);
-            if (!has_field(field)) {
+            let named_field: Optional(FieldInfo) = find_field(record, argument.name);
+            if (named_field is null) {
                 types.errors.append("Static struct initializer has no field named '" + argument.name + "'");
                 return NO_WIR_VALUE;
             }
-            field_index = field.offset;
+            field_index = named_field.offset;
         } else if saw_named {
             types.errors.append("Positional argument follows a named argument in a static struct initializer");
             return NO_WIR_VALUE;
@@ -144,7 +146,7 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
             types.errors.append("Static struct field is initialized more than once");
             return NO_WIR_VALUE;
         }
-        let field: FieldInfo = info.fields[field_index];
+        let field: FieldInfo = record.fields[field_index];
         let value: WirValueID = wir_lower_static_value(ref types, ref source, ref program, argument.val, field.type, pos);
         if (value == NO_WIR_VALUE) { return NO_WIR_VALUE; }
         values[field_index] = value;
@@ -225,10 +227,10 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
         return wir_const_float(ref program, type_id, value);
     }
-    if (source.array_info_map is !null && has_array_info(source.array_info_map.lookup(repr))) {
+    if (source.array_info_map is !null && (source.array_info_map.lookup(repr) is !null)) {
         return wir_static_array(ref types, ref source, ref program, node, source_type, pos);
     }
-    if (source.struct_id_map is !null && has_struct(source.struct_id_map.lookup(repr))) {
+    if (source.struct_id_map is !null && (source.struct_id_map.lookup(repr) is !null)) {
         return wir_static_struct(ref types, ref source, ref program, node, source_type, pos);
     }
     return NO_WIR_VALUE;

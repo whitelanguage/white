@@ -215,12 +215,12 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     wir_return(ref program, float_done, float_result, no_wir_location());
 
     let class_check: WirBlockID = check_class;
-    let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
+    let hash_interface: Optional(StructInfo) = source.struct_table.lookup("hashing.Hash");
     let type_id: Int = 100;
     while (type_id < source.type_counter) {
-        let info: StructInfo = source.struct_id_map.lookup(type_id);
-        let hashable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
-        if hashable {
+        let info: Optional(StructInfo) = source.struct_id_map.lookup(type_id);
+        let hashable: Bool = (info is !null) && info.is_class && (hash_interface is !null) && implements_interface(ref source, type_id, hash_interface.type_id);
+        if (hashable && info is !null) {
             let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
             let next: WirBlockID = wir_add_block(ref program, function_id, "check.class." + type_id, []);
             let matches: WirValueID = wir_binary(
@@ -365,12 +365,12 @@ func wir_dict_variant_equal_function(ref types: WirTypeMap, ref source: Compiler
     wir_return(ref program, float_key, float_result, no_wir_location());
 
     let class_check: WirBlockID = check_class;
-    let hash_interface: StructInfo = source.struct_table.lookup("hashing.Hash");
+    let hash_interface: Optional(StructInfo) = source.struct_table.lookup("hashing.Hash");
     let type_id: Int = 100;
     while (type_id < source.type_counter) {
-        let info: StructInfo = source.struct_id_map.lookup(type_id);
-        let comparable: Bool = has_struct(info) && info.is_class && has_struct(hash_interface) && implements_interface(ref source, type_id, hash_interface.type_id);
-        if comparable {
+        let info: Optional(StructInfo) = source.struct_id_map.lookup(type_id);
+        let comparable: Bool = (info is !null) && info.is_class && (hash_interface is !null) && implements_interface(ref source, type_id, hash_interface.type_id);
+        if (comparable && info is !null) {
             let class_key: WirBlockID = wir_add_block(ref program, function_id, "class." + type_id, []);
             let next: WirBlockID = wir_add_block(ref program, function_id, "check.class." + type_id, []);
             let matches: WirValueID = wir_binary(
@@ -508,8 +508,8 @@ func wir_dict_string_equal_function(ref types: WirTypeMap, ref source: Compiler,
     );
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
-    let compare: FuncInfo = wir_compiler_link_function(ref source, "string_compare");
-    if (!has_func(compare)) {
+    let compare: Optional(FuncInfo) = wir_compiler_link_function(ref source, "string_compare");
+    if (!(compare is !null)) {
         wir_trap(ref program, entry, no_wir_location());
         return function_id;
     }
@@ -672,14 +672,14 @@ func wir_dict_scalar_equal_function(ref types: WirTypeMap, ref source: Compiler,
     return function_id;
 }
 
-func wir_dict_class_method(info: StructInfo, name: String) -> FuncInfo {
+func wir_dict_class_method(info: StructInfo, name: String) -> Optional(FuncInfo) {
     let index: Int = 0;
     while (info.vtable is !null && index < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[index];
         if (method_info.base_name == name) { return method_info; }
         index++;
     }
-    return FuncInfo();
+    return null;
 }
 
 func wir_dict_class_method_index(info: StructInfo, name: String) -> Int {
@@ -697,9 +697,9 @@ func wir_dict_class_hash_function(ref types: WirTypeMap, ref source: Compiler, r
     let existing: WirFuncID = wir_find_function(program, name);
     if (existing != NO_WIR_FUNC) { return existing; }
 
-    let method_info: FuncInfo = wir_dict_class_method(info, "hash");
+    let method_info: Optional(FuncInfo) = wir_dict_class_method(info, "hash");
     let slot: Int = wir_dict_class_method_index(info, "hash");
-    if (!has_func(method_info) || slot < 0) { return NO_WIR_FUNC; }
+    if (!(method_info is !null) || slot < 0) { return NO_WIR_FUNC; }
     queue_generic_class_method(ref source, info, method_info.base_name);
     let method_id: WirFuncID = wir_find_function(program, method_info.name);
     if (method_id == NO_WIR_FUNC) {
@@ -746,9 +746,9 @@ func wir_dict_class_equal_function(ref types: WirTypeMap, ref source: Compiler, 
     let existing: WirFuncID = wir_find_function(program, name);
     if (existing != NO_WIR_FUNC) { return existing; }
 
-    let method_info: FuncInfo = wir_dict_class_method(info, "equals");
+    let method_info: Optional(FuncInfo) = wir_dict_class_method(info, "equals");
     let slot: Int = wir_dict_class_method_index(info, "equals");
-    if (!has_func(method_info) || slot < 0) { return NO_WIR_FUNC; }
+    if (!(method_info is !null) || slot < 0) { return NO_WIR_FUNC; }
     queue_generic_class_method(ref source, info, method_info.base_name);
     let method_id: WirFuncID = wir_find_function(program, method_info.name);
     if (method_id == NO_WIR_FUNC) {
@@ -798,8 +798,8 @@ func wir_dict_typed_hash_function(ref types: WirTypeMap, ref source: Compiler, r
     if (repr == TYPE_STRING) {
         return wir_dict_string_hash_function(ref types, ref source, ref program, source_type);
     }
-    let info: StructInfo = source.struct_id_map.lookup(repr);
-    if (has_struct(info) && info.is_class) {
+    let info: Optional(StructInfo) = source.struct_id_map.lookup(repr);
+    if ((info is !null) && info.is_class) {
         return wir_dict_class_hash_function(ref types, ref source, ref program, source_type, info);
     }
     return wir_dict_scalar_hash_function(ref types, ref source, ref program, source_type);
@@ -810,8 +810,8 @@ func wir_dict_typed_equal_function(ref types: WirTypeMap, ref source: Compiler, 
     if (repr == TYPE_STRING) {
         return wir_dict_string_equal_function(ref types, ref source, ref program, source_type);
     }
-    let info: StructInfo = source.struct_id_map.lookup(repr);
-    if (has_struct(info) && info.is_class) {
+    let info: Optional(StructInfo) = source.struct_id_map.lookup(repr);
+    if ((info is !null) && info.is_class) {
         return wir_dict_class_equal_function(ref types, ref source, ref program, source_type, info);
     }
     return wir_dict_scalar_equal_function(ref types, ref source, ref program, source_type);

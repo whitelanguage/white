@@ -138,7 +138,8 @@ func main() -> Int {
     }
     let order: Vector(WirBlockID) = x86_block_order(program.arena.functions[wir_id_index(UInt32(straight))]);
     let predecessors: Dict(UInt32, Int) = x86_predecessor_counts(ref program, order);
-    if (predecessors.lookup(UInt32(straight_next)) != 1 || predecessors.lookup(UInt32(entry)) != 0) {
+    let next_count = predecessors.lookup(UInt32(straight_next));
+    if (next_count is null || next_count != 1 || predecessors.lookup(UInt32(entry)) is !null) {
         print("FAIL: predecessor counts include an unrelated function");
         return 1;
     }

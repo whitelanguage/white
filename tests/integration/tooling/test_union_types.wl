@@ -10,6 +10,12 @@ import * from "../../../src/compiler/context.wl"
 import reserve_named_types, resolve_named_types from "../../../src/compiler/registration.wl"
 import check_errors_and_abort from "../../../src/frontend/diagnostics.wl"
 
+func alias_id(ref compiler: Compiler, name: String) -> Int {
+    let info = compiler.named_types.get(name)?;
+    catch(err) { print("FAIL: missing alias", name); return 0; }
+    return info.type_id;
+}
+
 func main() -> Int {
     let text: String = "type (T | Null) as Optional<T>; type T as Identity<T>; " +
         "type (Int | String) as Mixed; type (String | Int | Int) as Reordered; " +
@@ -28,20 +34,20 @@ func main() -> Int {
     reserve_named_types(ref compiler, root);
     resolve_named_types(ref compiler, root);
     check_errors_and_abort();
-    let mixed = compiler.named_types.lookup("Mixed").type_id;
-    let maybe = compiler.named_types.lookup("MaybeInt").type_id;
-    let nominal = compiler.named_types.lookup("Nominal").type_id;
+    let mixed = alias_id(ref compiler, "Mixed");
+    let maybe = alias_id(ref compiler, "MaybeInt");
+    let nominal = alias_id(ref compiler, "Nominal");
     let nominal_info = get_union_type(ref compiler, nominal);
     if (nominal_info is null) {
         print("FAIL: nominal union metadata missing");
         return 1;
     }
-    if (mixed != compiler.named_types.lookup("Reordered").type_id ||
-        compiler.named_types.lookup("Nested").type_id != compiler.named_types.lookup("Flat").type_id ||
-        compiler.named_types.lookup("Single").type_id != TYPE_INT ||
-        maybe != compiler.named_types.lookup("RawInt").type_id ||
-        maybe != compiler.named_types.lookup("AliasInt").type_id ||
-        get_inner_fallible_type(ref compiler, compiler.named_types.lookup("Result").type_id) != maybe ||
+    if (mixed != alias_id(ref compiler, "Reordered") ||
+        alias_id(ref compiler, "Nested") != alias_id(ref compiler, "Flat") ||
+        alias_id(ref compiler, "Single") != TYPE_INT ||
+        maybe != alias_id(ref compiler, "RawInt") ||
+        maybe != alias_id(ref compiler, "AliasInt") ||
+        get_inner_fallible_type(ref compiler, alias_id(ref compiler, "Result")) != maybe ||
         nominal_info.members.length() != 2) {
         print("FAIL: union identity or alias substitution");
         return 1;

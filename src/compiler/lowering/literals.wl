@@ -3,8 +3,8 @@ import * from "../context.wl"
 
 
 func register_string_constant(ref c: Compiler, val: String) -> Int {
-    let exist: StringConstant = c.string_pool.lookup(val);
-    if (has_string_constant(exist)) { return exist.id; }
+    let exist: Optional(StringConstant) = c.string_pool.lookup(val);
+    if ((exist is !null)) { return exist.id; }
     let s_id: Int = c.str_count;
     c.str_count += 1;
     let sc: StringConstant = StringConstant(id=s_id, value=val);

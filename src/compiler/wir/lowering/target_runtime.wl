@@ -13,8 +13,8 @@ func wir_windows_target(program: WirModule) -> Bool {
 }
 
 func wir_runtime_function(ref source: Compiler, program: WirModule, link_name: String, errors: Vector(String)) -> WirFuncID {
-    let info: FuncInfo = wir_compiler_link_function(ref source, link_name);
-    if (!has_func(info)) {
+    let info: Optional(FuncInfo) = wir_compiler_link_function(ref source, link_name);
+    if (!(info is !null)) {
         errors.append("Windows entry point requires compiler link '" + link_name + "'");
         return NO_WIR_FUNC;
     }
@@ -47,9 +47,9 @@ func wir_failure_function(ref program: WirModule, name: String, message: String,
 }
 
 func wir_emit_failure_runtime(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
-    let writer_info: FuncInfo = wir_compiler_link_function(ref source, "print_bytes");
-    let exit_info: FuncInfo = wir_compiler_link_function(ref source, "process_exit");
-    if (!has_func(writer_info) || !has_func(exit_info)) { return; }
+    let writer_info: Optional(FuncInfo) = wir_compiler_link_function(ref source, "print_bytes");
+    let exit_info: Optional(FuncInfo) = wir_compiler_link_function(ref source, "process_exit");
+    if (!(writer_info is !null) || !(exit_info is !null)) { return; }
 
     let writer: WirFuncID = wir_find_function(program, writer_info.name);
     if (writer == NO_WIR_FUNC) {
@@ -153,7 +153,7 @@ func wir_emit_target_runtime(ref source: Compiler, ref program: WirModule, error
     if (!wir_windows_target(program)) {
         return;
     }
-    let has_runtime: Bool = source.is_shared || has_func(wir_compiler_link_function(ref source, "process_exit"));
+    let has_runtime: Bool = source.is_shared || (wir_compiler_link_function(ref source, "process_exit") is !null);
     if (!has_runtime) { return; }
     wir_emit_windows_abi(ref program);
     if (source.is_shared) {

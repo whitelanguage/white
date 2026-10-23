@@ -453,10 +453,10 @@ class Dict<K: Hash, V> {
         throw Error.KeyNotFound;
     }
 
-    func lookup(key: K) -> V {
-    // return the zero value when absent, compiler tables use this for cheap probes
+    func lookup(key: K) -> Optional(V) {
+    // probing does not construct a value for an empty slot
         if (self.size == 0) {
-            return self.__zero_value();
+            return null;
         }
 
         let hash: Int = self.__hash(key);
@@ -465,14 +465,14 @@ class Dict<K: Hash, V> {
         while true {
             let current: Int = self.hashes[idx];
             if (current == 0) {
-                return self.__zero_value();
+                return null;
             }
             if (current == hash && self.__equal(self.keys[idx], key)) {
                 return self.values[idx];
             }
             idx = (idx + 1) & mask;
         }
-        return self.__zero_value();
+        return null;
     }
 
     func remove(key: K) -> Bool {

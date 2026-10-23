@@ -25,8 +25,8 @@ func flow_apply_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
         while (dot < root.length() && root[dot] != Byte(46)) { dot++; }
         if (dot < root.length()) { root = root.slice(0, dot); }
         let symbol = find_symbol(ref c, root);
-        let unstable = flow_has_field(path) || !has_symbol(symbol);
-        if (has_symbol(symbol)) { unstable = unstable || symbol.reg.starts_with("@") || symbol.is_reference; }
+        let unstable = flow_has_field(path) || !(symbol is !null);
+        if ((symbol is !null)) { unstable = unstable || symbol.reg.starts_with("@") || symbol.is_reference; }
         unstable = unstable || flow_is_exposed(ref c, path);
         if (!unstable || !flow_has_call(ref c, condition)) {
             flow_record(ref c, guard.target, original, guard.present, unstable);
@@ -43,8 +43,8 @@ func flow_write_facts(ref c: Compiler, node: NodeID) -> Vector(FlowType) {
         let member = flow_type(ref c, current);
         let type_id = member;
         if (type_id == 0) { type_id = get_expr_type(ref c, current); }
-        let owner: StructInfo = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
-        if ((has_struct(owner) && owner.is_class) || is_pointer_type(ref c, type_id)) { break; }
+        let owner: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+        if (((owner is !null) && owner.is_class) || is_pointer_type(ref c, type_id)) { break; }
         if (member != 0) {
             result.append(FlowType(path=format_ast_path(ref c, current), type=member, unstable=false));
         }

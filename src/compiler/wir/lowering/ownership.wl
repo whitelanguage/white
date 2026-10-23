@@ -45,14 +45,14 @@ func wir_take_owned(ref state: WirFunctionLowering, value: WirValueID) -> Bool {
 
 func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int) -> WirValueID {
     let repr: Int = get_repr_type(ref source, source_type);
-    let info: StructInfo = StructInfo();
+    let info: Optional(StructInfo) = null;
     if (source.struct_id_map is !null) { info = source.struct_id_map.lookup(repr); }
-    if (has_struct(info) && info.is_interface) {
+    if ((info is !null) && info.is_interface) {
         return wir_field(ref program, state.block, value, 0, "", no_wir_location());
     }
-    let array: ArrayInfo = ArrayInfo();
+    let array: Optional(ArrayInfo) = null;
     if (source.array_info_map is !null) { array = source.array_info_map.lookup(repr); }
-    if (has_array_info(array) && array.size == -1) { return value; }
+    if ((array is !null) && array.size == -1) { return value; }
     let type_id: WirTypeID = wir_value_type(ref program, value);
     if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) { return value; }
     state.errors.append("ARC value has no payload pointer in WIR lowering");
@@ -114,26 +114,28 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirType
         state.block = done;
         return;
     }
-    let array: ArrayInfo = ArrayInfo();
+    let array: Optional(ArrayInfo) = null;
     if (source.array_info_map is !null) { array = source.array_info_map.lookup(repr); }
-    if (has_array_info(array) && array.size >= 0) {
+    if ((array is !null) && array.size >= 0) {
+        let meta_array: ArrayInfo = array;
         let index_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
         let i: Int = 0;
-        while (i < array.size) {
+        while (i < meta_array.size) {
             let index: WirValueID = wir_const_int(ref program, index_type, UInt128(UIntSize(i)));
             let element: WirValueID = wir_index(ref program, state.block, value, index, "", no_wir_location());
-            wir_emit_ownership_value(ref state, ref types, ref source, ref program, element, array.base_type, retain);
+            wir_emit_ownership_value(ref state, ref types, ref source, ref program, element, meta_array.base_type, retain);
             i++;
         }
         return;
     }
 
-    let struct_info: StructInfo = StructInfo();
+    let struct_info: Optional(StructInfo) = null;
     if (source.struct_id_map is !null) { struct_info = source.struct_id_map.lookup(repr); }
-    if (is_value_struct(ref source, source_type) && has_struct(struct_info)) {
+    if (is_value_struct(ref source, source_type) && (struct_info is !null)) {
+        let meta_struct_info: StructInfo = struct_info;
         let i: Int = 0;
-        while (struct_info.fields is !null && i < struct_info.fields.length()) {
-            let field: FieldInfo = struct_info.fields[i];
+        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+            let field: FieldInfo = meta_struct_info.fields[i];
             if (wir_value_needs_drop(ref source, field.type)) {
                 let field_value: WirValueID = wir_field(ref program, state.block, value, field.offset, "", no_wir_location());
                 wir_emit_ownership_value(ref state, ref types, ref source, ref program, field_value, field.type, retain);

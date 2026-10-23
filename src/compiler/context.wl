@@ -627,12 +627,12 @@ func unbind_namespace(ref c: Compiler, name: String) -> Void {
 }
 
 // symbol & field lookup utils
-func find_symbol(ref c: Compiler, name: String) -> SymbolInfo {
+func find_symbol(ref c: Compiler, name: String) -> Optional(SymbolInfo) {
     let curr: Scope = c.symbol_table;
     while true {
         if (curr.table is !null) {
-            let info: SymbolInfo = curr.table.lookup(name);
-            if (has_symbol(info)) { return info; }
+            let info: Optional(SymbolInfo) = curr.table.lookup(name);
+            if ((info is !null)) { return info; }
         }
         if (curr.parent < 0 || c.scope_stack is null || curr.parent >= c.scope_stack.length()) {
             break;
@@ -641,30 +641,30 @@ func find_symbol(ref c: Compiler, name: String) -> SymbolInfo {
     }
 
     if (c.global_symbol_table is null) {
-        return SymbolInfo();
+        return null;
     }
     if (c.current_package_prefix != "") {
-        let fallback: SymbolInfo = c.global_symbol_table.lookup(c.current_package_prefix + name);
-        if (has_symbol(fallback)) { return fallback; }
+        let fallback: Optional(SymbolInfo) = c.global_symbol_table.lookup(c.current_package_prefix + name);
+        if ((fallback is !null)) { return fallback; }
     }
 
-    let g_info: SymbolInfo = c.global_symbol_table.lookup(name);
-    if (has_symbol(g_info)) { return g_info; }
+    let g_info: Optional(SymbolInfo) = c.global_symbol_table.lookup(name);
+    if ((g_info is !null)) { return g_info; }
 
-    let mapped_global: String = null;
+    let mapped_global: Optional(String) = null;
     if (c.current_file_global_aliases is !null) {
         mapped_global = c.current_file_global_aliases.lookup(name);
     }
     if (mapped_global is !null) {
-        let alias_info: SymbolInfo = c.global_symbol_table.lookup(mapped_global);
-        if (has_symbol(alias_info)) { return alias_info; }
+        let alias_info: Optional(SymbolInfo) = c.global_symbol_table.lookup(mapped_global);
+        if ((alias_info is !null)) { return alias_info; }
     }
 
-    let g_alias: String = null;
+    let g_alias: Optional(String) = null;
     if (c.global_var_aliases is !null) { g_alias = c.global_var_aliases.lookup(name); }
     if (g_alias is !null) {
-        let alias_info: SymbolInfo = c.global_symbol_table.lookup(g_alias);
-        if (has_symbol(alias_info)) { return alias_info; }
+        let alias_info: Optional(SymbolInfo) = c.global_symbol_table.lookup(g_alias);
+        if ((alias_info is !null)) { return alias_info; }
     }
 
     return c.global_symbol_table.lookup(name);
@@ -673,7 +673,7 @@ func find_symbol(ref c: Compiler, name: String) -> SymbolInfo {
 func update_symbol(ref c: Compiler, name: String, info: SymbolInfo) -> Void {
     let curr: Scope = c.symbol_table;
     while true {
-        if (has_symbol(curr.table.lookup(name))) {
+        if ((curr.table.lookup(name) is !null)) {
             curr.table.put(name, info);
             return;
         }
@@ -685,33 +685,34 @@ func update_symbol(ref c: Compiler, name: String, info: SymbolInfo) -> Void {
 
     if (c.current_package_prefix != "") {
         let qualified: String = c.current_package_prefix + name;
-        if (has_symbol(c.global_symbol_table.lookup(qualified))) {
+        if ((c.global_symbol_table.lookup(qualified) is !null)) {
             c.global_symbol_table.put(qualified, info);
             return;
         }
     }
 
-    if (has_symbol(c.global_symbol_table.lookup(name))) {
+    if ((c.global_symbol_table.lookup(name) is !null)) {
         c.global_symbol_table.put(name, info);
         return;
     }
 
-    let mapped_global: String = c.current_file_global_aliases.lookup(name);
-    if (mapped_global is !null && has_symbol(c.global_symbol_table.lookup(mapped_global))) {
+    let mapped_global: Optional(String) = c.current_file_global_aliases.lookup(name);
+    if (mapped_global is !null && (c.global_symbol_table.lookup(mapped_global) is !null)) {
         c.global_symbol_table.put(mapped_global, info);
         return;
     }
 
-    let global_alias: String = c.global_var_aliases.lookup(name);
-    if (global_alias is !null && has_symbol(c.global_symbol_table.lookup(global_alias))) {
+    let global_alias: Optional(String) = c.global_var_aliases.lookup(name);
+    if (global_alias is !null && (c.global_symbol_table.lookup(global_alias) is !null)) {
         c.global_symbol_table.put(global_alias, info);
     }
 }
 
-func find_field(s_info: StructInfo, name: String) -> FieldInfo {
-    if (!has_struct(s_info)) {
-        return FieldInfo();
+func find_field(found: Optional(StructInfo), name: String) -> Optional(FieldInfo) {
+    if (found is null) {
+        return null;
     }
+    let s_info: StructInfo = found;
     let fields: Vector(Struct) = s_info.fields;
     let len: Int = 0;
     if (fields is !null) { len = fields.length(); }
@@ -721,17 +722,20 @@ func find_field(s_info: StructInfo, name: String) -> FieldInfo {
         if (curr.name == name) { return curr; }
         i += 1;
     }
-    return FieldInfo();
+    return null;
 }
 
-func get_field_by_index(s_info: StructInfo, index: Int) -> FieldInfo {
+func get_field_by_index(found: Optional(StructInfo), index: Int) -> Optional(FieldInfo) {
+    if (found is null) { return null; }
+    let s_info: StructInfo = found;
     let fields: Vector(Struct) = s_info.fields;
     let len: Int = 0;
     if (fields is !null) { len = fields.length(); }
     if (index >= 0 && index < len) {
-        return fields[index];
+        let field: FieldInfo = fields[index];
+        return field;
     }
-    return FieldInfo();
+    return null;
 }
 
 func export_module_symbols(ref c: Compiler, prefix: String, as_submodule: Bool, module_name: String) -> Void {
@@ -909,7 +913,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (f_key.starts_with(prefix)) {
                         let bare_name: String = f_key.slice(p_len, f_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_f: String = c.current_file_func_aliases.lookup(bare_name);
+                            let existing_f: Optional(String) = c.current_file_func_aliases.lookup(bare_name);
                             if (existing_f is !null && keep_existing) {
                             } else if (existing_f is !null && existing_f != f_key) {
                                 report_import_collision(ref c, node.pos, "function", bare_name);
@@ -930,7 +934,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (f_key.starts_with(prefix)) {
                         let bare_name: String = f_key.slice(p_len, f_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_f: String = c.current_file_func_aliases.lookup(bare_name);
+                            let existing_f: Optional(String) = c.current_file_func_aliases.lookup(bare_name);
                             if (existing_f is !null && keep_existing) {
                                 /* pass */
                             } else if (existing_f is !null && existing_f != f_key) {
@@ -952,7 +956,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (s_key.starts_with(prefix)) {
                         let bare_name: String = s_key.slice(p_len, s_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_s: String = c.current_file_type_aliases.lookup(bare_name);
+                            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(bare_name);
                             if (existing_s is !null && keep_existing) {
                             } else if (existing_s is !null && existing_s != s_key) {
                                 report_import_collision(ref c, node.pos, "type", bare_name);
@@ -973,7 +977,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (type_key.starts_with(prefix)) {
                         let bare_name: String = type_key.slice(p_len, type_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_s: String = c.current_file_type_aliases.lookup(bare_name);
+                            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(bare_name);
                             if (existing_s is !null && keep_existing) {
                             } else if (existing_s is !null && existing_s != type_key) {
                                 report_import_collision(ref c, node.pos, "type", bare_name);
@@ -994,7 +998,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (s_key.starts_with(prefix)) {
                         let bare_name: String = s_key.slice(p_len, s_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_s: String = c.current_file_type_aliases.lookup(bare_name);
+                            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(bare_name);
                             if (existing_s is !null && keep_existing) {
                                 /* pass */
                             } else if (existing_s is !null && existing_s != s_key) {
@@ -1016,7 +1020,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
                     if (g_key.starts_with(prefix)) {
                         let bare_name: String = g_key.slice(p_len, g_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_g: String = c.current_file_global_aliases.lookup(bare_name);
+                            let existing_g: Optional(String) = c.current_file_global_aliases.lookup(bare_name);
                             if (existing_g is !null && keep_existing) {
                             } else if (existing_g is !null && existing_g != g_key) {
                                 report_import_collision(ref c, node.pos, "global", bare_name);
@@ -1034,11 +1038,11 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             while (k < g_f_cap) {
                 if (c.global_func_aliases.hashes[k] >= 2) {
                     let f_key: String = c.global_func_aliases.keys[k];
-                    if (f_key.starts_with(prefix) && !has_func(c.func_table.lookup(f_key))) {
+                    if (f_key.starts_with(prefix) && !(c.func_table.lookup(f_key) is !null)) {
                         let bare_name: String = f_key.slice(p_len, f_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_f: String = c.current_file_func_aliases.lookup(bare_name);
-                            let val: String = c.global_func_aliases.lookup(f_key);
+                            let existing_f: Optional(String) = c.current_file_func_aliases.lookup(bare_name);
+                            let val: String = c.global_func_aliases.values[k];
                             if (existing_f is !null && keep_existing) {
                             } else if (existing_f is !null && existing_f != val) {
                                 report_import_collision(ref c, node.pos, "function", bare_name);
@@ -1056,11 +1060,11 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             while (k < g_s_cap) {
                 if (c.global_type_aliases.hashes[k] >= 2) {
                     let s_key: String = c.global_type_aliases.keys[k];
-                    if (s_key.starts_with(prefix) && !has_struct(c.struct_table.lookup(s_key))) {
+                    if (s_key.starts_with(prefix) && !(c.struct_table.lookup(s_key) is !null)) {
                         let bare_name: String = s_key.slice(p_len, s_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_s: String = c.current_file_type_aliases.lookup(bare_name);
-                            let val: String = c.global_type_aliases.lookup(s_key);
+                            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(bare_name);
+                            let val: String = c.global_type_aliases.values[k];
                             if (existing_s is !null && keep_existing) {
                             } else if (existing_s is !null && existing_s != val) {
                                 report_import_collision(ref c, node.pos, "type", bare_name);
@@ -1078,11 +1082,11 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             while (k < g_v_cap) {
                 if (c.global_var_aliases.hashes[k] >= 2) {
                     let v_key: String = c.global_var_aliases.keys[k];
-                    if (v_key.starts_with(prefix) && !has_symbol(c.global_symbol_table.lookup(v_key))) {
+                    if (v_key.starts_with(prefix) && !(c.global_symbol_table.lookup(v_key) is !null)) {
                         let bare_name: String = v_key.slice(p_len, v_key.length());
                         if (!bare_name.starts_with("__") && (include_submodules || is_direct_export(bare_name))) {
-                            let existing_v: String = c.current_file_global_aliases.lookup(bare_name);
-                            let val: String = c.global_var_aliases.lookup(v_key);
+                            let existing_v: Optional(String) = c.current_file_global_aliases.lookup(bare_name);
+                            let val: String = c.global_var_aliases.values[k];
                             if (existing_v is !null && keep_existing) {
                             } else if (existing_v is !null && existing_v != val) {
                                 report_import_collision(ref c, node.pos, "global", bare_name);
@@ -1121,8 +1125,8 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
         let lookup_name: String = prefix + orig_name;
         let found: Bool = false;
 
-        if (has_func(c.func_table.lookup(lookup_name)) || has_template(c.generic_funcs.lookup(lookup_name))) {
-            let existing_f: String = c.current_file_func_aliases.lookup(target_name);
+        if ((c.func_table.lookup(lookup_name) is !null) || (c.generic_funcs.lookup(lookup_name) is !null)) {
+            let existing_f: Optional(String) = c.current_file_func_aliases.lookup(target_name);
             if (existing_f is !null && keep_existing) { }
             else if (existing_f is !null && existing_f != lookup_name) {
                 report_import_collision(ref c, node.pos, "function", target_name);
@@ -1130,8 +1134,9 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             else { c.current_file_func_aliases.put(target_name, lookup_name); }
             found = true;
         } else if (c.global_func_aliases.lookup(lookup_name) is !null) {
-            let real_name: String = c.global_func_aliases.lookup(lookup_name);
-            let existing_f: String = c.current_file_func_aliases.lookup(target_name);
+            let real_name: Optional(String) = c.global_func_aliases.lookup(lookup_name);
+            if (real_name is null) { i++; continue; }
+            let existing_f: Optional(String) = c.current_file_func_aliases.lookup(target_name);
             if (existing_f is !null && keep_existing) { }
             else if (existing_f is !null && existing_f != real_name) {
                 report_import_collision(ref c, node.pos, "function", target_name);
@@ -1139,8 +1144,8 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             else { c.current_file_func_aliases.put(target_name, real_name); }
             found = true;
         }
-        if (has_struct(c.struct_table.lookup(lookup_name)) || has_template(c.generic_structs.lookup(lookup_name)) || has_named_type(c.named_types.lookup(lookup_name))) {
-            let existing_s: String = c.current_file_type_aliases.lookup(target_name);
+        if ((c.struct_table.lookup(lookup_name) is !null) || (c.generic_structs.lookup(lookup_name) is !null) || (c.named_types.lookup(lookup_name) is !null)) {
+            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(target_name);
             if (existing_s is !null && keep_existing) { }
             else if (existing_s is !null && existing_s != lookup_name) {
                 report_import_collision(ref c, node.pos, "type", target_name);
@@ -1148,8 +1153,9 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             else { c.current_file_type_aliases.put(target_name, lookup_name); }
             found = true;
         } else if (c.global_type_aliases.lookup(lookup_name) is !null) {
-            let real_name: String = c.global_type_aliases.lookup(lookup_name);
-            let existing_s: String = c.current_file_type_aliases.lookup(target_name);
+            let real_name: Optional(String) = c.global_type_aliases.lookup(lookup_name);
+            if (real_name is null) { i++; continue; }
+            let existing_s: Optional(String) = c.current_file_type_aliases.lookup(target_name);
             if (existing_s is !null && keep_existing) { }
             else if (existing_s is !null && existing_s != real_name) {
                 report_import_collision(ref c, node.pos, "type", target_name);
@@ -1157,8 +1163,8 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             else { c.current_file_type_aliases.put(target_name, real_name); }
             found = true;
         }
-        if (has_symbol(c.global_symbol_table.lookup(lookup_name))) {
-            let existing_g: String = c.current_file_global_aliases.lookup(target_name);
+        if ((c.global_symbol_table.lookup(lookup_name) is !null)) {
+            let existing_g: Optional(String) = c.current_file_global_aliases.lookup(target_name);
             if (existing_g is !null && keep_existing) { }
             else if (existing_g is !null && existing_g != lookup_name) {
                 report_import_collision(ref c, node.pos, "global", target_name);
@@ -1166,8 +1172,9 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
             else { c.current_file_global_aliases.put(target_name, lookup_name); }
             found = true;
         } else if (c.global_var_aliases.lookup(lookup_name) is !null) {
-            let real_name: String = c.global_var_aliases.lookup(lookup_name);
-            let existing_g: String = c.current_file_global_aliases.lookup(target_name);
+            let real_name: Optional(String) = c.global_var_aliases.lookup(lookup_name);
+            if (real_name is null) { i++; continue; }
+            let existing_g: Optional(String) = c.current_file_global_aliases.lookup(target_name);
             if (existing_g is !null && keep_existing) { }
             else if (existing_g is !null && existing_g != real_name) {
                 report_import_collision(ref c, node.pos, "global", target_name);
@@ -1198,17 +1205,17 @@ func export_named_imports(ref c: Compiler, node: ImportNode) -> Void {
         if (symbol.alias_tok.value is !null) { target_name = symbol.alias_tok.value; }
         let export_name: String = c.current_package_prefix + target_name;
 
-        let mapped_func: String = c.current_file_func_aliases.lookup(target_name);
+        let mapped_func: Optional(String) = c.current_file_func_aliases.lookup(target_name);
         if (mapped_func is !null) {
             c.global_func_aliases.put(export_name, mapped_func);
         }
 
-        let mapped_type: String = c.current_file_type_aliases.lookup(target_name);
+        let mapped_type: Optional(String) = c.current_file_type_aliases.lookup(target_name);
         if (mapped_type is !null) {
             c.global_type_aliases.put(export_name, mapped_type);
         }
 
-        let mapped_global: String = c.current_file_global_aliases.lookup(target_name);
+        let mapped_global: Optional(String) = c.current_file_global_aliases.lookup(target_name);
         if (mapped_global is !null) {
             c.global_var_aliases.put(export_name, mapped_global);
         }
@@ -1281,8 +1288,8 @@ func get_vector_llvm_type(ref c: Compiler, element_type: Int) -> String {
     return "{ " + size_ty + ", " + size_ty + ", " + element_ty + "* }";
 }
 
-func get_named_type(ref c: Compiler, type_id: Int) -> NamedTypeInfo {
-    if (type_id < 100 || c.named_type_ids is null) { return NamedTypeInfo(); }
+func get_named_type(ref c: Compiler, type_id: Int) -> Optional(NamedTypeInfo) {
+    if (type_id < 100 || c.named_type_ids is null) { return null; }
     return c.named_type_ids.lookup(type_id);
 }
 
@@ -1291,8 +1298,8 @@ func get_repr_type(ref c: Compiler, type_id: Int) -> Int {
     let current: Int = type_id;
     let depth: Int = 0;
     while (depth < 64) {
-        let info: NamedTypeInfo = get_named_type(ref c, current);
-        if (!has_named_type(info) || info.underlying_type == current) { return current; }
+        let info: Optional(NamedTypeInfo) = get_named_type(ref c, current);
+        if (!(info is !null) || info.underlying_type == current) { return current; }
         current = info.underlying_type;
         depth += 1;
     }
@@ -1392,7 +1399,7 @@ func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Positi
     while (i < union.members.length()) {
         let member: Int = union.members[i];
         let array = c.array_info_map.lookup(member);
-        if (has_symbol(c.vector_base_map.lookup(member)) || (has_array_info(array) && array.size >= 0)) {
+        if ((c.vector_base_map.lookup(member) is !null) || ((array is !null) && array.size >= 0)) {
             candidate = member;
             count++;
         }
@@ -1422,9 +1429,9 @@ func union_map_target(ref c: Compiler, target: Int, node: NodeID, pos: Position)
     while (i < union.members.length()) {
         let member = get_repr_type(ref c, union.members[i]);
         let info = c.struct_id_map.lookup(member);
-        let template: GenericTemplate = c.generic_instance_templates.lookup("" + member);
-        let dynamic = has_struct(info) && (info.name == "Dict" || info.name == "dict.Dict");
-        let typed = has_template(template) && (template.name == "Dict" || template.name.ends_with(".Dict"));
+        let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + member);
+        let dynamic = (info is !null) && (info.name == "Dict" || info.name == "dict.Dict");
+        let typed = (template is !null) && (template.name == "Dict" || template.name.ends_with(".Dict"));
         if (dynamic || typed) {
             candidate = union.members[i];
             count++;
@@ -1535,8 +1542,8 @@ func get_union_type_id(ref c: Compiler, members: Vector(Int), pos: Position) -> 
         key += "" + keys[i].length() + "_" + keys[i];
         i++;
     }
-    let cached: SymbolInfo = c.union_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.union_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     let type_id: Int = c.type_counter;
     c.type_counter++;
@@ -1580,8 +1587,9 @@ func instantiate_alias(ref c: Compiler, template: GenericTemplate, concrete: Vec
     return target;
 }
 
-func resolve_named_type(ref c: Compiler, info: NamedTypeInfo) -> Int {
-    if (!has_named_type(info)) { return TYPE_POISON; }
+func resolve_named_type(ref c: Compiler, found: Optional(NamedTypeInfo)) -> Int {
+    if (found is null) { return TYPE_POISON; }
+    let info: NamedTypeInfo = found;
     if (info.resolved) { return info.type_id; }
     if (info.resolving) {
         throw_type_error(info.pos, "Type declaration for '" + info.name + "' is recursive.");
@@ -1625,8 +1633,8 @@ func resolve_named_type(ref c: Compiler, info: NamedTypeInfo) -> Int {
 }
 
 func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return get_llvm_type_str(ref c, named.underlying_type);
     }
     let union: Bool = is_union_type(ref c, type_id);
@@ -1696,8 +1704,8 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
         return get_size_llvm_type();
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info)) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null)) {
         if (arr_info.size == -1) {
             return arr_info.llvm_name + "*";
         }
@@ -1705,26 +1713,26 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
     }
 
     if (type_id >= 100) {
-        let f_info: SymbolInfo = c.func_ret_map.lookup(type_id);
-        if (has_symbol(f_info)) {
+        let f_info: Optional(SymbolInfo) = c.func_ret_map.lookup(type_id);
+        if ((f_info is !null)) {
             return "i8*";
         }
 
-        let m_info: SymbolInfo = c.method_ret_map.lookup(type_id);
-        if (has_symbol(m_info)) {
+        let m_info: Optional(SymbolInfo) = c.method_ret_map.lookup(type_id);
+        if ((m_info is !null)) {
             return "i8*";
         }
 
-        let ptr_info: SymbolInfo = c.ptr_base_map.lookup(type_id);
-        if (has_symbol(ptr_info)) {
+        let ptr_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(type_id);
+        if ((ptr_info is !null)) {
             if (ptr_info.type == TYPE_VOID) {
                 return "i8*";
             }
             return get_llvm_type_str(ref c, ptr_info.type) + "*";
         }
 
-        let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-        if (has_struct(s_info)) {
+        let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+        if ((s_info is !null)) {
             if (s_info.is_enum) {
                 return "i32";
             }
@@ -1735,13 +1743,13 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
             return s_info.llvm_name;
         }
 
-        let v_info: SymbolInfo = c.vector_base_map.lookup(type_id);
-        if (has_symbol(v_info)) {
+        let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(type_id);
+        if ((v_info is !null)) {
             return get_vector_llvm_type(ref c, v_info.type) + "*";
         }
 
-        let fll_info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-        if (has_symbol(fll_info)) {
+        let fll_info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+        if ((fll_info is !null)) {
             if (fll_info.type == TYPE_VOID) {
                 return "{ i1, { i64, i32 } }";
             }
@@ -1755,8 +1763,8 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
 }
 
 func get_type_name(ref c: Compiler, type_id: Int) -> String {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) { return named.name; }
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) { return named.name; }
     let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
     if (found_union is !null) {
         let union: UnionInfo = found_union;
@@ -1847,24 +1855,26 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
     if (type_id == TYPE_UINTSIZE){ return "UIntSize"; }
 
     if (type_id >= 100) {
-        let generic_name: StringConstant = c.generic_type_names.lookup("" + type_id);
-        if (has_string_constant(generic_name)) { return generic_name.value; }
+        let generic_name: Optional(StringConstant) = c.generic_type_names.lookup("" + type_id);
+        if ((generic_name is !null)) { return generic_name.value; }
 
-        let f_info: SymbolInfo = c.func_ret_map.lookup(type_id);
-        if (has_symbol(f_info)) {
+        let f_info: Optional(SymbolInfo) = c.func_ret_map.lookup(type_id);
+        if ((f_info is !null)) {
+            let meta_f_info: SymbolInfo = f_info;
             let sig: String = "Function(";
             let a_idx: Int = 0;
-            if (f_info.func_arg_types is !null) {
-                let len: Int = f_info.func_arg_types.length();
+            if (meta_f_info.func_arg_types is !null) {
+                let len: Int = meta_f_info.func_arg_types.length();
                 while (a_idx < len) {
-                    let a_node: TypeListNode = f_info.func_arg_types[a_idx];
+                    let a_node: TypeListNode = meta_f_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    if (f_info.arg_names is !null && a_idx < f_info.arg_names.length() && f_info.arg_names[a_idx].length() > 0) {
-                        sig += f_info.arg_names[a_idx] + ": ";
+                    if (meta_f_info.arg_names is !null && a_idx < meta_f_info.arg_names.length() && meta_f_info.arg_names[a_idx].length() > 0) {
+                        sig += meta_f_info.arg_names[a_idx] + ": ";
                     }
                     if (a_node.pass_mode == PARAM_REF) { sig += "ref "; }
-                    if (f_info.variadic_param == a_idx + 1) {
-                        let pack: ArrayInfo = c.array_info_map.lookup(a_node.type);
+                    if (meta_f_info.variadic_param == a_idx + 1) {
+                        let pack: Optional(ArrayInfo) = c.array_info_map.lookup(a_node.type);
+                        if (pack is null) { return "<invalid callable>"; }
                         sig += get_type_name(ref c, pack.base_type) + "...";
                     } else {
                         sig += get_type_name(ref c, a_node.type);
@@ -1872,25 +1882,27 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
                     a_idx += 1;
                 }
             }
-            sig += ") -> " + get_type_name(ref c, f_info.type);
+            sig += ") -> " + get_type_name(ref c, meta_f_info.type);
             return sig;
         }
 
-        let m_info: SymbolInfo = c.method_ret_map.lookup(type_id);
-        if (has_symbol(m_info)) {
+        let m_info: Optional(SymbolInfo) = c.method_ret_map.lookup(type_id);
+        if ((m_info is !null)) {
+            let meta_m_info: SymbolInfo = m_info;
             let sig: String = "Method(";
             let a_idx: Int = 0;
-            if (m_info.func_arg_types is !null) {
-                let len: Int = m_info.func_arg_types.length();
+            if (meta_m_info.func_arg_types is !null) {
+                let len: Int = meta_m_info.func_arg_types.length();
                 while (a_idx < len) {
-                    let a_node: TypeListNode = m_info.func_arg_types[a_idx];
+                    let a_node: TypeListNode = meta_m_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    if (m_info.arg_names is !null && a_idx < m_info.arg_names.length() && m_info.arg_names[a_idx].length() > 0) {
-                        sig += m_info.arg_names[a_idx] + ": ";
+                    if (meta_m_info.arg_names is !null && a_idx < meta_m_info.arg_names.length() && meta_m_info.arg_names[a_idx].length() > 0) {
+                        sig += meta_m_info.arg_names[a_idx] + ": ";
                     }
                     if (a_node.pass_mode == PARAM_REF) { sig += "ref "; }
-                    if (m_info.variadic_param == a_idx + 1) {
-                        let pack: ArrayInfo = c.array_info_map.lookup(a_node.type);
+                    if (meta_m_info.variadic_param == a_idx + 1) {
+                        let pack: Optional(ArrayInfo) = c.array_info_map.lookup(a_node.type);
+                        if (pack is null) { return "<invalid callable>"; }
                         sig += get_type_name(ref c, pack.base_type) + "...";
                     } else {
                         sig += get_type_name(ref c, a_node.type);
@@ -1898,30 +1910,30 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
                     a_idx += 1;
                 }
             }
-            sig += ") -> " + get_type_name(ref c, m_info.type);
+            sig += ") -> " + get_type_name(ref c, meta_m_info.type);
             return sig;
         }
 
-        let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-        if (has_struct(s_info)) { return s_info.name; }
+        let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+        if ((s_info is !null)) { return s_info.name; }
 
-        let ptr_info: SymbolInfo = c.ptr_base_map.lookup(type_id);
-        if (has_symbol(ptr_info)) {
+        let ptr_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(type_id);
+        if ((ptr_info is !null)) {
             return "Ptr<" + get_type_name(ref c, ptr_info.type) + ">";
         }
 
-        let v_info: SymbolInfo = c.vector_base_map.lookup(type_id);
-        if (has_symbol(v_info)) {
+        let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(type_id);
+        if ((v_info is !null)) {
             return "Vector(" + get_type_name(ref c, v_info.type) + ")";
         }
 
-        let fll_info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-        if (has_symbol(fll_info)) {
+        let fll_info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+        if ((fll_info is !null)) {
             return get_type_name(ref c, fll_info.type) + "?";
         }
 
-        let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-        if (has_array_info(arr_info)) {
+        let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+        if ((arr_info is !null)) {
             return get_type_name(ref c, arr_info.base_type) + "[" + arr_info.size + "]";
         }
     }
@@ -1931,15 +1943,15 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
 
 func is_pointer_type(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR; }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_pointer_type(ref c, named.underlying_type);
     }
     if (type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR) { return true; }
 
     if (type_id >= 100) {
-        let info: SymbolInfo = c.ptr_base_map.lookup(type_id);
-        if (has_symbol(info)) { return true; }
+        let info: Optional(SymbolInfo) = c.ptr_base_map.lookup(type_id);
+        if ((info is !null)) { return true; }
     }
 
     return false;
@@ -1947,62 +1959,62 @@ func is_pointer_type(ref c: Compiler, type_id: Int) -> Bool {
 
 func is_fallible_type(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return false; }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_fallible_type(ref c, named.underlying_type);
     }
     if (type_id >= 100) {
         if (c.fallible_base_map is null) { return false; }
-        let info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-        if (has_symbol(info)) { return true; }
+        let info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+        if ((info is !null)) { return true; }
     }
     return false;
 }
 
 func is_error_type(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return type_id == TYPE_ANY_ERROR; }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_error_type(ref c, named.underlying_type);
     }
     if (type_id == TYPE_ANY_ERROR) { return true; }
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_enum && info.is_error;
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_enum && info.is_error;
 }
 
 func get_inner_fallible_type(ref c: Compiler, type_id: Int) -> Int {
     if (type_id >= 100) {
-        let info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-        if (has_symbol(info)) { return info.type; }
+        let info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+        if ((info is !null)) { return info.type; }
     }
     return TYPE_POISON;
 }
 
 func is_void_ptr(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return type_id == TYPE_ANYPTR; }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_void_ptr(ref c, named.underlying_type);
     }
     if (type_id == TYPE_ANYPTR) { return true; }
     if (type_id >= 100) {
-        let base_info: SymbolInfo = c.ptr_base_map.lookup(type_id);
-        if (has_symbol(base_info) && base_info.type == TYPE_VOID) { return true; }
+        let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(type_id);
+        if ((base_info is !null) && base_info.type == TYPE_VOID) { return true; }
     }
     return false;
 }
 
 func is_value_struct(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return false; }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_value_struct(ref c, named.underlying_type);
     }
     if (type_id < 100) { return false; }
 
     if (c.struct_id_map is null) { return false; }
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && !info.is_class && !info.is_enum && !info.is_interface;
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && !info.is_class && !info.is_enum && !info.is_interface;
 }
 
 func is_ref_type(ref c: Compiler, type_id: Int) -> Bool {
@@ -2011,8 +2023,8 @@ func is_ref_type(ref c: Compiler, type_id: Int) -> Bool {
         return type_id == TYPE_STRING || type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_FUNCTION ||
                type_id == TYPE_GENERIC_CLASS || type_id == TYPE_GENERIC_METHOD;
     }
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return is_ref_type(ref c, named.underlying_type);
     }
     if (type_id == TYPE_STRING) { return true; }
@@ -2023,23 +2035,23 @@ func is_ref_type(ref c: Compiler, type_id: Int) -> Bool {
 
     if (type_id >= 100) {
         if (c.array_info_map is !null) {
-            let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-            if (has_array_info(arr_info)) {
+            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+            if ((arr_info is !null)) {
                 return arr_info.size == -1;
             }
         }
         if (c.struct_id_map is !null) {
-            let s_info: StructInfo = c.struct_id_map.lookup(type_id);
-            if (has_struct(s_info)) {
+            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+            if ((s_info is !null)) {
                 if (s_info.is_enum) { return false; }
                 return s_info.is_class || s_info.is_interface;
             }
         }
-        if (c.vector_base_map is !null && has_symbol(c.vector_base_map.lookup(type_id))) {
+        if (c.vector_base_map is !null && (c.vector_base_map.lookup(type_id) is !null)) {
             return true;
         }
-        if (c.func_ret_map is !null && has_symbol(c.func_ret_map.lookup(type_id))) { return true; }
-        if (c.method_ret_map is !null && has_symbol(c.method_ret_map.lookup(type_id))) {
+        if (c.func_ret_map is !null && (c.func_ret_map.lookup(type_id) is !null)) { return true; }
+        if (c.method_ret_map is !null && (c.method_ret_map.lookup(type_id) is !null)) {
             return true;
         }
     }
@@ -2084,15 +2096,15 @@ func type_needs_drop(ref c: Compiler, type_id: Int) -> Bool {
     if (is_fallible_type(ref c, type_id)) {
         return needs_drop(ref c, get_inner_fallible_type(ref c, type_id));
     }
-    let arr_info: ArrayInfo = ArrayInfo();
+    let arr_info: Optional(ArrayInfo) = null;
     if (c.array_info_map is !null) { arr_info = c.array_info_map.lookup(type_id); }
-    if (has_array_info(arr_info) && arr_info.size >= 0) {
+    if ((arr_info is !null) && arr_info.size >= 0) {
         return needs_drop(ref c, arr_info.base_type);
     }
     if (is_value_struct(ref c, type_id)) {
-        let info: StructInfo = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+        let info: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
         let i: Int = 0;
-        while (has_struct(info) && info.fields is !null && i < info.fields.length()) {
+        while ((info is !null) && info.fields is !null && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             if (needs_drop(ref c, field.type)) { return true; }
             i += 1;
@@ -2138,8 +2150,8 @@ func is_small_primitive_type(t: Int) -> Bool {
 }
 
 func is_nullable_reference_type(ref c: Compiler, t: Int) -> Bool {
-    let named: NamedTypeInfo = get_named_type(ref c, t);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, t);
+    if ((named is !null)) {
         return is_nullable_reference_type(ref c, named.underlying_type);
     }
     if (t == TYPE_NULL || t == TYPE_STRING || t == TYPE_ANYPTR || t == TYPE_NULLPTR ||
@@ -2149,24 +2161,24 @@ func is_nullable_reference_type(ref c: Compiler, t: Int) -> Bool {
     }
 
     if (t < 100) { return false; }
-    let arr_info: ArrayInfo = c.array_info_map.lookup(t);
-    if (has_array_info(arr_info)) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(t);
+    if ((arr_info is !null)) {
         return arr_info.size == -1;
     }
-    if (has_symbol(c.fallible_base_map.lookup(t))) { return false; }
-    if (has_symbol(c.ptr_base_map.lookup(t))) { return true; }
-    if (has_symbol(c.vector_base_map.lookup(t))) { return true; }
-    if (has_symbol(c.func_ret_map.lookup(t))) { return true; }
-    if (has_symbol(c.method_ret_map.lookup(t))) { return true; }
+    if ((c.fallible_base_map.lookup(t) is !null)) { return false; }
+    if ((c.ptr_base_map.lookup(t) is !null)) { return true; }
+    if ((c.vector_base_map.lookup(t) is !null)) { return true; }
+    if ((c.func_ret_map.lookup(t) is !null)) { return true; }
+    if ((c.method_ret_map.lookup(t) is !null)) { return true; }
 
-    let s_info: StructInfo = c.struct_id_map.lookup(t);
-    return has_struct(s_info) && (s_info.is_class || s_info.is_interface);
+    let s_info: Optional(StructInfo) = c.struct_id_map.lookup(t);
+    return (s_info is !null) && (s_info.is_class || s_info.is_interface);
 }
 
 func get_ptr_type_id(ref c: Compiler, base_id: Int) -> Int {
     let key: String = "ptr_" + base_id;
-    let cached: SymbolInfo = c.ptr_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.ptr_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
@@ -2179,8 +2191,8 @@ func get_ptr_type_id(ref c: Compiler, base_id: Int) -> Int {
 
 func get_fallible_type_id(ref c: Compiler, base_id: Int) -> Int {
     let key: String = "" + base_id;
-    let existing: SymbolInfo = c.fallible_cache.lookup(key);
-    if (has_symbol(existing)) { return existing.type; }
+    let existing: Optional(SymbolInfo) = c.fallible_cache.lookup(key);
+    if ((existing is !null)) { return existing.type; }
 
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
@@ -2206,8 +2218,8 @@ func get_func_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id: I
         i += 1;
     }
 
-    let cached: SymbolInfo = c.ptr_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.ptr_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
@@ -2228,8 +2240,8 @@ func get_method_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id:
         i += 1;
     }
 
-    let cached: SymbolInfo = c.ptr_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.ptr_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
@@ -2240,8 +2252,8 @@ func get_method_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id:
 
 func get_vector_type_id(ref c: Compiler, base_id: Int) -> Int {
     let key: String = "vec_" + base_id;
-    let cached: SymbolInfo = c.vector_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.vector_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     let new_id: Int = c.type_counter;
     c.type_drop_list.append(TypeListNode(type=new_id));
@@ -2255,8 +2267,8 @@ func get_vector_type_id(ref c: Compiler, base_id: Int) -> Int {
 
 func get_slice_type_id(ref c: Compiler, base_id: Int) -> Int {
     let key: String = "slice_" + base_id;
-    let cached: SymbolInfo = c.array_type_cache.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.array_type_cache.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
@@ -2366,18 +2378,18 @@ func get_builtin_cast_target(name: String) -> Int {
     return 0;
 }
 
-func find_named_decl(ref c: Compiler, name: String) -> NamedTypeInfo {
+func find_named_decl(ref c: Compiler, name: String) -> Optional(NamedTypeInfo) {
     if (c.named_types is null) {
-        return NamedTypeInfo();
+        return null;
     }
-    let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + name);
-    if (!has_named_type(info)) { info = c.named_types.lookup(name); }
-    if (!has_named_type(info) && c.current_file_type_aliases is !null) {
-        let mapped: String = c.current_file_type_aliases.lookup(name);
+    let info: Optional(NamedTypeInfo) = c.named_types.lookup(c.current_package_prefix + name);
+    if (!(info is !null)) { info = c.named_types.lookup(name); }
+    if (!(info is !null) && c.current_file_type_aliases is !null) {
+        let mapped: Optional(String) = c.current_file_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
-    if (!has_named_type(info) && c.global_type_aliases is !null) {
-        let mapped: String = c.global_type_aliases.lookup(name);
+    if (!(info is !null) && c.global_type_aliases is !null) {
+        let mapped: Optional(String) = c.global_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
     return info;
@@ -2387,15 +2399,15 @@ func get_cast_target(ref c: Compiler, name: String) -> Int {
     let builtin: Int = get_builtin_cast_target(name);
     if (builtin != 0) { return builtin; }
 
-    let info: NamedTypeInfo = find_named_decl(ref c, name);
-    if (!has_named_type(info)) { return 0; }
+    let info: Optional(NamedTypeInfo) = find_named_decl(ref c, name);
+    if (!(info is !null)) { return 0; }
     let type_id: Int = resolve_named_type(ref c, info);
-    if (info.is_alias && has_struct(c.struct_id_map.lookup(type_id))) { return 0; }
+    if (info.is_alias && (c.struct_id_map.lookup(type_id) is !null)) { return 0; }
     return type_id;
 }
 
 func is_conversion_target(ref c: Compiler, type_id: Int) -> Bool {
-    if (has_named_type(get_named_type(ref c, type_id))) { return true; }
+    if ((get_named_type(ref c, type_id) is !null)) { return true; }
     return is_numeric_type(type_id) || type_id == TYPE_BOOL ||
            type_id == TYPE_CHAR || type_id == TYPE_STRING;
 }
@@ -2414,29 +2426,30 @@ func method_base_name(ref c: Compiler, node: MethodDefNode) -> String {
     return conversion_method_name(target_type);
 }
 
-func find_method(methods: Vector(Struct), name: String) -> FuncInfo {
+func find_method(methods: Vector(Struct), name: String) -> Optional(FuncInfo) {
     let i: Int = 0;
     while (methods is !null && i < methods.length()) {
         let entry: FuncInfo = methods[i];
         if (entry.base_name == name) { return entry; }
         i += 1;
     }
-    return FuncInfo();
+    return null;
 }
 
-func find_class_conversion(info: StructInfo, target_type: Int) -> FuncInfo {
-    if (!has_struct(info) || !info.is_class || info.vtable is null) {
-        return FuncInfo();
+func find_class_conversion(info: Optional(StructInfo), target_type: Int) -> Optional(FuncInfo) {
+    if (info is null || !info.is_class || info.vtable is null) {
+        return null;
     }
+    let record: StructInfo = info;
 
     let wanted: String = conversion_method_name(target_type);
     let i: Int = 0;
-    while (i < info.vtable.length()) {
-        let func_info: FuncInfo = info.vtable[i];
+    while (i < record.vtable.length()) {
+        let func_info: FuncInfo = record.vtable[i];
         if (func_info.base_name == wanted) { return func_info; }
         i += 1;
     }
-    return FuncInfo();
+    return null;
 }
 
 func needs_explicit_cast(ref c: Compiler, source_type: Int, target_type: Int) -> Bool {
@@ -2444,8 +2457,8 @@ func needs_explicit_cast(ref c: Compiler, source_type: Int, target_type: Int) ->
     source_type = get_repr_type(ref c, source_type);
     target_type = get_repr_type(ref c, target_type);
     if (source_type == TYPE_ANY_ERROR) { source_type = TYPE_INT; }
-    let source_info: StructInfo = c.struct_id_map.lookup(source_type);
-    if (has_struct(source_info) && source_info.is_enum) { source_type = TYPE_INT; }
+    let source_info: Optional(StructInfo) = c.struct_id_map.lookup(source_type);
+    if ((source_info is !null) && source_info.is_enum) { source_type = TYPE_INT; }
     if (target_type == TYPE_BOOL) {
         return source_type != TYPE_BOOL;
     }
@@ -2524,58 +2537,61 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             let field: FieldAccessNode = get_field_access_node(ref c.arena, generic.base_type);
 
             let owner_type: Int = get_expr_type(ref c, field.obj);
-            let owner: StructInfo = c.struct_id_map.lookup(owner_type);
-            if (!has_struct(owner) || !owner.is_class) { return TYPE_POISON; }
+            let owner: Optional(StructInfo) = c.struct_id_map.lookup(owner_type);
+            if (!(owner is !null) || !owner.is_class) { return TYPE_POISON; }
+            let meta_owner: StructInfo = owner;
 
-            let method_template: GenericTemplate = c.generic_methods.lookup(owner.name + "_" + field.field_name);
-            if (!has_template(method_template)) { return TYPE_POISON; }
+            let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_owner.name + "_" + field.field_name);
+            if (!(method_template is !null)) { return TYPE_POISON; }
 
             let method_types: Vector(Struct) = resolve_generic_method_args(ref c, method_template, generic.type_args, null, generic.pos);
             if (method_types is null) { return TYPE_POISON; }
 
-            let method_info: FuncInfo = register_generic_method(ref c, method_template, owner, method_types, generic.pos);
-            if (!has_func(method_info)) { return TYPE_POISON; }
+            let method_info: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_owner, method_types, generic.pos);
+            if (!(method_info is !null)) { return TYPE_POISON; }
+            let signature: FuncInfo = method_info;
 
             let args: Vector(Struct) = [];
             let i: Int = 1;
-            while (i < method_info.arg_types.length()) {
-                args.append(method_info.arg_types[i]);
+            while (i < signature.arg_types.length()) {
+                args.append(signature.arg_types[i]);
                 i++;
             }
-            return get_method_type_id(ref c, args, method_info.ret_type, method_info.variadic_param, callable_arg_names(method_info, 1));
+            return get_method_type_id(ref c, args, signature.ret_type, signature.variadic_param, callable_arg_names(signature, 1));
         }
 
         let name: String = generic_symbol_name(ref c, generic.base_type, true);
-        let template: GenericTemplate = c.generic_funcs.lookup(name);
-        if (!has_template(template)) { return TYPE_POISON; }
+        let template: Optional(GenericTemplate) = c.generic_funcs.lookup(name);
+        if (!(template is !null)) { return TYPE_POISON; }
+        let meta_template: GenericTemplate = template;
 
-        let types: Vector(Struct) = resolve_generic_args(ref c, template, generic.type_args, null, generic.pos);
+        let types: Vector(Struct) = resolve_generic_args(ref c, meta_template, generic.type_args, null, generic.pos);
         if (types is null) { return TYPE_POISON; }
-        let instance: FuncInfo = register_generic_func(ref c, template, types, generic.pos);
-        if (!has_func(instance)) { return TYPE_POISON; }
+        let instance: Optional(FuncInfo) = register_generic_func(ref c, meta_template, types, generic.pos);
+        if (!(instance is !null)) { return TYPE_POISON; }
 
         return get_func_type_id(ref c, instance.arg_types, instance.ret_type, instance.variadic_param, callable_arg_names(instance, 0));
     }
 
     if (base == NODE_VAR_ACCESS) {
         let v: VarAccessNode = get_var_access_node(ref c.arena, node);
-        let info: SymbolInfo = find_symbol(ref c, v.name_tok.value);
-        if (has_symbol(info)) { return info.type; }
+        let info: Optional(SymbolInfo) = find_symbol(ref c, v.name_tok.value);
+        if ((info is !null)) { return info.type; }
 
         let h_curr: Scope = c.hoist_scope;
         while (h_curr.table is !null) {
-            let h_info: SymbolInfo = h_curr.table.lookup(v.name_tok.value);
-            if (has_symbol(h_info)) { return h_info.type; }
+            let h_info: Optional(SymbolInfo) = h_curr.table.lookup(v.name_tok.value);
+            if ((h_info is !null)) { return h_info.type; }
             if (h_curr.parent < 0 || c.hoist_scope_stack is null || h_curr.parent >= c.hoist_scope_stack.length()) { break; }
             h_curr = c.hoist_scope_stack[h_curr.parent];
         }
 
         if (c.func_table is !null) {
-            let f_info: FuncInfo = c.func_table.lookup(v.name_tok.value);
-            if (!has_func(f_info) && c.current_package_prefix != "") {
+            let f_info: Optional(FuncInfo) = c.func_table.lookup(v.name_tok.value);
+            if (!(f_info is !null) && c.current_package_prefix != "") {
                 f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value);
             }
-            if (has_func(f_info)) {
+            if ((f_info is !null)) {
                 return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
             }
         }
@@ -2588,16 +2604,17 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         let obj_type: Int = get_expr_type(ref c, f.obj);
         obj_type = get_repr_type(ref c, obj_type);
         if (is_pointer_type(ref c, obj_type)) {
-            let base_info: SymbolInfo = c.ptr_base_map.lookup(obj_type);
-            if (has_symbol(base_info)) { obj_type = base_info.type; }
+            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
+            if ((base_info is !null)) { obj_type = base_info.type; }
         }
         if (obj_type >= 100) {
-            let s_info: StructInfo = c.struct_id_map.lookup(obj_type);
-            if (has_struct(s_info)) {
-                let field: FieldInfo = find_field(s_info, f.field_name);
-                if (has_field(field)) { return field.type; }
-                if (s_info.is_class) {
-                    let vtable: Vector(Struct) = s_info.vtable;
+            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
+            if ((s_info is !null)) {
+                let meta_s_info: StructInfo = s_info;
+                let field: Optional(FieldInfo) = find_field(meta_s_info, f.field_name);
+                if ((field is !null)) { return field.type; }
+                if (meta_s_info.is_class) {
+                    let vtable: Vector(Struct) = meta_s_info.vtable;
                     let v_len: Int = 0;
                     if (vtable is !null) { v_len = vtable.length(); }
                     let m_idx: Int = 0;
@@ -2623,12 +2640,12 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             let v_node: VarAccessNode = get_var_access_node(ref c.arena, f.obj);
             let target_name: String = v_node.name_tok.value;
             if (c.current_package_prefix != "") {
-                if (has_struct(c.struct_table.lookup(c.current_package_prefix + target_name))) {
+                if ((c.struct_table.lookup(c.current_package_prefix + target_name) is !null)) {
                     target_name = c.current_package_prefix + target_name;
                 }
             }
-            let s_info: StructInfo = c.struct_table.lookup(target_name);
-            if (has_struct(s_info) && s_info.is_enum) { return s_info.type_id; }
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(target_name);
+            if ((s_info is !null) && s_info.is_enum) { return s_info.type_id; }
         }
         return 0;
     }
@@ -2638,19 +2655,20 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         let target_type: Int = get_expr_type(ref c, idx_node.target);
         target_type = get_repr_type(ref c, target_type);
         if (is_pointer_type(ref c, target_type) == true) {
-            let base_info: SymbolInfo = c.ptr_base_map.lookup(target_type);
-            if (has_symbol(base_info)) { return base_info.type; }
+            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(target_type);
+            if ((base_info is !null)) { return base_info.type; }
         }
         if (target_type >= 100) {
-            let v_info: SymbolInfo = c.vector_base_map.lookup(target_type);
-            if (has_symbol(v_info)) { return v_info.type; }
-            let arr_info: ArrayInfo = c.array_info_map.lookup(target_type);
-            if (has_array_info(arr_info)) { return arr_info.base_type; }
-            let s_info: StructInfo = c.struct_id_map.lookup(target_type);
-            if (has_struct(s_info) && s_info.is_class) {
+            let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+            if ((v_info is !null)) { return v_info.type; }
+            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+            if ((arr_info is !null)) { return arr_info.base_type; }
+            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(target_type);
+            if ((s_info is !null) && s_info.is_class) {
+                let meta_s_info: StructInfo = s_info;
                 let method_index: Int = 0;
-                while (s_info.vtable is !null && method_index < s_info.vtable.length()) {
-                    let method_info: FuncInfo = s_info.vtable[method_index];
+                while (meta_s_info.vtable is !null && method_index < meta_s_info.vtable.length()) {
+                    let method_info: FuncInfo = meta_s_info.vtable[method_index];
                     if (method_info.base_name == "get") { return method_info.ret_type; }
                     method_index++;
                 }
@@ -2670,11 +2688,11 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
             let elem_type: Int = 0;
             if (target_type >= 100) {
-                let arr_info: ArrayInfo = c.array_info_map.lookup(target_type);
-                if (has_array_info(arr_info)) { elem_type = arr_info.base_type; }
+                let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+                if ((arr_info is !null)) { elem_type = arr_info.base_type; }
                 else {
-                    let vec_info: SymbolInfo = c.vector_base_map.lookup(target_type);
-                    if (has_symbol(vec_info)) { elem_type = vec_info.type; }
+                    let vec_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+                    if ((vec_info is !null)) { elem_type = vec_info.type; }
                 }
             }
             if (elem_type != 0) { return get_slice_type_id(ref c, elem_type); }
@@ -2691,8 +2709,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         let deref_node: DerefNode = get_deref_node(ref c.arena, node);
         let ptr_type: Int = get_expr_type(ref c, deref_node.node);
         if (is_pointer_type(ref c, ptr_type)) {
-            let base_info: SymbolInfo = c.ptr_base_map.lookup(ptr_type);
-            if (has_symbol(base_info)) { return base_info.type; }
+            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(ptr_type);
+            if ((base_info is !null)) { return base_info.type; }
         }
         return 0;
     }
@@ -2705,11 +2723,11 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
         let elem_type: Int = 0;
         if (target_type >= 100) {
-            let arr_info: ArrayInfo = c.array_info_map.lookup(target_type);
-            if (has_array_info(arr_info)) { elem_type = arr_info.base_type; }
+            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+            if ((arr_info is !null)) { elem_type = arr_info.base_type; }
             else {
-                let v_info: SymbolInfo = c.vector_base_map.lookup(target_type);
-                if (has_symbol(v_info)) { elem_type = v_info.type; }
+                let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+                if ((v_info is !null)) { elem_type = v_info.type; }
             }
         }
 
@@ -2755,8 +2773,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         }
 
         let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
-        let generic_type_template: GenericTemplate = c.generic_structs.lookup(generic_type_name);
-        if (use_generic_constructor(ref c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
+        let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
+        if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
             let types: Vector(Struct) = resolve_generic_constructor_args(ref c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
             if (types is null) { return TYPE_POISON; }
 
@@ -2768,13 +2786,13 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         }
 
         let generic_name: String = generic_symbol_name(ref c, callee_node, true);
-        let generic_template: GenericTemplate = c.generic_funcs.lookup(generic_name);
-        if (has_template(generic_template)) {
+        let generic_template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
+        if ((generic_template is !null)) {
             let types: Vector(Struct) = resolve_generic_args(ref c, generic_template, call_node.type_args, call_node.args, call_node.pos);
             if (types is null) { return TYPE_POISON; }
 
-            let instance: FuncInfo = register_generic_func(ref c, generic_template, types, call_node.pos);
-            if (!has_func(instance)) { return TYPE_POISON; }
+            let instance: Optional(FuncInfo) = register_generic_func(ref c, generic_template, types, call_node.pos);
+            if (!(instance is !null)) { return TYPE_POISON; }
 
             if (call_node.preserve_fallible) { return instance.ret_type; }
             if (is_fallible_type(ref c, instance.ret_type)) {
@@ -2794,9 +2812,9 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
                 if (args is !null && args.length() == 1) {
                     let arg: ArgNode = args[0];
                     let source_type: Int = get_expr_type(ref c, arg.val);
-                    let source_info: StructInfo = c.struct_id_map.lookup(source_type);
-                    let conversion: FuncInfo = find_class_conversion(source_info, cast_target);
-                    if (has_func(conversion)) {
+                    let source_info: Optional(StructInfo) = c.struct_id_map.lookup(source_type);
+                    let conversion: Optional(FuncInfo) = find_class_conversion(source_info, cast_target);
+                    if ((conversion is !null)) {
                         if (call_node.preserve_fallible) { return conversion.ret_type; }
                         if (is_fallible_type(ref c, conversion.ret_type)) {
                             return get_inner_fallible_type(ref c, conversion.ret_type);
@@ -2810,39 +2828,39 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
                 return cast_target;
             }
 
-            let f_info: FuncInfo = c.func_table.lookup(callee_name);
-            if (!has_func(f_info) && c.current_package_prefix != "") {
+            let f_info: Optional(FuncInfo) = c.func_table.lookup(callee_name);
+            if (!(f_info is !null) && c.current_package_prefix != "") {
                 f_info = c.func_table.lookup(c.current_package_prefix + callee_name);
             }
-            if (!has_func(f_info) && c.current_file_func_aliases is !null) {
-                let mapped: String = c.current_file_func_aliases.lookup(callee_name);
+            if (!(f_info is !null) && c.current_file_func_aliases is !null) {
+                let mapped: Optional(String) = c.current_file_func_aliases.lookup(callee_name);
                 if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
             }
-            if (!has_func(f_info) && c.global_func_aliases is !null) {
-                let mapped: String = c.global_func_aliases.lookup(callee_name);
+            if (!(f_info is !null) && c.global_func_aliases is !null) {
+                let mapped: Optional(String) = c.global_func_aliases.lookup(callee_name);
                 if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
             }
-            if (has_func(f_info)) { return f_info.ret_type; }
+            if ((f_info is !null)) { return f_info.ret_type; }
 
-            let s_info: StructInfo = c.struct_table.lookup(callee_name);
-            if (!has_struct(s_info) && c.current_package_prefix != "") {
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(callee_name);
+            if (!(s_info is !null) && c.current_package_prefix != "") {
                 s_info = c.struct_table.lookup(c.current_package_prefix + callee_name);
             }
-            if (!has_struct(s_info)) {
-                let alias_info: NamedTypeInfo = find_named_decl(ref c, callee_name);
-                if (has_named_type(alias_info) && alias_info.is_alias) {
+            if (!(s_info is !null)) {
+                let alias_info: Optional(NamedTypeInfo) = find_named_decl(ref c, callee_name);
+                if ((alias_info is !null) && alias_info.is_alias) {
                     s_info = c.struct_id_map.lookup(resolve_named_type(ref c, alias_info));
                 }
             }
-            if (has_struct(s_info)) { return s_info.type_id; }
+            if ((s_info is !null)) { return s_info.type_id; }
 
-            let var_info: SymbolInfo = find_symbol(ref c, callee_name);
-            if (has_symbol(var_info)) {
+            let var_info: Optional(SymbolInfo) = find_symbol(ref c, callee_name);
+            if ((var_info is !null)) {
                 let p_type: Int = var_info.type;
-                let f_ret_info: SymbolInfo = c.func_ret_map.lookup(p_type);
-                if (has_symbol(f_ret_info)) { return f_ret_info.type; }
-                let m_ret_info: SymbolInfo = c.method_ret_map.lookup(p_type);
-                if (has_symbol(m_ret_info)) { return m_ret_info.type; }
+                let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(p_type);
+                if ((f_ret_info is !null)) { return f_ret_info.type; }
+                let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(p_type);
+                if ((m_ret_info is !null)) { return m_ret_info.type; }
             }
         }
         else if (callee == NODE_FIELD_ACCESS) {
@@ -2861,35 +2879,35 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
                 if (curr_base == NODE_VAR_ACCESS) {
                     let inner_v: VarAccessNode = get_var_access_node(ref c.arena, curr_obj);
                     let root_name: String = inner_v.name_tok.value;
-                    if (!has_symbol(find_symbol(ref c, root_name))) {
+                    if (!(find_symbol(ref c, root_name) is !null)) {
                         let full_name: String = "";
-                        let module_prefix: String = c.current_file_visible_prefixes.lookup(root_name);
+                        let module_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(root_name);
                         if (module_prefix is !null) {
                             full_name = module_member_name(module_prefix, path_parts, f.field_name);
                         } else {
                             let source_name: String = module_member_name(root_name + ".", path_parts, f.field_name);
-                            let mapped_func: String = c.current_file_func_aliases.lookup(source_name);
+                            let mapped_func: Optional(String) = c.current_file_func_aliases.lookup(source_name);
                             if (mapped_func is !null) { full_name = mapped_func; }
                         }
-                        let g_alias_f: String = c.global_func_aliases.lookup(full_name);
+                        let g_alias_f: Optional(String) = c.global_func_aliases.lookup(full_name);
                         if (g_alias_f is !null) { full_name = g_alias_f; }
 
-                        let f_info: FuncInfo = c.func_table.lookup(full_name);
-                        if (has_func(f_info)) { return f_info.ret_type; }
+                        let f_info: Optional(FuncInfo) = c.func_table.lookup(full_name);
+                        if ((f_info is !null)) { return f_info.ret_type; }
                     }
                 }
             }
 
             if (is_pointer_type(ref c, obj_type)) {
-                let base_info: SymbolInfo = c.ptr_base_map.lookup(obj_type);
-                if (has_symbol(base_info)) { obj_type = base_info.type; }
+                let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
+                if ((base_info is !null)) { obj_type = base_info.type; }
             }
 
             if (obj_type == TYPE_STRING) {
-                let str_link: String = c.compiler_link.lookup("string_" + f.field_name);
+                let str_link: Optional(String) = c.compiler_link.lookup("string_" + f.field_name);
                 if (str_link is !null) {
-                    let f_info: FuncInfo = c.func_table.lookup(str_link);
-                    if (has_func(f_info)) { return f_info.ret_type; }
+                    let f_info: Optional(FuncInfo) = c.func_table.lookup(str_link);
+                    if ((f_info is !null)) { return f_info.ret_type; }
                 }
             }
 
@@ -2897,27 +2915,29 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             if (f.field_name == "append") { return TYPE_VOID; }
             if (f.field_name == "drop") {
                 if (obj_type >= 100) {
-                    let v_info: SymbolInfo = c.vector_base_map.lookup(obj_type);
-                    if (has_symbol(v_info)) { return v_info.type; }
+                    let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(obj_type);
+                    if ((v_info is !null)) { return v_info.type; }
                 }
                 return 0;
             }
 
             if (obj_type >= 100) {
-                let s_info: StructInfo = c.struct_id_map.lookup(obj_type);
-                if (has_struct(s_info) && s_info.is_class) {
-                    let method_template: GenericTemplate = c.generic_methods.lookup(s_info.name + "_" + f.field_name);
-                    if (has_template(method_template)) {
+                let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
+                if ((s_info is !null) && s_info.is_class) {
+                    let meta_s_info: StructInfo = s_info;
+                    let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_s_info.name + "_" + f.field_name);
+                    if ((method_template is !null)) {
                         let types: Vector(Struct) = resolve_generic_method_args(ref c, method_template, call_node.type_args, call_node.args, call_node.pos);
                         if (types is null) { return TYPE_POISON; }
-                        let instance: FuncInfo = register_generic_method(ref c, method_template, s_info, types, call_node.pos);
-                        if (!has_func(instance)) { return TYPE_POISON; }
-                        if (!call_node.preserve_fallible && is_fallible_type(ref c, instance.ret_type)) {
-                            return get_inner_fallible_type(ref c, instance.ret_type);
+                        let instance: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_s_info, types, call_node.pos);
+                        if (!(instance is !null)) { return TYPE_POISON; }
+                        let meta_instance: FuncInfo = instance;
+                        if (!call_node.preserve_fallible && is_fallible_type(ref c, meta_instance.ret_type)) {
+                            return get_inner_fallible_type(ref c, meta_instance.ret_type);
                         }
-                        return instance.ret_type;
+                        return meta_instance.ret_type;
                     }
-                    let vtable: Vector(Struct) = s_info.vtable;
+                    let vtable: Vector(Struct) = meta_s_info.vtable;
                     let v_len: Int = 0;
                     if (vtable is !null) { v_len = vtable.length(); }
                     let m_idx: Int = 0;
@@ -2926,15 +2946,16 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
                         if (m_info.base_name == f.field_name) { return m_info.ret_type; }
                         m_idx += 1;
                     }
-                } else if (has_struct(s_info) && s_info.is_interface) {
-                    let vtable: Vector(Struct) = s_info.vtable;
+                } else if ((s_info is !null) && s_info.is_interface) {
+                    let protocol: StructInfo = s_info;
+                    let vtable: Vector(Struct) = protocol.vtable;
                     let v_len: Int = 0;
                     if (vtable is !null) { v_len = vtable.length(); }
                     let m_idx: Int = 0;
                     while (m_idx < v_len) {
                         let m_node: MethodDefNode = vtable[m_idx];
                         if (m_node.name_tok.value == f.field_name) {
-                            return interface_method_type(ref c, s_info, m_node.return_type);
+                            return interface_method_type(ref c, protocol, m_node.return_type);
                         }
                         m_idx += 1;
                     }
@@ -2943,10 +2964,10 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         }
         let ptr_type: Int = get_expr_type(ref c, callee_node);
         if (ptr_type != 0) {
-            let f_ret_info: SymbolInfo = c.func_ret_map.lookup(ptr_type);
-            if (has_symbol(f_ret_info)) { return f_ret_info.type; }
-            let m_ret_info: SymbolInfo = c.method_ret_map.lookup(ptr_type);
-            if (has_symbol(m_ret_info)) { return m_ret_info.type; }
+            let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(ptr_type);
+            if ((f_ret_info is !null)) { return f_ret_info.type; }
+            let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(ptr_type);
+            if ((m_ret_info is !null)) { return m_ret_info.type; }
         }
 
         return 0;
@@ -2966,8 +2987,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     }
 
     if (base == NODE_MAP_LIT) {
-        let s_info: StructInfo = c.struct_table.lookup("Dict");
-        if (has_struct(s_info)) { return s_info.type_id; }
+        let s_info: Optional(StructInfo) = c.struct_table.lookup("Dict");
+        if ((s_info is !null)) { return s_info.type_id; }
         return 0;
     }
 
@@ -3026,8 +3047,8 @@ func get_type_bitwidth(t: Int) -> Int {
 
 func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
 // return the in-memory size used by contiguous containers
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return get_type_size_bytes(ref c, named.underlying_type);
     }
     let union: Bool = is_union_type(ref c, type_id);
@@ -3050,27 +3071,28 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
         return any_error_size();
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info)) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null)) {
         if (arr_info.size < 0) {
             return get_pointer_size_bytes();
         }
         return arr_info.size * get_type_size_bytes(ref c, arr_info.base_type);
     }
 
-    let struct_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(struct_info) && struct_info.is_interface) {
+    let struct_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((struct_info is !null) && struct_info.is_interface) {
         return get_pointer_size_bytes() * 2;
     }
-    if (has_struct(struct_info)) {
-        if (struct_info.is_class) {
+    if ((struct_info is !null)) {
+        let meta_struct_info: StructInfo = struct_info;
+        if (meta_struct_info.is_class) {
             return get_pointer_size_bytes();
         }
         let offset: Int = 0;
         let layout_align: Int = 1;
         let i: Int = 0;
-        while (struct_info.fields is !null && i < struct_info.fields.length()) {
-            let field: FieldInfo = struct_info.fields[i];
+        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+            let field: FieldInfo = meta_struct_info.fields[i];
             let field_align: Int = get_type_align_bytes(ref c, field.type);
 
             offset = align_to(offset, field_align);
@@ -3085,8 +3107,8 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
         return size;
     }
 
-    let fallible_info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-    if (has_symbol(fallible_info)) {
+    let fallible_info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+    if ((fallible_info is !null)) {
         let error_align: Int = any_error_align();
         let offset: Int = align_to(1, error_align) + any_error_size();
         let layout_align: Int = error_align;
@@ -3103,8 +3125,8 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
 }
 
 func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vector(Int)) -> Bool {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return value_layout_contains(ref c, named.underlying_type, target, seen);
     }
 
@@ -3121,14 +3143,15 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
         return false;
     }
 
-    let array_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(array_info)) {
+    let array_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((array_info is !null)) {
         if (array_info.size < 0) { return false; }
         return value_layout_contains(ref c, array_info.base_type, target, seen);
     }
 
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (!has_struct(info) || info.is_class || info.is_interface || info.is_enum) { return false; }
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if (!(info is !null) || info.is_class || info.is_interface || info.is_enum) { return false; }
+    let meta_info: StructInfo = info;
 
     let i: Int = 0;
     while (i < seen.length()) {
@@ -3138,8 +3161,8 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
     seen.append(type_id);
 
     i = 0;
-    while (info.fields is !null && i < info.fields.length()) {
-        let field: FieldInfo = info.fields[i];
+    while (meta_info.fields is !null && i < meta_info.fields.length()) {
+        let field: FieldInfo = meta_info.fields[i];
         if (value_layout_contains(ref c, field.type, target, seen)) { return true; }
 
         i += 1;
@@ -3148,8 +3171,8 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
 }
 
 func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return get_type_align_bytes(ref c, named.underlying_type);
     }
     let union: Bool = is_union_type(ref c, type_id);
@@ -3168,24 +3191,25 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
     }
     if (type_id == TYPE_LONG || type_id == TYPE_UINT64 || type_id == TYPE_FLOAT || type_id == TYPE_ANY_ERROR) { return target_i64_align(); }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info)) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null)) {
         if (arr_info.size < 0) {
             return get_pointer_size_bytes();
         }
         return get_type_align_bytes(ref c, arr_info.base_type);
     }
 
-    let struct_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(struct_info)) {
-        if (struct_info.is_class || struct_info.is_interface) {
+    let struct_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((struct_info is !null)) {
+        let meta_struct_info: StructInfo = struct_info;
+        if (meta_struct_info.is_class || meta_struct_info.is_interface) {
             return get_pointer_size_bytes();
         }
 
         let result: Int = 1;
         let i: Int = 0;
-        while (struct_info.fields is !null && i < struct_info.fields.length()) {
-            let field: FieldInfo = struct_info.fields[i];
+        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+            let field: FieldInfo = meta_struct_info.fields[i];
             let field_align: Int = get_type_align_bytes(ref c, field.type);
             if (field_align > result) { result = field_align; }
 
@@ -3194,8 +3218,8 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
         return result;
     }
 
-    let fallible_info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-    if (has_symbol(fallible_info)) {
+    let fallible_info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+    if ((fallible_info is !null)) {
         let result: Int = any_error_align();
         if (fallible_info.type != TYPE_VOID) {
             let value_align: Int = get_type_align_bytes(ref c, fallible_info.type);
@@ -3272,10 +3296,11 @@ func generic_bindings(params: Vector(GenericParamNode), types: Vector(Struct)) -
     return bindings;
 }
 
-func extend_generic_bindings(base: Dict(String, SymbolInfo), params: Vector(GenericParamNode), types: Vector(Struct)) -> Dict(String, SymbolInfo) {
+func extend_generic_bindings(found: Optional(Dict(String, SymbolInfo)), params: Vector(GenericParamNode), types: Vector(Struct)) -> Dict(String, SymbolInfo) {
     let bindings: Dict(String, SymbolInfo) = Dict();
     let i: Int = 0;
-    if (base is !null) {
+    if (found is !null) {
+        let base: Dict(String, SymbolInfo) = found;
         while (i < base.capacity) {
             if (base.hashes[i] >= 2) {
                 bindings.put(base.keys[i], base.values[i]);
@@ -3338,7 +3363,7 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
     if (base == NODE_VAR_ACCESS) {
         let named: VarAccessNode = get_var_access_node(ref c.arena, node);
         let name: String = named.name_tok.value;
-        let alias: String = null;
+        let alias: Optional(String) = null;
         if is_function {
             if (c.current_file_func_aliases is !null) {
                 alias = c.current_file_func_aliases.lookup(name);
@@ -3350,14 +3375,14 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         }
 
         if (alias is !null &&
-            ((is_function && c.generic_funcs is !null && has_template(c.generic_funcs.lookup(alias))) ||
-             (!is_function && c.generic_structs is !null && has_template(c.generic_structs.lookup(alias))))) {
+            ((is_function && c.generic_funcs is !null && (c.generic_funcs.lookup(alias) is !null)) ||
+             (!is_function && c.generic_structs is !null && (c.generic_structs.lookup(alias) is !null)))) {
             return alias;
         }
         if (c.current_package_prefix != "") {
             let local: String = c.current_package_prefix + name;
-            if ((is_function && c.generic_funcs is !null && has_template(c.generic_funcs.lookup(local))) ||
-                (!is_function && c.generic_structs is !null && has_template(c.generic_structs.lookup(local)))) {
+            if ((is_function && c.generic_funcs is !null && (c.generic_funcs.lookup(local) is !null)) ||
+                (!is_function && c.generic_structs is !null && (c.generic_structs.lookup(local) is !null))) {
                 return local;
             }
         }
@@ -3384,7 +3409,7 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         }
 
         let root: VarAccessNode = get_var_access_node(ref c.arena, current);
-        let prefix: String = null;
+        let prefix: Optional(String) = null;
         if (c.current_file_visible_prefixes is !null) {
             prefix = c.current_file_visible_prefixes.lookup(root.name_tok.value);
         }
@@ -3393,7 +3418,7 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         }
 
         let source: String = module_member_name(root.name_tok.value + ".", path_parts, field.field_name);
-        let alias: String = null;
+        let alias: Optional(String) = null;
         if is_function {
             if (c.current_file_func_aliases is !null) {
                 alias = c.current_file_func_aliases.lookup(source);
@@ -3411,8 +3436,8 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
 
 func register_generic_struct(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
     let key: String = generic_instance_name(template.name, types, ref c);
-    let cached: SymbolInfo = c.generic_instances.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.generic_instances.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     if (c.generic_depth >= 64) {
         throw_type_error(pos, "Generic instantiation depth exceeds 64.");
@@ -3502,8 +3527,8 @@ func append_type_once(list: Vector(Struct), type_id: Int) -> Void {
 
 func register_generic_interface(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
     let key: String = generic_instance_name(template.name, types, ref c);
-    let cached: SymbolInfo = c.generic_instances.lookup(key);
-    if (has_symbol(cached)) {
+    let cached: Optional(SymbolInfo) = c.generic_instances.lookup(key);
+    if ((cached is !null)) {
         if (cached.type == TYPE_POISON) {
             throw_type_error(pos, "Generic interface inheritance cycle involving '" + generic_type_name(template.name, types, ref c) + "'.");
         }
@@ -3572,26 +3597,27 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
             return TYPE_POISON;
         }
 
-        let parent: StructInfo = c.struct_id_map.lookup(parent_id);
-        if (!has_struct(parent) || !parent.is_interface) {
+        let parent: Optional(StructInfo) = c.struct_id_map.lookup(parent_id);
+        if (!(parent is !null) || !parent.is_interface) {
             throw_type_error(pos, "Generic interface '" + key + "' can only inherit from another interface.");
             c.generic_instances.remove(key);
             restore_generic_context(ref c, previous, previous_bindings);
             c.generic_depth--;
             return TYPE_POISON;
         }
+        let meta_parent: StructInfo = parent;
 
         let inherited_index: Int = 0;
-        while (parent.interfaces is !null && inherited_index < parent.interfaces.length()) {
-            let inherited_type: TypeListNode = parent.interfaces[inherited_index];
+        while (meta_parent.interfaces is !null && inherited_index < meta_parent.interfaces.length()) {
+            let inherited_type: TypeListNode = meta_parent.interfaces[inherited_index];
             append_type_once(interfaces, inherited_type.type);
             inherited_index += 1;
         }
         append_type_once(interfaces, parent_id);
 
         let method_index: Int = 0;
-        while (parent.vtable is !null && method_index < parent.vtable.length()) {
-            let inherited_method: MethodDefNode = parent.vtable[method_index];
+        while (meta_parent.vtable is !null && method_index < meta_parent.vtable.length()) {
+            let inherited_method: MethodDefNode = meta_parent.vtable[method_index];
             if (method_names.contains_key(inherited_method.name_tok.value)) {
                 let repeated: Bool = false;
                 let existing_index: Int = 0;
@@ -3748,7 +3774,7 @@ func interface_uses_self(ref c: Compiler, info: StructInfo) -> Bool {
 }
 
 func interface_type_bindings(ref c: Compiler, info: StructInfo, self_type: Int) -> Dict(String, SymbolInfo) {
-    let bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + info.type_id);
+    let bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + info.type_id);
     let result: Dict(String, SymbolInfo) = extend_generic_bindings(bindings, null, null);
     if (self_type != 0) {
         result.put("Self", SymbolInfo(reg="", type=self_type, origin_type=self_type));
@@ -3758,19 +3784,19 @@ func interface_type_bindings(ref c: Compiler, info: StructInfo, self_type: Int) 
 }
 
 func interface_method_type_for(ref c: Compiler, info: StructInfo, node: NodeID, self_type: Int) -> Int {
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
     let bindings: Dict(String, SymbolInfo) = interface_type_bindings(ref c, info, self_type);
 
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
     let previous: GenericTemplate = GenericTemplate();
-    if (has_template(template)) {
+    if ((template is !null)) {
         previous = use_generic_context(ref c, template, bindings);
     } else {
         c.generic_bindings = bindings;
     }
 
     let result: Int = resolve_type(ref c, node);
-    if (has_template(template)) {
+    if ((template is !null)) {
         restore_generic_context(ref c, previous, previous_bindings);
     } else {
         c.generic_bindings = previous_bindings;
@@ -3799,30 +3825,35 @@ func interface_method_sig(ref c: Compiler, info: StructInfo, node: MethodDefNode
         param_index += 1;
     }
 
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + info.type_id);
-    if (!has_template(template)) {
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
+    if (!(template is !null)) {
         return get_method_def_sig_str(ref c, node);
     }
 
-    let bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + info.type_id);
+    let instance: GenericTemplate = template;
+    let bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.get("" + info.type_id)?;
+    catch(err) {
+        throw_internal_compiler_error(node.pos, "Missing generic interface bindings.");
+        return "void ()*";
+    }
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
-    let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
+    let previous: GenericTemplate = use_generic_context(ref c, instance, bindings);
     let result: String = get_method_def_sig_str(ref c, node);
     restore_generic_context(ref c, previous, previous_bindings);
     return result;
 }
 
 func is_hash_interface(ref c: Compiler, type_id: Int) -> Bool {
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_interface && (info.name == "hash.Hash" || info.name == "hashing.Hash");
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_interface && (info.name == "hash.Hash" || info.name == "hashing.Hash");
 }
 
 func is_eq_interface(ref c: Compiler, type_id: Int) -> Bool {
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (!has_struct(info) || !info.is_interface) { return false; }
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if (!(info is !null) || !info.is_interface) { return false; }
     if (info.name == "comparison.Equal") { return true; }
-    let template: GenericTemplate = c.generic_instance_templates.lookup("" + type_id);
-    return has_template(template) && template.name == "hash.Eq";
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + type_id);
+    return (template is !null) && template.name == "hash.Eq";
 }
 
 func has_builtin_hash(ref c: Compiler, type_id: Int) -> Bool {
@@ -3835,12 +3866,12 @@ func has_builtin_hash(ref c: Compiler, type_id: Int) -> Bool {
         type_id == TYPE_ANYPTR || type_id == TYPE_NULLPTR) {
         return true;
     }
-    if (is_pointer_type(ref c, type_id) || has_symbol(c.func_ret_map.lookup(type_id)) ||
-        has_symbol(c.method_ret_map.lookup(type_id))) {
+    if (is_pointer_type(ref c, type_id) || (c.func_ret_map.lookup(type_id) is !null) ||
+        (c.method_ret_map.lookup(type_id) is !null)) {
         return true;
     }
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_enum;
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_enum;
 }
 
 func has_builtin_equal(ref c: Compiler, type_id: Int) -> Bool {
@@ -3850,18 +3881,18 @@ func has_builtin_equal(ref c: Compiler, type_id: Int) -> Bool {
 }
 
 func is_comparable_interface(ref c: Compiler, type_id: Int) -> Bool {
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_interface && info.name == "comparison.Comparable";
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_interface && info.name == "comparison.Comparable";
 }
 
 func is_display_interface(ref c: Compiler, type_id: Int) -> Bool {
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_interface && info.name == "formatting.Display";
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_interface && info.name == "formatting.Display";
 }
 
 func interface_diagnostic_name(ref c: Compiler, type_id: Int) -> String {
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (!has_struct(info) || !info.is_interface) {
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if (!(info is !null) || !info.is_interface) {
         return get_type_name(ref c, type_id);
     }
     if (info.name == "comparison.Equal") { return "protocol.Equal"; }
@@ -3891,8 +3922,8 @@ func has_builtin_display(ref c: Compiler, type_id: Int) -> Bool {
     type_id = get_repr_type(ref c, type_id);
     if (type_id == TYPE_STRING || type_id == TYPE_CHAR || type_id == TYPE_BOOL || type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { return true; }
     if (is_integer_type(type_id)) { return true; }
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    return has_struct(info) && info.is_enum;
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    return (info is !null) && info.is_enum;
 }
 
 func implements_interface(ref c: Compiler, type_id: Int, interface_id: Int) -> Bool {
@@ -3905,8 +3936,9 @@ func implements_interface(ref c: Compiler, type_id: Int, interface_id: Int) -> B
     if (is_display_interface(ref c, interface_id) && has_builtin_display(ref c, type_id)) {
         return true;
     }
-    let info: StructInfo = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
-    while (has_struct(info)) {
+    let current: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+    while (current is !null) {
+        let info: StructInfo = current;
         let i: Int = 0;
         while (info.interfaces is !null && i < info.interfaces.length()) {
             let item: TypeListNode = info.interfaces[i];
@@ -3916,7 +3948,7 @@ func implements_interface(ref c: Compiler, type_id: Int, interface_id: Int) -> B
         if (info.parent_id == 0) {
             break;
         }
-        info = c.struct_id_map.lookup(info.parent_id);
+        current = c.struct_id_map.lookup(info.parent_id);
     }
     return false;
 }
@@ -3931,8 +3963,8 @@ func check_generic_constraints(ref c: Compiler, template: GenericTemplate, bindi
         let constraint_index: Int = 0;
         while (param.constraints is !null && constraint_index < param.constraints.length()) {
             let constraint_type: Int = resolve_type(ref c, param.constraints[constraint_index]);
-            let constraint_info: StructInfo = c.struct_id_map.lookup(constraint_type);
-            if (!has_struct(constraint_info) || !constraint_info.is_interface) {
+            let constraint_info: Optional(StructInfo) = c.struct_id_map.lookup(constraint_type);
+            if (!(constraint_info is !null) || !constraint_info.is_interface) {
                 throw_type_error(param.pos, "Generic constraint " + interface_diagnostic_name(ref c, constraint_type) + " is not an interface.");
                 restore_generic_context(ref c, previous, previous_bindings);
                 return false;
@@ -3953,8 +3985,8 @@ func check_generic_constraints(ref c: Compiler, template: GenericTemplate, bindi
 func register_generic_class(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
 // the instance key is canonical, every use of the same binding shares one type id
     let key: String = generic_instance_name(template.name, types, ref c);
-    let cached: SymbolInfo = c.generic_instances.lookup(key);
-    if (has_symbol(cached)) { return cached.type; }
+    let cached: Optional(SymbolInfo) = c.generic_instances.lookup(key);
+    if ((cached is !null)) { return cached.type; }
 
     if (c.generic_depth >= 64) {
         throw_type_error(pos, "Generic instantiation depth exceeds 64.");
@@ -4002,12 +4034,12 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
     let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
 
-    let parent_info: StructInfo = StructInfo();
+    let parent_info: Optional(StructInfo) = null;
     if (has_node(node.parent_tok)) {
         let parent_type: Int = resolve_type(ref c, node.parent_tok);
 
         parent_info = c.struct_id_map.lookup(parent_type);
-        if (!has_struct(parent_info) || !parent_info.is_class) {
+        if (!(parent_info is !null) || !parent_info.is_class) {
             throw_type_error(pos, "Type " + get_type_name(ref c, parent_type) + " is not a class.");
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
@@ -4017,7 +4049,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
     let interfaces: Vector(Struct) = [];
     let inherited_interface_index: Int = 0;
-    while (has_struct(parent_info) && parent_info.interfaces is !null && inherited_interface_index < parent_info.interfaces.length()) {
+    while ((parent_info is !null) && parent_info.interfaces is !null && inherited_interface_index < parent_info.interfaces.length()) {
         interfaces.append(parent_info.interfaces[inherited_interface_index]);
         inherited_interface_index++;
     }
@@ -4025,8 +4057,8 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
     let interface_index: Int = 0;
     while (node.interfaces is !null && interface_index < node.interfaces.length()) {
         let interface_type: Int = resolve_type(ref c, node.interfaces[interface_index]);
-        let interface_info: StructInfo = c.struct_id_map.lookup(interface_type);
-        if (!has_struct(interface_info) || !interface_info.is_interface) {
+        let interface_info: Optional(StructInfo) = c.struct_id_map.lookup(interface_type);
+        if (!(interface_info is !null) || !interface_info.is_interface) {
             throw_type_error(pos, "Type " + get_type_name(ref c, interface_type) + " is not an interface.");
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
@@ -4038,10 +4070,11 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
     let fields: Vector(Struct) = [];
     let field_names: Dict(String, StringConstant) = Dict();
-    if (has_struct(parent_info)) {
+    if ((parent_info is !null)) {
+        let meta_parent_info: StructInfo = parent_info;
         let inherited_field_index: Int = 0;
-        while (parent_info.fields is !null && inherited_field_index < parent_info.fields.length()) {
-            let inherited_field: FieldInfo = parent_info.fields[inherited_field_index];
+        while (meta_parent_info.fields is !null && inherited_field_index < meta_parent_info.fields.length()) {
+            let inherited_field: FieldInfo = meta_parent_info.fields[inherited_field_index];
             fields.append(inherited_field);
             field_names.put(inherited_field.name, StringConstant(id=0, value=inherited_field.name));
             inherited_field_index++;
@@ -4060,7 +4093,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
         }
-        if (has_struct(parent_info) && has_func(find_method(parent_info.vtable, field_name))) {
+        if ((parent_info is !null) && (find_method(parent_info.vtable, field_name) is !null)) {
             throw_name_error(field.pos, "Class '" + generic_type_name(template.name, types, ref c) + "' cannot use '" + field_name + "' as both a field and a method.");
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
@@ -4089,7 +4122,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
     let methods: Vector(Struct) = [];
     let inherited_method_index: Int = 0;
-    while (has_struct(parent_info) && parent_info.vtable is !null && inherited_method_index < parent_info.vtable.length()) {
+    while ((parent_info is !null) && parent_info.vtable is !null && inherited_method_index < parent_info.vtable.length()) {
         methods.append(parent_info.vtable[inherited_method_index]);
         inherited_method_index++;
     }
@@ -4107,7 +4140,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
         if (method_node.type_params is !null && method_node.type_params.length() > 0) {
             let method_key: String = key + "_" + method_name;
-            if (has_template(c.generic_methods.lookup(method_key)) || has_func(c.func_table.lookup(method_key))) {
+            if ((c.generic_methods.lookup(method_key) is !null) || (c.func_table.lookup(method_key) is !null)) {
                 throw_name_error(method_node.pos, "Method '" + method_key + "' is already defined.");
                 restore_generic_context(ref c, previous, previous_bindings);
                 return TYPE_POISON;
@@ -4158,7 +4191,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         }
 
         let method_key: String = key + "_" + method_name;
-        if (has_func(c.func_table.lookup(method_key)) || has_template(c.generic_methods.lookup(method_key))) {
+        if ((c.func_table.lookup(method_key) is !null) || (c.generic_methods.lookup(method_key) is !null)) {
             throw_name_error(method_node.pos, "Method '" + method_key + "' is already defined.");
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
@@ -4230,21 +4263,25 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 }
 
 func queue_generic_class_method(ref c: Compiler, owner: StructInfo, name: String) -> Void {
-    if (!has_struct(owner) || !has_template(c.generic_instance_templates.lookup("" + owner.type_id))) {
+    if (!has_struct(owner) || !(c.generic_instance_templates.lookup("" + owner.type_id) is !null)) {
         return;
     }
 
     let key: String = owner.name + "_" + name;
-    if (c.generic_methods_queued.lookup(key)) {
+    if (c.generic_methods_queued.contains_key(key)) {
         return;
     }
 
-    let template: GenericTemplate = c.generic_class_methods.lookup(key);
-    if (!has_template(template)) {
+    let template: Optional(GenericTemplate) = c.generic_class_methods.lookup(key);
+    if (!(template is !null)) {
         return;
     }
 
-    let bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + owner.type_id);
+    let bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + owner.type_id);
+    if (bindings is null) {
+        throw_internal_compiler_error(Position(), "Missing generic class bindings.");
+        return;
+    }
     c.generic_methods_queued.put(key, true);
     c.generic_method_worklist.append(GenericMethodInstance(template=template, bindings=bindings, func_key=key, owner_name=owner.name, depth=c.generic_depth));
 }
@@ -4262,8 +4299,8 @@ func is_type_parameter(template: GenericTemplate, name: String) -> Bool {
 func bind_inferred_type(inferred: Dict(String, SymbolInfo), name: String, actual: Int, pos: Position) -> Bool {
     if (actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
 
-    let previous: SymbolInfo = inferred.lookup(name);
-    if (has_symbol(previous) && previous.type != actual) {
+    let previous: Optional(SymbolInfo) = inferred.lookup(name);
+    if ((previous is !null) && previous.type != actual) {
         throw_type_error(pos, "Conflicting types inferred for '" + name + "'.");
         return false;
     }
@@ -4287,24 +4324,25 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
     }
 
     if (base == NODE_VECTOR_TYPE) {
-        let vector: SymbolInfo = c.vector_base_map.lookup(actual);
-        if (!has_symbol(vector)) { return true; }
+        let vector: Optional(SymbolInfo) = c.vector_base_map.lookup(actual);
+        if (!(vector is !null)) { return true; }
         let pattern_vector: VectorTypeNode = get_vector_type_node(ref c.arena, pattern);
         return infer_type_args(ref c, template, pattern_vector.element_type, vector.type, inferred, pos);
     }
 
     if (base == NODE_SLICE_TYPE) {
-        let slice: ArrayInfo = c.array_info_map.lookup(actual);
-        if (!has_array_info(slice) || slice.size != -1) { return true; }
+        let slice: Optional(ArrayInfo) = c.array_info_map.lookup(actual);
+        if (!(slice is !null) || slice.size != -1) { return true; }
         let pattern_slice: SliceTypeNode = get_slice_type_node(ref c.arena, pattern);
         return infer_type_args(ref c, template, pattern_slice.element_type, slice.base_type, inferred, pos);
     }
 
     if (base == NODE_ARRAY_TYPE) {
-        let array: ArrayInfo = c.array_info_map.lookup(actual);
-        if (!has_array_info(array) || array.size < 0) { return true; }
+        let array: Optional(ArrayInfo) = c.array_info_map.lookup(actual);
+        if (!(array is !null) || array.size < 0) { return true; }
+        let meta_array: ArrayInfo = array;
         let pattern_array: ArrayTypeNode = get_array_type_node(ref c.arena, pattern);
-        return infer_type_args(ref c, template, pattern_array.base_type, array.base_type, inferred, pos);
+        return infer_type_args(ref c, template, pattern_array.base_type, meta_array.base_type, inferred, pos);
     }
 
     if (base == NODE_PTR_TYPE) {
@@ -4312,20 +4350,22 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
         let current: Int = actual;
         let level: Int = 0;
         while (level < pointer.level) {
-            let ptr_info: SymbolInfo = c.ptr_base_map.lookup(current);
-            if (!has_symbol(ptr_info)) { return true; }
+            let ptr_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(current);
+            if (!(ptr_info is !null)) { return true; }
+            let meta_ptr_info: SymbolInfo = ptr_info;
 
-            current = ptr_info.type;
+            current = meta_ptr_info.type;
             level += 1;
         }
         return infer_type_args(ref c, template, pointer.base_type, current, inferred, pos);
     }
 
     if (base == NODE_FALLIBLE_TYPE) {
-        let fallible: SymbolInfo = c.fallible_base_map.lookup(actual);
-        if (!has_symbol(fallible)) { return true; }
+        let fallible: Optional(SymbolInfo) = c.fallible_base_map.lookup(actual);
+        if (!(fallible is !null)) { return true; }
+        let meta_fallible: SymbolInfo = fallible;
         let pattern_fallible: FallibleTypeNode = get_fallible_type_node(ref c.arena, pattern);
-        return infer_type_args(ref c, template, pattern_fallible.base_type, fallible.type, inferred, pos);
+        return infer_type_args(ref c, template, pattern_fallible.base_type, meta_fallible.type, inferred, pos);
     }
 
     if (base == NODE_GENERIC_TYPE) {
@@ -4334,42 +4374,44 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
         if (generic_base == NODE_VAR_ACCESS) {
             let named: VarAccessNode = get_var_access_node(ref c.arena, generic.base_type);
             if (named.name_tok.value == "Vector") {
-                let vector: SymbolInfo = c.vector_base_map.lookup(actual);
-                if (has_symbol(vector) && generic.type_args.length() == 1) {
+                let vector: Optional(SymbolInfo) = c.vector_base_map.lookup(actual);
+                if ((vector is !null) && generic.type_args.length() == 1) {
                     return infer_type_args(ref c, template, generic.type_args[0], vector.type, inferred, pos);
                 }
                 return true;
             }
             if (named.name_tok.value == "Array") {
-                let slice: ArrayInfo = c.array_info_map.lookup(actual);
-                if (has_array_info(slice) && slice.size == -1 && generic.type_args.length() == 1) {
+                let slice: Optional(ArrayInfo) = c.array_info_map.lookup(actual);
+                if ((slice is !null) && slice.size == -1 && generic.type_args.length() == 1) {
                     return infer_type_args(ref c, template, generic.type_args[0], slice.base_type, inferred, pos);
                 }
                 return true;
             }
 
-            let actual_bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + actual);
-            let actual_info: StructInfo = c.struct_id_map.lookup(actual);
-            if (actual_bindings is null || !has_struct(actual_info)) { return true; }
+            let actual_bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + actual);
+            let actual_info: Optional(StructInfo) = c.struct_id_map.lookup(actual);
+            if (actual_bindings is null || !(actual_info is !null)) { return true; }
+            let meta_actual_bindings: Dict(String, SymbolInfo) = actual_bindings;
 
             let generic_name: String = named.name_tok.value;
-            if (c.current_package_prefix != "" && has_template(c.generic_structs.lookup(c.current_package_prefix + generic_name))) {
+            if (c.current_package_prefix != "" && (c.generic_structs.lookup(c.current_package_prefix + generic_name) is !null)) {
                 generic_name = c.current_package_prefix + generic_name;
             }
 
-            let alias: String = c.current_file_type_aliases.lookup(generic_name);
+            let alias: Optional(String) = c.current_file_type_aliases.lookup(generic_name);
             if (alias is !null) { generic_name = alias; }
 
-            let nested_template: GenericTemplate = c.generic_structs.lookup(generic_name);
-            if (!has_template(nested_template) || !actual_info.name.starts_with(generic_name + "$")) {
+            let nested_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_name);
+            if (!(nested_template is !null) || !actual_info.name.starts_with(generic_name + "$")) {
                 return true;
             }
+            let meta_nested_template: GenericTemplate = nested_template;
 
             let i: Int = 0;
-            while (i < generic.type_args.length() && i < nested_template.type_params.length()) {
-                let nested_param: GenericParamNode = nested_template.type_params[i];
-                let nested_actual: SymbolInfo = actual_bindings.lookup(nested_param.name_tok.value);
-                if (has_symbol(nested_actual) &&
+            while (i < generic.type_args.length() && i < meta_nested_template.type_params.length()) {
+                let nested_param: GenericParamNode = meta_nested_template.type_params[i];
+                let nested_actual: Optional(SymbolInfo) = meta_actual_bindings.lookup(nested_param.name_tok.value);
+                if ((nested_actual is !null) &&
                     !infer_type_args(ref c, template, generic.type_args[i], nested_actual.type, inferred, pos)) {
                     return false;
                 }
@@ -4393,7 +4435,7 @@ func generic_constructor_context(ref c: Compiler, template: GenericTemplate, exp
     while (i < union.members.length()) {
         let member = get_repr_type(ref c, union.members[i]);
         let instance = c.generic_instance_templates.lookup("" + member);
-        if (has_template(instance) && instance.name == template.name) {
+        if ((instance is !null) && instance.name == template.name) {
             if (match != 0) { return 0; }
             match = member;
         }
@@ -4408,17 +4450,18 @@ func infer_generic_instance(ref c: Compiler, template: GenericTemplate, actual: 
     actual = generic_constructor_context(ref c, template, actual);
     if (actual == 0) { return true; }
 
-    let actual_template: GenericTemplate = c.generic_instance_templates.lookup("" + actual);
-    if (!has_template(actual_template) || actual_template.name != template.name) { return true; }
+    let actual_template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + actual);
+    if (!(actual_template is !null) || actual_template.name != template.name) { return true; }
 
-    let actual_bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + actual);
+    let actual_bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + actual);
     if (actual_bindings is null) { return true; }
+    let meta_actual_bindings: Dict(String, SymbolInfo) = actual_bindings;
 
     let i: Int = 0;
     while (i < template.type_params.length()) {
         let param: GenericParamNode = template.type_params[i];
-        let binding: SymbolInfo = actual_bindings.lookup(param.name_tok.value);
-        if (has_symbol(binding) && !bind_inferred_type(inferred, param.name_tok.value, binding.type, pos)) {
+        let binding: Optional(SymbolInfo) = meta_actual_bindings.lookup(param.name_tok.value);
+        if ((binding is !null) && !bind_inferred_type(inferred, param.name_tok.value, binding.type, pos)) {
             return false;
         }
         i += 1;
@@ -4427,8 +4470,8 @@ func infer_generic_instance(ref c: Compiler, template: GenericTemplate, actual: 
 }
 
 func concrete_constructor_accepts(ref c: Compiler, name: String, args: Vector(ArgNode)) -> Bool {
-    let info: StructInfo = c.struct_table.lookup(name);
-    if (!has_struct(info)) { return false; }
+    let info: Optional(StructInfo) = c.struct_table.lookup(name);
+    if (!(info is !null)) { return false; }
 
     let count: Int = 0;
     if (args is !null) { count = args.length(); }
@@ -4437,8 +4480,8 @@ func concrete_constructor_accepts(ref c: Compiler, name: String, args: Vector(Ar
         if (info.fields is !null) { fields = info.fields.length(); }
         return count == fields;
     }
-    let init: FuncInfo = c.func_table.lookup(info.name + "_$init");
-    if (!has_func(init)) {
+    let init: Optional(FuncInfo) = c.func_table.lookup(info.name + "_$init");
+    if (!(init is !null)) {
         return count == 0;
     }
     let params: Int = 0;
@@ -4451,8 +4494,8 @@ func use_generic_constructor(ref c: Compiler, name: String, template: GenericTem
     if (explicit is !null) { return true; }
 
     expected = generic_constructor_context(ref c, template, expected);
-    let expected_template: GenericTemplate = c.generic_instance_templates.lookup("" + expected);
-    if (has_template(expected_template) && expected_template.name == template.name) { return true; }
+    let expected_template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + expected);
+    if ((expected_template is !null) && expected_template.name == template.name) { return true; }
     return !concrete_constructor_accepts(ref c, name, args);
 }
 
@@ -4501,16 +4544,16 @@ func generic_arg_type(ref c: Compiler, arg: ArgNode, params: Vector(ParamNode), 
     c.expected_type = previous_expected;
 
     if (param_index >= 0 && params[param_index].pass_mode == PARAM_REF) {
-        let pointer: SymbolInfo = c.ptr_base_map.lookup(actual_type);
-        if (has_symbol(pointer)) { return pointer.type; }
+        let pointer: Optional(SymbolInfo) = c.ptr_base_map.lookup(actual_type);
+        if ((pointer is !null)) { return pointer.type; }
     }
 
     if (!arg.is_spread || param_index < 0 || !params[param_index].is_variadic) { return actual_type; }
 
-    let array_info: ArrayInfo = c.array_info_map.lookup(actual_type);
-    if (has_array_info(array_info)) { return array_info.base_type; }
-    let vector_info: SymbolInfo = c.vector_base_map.lookup(actual_type);
-    if (has_symbol(vector_info)) { return vector_info.type; }
+    let array_info: Optional(ArrayInfo) = c.array_info_map.lookup(actual_type);
+    if ((array_info is !null)) { return array_info.base_type; }
+    let vector_info: Optional(SymbolInfo) = c.vector_base_map.lookup(actual_type);
+    if ((vector_info is !null)) { return vector_info.type; }
     return actual_type;
 }
 
@@ -4555,8 +4598,8 @@ func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate
     i = 0;
     while (i < count) {
         let type_param: GenericParamNode = template.type_params[i];
-        let inferred_type: SymbolInfo = inferred.lookup(type_param.name_tok.value);
-        if (!has_symbol(inferred_type)) {
+        let inferred_type: Optional(SymbolInfo) = inferred.lookup(type_param.name_tok.value);
+        if (!(inferred_type is !null)) {
             throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for type '" + template.name + "'.");
             return null;
         }
@@ -4610,8 +4653,8 @@ func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: 
     i = 0;
     while (i < count) {
         let type_param: GenericParamNode = template.type_params[i];
-        let inferred_type: SymbolInfo = inferred.lookup(type_param.name_tok.value);
-        if (!has_symbol(inferred_type)) {
+        let inferred_type: Optional(SymbolInfo) = inferred.lookup(type_param.name_tok.value);
+        if (!(inferred_type is !null)) {
             throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for function '" + template.name + "'.");
             return null;
         }
@@ -4663,8 +4706,8 @@ func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, exp
     i = 0;
     while (i < count) {
         let type_param: GenericParamNode = template.type_params[i];
-        let inferred_type: SymbolInfo = inferred.lookup(type_param.name_tok.value);
-        if (!has_symbol(inferred_type)) {
+        let inferred_type: Optional(SymbolInfo) = inferred.lookup(type_param.name_tok.value);
+        if (!(inferred_type is !null)) {
             throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for method '" + node.name_tok.value + "'.");
             return null;
         }
@@ -4674,25 +4717,25 @@ func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, exp
     return result;
 }
 
-func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: StructInfo, types: Vector(Struct), pos: Position) -> FuncInfo {
+func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: StructInfo, types: Vector(Struct), pos: Position) -> Optional(FuncInfo) {
     let key: String = generic_instance_name(template.name, types, ref c);
-    let cached: FuncInfo = c.func_table.lookup(key);
-    if (has_func(cached)) { return cached; }
+    let cached: Optional(FuncInfo) = c.func_table.lookup(key);
+    if ((cached is !null)) { return cached; }
     if (c.generic_depth >= 64) {
         throw_type_error(pos, "Generic instantiation depth exceeds 64.");
-        return FuncInfo();
+        return null;
     }
     if (c.generic_instance_count >= 4096) {
         throw_type_error(pos, "Generic instantiation limit exceeded.");
-        return FuncInfo();
+        return null;
     }
     c.generic_instance_count++;
 
     let node: MethodDefNode = get_method_def_node(ref c.arena, template.node);
-    let owner_bindings: Dict(String, SymbolInfo) = c.generic_instance_bindings.lookup("" + owner.type_id);
+    let owner_bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + owner.type_id);
     let bindings: Dict(String, SymbolInfo) = extend_generic_bindings(owner_bindings, template.type_params, types);
     if (!check_generic_constraints(ref c, template, bindings, types, pos)) {
-        return FuncInfo();
+        return null;
     }
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
     let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
@@ -4735,19 +4778,19 @@ func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: 
     return info;
 }
 
-func register_generic_func(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> FuncInfo {
+func register_generic_func(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Optional(FuncInfo) {
     let key: String = generic_instance_name(template.name, types, ref c);
-    let cached: FuncInfo = c.func_table.lookup(key);
-    if (has_func(cached)) { return cached; }
+    let cached: Optional(FuncInfo) = c.func_table.lookup(key);
+    if ((cached is !null)) { return cached; }
 
     if (c.generic_depth >= 64) {
         throw_type_error(pos, "Generic instantiation depth exceeds 64.");
-        return FuncInfo();
+        return null;
     }
 
     if (c.generic_instance_count >= 4096) {
         throw_type_error(pos, "Generic instantiation limit exceeded.");
-        return FuncInfo();
+        return null;
     }
 
     c.generic_instance_count += 1;
@@ -4755,7 +4798,7 @@ func register_generic_func(ref c: Compiler, template: GenericTemplate, types: Ve
     let node: FunctionDefNode = get_func_def_node(ref c.arena, template.node);
     let bindings: Dict(String, SymbolInfo) = generic_bindings(template.type_params, types);
     if (!check_generic_constraints(ref c, template, bindings, types, pos)) {
-        return FuncInfo();
+        return null;
     }
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
     let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
@@ -4846,30 +4889,31 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
             return get_slice_type_id(ref c, resolve_type(ref c, args[0]));
         }
         let key: String = generic_symbol_name(ref c, generic.base_type, false);
-        let template: GenericTemplate = c.generic_structs.lookup(key);
-        if (!has_template(template)) {
-            let exported_key: String = c.global_type_aliases.lookup(key);
+        let template: Optional(GenericTemplate) = c.generic_structs.lookup(key);
+        if (!(template is !null)) {
+            let exported_key: Optional(String) = c.global_type_aliases.lookup(key);
             if (exported_key is !null) {
                 template = c.generic_structs.lookup(exported_key);
                 key = exported_key;
             }
         }
-        if (!has_template(template) && base_node == NODE_VAR_ACCESS) {
+        if (!(template is !null) && base_node == NODE_VAR_ACCESS) {
             let named: VarAccessNode = get_var_access_node(ref c.arena, generic.base_type);
-            let import_key: String = c.current_file_type_aliases.lookup(named.name_tok.value);
+            let import_key: Optional(String) = c.current_file_type_aliases.lookup(named.name_tok.value);
             if (import_key is !null) {
                 template = c.generic_structs.lookup(import_key);
                 key = import_key;
             }
         }
-        if (!has_template(template)) {
+        if (!(template is !null)) {
             throw_type_error(generic.pos, "Type '" + key + "' is not generic.");
             return TYPE_POISON;
         }
-        if (args is null || args.length() != template.type_params.length()) {
+        let meta_template: GenericTemplate = template;
+        if (args is null || args.length() != meta_template.type_params.length()) {
             let got: Int = 0;
             if (args is !null) { got = args.length(); }
-            throw_type_error(generic.pos, "Type '" + key + "' expects " + template.type_params.length() + " type arguments, got " + got + ".");
+            throw_type_error(generic.pos, "Type '" + key + "' expects " + meta_template.type_params.length() + " type arguments, got " + got + ".");
             return TYPE_POISON;
         }
         let instance_key: String = key;
@@ -4883,26 +4927,26 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
             i += 1;
         }
 
-        let cached: SymbolInfo = c.generic_instances.lookup(instance_key);
-        if (has_symbol(cached)) {
-            if (cached.type == TYPE_POISON && node_tag(template.node) == NODE_TYPE_DECL) {
+        let cached: Optional(SymbolInfo) = c.generic_instances.lookup(instance_key);
+        if ((cached is !null)) {
+            if (cached.type == TYPE_POISON && node_tag(meta_template.node) == NODE_TYPE_DECL) {
                 throw_type_error(generic.pos, "Type alias '" + key + "' is recursive.");
             }
             return cached.type;
         }
 
-        let template_base: Int = node_tag(template.node);
+        let template_base: Int = node_tag(meta_template.node);
         if (template_base == NODE_TYPE_DECL) {
-            return instantiate_alias(ref c, template, concrete, instance_key, generic.pos);
+            return instantiate_alias(ref c, meta_template, concrete, instance_key, generic.pos);
         }
         if (template_base == NODE_CLASS_DEF) {
-            return register_generic_class(ref c, template, concrete, generic.pos);
+            return register_generic_class(ref c, meta_template, concrete, generic.pos);
         }
         if (template_base == NODE_INTERFACE_DEF) {
-            return register_generic_interface(ref c, template, concrete, generic.pos);
+            return register_generic_interface(ref c, meta_template, concrete, generic.pos);
         }
 
-        return register_generic_struct(ref c, template, concrete, generic.pos);
+        return register_generic_struct(ref c, meta_template, concrete, generic.pos);
     }
 
     if (base == NODE_FUNCTION_TYPE) {
@@ -5000,9 +5044,9 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let size: Int = string_to_int(arr_node.size_tok.value, arr_node.pos);
 
         let cache_key: String = "arr_" + base_id + "_" + size;
-        let cached: SymbolInfo = c.array_type_cache.lookup(cache_key);
+        let cached: Optional(SymbolInfo) = c.array_type_cache.lookup(cache_key);
 
-        if (has_symbol(cached)) { return cached.type; }
+        if ((cached is !null)) { return cached.type; }
 
         let new_id: Int = c.type_counter;
         c.type_counter += 1;
@@ -5027,8 +5071,8 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let v: VarAccessNode = get_var_access_node(ref c.arena, node);
         let name: String = v.name_tok.value;
 
-        let generic_type: SymbolInfo = c.generic_bindings.lookup(name);
-        if (has_symbol(generic_type)) { return generic_type.type; }
+        let generic_type: Optional(SymbolInfo) = c.generic_bindings.lookup(name);
+        if ((generic_type is !null)) { return generic_type.type; }
         if (name == "Self") {
             throw_type_error(v.pos, "Self is only available in an interface method declaration.");
             return TYPE_POISON;
@@ -5063,45 +5107,45 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         if (name == "Auto") { return TYPE_AUTO; }
         if (name == "AnyPtr") { return TYPE_ANYPTR; }
 
-        let named_info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + name);
-        if (has_named_type(named_info)) {
+        let named_info: Optional(NamedTypeInfo) = c.named_types.lookup(c.current_package_prefix + name);
+        if ((named_info is !null)) {
             return resolve_named_type(ref c, named_info);
         }
 
-        let internal_info: StructInfo = c.struct_table.lookup(c.current_package_prefix + name);
-        if (has_struct(internal_info)) { return internal_info.type_id; }
+        let internal_info: Optional(StructInfo) = c.struct_table.lookup(c.current_package_prefix + name);
+        if ((internal_info is !null)) { return internal_info.type_id; }
 
-        let full_name: String = c.current_file_type_aliases.lookup(name);
+        let full_name: Optional(String) = c.current_file_type_aliases.lookup(name);
         if (full_name is !null) {
             named_info = c.named_types.lookup(full_name);
-            if (has_named_type(named_info)) {
+            if ((named_info is !null)) {
                 return resolve_named_type(ref c, named_info);
             }
-            let s_info: StructInfo = c.struct_table.lookup(full_name);
-            if (has_struct(s_info)) { return s_info.type_id; }
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(full_name);
+            if ((s_info is !null)) { return s_info.type_id; }
         }
 
-        let s_info: StructInfo = c.struct_table.lookup(name);
-        if (has_struct(s_info)) { return s_info.type_id; }
+        let s_info: Optional(StructInfo) = c.struct_table.lookup(name);
+        if ((s_info is !null)) { return s_info.type_id; }
 
-        let local_alias: String = c.current_file_type_aliases.lookup(name);
+        let local_alias: Optional(String) = c.current_file_type_aliases.lookup(name);
         if (local_alias is !null) {
             named_info = c.named_types.lookup(local_alias);
-            if (has_named_type(named_info)) {
+            if ((named_info is !null)) {
                 return resolve_named_type(ref c, named_info);
             }
-            let s_info: StructInfo = c.struct_table.lookup(local_alias);
-            if (has_struct(s_info)) { return s_info.type_id; }
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(local_alias);
+            if ((s_info is !null)) { return s_info.type_id; }
         }
 
-        let g_alias: String = c.global_type_aliases.lookup(name);
+        let g_alias: Optional(String) = c.global_type_aliases.lookup(name);
         if (g_alias is !null) {
             named_info = c.named_types.lookup(g_alias);
-            if (has_named_type(named_info)) {
+            if ((named_info is !null)) {
                 return resolve_named_type(ref c, named_info);
             }
-            let s_info: StructInfo = c.struct_table.lookup(g_alias);
-            if (has_struct(s_info)) { return s_info.type_id; }
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(g_alias);
+            if ((s_info is !null)) { return s_info.type_id; }
         }
 
         throw_type_error(v.pos, "Unknown type: " + name);
@@ -5130,31 +5174,31 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
             }
 
             let full_name: String = "";
-            let module_prefix: String = c.current_file_visible_prefixes.lookup(pkg_name);
+            let module_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(pkg_name);
             if (module_prefix is !null) {
                 full_name = module_member_name(module_prefix, path_parts, type_name);
             } else {
                 let source_name: String = module_member_name(pkg_name + ".", path_parts, type_name);
-                let mapped_type: String = c.current_file_type_aliases.lookup(source_name);
+                let mapped_type: Optional(String) = c.current_file_type_aliases.lookup(source_name);
                 if (mapped_type is !null) { full_name = mapped_type; }
             }
 
-            let s_info: StructInfo = c.struct_table.lookup(full_name);
-            if (has_struct(s_info)) { return s_info.type_id; }
+            let s_info: Optional(StructInfo) = c.struct_table.lookup(full_name);
+            if ((s_info is !null)) { return s_info.type_id; }
 
-            let named_info: NamedTypeInfo = c.named_types.lookup(full_name);
-            if (has_named_type(named_info)) {
+            let named_info: Optional(NamedTypeInfo) = c.named_types.lookup(full_name);
+            if ((named_info is !null)) {
                 return resolve_named_type(ref c, named_info);
             }
 
-            let g_alias: String = c.global_type_aliases.lookup(full_name);
+            let g_alias: Optional(String) = c.global_type_aliases.lookup(full_name);
             if (g_alias is !null) {
                 named_info = c.named_types.lookup(g_alias);
-                if (has_named_type(named_info)) {
+                if ((named_info is !null)) {
                     return resolve_named_type(ref c, named_info);
                 }
-                let type_s_info: StructInfo = c.struct_table.lookup(g_alias);
-                if (has_struct(type_s_info)) { return type_s_info.type_id; }
+                let type_s_info: Optional(StructInfo) = c.struct_table.lookup(g_alias);
+                if ((type_s_info is !null)) { return type_s_info.type_id; }
             }
 
             throw_type_error(f_acc.pos, "Unknown module type: " + full_name);
@@ -5208,9 +5252,9 @@ func get_method_def_sig_str(ref c: Compiler, m_node: MethodDefNode) -> String {
 }
 
 func runtime_type_name(ref c: Compiler, type_id: Int) -> String {
-    let callable: Bool = c.func_ret_map is !null && has_symbol(c.func_ret_map.lookup(type_id));
+    let callable: Bool = c.func_ret_map is !null && c.func_ret_map.contains_key(type_id);
     if (!callable) {
-        callable = c.method_ret_map is !null && has_symbol(c.method_ret_map.lookup(type_id));
+        callable = c.method_ret_map is !null && (c.method_ret_map.lookup(type_id) is !null);
     }
     if callable {
         // callable labels belong to source binding, not runtime type identity
@@ -5246,8 +5290,8 @@ func type_fingerprint(ref c: Compiler, type_id: Int) -> UInt64 {
 }
 
 func mangle_type(ref c: Compiler, type_id: Int) -> String {
-    let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) {
+    let named: Optional(NamedTypeInfo) = get_named_type(ref c, type_id);
+    if ((named is !null)) {
         return "N" + named.name.length() + named.name;
     }
     let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
@@ -5319,65 +5363,67 @@ func mangle_type(ref c: Compiler, type_id: Int) -> String {
         return "Ge";
     }
 
-    let ptr_info: SymbolInfo = c.ptr_base_map.lookup(type_id);
-    if (has_symbol(ptr_info)) {
+    let ptr_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(type_id);
+    if ((ptr_info is !null)) {
         return "P" + mangle_type(ref c, ptr_info.type);
     }
 
-    let arr_info: ArrayInfo = c.array_info_map.lookup(type_id);
-    if (has_array_info(arr_info)) {
+    let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(type_id);
+    if ((arr_info is !null)) {
         if (arr_info.size == -1) {
             return "Q" + mangle_type(ref c, arr_info.base_type);
         }
         return "A" + arr_info.size + "_" + mangle_type(ref c, arr_info.base_type);
     }
 
-    let vec_info: SymbolInfo = c.vector_base_map.lookup(type_id);
-    if (has_symbol(vec_info)) {
+    let vec_info: Optional(SymbolInfo) = c.vector_base_map.lookup(type_id);
+    if ((vec_info is !null)) {
         return "V" + mangle_type(ref c, vec_info.type);
     }
 
-    let fallible_info: SymbolInfo = c.fallible_base_map.lookup(type_id);
-    if (has_symbol(fallible_info)) {
+    let fallible_info: Optional(SymbolInfo) = c.fallible_base_map.lookup(type_id);
+    if ((fallible_info is !null)) {
         return "R" + mangle_type(ref c, fallible_info.type);
     }
 
-    let func_info: SymbolInfo = c.func_ret_map.lookup(type_id);
-    if (has_symbol(func_info)) {
+    let func_info: Optional(SymbolInfo) = c.func_ret_map.lookup(type_id);
+    if ((func_info is !null)) {
+        let meta_func_info: SymbolInfo = func_info;
         let encoded: String = "F";
-        let args: Vector(Struct) = func_info.func_arg_types;
+        let args: Vector(Struct) = meta_func_info.func_arg_types;
         let len: Int = 0;
         if (args is !null) { len = args.length(); }
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
-            if (func_info.variadic_param == i + 1) { encoded += "Z"; }
+            if (meta_func_info.variadic_param == i + 1) { encoded += "Z"; }
             if (arg.pass_mode == PARAM_REF) { encoded += "L"; }
             encoded += mangle_type(ref c, arg.type);
             i += 1;
         }
-        return encoded + "E" + mangle_type(ref c, func_info.type);
+        return encoded + "E" + mangle_type(ref c, meta_func_info.type);
     }
 
-    let method_info: SymbolInfo = c.method_ret_map.lookup(type_id);
-    if (has_symbol(method_info)) {
+    let method_info: Optional(SymbolInfo) = c.method_ret_map.lookup(type_id);
+    if ((method_info is !null)) {
+        let meta_method_info: SymbolInfo = method_info;
         let encoded: String = "M";
-        let args: Vector(Struct) = method_info.func_arg_types;
+        let args: Vector(Struct) = meta_method_info.func_arg_types;
         let len: Int = 0;
         if (args is !null) { len = args.length(); }
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
-            if (method_info.variadic_param == i + 1) { encoded += "Z"; }
+            if (meta_method_info.variadic_param == i + 1) { encoded += "Z"; }
             if (arg.pass_mode == PARAM_REF) { encoded += "L"; }
             encoded += mangle_type(ref c, arg.type);
             i += 1;
         }
-        return encoded + "E" + mangle_type(ref c, method_info.type);
+        return encoded + "E" + mangle_type(ref c, meta_method_info.type);
     }
 
-    let struct_info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (has_struct(struct_info)) {
+    let struct_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((struct_info is !null)) {
         return "N" + struct_info.name.length() + struct_info.name + "E";
     }
 
@@ -5418,12 +5464,12 @@ func mangle_wl_name(ref c: Compiler, prefix: String, base_name: String, arg_type
 }
 
 func get_mangled_symbol(ref c: Compiler, link_name: String, pos: Position) -> String {
-    let func_key: String = c.compiler_link.lookup(link_name);
+    let func_key: Optional(String) = c.compiler_link.lookup(link_name);
     let name: String = null;
 
     if (func_key is !null) {
-        let f_info: FuncInfo = c.func_table.lookup(func_key);
-        if (has_func(f_info)) { name = f_info.name; }
+        let f_info: Optional(FuncInfo) = c.func_table.lookup(func_key);
+        if ((f_info is !null)) { name = f_info.name; }
     }
 
     if (name is null && has_position(pos)) {
@@ -6098,14 +6144,15 @@ func check_out_index(ref c: Compiler, target_node: NodeID, index_node: NodeID, p
 // oop
 func is_subclass(ref c: Compiler, child_id: Int, parent_id: Int) -> Bool {
     if (child_id == parent_id) { return true; }
-    let s_info: StructInfo = c.struct_id_map.lookup(child_id);
-    if (!has_struct(s_info)) { return false; }
-    if (parent_id == TYPE_GENERIC_ENUM && s_info.is_enum) { return true; }
-    let curr_parent: Int = s_info.parent_id;
+    let s_info: Optional(StructInfo) = c.struct_id_map.lookup(child_id);
+    if (!(s_info is !null)) { return false; }
+    let meta_s_info: StructInfo = s_info;
+    if (parent_id == TYPE_GENERIC_ENUM && meta_s_info.is_enum) { return true; }
+    let curr_parent: Int = meta_s_info.parent_id;
     while (curr_parent != 0) {
         if (curr_parent == parent_id) { return true; }
-        let p_info: StructInfo = c.struct_id_map.lookup(curr_parent);
-        if (!has_struct(p_info)) { return false; }
+        let p_info: Optional(StructInfo) = c.struct_id_map.lookup(curr_parent);
+        if (!(p_info is !null)) { return false; }
         curr_parent = p_info.parent_id;
     }
     return false;

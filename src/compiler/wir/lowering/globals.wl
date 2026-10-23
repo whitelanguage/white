@@ -76,30 +76,30 @@ func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
     }
 
     let key: String = name;
-    let info: SymbolInfo = SymbolInfo();
+    let info: Optional(SymbolInfo) = null;
     if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
         key = source.current_package_prefix + name;
         info = source.global_symbol_table.lookup(key);
     }
-    if (!has_symbol(info)) {
+    if (!(info is !null)) {
         key = name;
         info = source.global_symbol_table.lookup(key);
     }
-    if (!has_symbol(info) && source.current_file_global_aliases is !null) {
-        let mapped: String = source.current_file_global_aliases.lookup(name);
+    if (!(info is !null) && source.current_file_global_aliases is !null) {
+        let mapped: Optional(String) = source.current_file_global_aliases.lookup(name);
         if (mapped is !null) {
             key = mapped;
             info = source.global_symbol_table.lookup(key);
         }
     }
-    if (!has_symbol(info) && source.global_var_aliases is !null) {
-        let mapped: String = source.global_var_aliases.lookup(name);
+    if (!(info is !null) && source.global_var_aliases is !null) {
+        let mapped: Optional(String) = source.global_var_aliases.lookup(name);
         if (mapped is !null) {
             key = mapped;
             info = source.global_symbol_table.lookup(key);
         }
     }
-    if (!has_symbol(info)) {
+    if (!(info is !null)) {
         return no_wir_source_global();
     }
 

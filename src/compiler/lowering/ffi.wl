@@ -97,8 +97,8 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     let full_func_name: String = func_name;
     if (c.current_package_prefix.length() > 0) { full_func_name = c.current_package_prefix + func_name; }
 
-    let existing_func: FuncInfo = c.func_table.lookup(full_func_name);
-    if (has_func(existing_func)) {
+    let existing_func: Optional(FuncInfo) = c.func_table.lookup(full_func_name);
+    if ((existing_func is !null)) {
         throw_name_error(node.pos, "Function '" + full_func_name + "' is already defined.");
         return void_result();
     }
@@ -111,8 +111,8 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
         throw_extern_error(node.pos, "Extern declaration for compiler-provided symbol '" + func_name + "' has an incompatible signature.");
         return void_result();
     }
-    let existing_decl: StringConstant = c.declared_externs.lookup(func_name);
-    if (!has_string_constant(existing_decl)) {
+    let existing_decl: Optional(StringConstant) = c.declared_externs.lookup(func_name);
+    if (!(existing_decl is !null)) {
         if (backend_signature.length() == 0) {
             c.output_file.write("declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n");
         }

@@ -7,29 +7,29 @@ import * from "../frontend/tokens.wl"
 import * from "target.wl"
 
 
-func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> SymbolInfo {
-    if (!has_node(node)) { return SymbolInfo(); }
+func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> Optional(SymbolInfo) {
+    if (!has_node(node)) { return null; }
     let base: Int = node_tag(node);
-    let info: SymbolInfo = SymbolInfo();
+    let info: Optional(SymbolInfo) = null;
     if (base == NODE_FIELD_ACCESS) {
         let name: String = format_ast_path(ref c, node);
-        let mapped: String = c.current_file_global_aliases.lookup(name);
+        let mapped: Optional(String) = c.current_file_global_aliases.lookup(name);
         if (mapped is null) { mapped = c.global_var_aliases.lookup(name); }
         if (mapped is !null) { info = c.global_symbol_table.lookup(mapped); }
-        if (!has_symbol(info)) { info = c.global_symbol_table.lookup(name); }
+        if (!(info is !null)) { info = c.global_symbol_table.lookup(name); }
     } else if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(ref c.arena, node);
         info = find_symbol(ref c, access.name_tok.value);
     }
-    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) {
-        return SymbolInfo();
+    if (!(info is !null) || !info.reg.starts_with("$intrinsic.")) {
+        return null;
     }
     return info;
 }
 
 func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
-    let info: SymbolInfo = target_intrinsic_symbol(ref c, node);
-    if (!has_symbol(info)) { return ""; }
+    let info: Optional(SymbolInfo) = target_intrinsic_symbol(ref c, node);
+    if (!(info is !null)) { return ""; }
     return info.reg.slice(11, info.reg.length());
 }
 

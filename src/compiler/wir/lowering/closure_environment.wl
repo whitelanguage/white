@@ -141,14 +141,15 @@ func wir_alloc_closure_environment(
         state.errors.append("Closure environment is too large for the target address space");
         return NO_WIR_VALUE;
     }
-    let allocator: FuncInfo = wir_compiler_link_function(ref source, "memory_alloc");
-    if (!has_func(allocator)) {
+    let allocator: Optional(FuncInfo) = wir_compiler_link_function(ref source, "memory_alloc");
+    if (!(allocator is !null)) {
         state.errors.append("Closure construction requires the memory_alloc compiler link");
         return NO_WIR_VALUE;
     }
-    let allocator_id: WirFuncID = wir_find_function(program, allocator.name);
+    let meta_allocator: FuncInfo = allocator;
+    let allocator_id: WirFuncID = wir_find_function(program, meta_allocator.name);
     if (allocator_id == NO_WIR_FUNC) {
-        allocator_id = wir_lower_function_decl(ref types, ref source, ref program, allocator);
+        allocator_id = wir_lower_function_decl(ref types, ref source, ref program, meta_allocator);
     }
     if (allocator_id == NO_WIR_FUNC) { return NO_WIR_VALUE; }
 

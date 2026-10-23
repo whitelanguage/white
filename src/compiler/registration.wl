@@ -22,8 +22,8 @@ func reserve_named_types(ref c: Compiler, node: NodeID) -> Void {
             let decl: TypeDeclNode = get_type_decl_node(ref c.arena, stmts[i]);
             let raw_name: String = decl.name_tok.value;
             let name: String = c.current_package_prefix + raw_name;
-            if (is_builtin_type_name(raw_name) || has_named_type(c.named_types.lookup(name)) ||
-                has_struct(c.struct_table.lookup(name)) || has_template(c.generic_structs.lookup(name))) {
+            if (is_builtin_type_name(raw_name) || (c.named_types.lookup(name) is !null) ||
+                (c.struct_table.lookup(name) is !null) || (c.generic_structs.lookup(name) is !null)) {
                 throw_name_error(decl.pos, "Type '" + name + "' is already defined.");
                 i += 1;
                 continue;
@@ -78,7 +78,7 @@ func resolve_named_types(ref c: Compiler, node: NodeID) -> Void {
                 i++;
                 continue;
             }
-            let info: NamedTypeInfo = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
+            let info: Optional(NamedTypeInfo) = c.named_types.lookup(c.current_package_prefix + decl.name_tok.value);
             resolve_named_type(ref c, info);
         }
         i += 1;
@@ -127,24 +127,30 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
     i = 0;
     while (node.interfaces is !null && i < node.interfaces.length()) {
         let parent_id: Int = resolve_type(ref c, node.interfaces[i]);
-        let parent: StructInfo = c.struct_id_map.lookup(parent_id);
-        if (!has_struct(parent) || !parent.is_interface) {
+        let parent: Optional(StructInfo) = c.struct_id_map.lookup(parent_id);
+        if (!(parent is !null) || !parent.is_interface) {
             throw_type_error(pos, "Interface '" + info.name + "' can only inherit from another interface.");
             stack.drop();
             return false;
         }
-        if (!resolve_interface_info(ref c, parent, stack, pos)) {
+        let unresolved: StructInfo = parent;
+        if (!resolve_interface_info(ref c, unresolved, stack, pos)) {
             stack.drop();
             return false;
         }
         parent = c.struct_id_map.lookup(parent_id);
+        if (parent is null) {
+            stack.drop();
+            return false;
+        }
+        let parent_info: StructInfo = parent;
         if (!add_interface_type(ref c, info.interfaces, parent_id, pos)) {
             stack.drop();
             return false;
         }
         let method_index: Int = 0;
-        while (parent.vtable is !null && method_index < parent.vtable.length()) {
-            let inherited: MethodDefNode = parent.vtable[method_index];
+        while (parent_info.vtable is !null && method_index < parent_info.vtable.length()) {
+            let inherited: MethodDefNode = parent_info.vtable[method_index];
             if (!append_interface_method(methods, names, inherited, info.name)) {
                 stack.drop();
                 return false;
@@ -184,7 +190,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let s_name: String = c.current_package_prefix + raw_name;
 
             if (n.type_params is !null && n.type_params.length() > 0) {
-                if (has_template(c.generic_structs.lookup(s_name)) || has_struct(c.struct_table.lookup(s_name)) || has_named_type(c.named_types.lookup(s_name))) {
+                if ((c.generic_structs.lookup(s_name) is !null) || (c.struct_table.lookup(s_name) is !null) || (c.named_types.lookup(s_name) is !null)) {
                     throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
                     i += 1;
                     continue;
@@ -215,7 +221,11 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 }
 
                 if (raw_name == "Variant") {
-                    let intrinsic_info: StructInfo = c.struct_table.lookup("$Variant");
+                    let intrinsic_info: Optional(StructInfo) = c.struct_table.lookup("$Variant");
+                    if (intrinsic_info is null) {
+                        throw_internal_compiler_error(n.pos, "Missing Variant declaration.");
+                        return;
+                    }
                     c.struct_table.put(s_name, intrinsic_info);
                     i += 1;
                     continue;
@@ -224,7 +234,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                     return;
                 }
             }
-            if (has_struct(c.struct_table.lookup(s_name)) || has_template(c.generic_structs.lookup(s_name)) || has_named_type(c.named_types.lookup(s_name))) {
+            if ((c.struct_table.lookup(s_name) is !null) || (c.generic_structs.lookup(s_name) is !null) || (c.named_types.lookup(s_name) is !null)) {
                 throw_name_error(n.pos, "Type '" + s_name + "' is already defined");
                 i += 1;
                 continue;
@@ -256,7 +266,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let raw_name: String = c_node.name_tok.value;
             let c_name: String = c.current_package_prefix + raw_name;
             if (c_node.type_params is !null && c_node.type_params.length() > 0) {
-                if (has_template(c.generic_structs.lookup(c_name)) || has_named_type(c.named_types.lookup(c_name)) || (has_struct(c.struct_table.lookup(c_name)) && c_name != "dict.Dict")) {
+                if ((c.generic_structs.lookup(c_name) is !null) || (c.named_types.lookup(c_name) is !null) || ((c.struct_table.lookup(c_name) is !null) && c_name != "dict.Dict")) {
                     throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
                     i += 1;
                     continue;
@@ -278,7 +288,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 i++;
                 continue;
             }
-            if (has_struct(c.struct_table.lookup(c_name)) || has_named_type(c.named_types.lookup(c_name)) || (has_template(c.generic_structs.lookup(c_name)) && c_name != "dict.Dict")) {
+            if ((c.struct_table.lookup(c_name) is !null) || (c.named_types.lookup(c_name) is !null) || ((c.generic_structs.lookup(c_name) is !null) && c_name != "dict.Dict")) {
                 throw_name_error(c_node.pos, "Type '" + c_name + "' is already defined");
                 i += 1;
                 continue;
@@ -310,7 +320,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let i_node: InterfaceDefNode = get_interface_def_node(ref c.arena, stmts[i]);
             let raw_name: String = i_node.name_tok.value;
             let i_name: String = c.current_package_prefix + raw_name;
-            if (has_struct(c.struct_table.lookup(i_name)) || has_template(c.generic_structs.lookup(i_name)) || has_named_type(c.named_types.lookup(i_name))) {
+            if ((c.struct_table.lookup(i_name) is !null) || (c.generic_structs.lookup(i_name) is !null) || (c.named_types.lookup(i_name) is !null)) {
                 throw_name_error(i_node.pos, "Type '" + i_name + "' is already defined");
                 i += 1;
                 continue;
@@ -386,8 +396,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let e_node: EnumDefNode = get_enum_def_node(ref c.arena, stmts[i]);
             let raw_name: String = e_node.name_tok.value;
             let e_name: String = c.current_package_prefix + raw_name;
-            if (has_struct(c.struct_table.lookup(e_name)) ||
-                has_named_type(c.named_types.lookup(e_name))) {
+            if ((c.struct_table.lookup(e_name) is !null) ||
+                (c.named_types.lookup(e_name) is !null)) {
                 throw_name_error(e_node.pos, "Type '" + e_name + "' is already defined");
                 i += 1;
                 continue;
@@ -429,8 +439,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
         if (base == NODE_INTERFACE_DEF) {
             let node: InterfaceDefNode = get_interface_def_node(ref c.arena, stmts[i]);
             if (node.type_params is null || node.type_params.length() == 0) {
-                let info: StructInfo = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
-                if (has_struct(info) && !resolve_interface_info(ref c, info, [], node.pos)) {
+                let info: Optional(StructInfo) = c.struct_table.lookup(c.current_package_prefix + node.name_tok.value);
+                if ((info is !null) && !resolve_interface_info(ref c, info, [], node.pos)) {
                     return;
                 }
             }
@@ -452,7 +462,7 @@ func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
             let var_name: String = var_decl.name_tok.value;
             let full_var_name: String = var_name;
             if (c.current_package_prefix != "") { full_var_name = c.current_package_prefix + var_name; }
-            if (has_symbol(c.global_symbol_table.lookup(full_var_name))) {
+            if ((c.global_symbol_table.lookup(full_var_name) is !null)) {
                 throw_name_error(var_decl.pos, "Global '" + full_var_name + "' is already defined");
                 i += 1;
                 continue;
@@ -479,7 +489,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
 
             if (f_node.type_params is !null && f_node.type_params.length() > 0) {
                 let template_name: String = c.current_package_prefix + raw_name;
-                if (has_template(c.generic_funcs.lookup(template_name)) || has_func(c.func_table.lookup(template_name))) {
+                if ((c.generic_funcs.lookup(template_name) is !null) || (c.func_table.lookup(template_name) is !null)) {
                     throw_name_error(f_node.pos, "Function '" + template_name + "' is already defined.");
                     return;
                 }
@@ -544,8 +554,8 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 if (ret_type_id == TYPE_INT && p_len == 2) {
                     let first_arg: TypeListNode = arg_types[0];
                     let second_arg: TypeListNode = arg_types[1];
-                    let pointer_base: SymbolInfo = c.ptr_base_map.lookup(second_arg.type);
-                    if (first_arg.type == TYPE_INT && has_symbol(pointer_base) &&
+                    let pointer_base: Optional(SymbolInfo) = c.ptr_base_map.lookup(second_arg.type);
+                    if (first_arg.type == TYPE_INT && (pointer_base is !null) &&
                         pointer_base.type == TYPE_STRING) {
                         valid_main = true;
                     }
@@ -584,7 +594,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 llvm_func_name = mangle_wl_name(ref c, c.current_package_prefix, raw_name, arg_types);
             }
 
-            if (has_func(c.func_table.lookup(func_key)) || has_template(c.generic_funcs.lookup(func_key))) {
+            if ((c.func_table.lookup(func_key) is !null) || (c.generic_funcs.lookup(func_key) is !null)) {
                 throw_name_error(f_node.pos, "Function '" + func_key + "' is already defined.");
                 return;
             }
@@ -626,7 +636,11 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
             let m_len: Int = 0;
             if (m_vec is !null) { m_len = m_vec.length(); }
 
-            let c_info: StructInfo = c.struct_table.lookup(c_name);
+            let c_info: Optional(StructInfo) = c.struct_table.lookup(c_name);
+            if (c_info is null) {
+                throw_internal_compiler_error(c_node.pos, "Missing class declaration.");
+                return;
+            }
             let class_type_id: Int = c_info.type_id;
 
             let m_idx: Int = 0;
@@ -636,7 +650,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
 
                 if (m_node.type_params is !null && m_node.type_params.length() > 0) {
                     let method_key: String = c_name + "_" + m_raw_name;
-                    if (has_template(c.generic_methods.lookup(method_key)) || has_func(c.func_table.lookup(method_key))) {
+                    if ((c.generic_methods.lookup(method_key) is !null) || (c.func_table.lookup(method_key) is !null)) {
                         throw_name_error(m_node.pos, "Method '" + method_key + "' is already defined.");
                         return;
                     }
@@ -707,7 +721,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 let m_key: String = c_name + "_" + m_raw_name;
                 let m_llvm_name: String = mangle_wl_name(ref c, c_name + ".", m_raw_name, arg_types);
 
-                if (has_func(c.func_table.lookup(m_key)) || has_template(c.generic_methods.lookup(m_key))) {
+                if ((c.func_table.lookup(m_key) is !null) || (c.generic_methods.lookup(m_key) is !null)) {
                     if (m_node.name_tok.value == "$type") {
                         let target_id: Int = ret_id;
                         if (is_fallible_type(ref c, target_id)) {

@@ -312,8 +312,8 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     }
 
     if (source.named_type_ids is !null) {
-        let named: NamedTypeInfo = source.named_type_ids.lookup(source_type);
-        if (has_named_type(named)) {
+        let named: Optional(NamedTypeInfo) = source.named_type_ids.lookup(source_type);
+        if ((named is !null)) {
             result = wir_lower_source_type(ref types, ref source, ref program, named.underlying_type);
             if (result != NO_WIR_TYPE) {
                 return wir_cache_type(ref types, source_type, result);
@@ -322,22 +322,22 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
         }
     }
     if (source.ptr_base_map is !null) {
-        let pointer: SymbolInfo = source.ptr_base_map.lookup(source_type);
-        if (has_symbol(pointer)) {
+        let pointer: Optional(SymbolInfo) = source.ptr_base_map.lookup(source_type);
+        if ((pointer is !null)) {
             let element: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, pointer.type);
             if (element == NO_WIR_TYPE) { return NO_WIR_TYPE; }
             return wir_cache_type(ref types, source_type, wir_pointer_type(ref program, element));
         }
     }
     if (source.array_info_map is !null) {
-        let array: ArrayInfo = source.array_info_map.lookup(source_type);
-        if (has_array_info(array)) {
+        let array: Optional(ArrayInfo) = source.array_info_map.lookup(source_type);
+        if ((array is !null)) {
             return wir_lower_array_type(ref types, ref source, ref program, source_type, array);
         }
     }
     if (source.vector_base_map is !null) {
-        let vector: SymbolInfo = source.vector_base_map.lookup(source_type);
-        if (has_symbol(vector)) {
+        let vector: Optional(SymbolInfo) = source.vector_base_map.lookup(source_type);
+        if ((vector is !null)) {
             let element: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, vector.type);
             if (element == NO_WIR_TYPE) { return NO_WIR_TYPE; }
             let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
@@ -346,8 +346,8 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
         }
     }
     if (source.fallible_base_map is !null) {
-        let fallible: SymbolInfo = source.fallible_base_map.lookup(source_type);
-        if (has_symbol(fallible)) {
+        let fallible: Optional(SymbolInfo) = source.fallible_base_map.lookup(source_type);
+        if ((fallible is !null)) {
             let fields: Vector(WirTypeID) = [program.bool_type, wir_error_layout(ref types, ref program)];
             if (fallible.type != TYPE_VOID) {
                 let value: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, fallible.type);
@@ -358,17 +358,17 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
         }
     }
     if (source.func_ret_map is !null) {
-        let function: SymbolInfo = source.func_ret_map.lookup(source_type);
-        if (has_symbol(function)) {
+        let function: Optional(SymbolInfo) = source.func_ret_map.lookup(source_type);
+        if ((function is !null)) {
             return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
         }
     }
-    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(source_type))) {
+    if (source.method_ret_map is !null && (source.method_ret_map.lookup(source_type) is !null)) {
         return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
     }
     if (source.struct_id_map is !null) {
-        let info: StructInfo = source.struct_id_map.lookup(source_type);
-        if (has_struct(info)) {
+        let info: Optional(StructInfo) = source.struct_id_map.lookup(source_type);
+        if ((info is !null)) {
             return wir_lower_struct_type(ref types, ref source, ref program, source_type, info);
         }
     }

@@ -90,8 +90,8 @@ func expr_root_name(ref c: Compiler, node: NodeID) -> String {
 func const_access_root(ref c: Compiler, node: NodeID) -> String {
     let name: String = expr_root_name(ref c, node);
     if (name.length() == 0) { return ""; }
-    let info: SymbolInfo = find_symbol(ref c, name);
-    if (has_symbol(info) && (info.is_const || info.is_const_access)) { return name; }
+    let info: Optional(SymbolInfo) = find_symbol(ref c, name);
+    if ((info is !null) && (info.is_const || info.is_const_access)) { return name; }
     return "";
 }
 
@@ -113,22 +113,22 @@ func stable_ref_target(ref c: Compiler, node: NodeID) -> Bool {
     let kind: Int = node_tag(node);
     if (kind == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(ref c.arena, node);
-        return has_symbol(find_symbol(ref c, access.name_tok.value));
+        return (find_symbol(ref c, access.name_tok.value) is !null);
     }
     if (kind == NODE_FIELD_ACCESS) {
         let access: FieldAccessNode = get_field_access_node(ref c.arena, node);
         let owner_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.obj));
         if (is_pointer_type(ref c, owner_type)) { return false; }
-        let owner: StructInfo = c.struct_id_map.lookup(owner_type);
-        return has_struct(owner) && !owner.is_class && stable_ref_target(ref c, access.obj);
+        let owner: Optional(StructInfo) = c.struct_id_map.lookup(owner_type);
+        return (owner is !null) && !owner.is_class && stable_ref_target(ref c, access.obj);
     }
     if (kind == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = get_index_access_node(ref c.arena, node);
         let target_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.target));
-        let array: ArrayInfo = c.array_info_map.lookup(target_type);
+        let array: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
         let vector = c.vector_base_map.lookup(target_type);
-        let checked = c.ref_targets is !null && c.ref_targets.lookup(UInt32(node));
-        return ((has_array_info(array) && (array.size >= 0 || checked)) || (has_symbol(vector) && checked)) &&
+        let checked = c.ref_targets is !null && c.ref_targets.contains_key(UInt32(node));
+        return (((array is !null) && (array.size >= 0 || checked)) || ((vector is !null) && checked)) &&
                stable_ref_target(ref c, access.target);
     }
     return false;
@@ -245,14 +245,15 @@ func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
 
 func add_interface_type(ref c: Compiler, list: Vector(Struct), type_id: Int, pos: Position) -> Bool {
     if (type_id == TYPE_POISON) { return false; }
-    let info: StructInfo = c.struct_id_map.lookup(type_id);
-    if (!has_struct(info) || !info.is_interface) {
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if (!(info is !null) || !info.is_interface) {
         throw_type_error(pos, "Type " + get_type_name(ref c, type_id) + " is not an interface.");
         return false;
     }
+    let meta_info: StructInfo = info;
     let parent_index: Int = 0;
-    while (info.interfaces is !null && parent_index < info.interfaces.length()) {
-        let parent: TypeListNode = info.interfaces[parent_index];
+    while (meta_info.interfaces is !null && parent_index < meta_info.interfaces.length()) {
+        let parent: TypeListNode = meta_info.interfaces[parent_index];
         if (!add_interface_type(ref c, list, parent.type, pos)) { return false; }
         parent_index += 1;
     }
@@ -271,18 +272,19 @@ func add_interface(ref c: Compiler, list: Vector(Struct), node: NodeID, pos: Pos
 }
 
 func class_has_interface(ref c: Compiler, class_info: StructInfo, target: StructInfo) -> Bool {
-    let current: StructInfo = class_info;
-    while (has_struct(current)) {
+    let current: Optional(StructInfo) = class_info;
+    while ((current is !null)) {
+        let info: StructInfo = current;
         let i: Int = 0;
-        while (current.interfaces is !null && i < current.interfaces.length()) {
-            let item: TypeListNode = current.interfaces[i];
+        while (info.interfaces is !null && i < info.interfaces.length()) {
+            let item: TypeListNode = info.interfaces[i];
             if (item.type == target.type_id) { return true; }
             i += 1;
         }
-        if (current.parent_id == 0) {
+        if (info.parent_id == 0) {
             break;
         }
-        current = c.struct_id_map.lookup(current.parent_id);
+        current = c.struct_id_map.lookup(info.parent_id);
     }
     return false;
 }
@@ -464,22 +466,24 @@ func validate_callable_value(info: FuncInfo, skip: Int, pos: Position, kind: Str
 }
 
 func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> Bool {
-    let actual_info: SymbolInfo = c.func_ret_map.lookup(actual);
-    let expected_info: SymbolInfo = c.func_ret_map.lookup(expected);
-    if (!has_symbol(actual_info) || !has_symbol(expected_info)) {
+    let actual_info: Optional(SymbolInfo) = c.func_ret_map.lookup(actual);
+    let expected_info: Optional(SymbolInfo) = c.func_ret_map.lookup(expected);
+    if (!(actual_info is !null) || !(expected_info is !null)) {
         actual_info = c.method_ret_map.lookup(actual);
         expected_info = c.method_ret_map.lookup(expected);
     }
-    if (!has_symbol(actual_info) || !has_symbol(expected_info)) { return false; }
-    if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) {
+    if (!(actual_info is !null) || !(expected_info is !null)) { return false; }
+    let meta_actual_info: SymbolInfo = actual_info;
+    let meta_expected_info: SymbolInfo = expected_info;
+    if (meta_actual_info.type != expected_info.type || meta_actual_info.variadic_param != expected_info.variadic_param) {
         return false;
     }
-    if (actual_info.func_arg_types.length() != expected_info.func_arg_types.length()) { return false; }
+    if (meta_actual_info.func_arg_types.length() != expected_info.func_arg_types.length()) { return false; }
 
     let i: Int = 0;
-    while (i < actual_info.func_arg_types.length()) {
-        let actual_arg: TypeListNode = actual_info.func_arg_types[i];
-        let expected_arg: TypeListNode = expected_info.func_arg_types[i];
+    while (i < meta_actual_info.func_arg_types.length()) {
+        let actual_arg: TypeListNode = meta_actual_info.func_arg_types[i];
+        let expected_arg: TypeListNode = meta_expected_info.func_arg_types[i];
         if (actual_arg.type != expected_arg.type || actual_arg.pass_mode != expected_arg.pass_mode) {
             return false;
         }
