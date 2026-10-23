@@ -4357,8 +4357,31 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
     return true;
 }
 
+func generic_constructor_context(ref c: Compiler, template: GenericTemplate, expected: Int) -> Int {
+// only a unique matching arm supplies type arguments, other union members give no context
+    expected = get_repr_type(ref c, expected);
+    let union = get_union_type(ref c, expected);
+    if (union.members is null) { return expected; }
+
+    let match = 0;
+    let i = 0;
+    while (i < union.members.length()) {
+        let member = get_repr_type(ref c, union.members[i]);
+        let instance = c.generic_instance_templates.lookup("" + member);
+        if (has_template(instance) && instance.name == template.name) {
+            if (match != 0) { return 0; }
+            match = member;
+        }
+        i++;
+    }
+
+    return match;
+}
+
 func infer_generic_instance(ref c: Compiler, template: GenericTemplate, actual: Int, inferred: Dict(String, SymbolInfo), pos: Position) -> Bool {
     if (actual == 0 || actual == TYPE_AUTO || actual == TYPE_POISON) { return true; }
+    actual = generic_constructor_context(ref c, template, actual);
+    if (actual == 0) { return true; }
 
     let actual_template: GenericTemplate = c.generic_instance_templates.lookup("" + actual);
     if (!has_template(actual_template) || actual_template.name != template.name) { return true; }
@@ -4402,6 +4425,7 @@ func use_generic_constructor(ref c: Compiler, name: String, template: GenericTem
     if (!has_template(template)) { return false; }
     if (explicit is !null) { return true; }
 
+    expected = generic_constructor_context(ref c, template, expected);
     let expected_template: GenericTemplate = c.generic_instance_templates.lookup("" + expected);
     if (has_template(expected_template) && expected_template.name == template.name) { return true; }
     return !concrete_constructor_accepts(ref c, name, args);

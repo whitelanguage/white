@@ -37,30 +37,7 @@ func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> Comp
 }
 
 func apply_flow_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
-    if (!flow_has_guard(ref c, condition)) { return; }
-    let guards: Vector(FlowGuard) = [];
-    flow_guards(ref c, condition, truth, guards);
-    let i = 0;
-    while (i < guards.length()) {
-        let guard = guards[i];
-        let old_skip = c.flow_skip;
-        c.flow_skip = guard.target;
-        let original = get_expr_type(ref c, guard.target);
-        c.flow_skip = old_skip;
-        let path = format_ast_path(ref c, guard.target);
-        let root = path;
-        let dot = 0;
-        while (dot < root.length() && root[dot] != Byte(46)) { dot++; }
-        if (dot < root.length()) { root = root.slice(0, dot); }
-        let symbol = find_symbol(ref c, root);
-        let unstable = flow_has_field(path) || !has_symbol(symbol);
-        if (has_symbol(symbol)) { unstable = unstable || symbol.reg.starts_with("@") || symbol.is_reference; }
-        unstable = unstable || flow_is_exposed(ref c, path);
-        if (!unstable || !flow_has_call(ref c, condition)) {
-            flow_record(ref c, guard.target, original, guard.present, unstable);
-        }
-        i++;
-    }
+    flow_apply_guard(ref c, condition, truth);
 }
 
 func emit_union_member(ref c: Compiler, slot: String, target: Int, member: Int, value: String) -> Void {

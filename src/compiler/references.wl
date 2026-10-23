@@ -1,9 +1,11 @@
 // src/compiler/references.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
+import TOK_AND, TOK_OR from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "context.wl"
 import * from "target_eval.wl"
+import * from "narrowing.wl"
 import bind_native_args, bind_callable_args from "validation.wl"
 
 
@@ -155,6 +157,16 @@ func ref_plain_drop(ref c: Compiler, type_id: Int, depth: Int) -> Bool {
     if (depth > 16) { return false; }
     type_id = get_repr_type(ref c, type_id);
     if (type_id == TYPE_STRING || !needs_drop(ref c, type_id)) { return true; }
+    let union = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        // cleanup can visit any stored arm, a harmless current value is not enough
+        let i = 0;
+        while (i < union.members.length()) {
+            if (!ref_plain_drop(ref c, union.members[i], depth + 1)) { return false; }
+            i++;
+        }
+        return true;
+    }
     let vector: SymbolInfo = c.vector_base_map.lookup(type_id);
     if (has_symbol(vector)) { return ref_plain_drop(ref c, vector.type, depth + 1); }
     let array: ArrayInfo = c.array_info_map.lookup(type_id);
@@ -379,11 +391,12 @@ func ref_known_call(ref c: Compiler, ref state: RefCheck, call: CallNode) -> Fun
     return ref_resolve_call(ref c, call);
 }
 
-func ref_method_call(ref c: Compiler, call: CallNode, info: FuncInfo) -> Bool {
+func ref_method_call(ref c: Compiler, call: CallNode, info: FuncInfo, receiver_type: Int = 0) -> Bool {
     if (node_tag(call.callee) != NODE_FIELD_ACCESS || info.arg_names is null ||
         info.arg_names.length() == 0 || info.arg_names[0] != "self") { return false; }
     let access = get_field_access_node(ref c.arena, call.callee);
-    let actual = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, access.obj)));
+    if (receiver_type == 0) { receiver_type = get_expr_type(ref c, access.obj); }
+    let actual = c.struct_id_map.lookup(get_repr_type(ref c, receiver_type));
     return has_struct(actual) && actual.is_class;
 }
 
@@ -401,7 +414,7 @@ func ref_constructor(ref c: Compiler, callee: NodeID) -> StructInfo {
     return record;
 }
 
-func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: FuncInfo) -> Bool {
+func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: FuncInfo, receiver_type: Int = 0) -> Bool {
 // analyze a direct body with the caller's allocation identities, imports belong to the callee
     if (!has_node(info.ref_body) || info.is_varargs || info.variadic_param > 0) { return false; }
     if (state.calls.length() >= 16 || state.budget <= 0) { return false; }
@@ -415,7 +428,7 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     let owners: Vector(Int) = [];
     let sources: Vector(String) = [];
     let receiver = NO_NODE;
-    if (ref_method_call(ref c, call, info)) {
+    if (ref_method_call(ref c, call, info, receiver_type)) {
         receiver = get_field_access_node(ref c.arena, call.callee).obj;
     }
     i = 0;
@@ -453,6 +466,8 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     let stack = c.scope_stack;
     let hoist = c.hoist_scope;
     let hoist_stack = c.hoist_scope_stack;
+    let facts = c.flow_types;
+    let exposed = c.flow_exposed;
     let bindings = c.generic_bindings;
     let callee_bindings = info.ref_bindings;
     if (callee_bindings is null) { callee_bindings = Dict(); }
@@ -483,12 +498,18 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     let before = ref_snapshot(ref state);
     state.active = [];
     state.collecting = true;
+    c.flow_types = null;
+    c.flow_exposed = null;
     ref_check_node(ref c, ref state, info.ref_body);
     state.slots = before;
     state.collecting = false;
     state.active = active;
+    c.flow_types = null;
+    c.flow_exposed = null;
     ref_check_node(ref c, ref state, info.ref_body);
 
+    c.flow_types = facts;
+    c.flow_exposed = exposed;
     c.symbol_table = scope;
     c.scope_stack = stack;
     c.hoist_scope = hoist;
@@ -500,7 +521,7 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     return true;
 }
 
-func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, node: NodeID) -> Void {
+func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: FuncInfo, receiver_type: Int) -> Void {
 // unknown calls may reach the same allocation through a field or a global alias
     if (state.collecting) {
         let i = 0;
@@ -521,7 +542,9 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, node: 
     if (state.active.length() == 0) { return; }
     if (node_tag(call.callee) == NODE_FIELD_ACCESS) {
         let access = get_field_access_node(ref c.arena, call.callee);
-        let target = get_repr_type(ref c, get_expr_type(ref c, access.obj));
+        let target = receiver_type;
+        if (target == 0) { target = get_expr_type(ref c, access.obj); }
+        target = get_repr_type(ref c, target);
         if (target == TYPE_STRING && access.field_name == "length") { return; }
         if (has_symbol(c.vector_base_map.lookup(target))) {
             if (access.field_name == "length") { return; }
@@ -544,7 +567,7 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, node: 
             ref_scalar_expr(ref c, arg.val)) { return; }
     }
 
-    let info = ref_known_call(ref c, ref state, call);
+    if (!has_func(info)) { info = ref_known_call(ref c, ref state, call); }
     if (!has_func(info)) {
         // record construction evaluates its field arguments, it has no hidden method body
         let record = ref_constructor(ref c, call.callee);
@@ -564,7 +587,7 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, node: 
         let link = info.compiler_link_name;
         let scalar = true;
         let i = 0;
-        if (ref_method_call(ref c, call, info)) { i = 1; }
+        if (ref_method_call(ref c, call, info, receiver_type)) { i = 1; }
         while (i < info.arg_types.length()) {
             let param: TypeListNode = info.arg_types[i];
             if (!ref_scalar(ref c, param.type)) { scalar = false; }
@@ -574,16 +597,16 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, node: 
         ref_error(ref state, call.pos, "call a function with unverified storage effects");
         return;
     }
-    if (has_func(info) && ref_call_body(ref c, ref state, call, info)) {
-        ref_check_overrides(ref c, ref state, call, info);
+    if (has_func(info) && ref_call_body(ref c, ref state, call, info, receiver_type)) {
+        ref_check_overrides(ref c, ref state, call, info, receiver_type);
         return;
     }
     ref_error(ref state, call.pos, "call a function with unverified storage effects");
 }
 
-func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, info: FuncInfo) -> Void {
+func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, info: FuncInfo, receiver_type: Int) -> Void {
 // a method reached through a base class may execute a subclass body
-    if (!ref_method_call(ref c, call, info)) { return; }
+    if (!ref_method_call(ref c, call, info, receiver_type)) { return; }
     let param: TypeListNode = info.arg_types[0];
     let owner = c.struct_id_map.lookup(param.type);
     if (!has_struct(owner) || !owner.is_class) { return; }
@@ -603,7 +626,7 @@ func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, i
                     while (candidate.vtable is !null && index < candidate.vtable.length()) {
                         let member: FuncInfo = candidate.vtable[index];
                         if (member.base_name == info.base_name && member.name != info.name &&
-                            !ref_call_body(ref c, ref state, call, member)) {
+                            !ref_call_body(ref c, ref state, call, member, receiver_type)) {
                             ref_error(ref state, call.pos, "call a function with unverified storage effects");
                         }
                         index++;
@@ -656,6 +679,15 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
     if (ref_plain_drop(ref c, type_id, 0)) { return true; }
     if (depth > 16) { return false; }
     type_id = get_repr_type(ref c, type_id);
+    let union = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        let i = 0;
+        while (i < union.members.length()) {
+            if (!ref_drop_effects(ref c, ref state, union.members[i], pos, depth + 1)) { return false; }
+            i++;
+        }
+        return true;
+    }
     if (ref_storage(ref c, type_id)) { return ref_drop_effects(ref c, ref state, ref_element(ref c, type_id), pos, depth + 1); }
     let record = c.struct_id_map.lookup(type_id);
     if (!has_struct(record) || record.is_interface) { return false; }
@@ -704,6 +736,18 @@ func ref_check_fields(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
         ref_error(ref state, pos, "replace managed storage");
         return;
     }
+    type_id = get_repr_type(ref c, type_id);
+    let union = get_union_type(ref c, type_id);
+    if (union.members is !null) {
+        let i = 0;
+        while (i < union.members.length()) {
+            if (needs_drop(ref c, union.members[i])) {
+                ref_check_fields(ref c, ref state, union.members[i], pos, depth + 1);
+            }
+            i++;
+        }
+        return;
+    }
     if (ref_storage(ref c, type_id)) {
         ref_conflict(ref state, 0, pos, "replace managed storage", ref_element(ref c, type_id));
         return;
@@ -733,12 +777,38 @@ func ref_check_block(ref c: Compiler, ref state: RefCheck, body: NodeID) -> Bool
     }
     // branch-local references must not restrict the next branch or the enclosing block
     while (state.active.length() > active) { state.active.drop(); }
+    // a local guard uses its spelling, discard it before an outer binding becomes visible
+    i = 0;
+    while (block.stmts is !null && i < block.stmts.length()) {
+        if (node_tag(block.stmts[i]) == NODE_VAR_DECL) {
+            flow_forget(ref c, get_var_decl_node(ref c.arena, block.stmts[i]).name_tok.value, false);
+        }
+        i++;
+    }
     c.symbol_table = saved_scope;
     c.scope_stack.drop();
     return terminated;
 }
 
 func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+// the effect walk uses the same guard lifetime as lowering, callees have separate facts
+    if (!has_node(node)) { return false; }
+    let kind = node_tag(node);
+    if (kind == NODE_WHILE || kind == NODE_FOR) { c.flow_types = null; }
+    let result = ref_check_raw_node(ref c, ref state, node);
+    if (kind == NODE_CALL) { flow_forget(ref c, "", true); }
+    if (kind == NODE_REF) { flow_expose(ref c, get_ref_node(ref c.arena, node).node); }
+    if (kind == NODE_VAR_ASSIGN) { flow_forget(ref c, get_var_assign_node(ref c.arena, node).name_tok.value, false); }
+    if (kind == NODE_FIELD_ASSIGN) {
+        let assignment = get_field_assign_node(ref c.arena, node);
+        flow_forget(ref c, format_ast_path(ref c, assignment.obj) + "." + assignment.field_name, false);
+    }
+    if (kind == NODE_PTR_ASSIGN) { c.flow_types = null; }
+    if (kind == NODE_WHILE || kind == NODE_FOR || kind == NODE_CATCH) { c.flow_types = null; }
+    return result;
+}
+
+func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     if (!state.collecting && state.calls.length() > 0) {
         if (state.budget <= 0) {
@@ -779,6 +849,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
             ref_error(ref state, declaration.pos, "create a managed value with unverified drop effects");
         }
         let slot = "ref." + state.frame + "." + UInt32(node);
+        flow_forget(ref c, declaration.name_tok.value, false);
         if (ref_storage(ref c, type)) {
             if (reference && node_tag(get_ref_node(ref c.arena, declaration.value).node) == NODE_VAR_ACCESS) {
                 let name = get_var_access_node(ref c.arena, get_ref_node(ref c.arena, declaration.value).node).name_tok.value;
@@ -889,6 +960,12 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
                 }
             }
         }
+        // lowering loads the receiver before its arguments, keep that selected type
+        // without restoring unrelated facts which an argument call can invalidate
+        let receiver_type = 0;
+        if (has_func(info) && ref_method_call(ref c, call, info)) {
+            receiver_type = get_expr_type(ref c, get_field_access_node(ref c.arena, call.callee).obj);
+        }
         let i = 0;
         while (arguments is !null && i < arguments.length()) {
             let arg = arguments[i];
@@ -917,7 +994,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
             }
             i++;
         }
-        ref_check_call(ref c, ref state, call, node);
+        ref_check_call(ref c, ref state, call, info, receiver_type);
         while (state.active.length() > active) { state.active.drop(); }
         return false;
     }
@@ -929,10 +1006,19 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
         if (selected == 1) { return ref_check_node(ref c, ref state, branch.body); }
         if (selected == 0) { return ref_check_node(ref c, ref state, branch.else_body); }
         let before = ref_snapshot(ref state);
+        let incoming = flow_copy(c.flow_types);
+        flow_apply_guard(ref c, branch.condition, true);
         let left = ref_check_node(ref c, ref state, branch.body);
         let after_left = ref_snapshot(ref state);
+        let left_facts = flow_copy(c.flow_types);
         state.slots = before;
+        c.flow_types = flow_copy(incoming);
+        flow_apply_guard(ref c, branch.condition, false);
         let right = ref_check_node(ref c, ref state, branch.else_body);
+        if (!left) {
+            if right { c.flow_types = left_facts; }
+            else { c.flow_types = flow_intersect(left_facts, c.flow_types); }
+        }
         ref_merge(ref state, after_left, left, right);
         return left && right;
     }
@@ -940,6 +1026,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
         let loop = get_while_node(ref c.arena, node);
         state.loop_depth++;
         ref_check_node(ref c, ref state, loop.condition);
+        flow_apply_guard(ref c, loop.condition, true);
         ref_check_node(ref c, ref state, loop.body);
         state.loop_depth--;
         return false;
@@ -954,6 +1041,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
         ref_check_node(ref c, ref state, loop.init);
         state.loop_depth++;
         ref_check_node(ref c, ref state, loop.cond);
+        flow_apply_guard(ref c, loop.cond, true);
         ref_check_node(ref c, ref state, loop.body);
         ref_check_node(ref c, ref state, loop.step);
         state.loop_depth--;
@@ -984,7 +1072,11 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
     if (kind == NODE_BINOP || kind == NODE_IS || kind == NODE_IS_NOT) {
         let binary = get_binop_node(ref c.arena, node);
         ref_check_node(ref c, ref state, binary.left);
+        let short_circuit = kind == NODE_BINOP && (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR);
+        let incoming = flow_copy(c.flow_types);
+        if short_circuit { flow_apply_guard(ref c, binary.left, binary.op_tok.type == TOK_AND); }
         ref_check_node(ref c, ref state, binary.right);
+        if short_circuit { c.flow_types = flow_intersect(incoming, c.flow_types); }
         if (kind == NODE_BINOP && state.active.length() > 0 &&
             (!ref_scalar_expr(ref c, binary.left) || !ref_scalar_expr(ref c, binary.right))) {
             ref_error(ref state, binary.pos, "use an operator with unverified storage effects");
@@ -1094,14 +1186,22 @@ func check_body_refs(ref c: Compiler, body: NodeID, inputs: Dict(String, SymbolI
     let stack = c.scope_stack;
     let hoist = c.hoist_scope;
     let hoist_stack = c.hoist_scope_stack;
+    let facts = c.flow_types;
+    let exposed = c.flow_exposed;
     c.symbol_table = Scope(table=inputs, parent=-1, gc_vars=[], depth=0);
     c.scope_stack = [];
     c.hoist_scope = Scope();
     c.hoist_scope_stack = [];
     let state = RefCheck(active=[], parents=[0], escaped=[true], slots=Dict(), slot_names=[], slot_refs=Dict(), allocations=Dict(), collecting=true, calls=[], budget=20000, functions=Dict());
+    c.flow_types = null;
+    c.flow_exposed = null;
     ref_check_node(ref c, ref state, body);
     state.collecting = false;
+    c.flow_types = null;
+    c.flow_exposed = null;
     ref_check_node(ref c, ref state, body);
+    c.flow_types = facts;
+    c.flow_exposed = exposed;
     c.symbol_table = scope;
     c.scope_stack = stack;
     c.hoist_scope = hoist;

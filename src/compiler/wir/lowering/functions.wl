@@ -262,6 +262,7 @@ func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compi
 func wir_generic_constructor_type(ref state: WirFunctionLowering, ref source: Compiler, call: CallNode) -> Int {
     let generic: GenericTemplate = wir_generic_constructor(ref source, call.callee);
     if (!has_template(generic)) { return 0; }
+    if (!use_generic_constructor(ref source, generic.name, generic, call.type_args, call.args, 0)) { return 0; }
 
     let arguments: Vector(Struct) = [];
     if (call.type_args is !null) {
@@ -5768,12 +5769,16 @@ func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeM
         return wir_lower_array_literal(ref state, ref types, ref source, ref program, node, expected_type);
     }
     if (has_node(node) && node_tag(node) == NODE_CALL && expected_type >= 100 && source.generic_instance_templates is !null) {
-        let expected_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, expected_type));
-        let expected_template: GenericTemplate = source.generic_instance_templates.lookup("" + get_repr_type(ref source, expected_type));
-        if (has_struct(expected_info) && has_template(expected_template)) {
-            let call: CallNode = get_call_node(ref source.arena, node);
+        let call: CallNode = get_call_node(ref source.arena, node);
+        let written_template: GenericTemplate = wir_generic_constructor(ref source, call.callee);
+        let context_type = expected_type;
+        if (has_template(written_template)) {
+            context_type = generic_constructor_context(ref source, written_template, expected_type);
+        }
+        let expected_info: StructInfo = source.struct_id_map.lookup(get_repr_type(ref source, context_type));
+        let expected_template: GenericTemplate = source.generic_instance_templates.lookup("" + get_repr_type(ref source, context_type));
+        if (has_struct(expected_info) && has_template(expected_template) && call.type_args is null) {
             let written_info: StructInfo = wir_struct_constructor(ref source, call.callee);
-            let written_template: GenericTemplate = wir_generic_constructor(ref source, call.callee);
             let matches_template: Bool = has_struct(written_info) && written_info.name == expected_template.name;
             if (!matches_template && has_template(written_template)) {
                 matches_template = written_template.name == expected_template.name;
@@ -7258,7 +7263,11 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             let member_call: WirMemberCall = wir_lower_class_call(ref state, ref types, ref source, ref program, call);
             if (member_call.handled) { return member_call.value; }
         }
-        let constructor: StructInfo = wir_struct_constructor(ref source, call.callee);
+        let constructor_type = wir_generic_constructor_type(ref state, ref source, call);
+        if (constructor_type == TYPE_POISON) { return wir_no_expr(); }
+        let constructor: StructInfo = StructInfo();
+        if (constructor_type != 0) { constructor = source.struct_id_map.lookup(constructor_type); }
+        else { constructor = wir_struct_constructor(ref source, call.callee); }
         if (has_struct(constructor) && !constructor.is_interface && !constructor.is_enum) {
             if (constructor.is_class) {
                 return wir_lower_class_constructor(ref state, ref types, ref source, ref program, call, constructor);
