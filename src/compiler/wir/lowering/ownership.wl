@@ -79,8 +79,9 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirType
     }
 
     let repr: Int = get_repr_type(ref source, source_type);
-    let union: UnionInfo = get_union_type(ref source, repr);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref source, repr);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let storage: WirTypeID = wir_value_type(ref program, value);
         let slot: WirValueID = wir_stack_alloc(ref program, state.entry, storage, "union.ownership", no_wir_location());
         wir_store(ref program, state.block, value, slot, no_wir_location());

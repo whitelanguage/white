@@ -157,8 +157,9 @@ func ref_plain_drop(ref c: Compiler, type_id: Int, depth: Int) -> Bool {
     if (depth > 16) { return false; }
     type_id = get_repr_type(ref c, type_id);
     if (type_id == TYPE_STRING || !needs_drop(ref c, type_id)) { return true; }
-    let union = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         // cleanup can visit any stored arm, a harmless current value is not enough
         let i = 0;
         while (i < union.members.length()) {
@@ -679,8 +680,9 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
     if (ref_plain_drop(ref c, type_id, 0)) { return true; }
     if (depth > 16) { return false; }
     type_id = get_repr_type(ref c, type_id);
-    let union = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let i = 0;
         while (i < union.members.length()) {
             if (!ref_drop_effects(ref c, ref state, union.members[i], pos, depth + 1)) { return false; }
@@ -737,8 +739,9 @@ func ref_check_fields(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
         return;
     }
     type_id = get_repr_type(ref c, type_id);
-    let union = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let i = 0;
         while (i < union.members.length()) {
             if (needs_drop(ref c, union.members[i])) {

@@ -44,12 +44,12 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         val_res.type = expected_type;
         return val_res;
     }
-    let target_union: UnionInfo = get_union_type(ref c, expected_type);
-    if (target_union.members is !null) {
+    let target_union: Bool = is_union_type(ref c, expected_type);
+    if (target_union) {
         return emit_union_cast(ref c, val_res, expected_type, pos);
     }
-    let source_union: UnionInfo = get_union_type(ref c, val_res.type);
-    if (source_union.members is !null) {
+    let source_union: Bool = is_union_type(ref c, val_res.type);
+    if (source_union) {
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref c, expected_type) + ", got " + get_type_name(ref c, val_res.type) + ".");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }

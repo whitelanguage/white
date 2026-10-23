@@ -64,8 +64,8 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
     c.output_file.write(c.indent + slot + " = alloca " + storage + "\n");
     c.output_file.write(c.indent + "store " + storage + " zeroinitializer, " + storage + "* " + slot + "\n");
 
-    let source_union: UnionInfo = get_union_type(ref c, value.type);
-    if (source_union.members is null) {
+    let found_source_union: Optional(UnionInfo) = get_union_type(ref c, value.type);
+    if (found_source_union is null) {
         let array = c.array_info_map.lookup(value.type);
         if (has_array_info(array) && array.size >= 0) {
             let loaded = next_reg(ref c);
@@ -74,6 +74,7 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
         }
         emit_union_member(ref c, slot, target, value.type, value.reg);
     } else {
+        let source_union: UnionInfo = found_source_union;
         let source_ty: String = get_llvm_type_str(ref c, value.type);
         let source_slot: String = next_reg(ref c);
         let tag: String = next_reg(ref c);

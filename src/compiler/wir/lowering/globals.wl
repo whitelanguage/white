@@ -175,7 +175,7 @@ func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref prog
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     if (type_id == NO_WIR_TYPE) { return NO_WIR_GLOBAL; }
     let global_id: WirGlobalID = wir_add_global(ref program, name, type_id, initializer, linkage, node.is_const);
-    if (get_union_type(ref source, get_repr_type(ref source, source_type)).members is !null) {
+    if (is_union_type(ref source, get_repr_type(ref source, source_type))) {
         program.arena.globals[wir_id_index(UInt32(global_id))].alignment = get_union_layout(ref source, get_repr_type(ref source, source_type)).alignment;
     }
     if (source.is_shared && (annotations.ann_flags & FLAG_ANN_EXPORT) != 0) {

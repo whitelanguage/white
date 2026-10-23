@@ -2237,8 +2237,8 @@ func wir_cast_expr(
     pos: Position
 ) -> WirExpr {
     if (value.value == NO_WIR_VALUE || value.source_type == target_type) { return value; }
-    let target_union: UnionInfo = get_union_type(ref source, target_type);
-    if (target_union.members is !null) {
+    let target_union: Bool = is_union_type(ref source, target_type);
+    if (target_union) {
         if (!union_accepts_type(ref source, target_type, value.source_type)) {
             throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
             return wir_no_expr();
@@ -2247,8 +2247,8 @@ func wir_cast_expr(
         if (wir_take_owned(ref state, value.value)) { wir_track_owned(ref state, result, target_type); }
         return WirExpr(value=result, source_type=target_type);
     }
-    let source_union: UnionInfo = get_union_type(ref source, value.source_type);
-    if (source_union.members is !null) {
+    let source_union: Bool = is_union_type(ref source, value.source_type);
+    if (source_union) {
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
         return wir_no_expr();
     }
@@ -2711,7 +2711,7 @@ func wir_lower_field_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMa
             return wir_no_expr();
         }
         let member = flow_type(ref source, object_node);
-        if (member != 0 && member != TYPE_NULL && get_union_type(ref source, get_repr_type(ref source, object.source_type)).members is !null) {
+        if (member != 0 && member != TYPE_NULL && is_union_type(ref source, get_repr_type(ref source, object.source_type))) {
             object = WirExpr(value=wir_union_payload(ref state, ref types, ref source, ref program, object.value, member), source_type=member);
         }
     }
@@ -2763,7 +2763,7 @@ func wir_lower_index_lvalue(
                 return wir_no_expr();
             }
             let member = flow_type(ref source, target_node);
-            if (member != 0 && get_union_type(ref source, target.source_type).members is !null) {
+            if (member != 0 && is_union_type(ref source, target.source_type)) {
                 target = WirExpr(value=wir_union_payload(ref state, ref types, ref source, ref program, target.value, member), source_type=member);
             }
             let length: WirValueID = wir_const_int(ref program, wir_lower_source_type(ref types, ref source, ref program, TYPE_INT), UInt128(UInt32(info.size)));
@@ -5748,7 +5748,7 @@ func wir_is_numeric_literal(ref source: Compiler, node: NodeID) -> Bool {
 }
 
 func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, expected_type: Int) -> WirExpr {
-    if (has_node(node) && get_union_type(ref source, expected_type).members is !null) {
+    if (has_node(node) && is_union_type(ref source, expected_type)) {
         if (node_tag(node) == NODE_VECTOR_LIT) {
             let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
             let member: Int = union_vector_target(ref source, expected_type, node, literal.pos);
@@ -6303,7 +6303,7 @@ func wir_print_struct(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
 }
 
 func wir_print_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirExpr) -> Bool {
-    if (get_union_type(ref source, get_repr_type(ref source, value.source_type)).members is !null) {
+    if (is_union_type(ref source, get_repr_type(ref source, value.source_type))) {
         throw_type_error(no_position(), "Type " + get_type_name(ref source, value.source_type) + " cannot be printed.");
         return false;
     }
@@ -6510,7 +6510,7 @@ func wir_lower_print_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
             if (value.value == NO_WIR_VALUE) {
                 return wir_no_expr();
             }
-            if (get_union_type(ref source, get_repr_type(ref source, value.source_type)).members is !null) {
+            if (is_union_type(ref source, get_repr_type(ref source, value.source_type))) {
                 throw_type_error(call.pos, "Type " + get_type_name(ref source, value.source_type) + " cannot be printed.");
                 return wir_no_expr();
             }
@@ -6568,7 +6568,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     if (has_node(node) && node_tag(node) == NODE_REF) { flow_expose(ref source, get_ref_node(ref source.arena, node).node); }
     let member = flow_type(ref source, node);
     let result = wir_lower_raw_expr(ref state, ref types, ref source, ref program, node);
-    if (result.value != NO_WIR_VALUE && member != 0 && get_union_type(ref source, get_repr_type(ref source, result.source_type)).members is !null) {
+    if (result.value != NO_WIR_VALUE && member != 0 && is_union_type(ref source, get_repr_type(ref source, result.source_type))) {
         if (member == TYPE_NULL) {
             result = WirExpr(value=wir_null(ref program, wir_opaque_pointer(ref types, ref program)), source_type=TYPE_NULL);
         } else {
@@ -6644,8 +6644,8 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             return wir_no_expr();
         }
         let type_id: WirTypeID = NO_WIR_TYPE;
-        let union: UnionInfo = get_union_type(ref source, get_repr_type(ref source, source_type));
-        if (union.members is !null) {
+        let union: Bool = is_union_type(ref source, get_repr_type(ref source, source_type));
+        if (union) {
             type_id = wir_union_storage(ref types, ref source, ref program, get_repr_type(ref source, source_type));
         } else {
             type_id = wir_lower_source_type(ref types, ref source, ref program, source_type);
@@ -6740,7 +6740,7 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             object_source_type = object.source_type;
         }
         let owner_type: Int = get_repr_type(ref source, object_source_type);
-        if (get_union_type(ref source, owner_type).members is !null) {
+        if (is_union_type(ref source, owner_type)) {
             throw_type_error(access.pos, "Cannot access a field of " + get_type_name(ref source, object_source_type) + " before narrowing.");
             return wir_no_expr();
         }
@@ -6821,12 +6821,12 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) {
             return wir_no_expr();
         }
-        let left_union: UnionInfo = get_union_type(ref source, get_repr_type(ref source, left.source_type));
-        let right_union: UnionInfo = get_union_type(ref source, get_repr_type(ref source, right.source_type));
-        if (left_union.members is !null || right_union.members is !null) {
+        let left_union: Bool = is_union_type(ref source, get_repr_type(ref source, left.source_type));
+        let right_union: Bool = is_union_type(ref source, get_repr_type(ref source, right.source_type));
+        if (left_union || right_union) {
             let value: WirExpr = left;
-            if (right_union.members is !null && left.source_type == TYPE_NULL) { value = right; }
-            else if (left_union.members is null || right.source_type != TYPE_NULL) {
+            if (right_union && left.source_type == TYPE_NULL) { value = right; }
+            else if (!left_union || right.source_type != TYPE_NULL) {
                 throw_type_error(identity.pos, "Union identity comparisons require a Null operand.");
                 return wir_no_expr();
             }
@@ -6983,7 +6983,7 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
         }
         let left_repr: Int = get_repr_type(ref source, left.source_type);
         let right_repr: Int = get_repr_type(ref source, right.source_type);
-        if (get_union_type(ref source, left_repr).members is !null || get_union_type(ref source, right_repr).members is !null) {
+        if (is_union_type(ref source, left_repr) || is_union_type(ref source, right_repr)) {
             throw_type_error(binary.pos, "Invalid types for binary operator.");
             return wir_no_expr();
         }

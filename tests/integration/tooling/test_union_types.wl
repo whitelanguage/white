@@ -31,21 +31,49 @@ func main() -> Int {
     let mixed = compiler.named_types.lookup("Mixed").type_id;
     let maybe = compiler.named_types.lookup("MaybeInt").type_id;
     let nominal = compiler.named_types.lookup("Nominal").type_id;
+    let nominal_info = get_union_type(ref compiler, nominal);
+    if (nominal_info is null) {
+        print("FAIL: nominal union metadata missing");
+        return 1;
+    }
     if (mixed != compiler.named_types.lookup("Reordered").type_id ||
         compiler.named_types.lookup("Nested").type_id != compiler.named_types.lookup("Flat").type_id ||
         compiler.named_types.lookup("Single").type_id != TYPE_INT ||
         maybe != compiler.named_types.lookup("RawInt").type_id ||
         maybe != compiler.named_types.lookup("AliasInt").type_id ||
         get_inner_fallible_type(ref compiler, compiler.named_types.lookup("Result").type_id) != maybe ||
-        get_union_type(ref compiler, nominal).members.length() != 2) {
+        nominal_info.members.length() != 2) {
         print("FAIL: union identity or alias substitution");
         return 1;
     }
 
-    let members: Vector(Int) = get_union_type(ref compiler, maybe).members;
+    let maybe_info = get_union_type(ref compiler, maybe);
+    if (maybe_info is null) {
+        print("FAIL: Optional metadata missing");
+        return 1;
+    }
+    let members: Vector(Int) = maybe_info.members;
     if (members.length() != 2 || members[0] != TYPE_NULL || members[1] != TYPE_INT) {
         print("FAIL: union tag order is unstable");
         return 1;
+    }
+
+    if (get_union_type(ref compiler, TYPE_INT) is !null ||
+        get_union_type(ref compiler, compiler.type_counter + 1000) is !null ||
+        is_union_type(ref compiler, TYPE_INT) || !is_union_type(ref compiler, maybe) ||
+        union_member_index(ref compiler, TYPE_INT, TYPE_INT) != -1) {
+        print("FAIL: missing union metadata must remain absent");
+        return 1;
+    }
+
+    let i = 0;
+    while (i < 100) {
+        let info = get_union_type(ref compiler, maybe);
+        if (info is null || info.members.length() != 2 || info.members[0] != TYPE_NULL) {
+            print("FAIL: repeated metadata query lost its members");
+            return 1;
+        }
+        i++;
     }
 
     print("PASS: union type normalization and aliases");

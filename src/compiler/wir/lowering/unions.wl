@@ -32,11 +32,12 @@ func wir_pack_union(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     let slot: WirValueID = wir_stack_alloc(ref program, state.entry, target_wir, "union.value", no_wir_location());
     wir_store(ref program, state.block, wir_const_zero(ref program, target_wir), slot, no_wir_location());
 
-    let source_union: UnionInfo = get_union_type(ref source, value.source_type);
-    if (source_union.members is null) {
+    let found_source_union: Optional(UnionInfo) = get_union_type(ref source, value.source_type);
+    if (found_source_union is null) {
         wir_union_store_member(ref state, ref types, ref source, ref program, slot, target, value.source_type, value.value);
         return wir_load(ref program, state.block, slot, "", no_wir_location());
     }
+    let source_union: UnionInfo = found_source_union;
 
     // widening must remap tags, adding a member can change the canonical order.
     let source_wir: WirTypeID = wir_value_type(ref program, value.value);

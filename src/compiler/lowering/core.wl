@@ -198,8 +198,8 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     let var_name: String = node.name_tok.value;
 
     if (c.scope_depth == 0) {
-        let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, target_type_id));
-        if (union.members is !null) {
+        let union: Bool = is_union_type(ref c, get_repr_type(ref c, target_type_id));
+        if (union) {
             emit_static_union(ref c, node, target_type_id)?;
             catch(err) {
                 throw_type_error(node.pos, "Could not write global initializer.");
@@ -2473,10 +2473,10 @@ func zero_value(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResul
     } else {
         let type_info: StructInfo = c.struct_id_map.lookup(type_id);
         let array_info: ArrayInfo = c.array_info_map.lookup(type_id);
-        let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+        let union: Bool = is_union_type(ref c, get_repr_type(ref c, type_id));
         if ((has_struct(type_info) && type_info.is_interface) ||
             (has_array_info(array_info) && array_info.size >= 0) ||
-            is_fallible_type(ref c, type_id) || is_value_struct(ref c, type_id) || union.members is !null) {
+            is_fallible_type(ref c, type_id) || is_value_struct(ref c, type_id) || union) {
             value = "zeroinitializer";
         }
     }
@@ -2513,10 +2513,10 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
             else {
                 let field_info: StructInfo = c.struct_id_map.lookup(f_curr.type);
                 let field_array: ArrayInfo = c.array_info_map.lookup(f_curr.type);
-                let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, f_curr.type));
+                let union: Bool = is_union_type(ref c, get_repr_type(ref c, f_curr.type));
                 if (is_fallible_type(ref c, f_curr.type) ||
                     is_value_struct(ref c, f_curr.type) ||
-                    union.members is !null ||
+                    union ||
                     (has_struct(field_info) && field_info.is_interface) ||
                     (has_array_info(field_array) && field_array.size >= 0)) {
                     zero_val = "zeroinitializer";
@@ -4772,7 +4772,7 @@ func compile_flow_lvalue(ref c: Compiler, node: NodeID, pos: Position) -> Compil
 // field writes use the payload in place, projecting a copied value would lose the write
     let address = compile_lvalue_ptr(ref c, node, pos);
     let member = flow_type(ref c, node);
-    if (member != 0 && member != TYPE_NULL && get_union_type(ref c, get_repr_type(ref c, address.type)).members is !null) {
+    if (member != 0 && member != TYPE_NULL && is_union_type(ref c, get_repr_type(ref c, address.type))) {
         return CompileResult(reg=emit_union_payload(ref c, address.reg, address.type, member), type=member, origin_type=member, is_const_access=address.is_const_access);
     }
     return address;
@@ -5103,8 +5103,8 @@ func compile_type_layout(ref c: Compiler, node: TypeLayoutNode) -> CompileResult
     }
 
     let llvm_type: String = "";
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union) {
         llvm_type = get_union_llvm_storage(ref c, get_repr_type(ref c, type_id));
     } else {
         llvm_type = get_llvm_type_str(ref c, type_id);
@@ -6032,7 +6032,7 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
     let member = flow_type(ref c, node);
     let result = compile_raw_node(ref c, node);
-    if (member != 0 && get_union_type(ref c, get_repr_type(ref c, result.type)).members is !null) {
+    if (member != 0 && is_union_type(ref c, get_repr_type(ref c, result.type))) {
         result = emit_union_read(ref c, result, member);
         if (needs_drop(ref c, member)) {
             // an argument can replace the checked slot after its receiver has been loaded.
@@ -6119,7 +6119,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
     if (base == NODE_VECTOR_LIT) {
         let literal: VectorLitNode = get_vector_lit_node(ref c.arena, node);
         let expected: Int = c.expected_type;
-        if (get_union_type(ref c, expected).members is !null) {
+        if (is_union_type(ref c, expected)) {
             c.expected_type = union_vector_target(ref c, expected, node, literal.pos);
             if (c.expected_type == TYPE_POISON) {
                 c.expected_type = expected;
@@ -6151,7 +6151,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
     }
     if (base == NODE_MAP_LIT) {
         let expected = c.expected_type;
-        if (get_union_type(ref c, expected).members is !null) {
+        if (is_union_type(ref c, expected)) {
             let literal = get_map_lit_node(ref c.arena, node);
             c.expected_type = union_map_target(ref c, expected, node, literal.pos);
             if (c.expected_type == TYPE_POISON) {
@@ -6290,13 +6290,13 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let rhs_res: CompileResult = compile_node(ref c, b_node.right);
         c.flow_skip = old_skip;
 
-        let left_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, lhs_res.type));
-        let right_union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, rhs_res.type));
-        if (left_union.members is !null || right_union.members is !null) {
+        let left_union: Bool = is_union_type(ref c, get_repr_type(ref c, lhs_res.type));
+        let right_union: Bool = is_union_type(ref c, get_repr_type(ref c, rhs_res.type));
+        if (left_union || right_union) {
             let result: CompileResult = CompileResult(reg="poison", type=TYPE_POISON);
-            if (left_union.members is !null && rhs_res.type == TYPE_NULL) {
+            if (left_union && rhs_res.type == TYPE_NULL) {
                 result = emit_union_null_check(ref c, lhs_res, base == NODE_IS_NOT);
-            } else if (right_union.members is !null && lhs_res.type == TYPE_NULL) {
+            } else if (right_union && lhs_res.type == TYPE_NULL) {
                 result = emit_union_null_check(ref c, rhs_res, base == NODE_IS_NOT);
             } else {
                 throw_type_error(b_node.pos, "Union identity comparisons require a Null operand.");

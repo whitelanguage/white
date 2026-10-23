@@ -790,7 +790,9 @@ func emit_slice_copy(ref c: Compiler, elem_type: Int, source: String, start_i32:
 
 func emit_union_ownership(ref c: Compiler, slot: String, type_id: Int, retain: Bool) -> Void {
 // the payload can contain stale pointers after reassignment, follow its tag only
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (found_union is null) { return; }
+    let union: UnionInfo = found_union;
     let storage: String = get_llvm_type_str(ref c, type_id);
     let tag_slot: String = next_reg(ref c);
     let tag: String = next_reg(ref c);
@@ -823,8 +825,8 @@ func emit_union_ownership(ref c: Compiler, slot: String, type_id: Int, retain: B
 }
 
 func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union) {
         if (needs_drop(ref c, type_id)) { emit_union_ownership(ref c, ptr_reg, type_id, false); }
         return;
     }
@@ -894,8 +896,8 @@ func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
 }
 
 func emit_retain_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, get_repr_type(ref c, type_id));
+    if (union) {
         if (needs_drop(ref c, type_id)) { emit_union_ownership(ref c, ptr_reg, type_id, true); }
         return;
     }

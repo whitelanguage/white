@@ -130,8 +130,9 @@ func flow_expose(ref c: Compiler, node: NodeID) -> Void {
 }
 
 func flow_record(ref c: Compiler, target: NodeID, type_id: Int, present: Bool, unstable: Bool) -> Void {
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (union.members is null || union_member_index(ref c, type_id, TYPE_NULL) < 0) { return; }
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (found_union is null || union_member_index(ref c, type_id, TYPE_NULL) < 0) { return; }
+    let union: UnionInfo = found_union;
     let member: Int = TYPE_NULL;
     if present {
         // one surviving arm has a concrete read type, larger unions stay unions.

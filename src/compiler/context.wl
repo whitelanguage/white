@@ -1304,11 +1304,18 @@ func same_repr_type(ref c: Compiler, left: Int, right: Int) -> Bool {
     return get_repr_type(ref c, left) == get_repr_type(ref c, right);
 }
 
-func get_union_type(ref c: Compiler, type_id: Int) -> UnionInfo {
+func is_union_type(ref c: Compiler, type_id: Int) -> Bool {
+// layout and conversion probes need only membership, avoid copying metadata there
+    return type_id >= 100 && c.union_types is !null && c.union_types.contains_key(type_id);
+}
+
+func get_union_type(ref c: Compiler, type_id: Int) -> Optional(UnionInfo) {
     if (type_id < 100 || c.union_types is null || c.union_types.length() == 0) {
-        return UnionInfo();
+        return null;
     }
-    return c.union_types.lookup(type_id);
+    let info: UnionInfo = c.union_types.get(type_id)?;
+    catch(err) { return null; }
+    return info;
 }
 
 func add_union_member(ref c: Compiler, members: Vector(Int), type_id: Int, pos: Position) -> Bool {
@@ -1319,8 +1326,9 @@ func add_union_member(ref c: Compiler, members: Vector(Int), type_id: Int, pos: 
         return false;
     }
 
-    let nested: UnionInfo = get_union_type(ref c, type_id);
-    if (nested.members is !null) {
+    let found_nested: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_nested is !null) {
+        let nested: UnionInfo = found_nested;
         let i: Int = 0;
         while (i < nested.members.length()) {
             if (!add_union_member(ref c, members, nested.members[i], pos)) { return false; }
@@ -1339,9 +1347,11 @@ func add_union_member(ref c: Compiler, members: Vector(Int), type_id: Int, pos: 
 }
 
 func union_member_index(ref c: Compiler, union_type: Int, member_type: Int) -> Int {
-    let union: UnionInfo = get_union_type(ref c, union_type);
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, union_type);
+    if (found_union is null) { return -1; }
+    let union: UnionInfo = found_union;
     let i: Int = 0;
-    while (union.members is !null && i < union.members.length()) {
+    while (i < union.members.length()) {
         if (union.members[i] == member_type) { return i; }
         i++;
     }
@@ -1351,13 +1361,13 @@ func union_member_index(ref c: Compiler, union_type: Int, member_type: Int) -> I
 func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> Bool {
 // assignment preserves each concrete member, numeric conversions stay explicit
     if (target_type == source_type) { return true; }
-    let target: UnionInfo = get_union_type(ref c, target_type);
-    if (target.members is null) { return false; }
+    if (!is_union_type(ref c, target_type)) { return false; }
 
-    let source: UnionInfo = get_union_type(ref c, source_type);
-    if (source.members is null) {
+    let found_source: Optional(UnionInfo) = get_union_type(ref c, source_type);
+    if (found_source is null) {
         return union_member_index(ref c, target_type, source_type) >= 0;
     }
+    let source: UnionInfo = found_source;
     let i: Int = 0;
     while (i < source.members.length()) {
         if (union_member_index(ref c, target_type, source.members[i]) < 0) {
@@ -1370,7 +1380,12 @@ func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> 
 
 func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Position) -> Int {
 // one container arm supplies context for [], multiple arms need an exact match
-    let union: UnionInfo = get_union_type(ref c, target);
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, target);
+    if (found_union is null) {
+        throw_type_error(pos, "Expected a union type.");
+        return TYPE_POISON;
+    }
+    let union: UnionInfo = found_union;
     let candidate: Int = 0;
     let count: Int = 0;
     let i: Int = 0;
@@ -1395,7 +1410,12 @@ func union_vector_target(ref c: Compiler, target: Int, node: NodeID, pos: Positi
 
 func union_map_target(ref c: Compiler, target: Int, node: NodeID, pos: Position) -> Int {
 // the annotated union chooses a typed dictionary before any keys are lowered
-    let union = get_union_type(ref c, target);
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, target);
+    if (found_union is null) {
+        throw_type_error(pos, "Expected a union type.");
+        return TYPE_POISON;
+    }
+    let union: UnionInfo = found_union;
     let candidate = 0;
     let count = 0;
     let i = 0;
@@ -1420,8 +1440,9 @@ func union_map_target(ref c: Compiler, target: Int, node: NodeID, pos: Position)
 
 func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
 // the tag selects the live member, the payload reserves its size and alignment
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is null) { return UnionLayout(); }
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is null) { return UnionLayout(); }
+    let union: UnionInfo = found_union;
 
     let payload_size: Int = 0;
     let payload_align: Int = 1;
@@ -1608,8 +1629,8 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
     if (has_named_type(named)) {
         return get_llvm_type_str(ref c, named.underlying_type);
     }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, type_id);
+    if (union) {
         return get_union_llvm_storage(ref c, type_id);
     }
     if (type_id == TYPE_NULL) { return "i8*"; }
@@ -1736,8 +1757,9 @@ func get_llvm_type_str(ref c: Compiler, type_id: Int) -> String {
 func get_type_name(ref c: Compiler, type_id: Int) -> String {
     let named: NamedTypeInfo = get_named_type(ref c, type_id);
     if (has_named_type(named)) { return named.name; }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let name: String = "";
         let i: Int = 0;
         while (i < union.members.length()) {
@@ -2048,8 +2070,9 @@ func needs_drop(ref c: Compiler, type_id: Int) -> Bool {
 func type_needs_drop(ref c: Compiler, type_id: Int) -> Bool {
     let repr: Int = get_repr_type(ref c, type_id);
     if (repr != type_id) { return needs_drop(ref c, repr); }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let i: Int = 0;
         while (i < union.members.length()) {
             if (needs_drop(ref c, union.members[i])) { return true; }
@@ -3007,8 +3030,8 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
     if (has_named_type(named)) {
         return get_type_size_bytes(ref c, named.underlying_type);
     }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, type_id);
+    if (union) {
         return get_union_layout(ref c, type_id).size;
     }
     // String's member table is a frontend placeholder, storage is still a pointer.
@@ -3087,8 +3110,9 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
 
     if (type_id == target) { return true; }
 
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let i: Int = 0;
         while (i < union.members.length()) {
             if (value_layout_contains(ref c, union.members[i], target, seen)) { return true; }
@@ -3128,8 +3152,8 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
     if (has_named_type(named)) {
         return get_type_align_bytes(ref c, named.underlying_type);
     }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref c, type_id);
+    if (union) {
         return get_union_layout(ref c, type_id).alignment;
     }
     if (type_id == TYPE_STRING || type_id == TYPE_NULL || type_id == TYPE_ANYPTR || type_id == TYPE_NULLPTR) {
@@ -4360,8 +4384,9 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
 func generic_constructor_context(ref c: Compiler, template: GenericTemplate, expected: Int) -> Int {
 // only a unique matching arm supplies type arguments, other union members give no context
     expected = get_repr_type(ref c, expected);
-    let union = get_union_type(ref c, expected);
-    if (union.members is null) { return expected; }
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, expected);
+    if (found_union is null) { return expected; }
+    let union: UnionInfo = found_union;
 
     let match = 0;
     let i = 0;
@@ -5225,8 +5250,10 @@ func mangle_type(ref c: Compiler, type_id: Int) -> String {
     if (has_named_type(named)) {
         return "N" + named.name.length() + named.name;
     }
-    let union: UnionInfo = get_union_type(ref c, type_id);
-    if (union.members is !null) { return union.key; }
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
+    if (found_union is !null) {
+        return found_union.key;
+    }
     if (type_id == TYPE_NULL) { return "Dn"; }
     if (type_id == TYPE_VOID) { return "v"; }
     if (type_id == TYPE_BOOL) {

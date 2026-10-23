@@ -11,8 +11,9 @@ func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Posit
     let property: String = "size";
     if is_align { property = "alignment"; }
     if (type_id == TYPE_POISON) { return false; }
-    let union: UnionInfo = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (union.members is !null) {
+    let found_union: Optional(UnionInfo) = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (found_union is !null) {
+        let union: UnionInfo = found_union;
         let i: Int = 0;
         while (i < union.members.length()) {
             if (!check_layout_type(ref c, union.members[i], is_align, pos)) { return false; }

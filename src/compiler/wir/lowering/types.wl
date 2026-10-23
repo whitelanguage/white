@@ -242,8 +242,8 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     let cached: WirTypeID = wir_cached_type(ref types, source_type);
     if (cached != NO_WIR_TYPE) { return cached; }
 
-    let union: UnionInfo = get_union_type(ref source, source_type);
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref source, source_type);
+    if (union) {
         return wir_cache_type(ref types, source_type, wir_union_storage(ref types, ref source, ref program, source_type));
     }
 

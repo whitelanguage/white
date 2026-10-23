@@ -161,12 +161,12 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
     let repr: Int = get_repr_type(ref source, source_type);
     let kind: Int = node_tag(node);
-    let union: UnionInfo = get_union_type(ref source, repr);
-    if (union.members is !null) {
+    let union: Bool = is_union_type(ref source, repr);
+    if (union) {
         let member = get_expr_type(ref source, node);
         if (kind == NODE_NULL) { member = TYPE_NULL; }
         if (kind == NODE_VECTOR_LIT) { member = union_vector_target(ref source, repr, node, pos); }
-        if (!union_accepts_type(ref source, repr, member) || get_union_type(ref source, member).members is !null) {
+        if (!union_accepts_type(ref source, repr, member) || is_union_type(ref source, member)) {
             throw_type_error(pos, "Global union initializer must have a concrete member type of " + get_type_name(ref source, source_type) + ".");
             return NO_WIR_VALUE;
         }
