@@ -218,7 +218,7 @@ struct CallNode(
 
 struct ArgNode(
     val  : NodeID, // expression
-    name : String,
+    name : String, // empty for positional arguments
     is_spread : Bool
 )
 

@@ -19,10 +19,10 @@ func emit_error_value(ref c: Compiler, value: CompileResult, pos: Position) -> C
     }
 
     let with_domain: String = next_reg(ref c);
-    c.output_file.write(c.indent + with_domain + " = insertvalue { i64, i32 } undef, i64 " + type_fingerprint(ref c, error_type) + ", 0\n");
+    write_ir(ref c, c.indent + with_domain + " = insertvalue { i64, i32 } undef, i64 " + type_fingerprint(ref c, error_type) + ", 0\n");
 
     let result: String = next_reg(ref c);
-    c.output_file.write(c.indent + result + " = insertvalue { i64, i32 } " + with_domain + ", i32 " + value.reg + ", 1\n");
+    write_ir(ref c, c.indent + result + " = insertvalue { i64, i32 } " + with_domain + ", i32 " + value.reg + ", 1\n");
 
     return CompileResult(reg=result, type=TYPE_ANY_ERROR);
 }

@@ -69,7 +69,7 @@ func emit_static_union(ref c: Compiler, node: VarDeclareNode, target: Int) -> Vo
 
     let source_type = get_llvm_type_str(ref c, target);
     output.write("@" + symbol + " = alias " + source_type + ", " + source_type + "* bitcast (" + packed_type + "* " + backing + " to " + source_type + "*)\n")?;
-    c.output_file.write(output.build()?);
+    write_ir(ref c, output.build()?);
     c.global_symbol_table.put(name, SymbolInfo(reg="@" + symbol, type=target, origin_type=target, is_const=node.is_const));
     return;
 }

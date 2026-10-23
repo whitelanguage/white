@@ -1,7 +1,7 @@
 // Test: REFERENCE_CONSTRUCTOR_ARGUMENT
 // File: tests/diagnostics/failures/test_ref_init.wl
 // Focus: Constructor reference parameters have the same temporary storage restriction as calls.
-// Expected Error: "TypeError: Cannot call a function with unverified storage effects while element reference 'argument' is active."
+// Expected Error: "TypeError: Cannot call 'append' while element reference 'argument' is active."
 
 class Cell {
     init(ref first: Int, values: Vector(Int)) {

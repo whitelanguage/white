@@ -124,11 +124,14 @@ func compile_block(ref c: Compiler, node: BlockNode) -> CompileResult {
     if (!is_root) {
         // a shadowed name stops identifying this binding once its block ends.
         if (c.flow_types is !null && c.flow_types.length() != 0) {
-            let table = c.symbol_table.table;
-            let slot = 0;
-            while (slot < table.capacity) {
-                if (table.hashes[slot] >= 2) { flow_forget(ref c, table.keys[slot], false); }
-                slot++;
+            let found_table = c.symbol_table.table;
+            if (found_table is !null) {
+                let table: Dict(String, SymbolInfo) = found_table;
+                let slot = 0;
+                while (slot < table.capacity) {
+                    if (table.hashes[slot] >= 2) { flow_forget(ref c, table.keys[slot], false); }
+                    slot++;
+                }
             }
         }
         if terminated {
@@ -161,19 +164,19 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
         }
         if (target_type_id == TYPE_POISON) {
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
             return void_result();
         }
         if (target_type_id == 0 || target_type_id == TYPE_AUTO) {
             throw_type_error(node.pos, "Failed to statically infer type for 'Auto'.");
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
             return void_result();
         }
         if (target_type_id == TYPE_NULL || target_type_id == TYPE_NULLPTR || target_type_id == TYPE_VOID || target_type_id == TYPE_POISON) {
             throw_type_error(node.pos, "Cannot infer 'Auto' as null, Void");
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
             return void_result();
         }
     }
@@ -181,7 +184,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     if (is_fallible_type(ref c, target_type_id)) {
         throw_type_error(node.pos, "Fallible values cannot be stored; handle the call with '?'");
         let curr_scope: Scope = c.symbol_table;
-        curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+        scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
         return void_result();
     }
 
@@ -190,7 +193,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
             throw_type_error(node.pos, "Variable '" + node.name_tok.value + "' cannot have type Void.");
         }
         let curr_scope: Scope = c.symbol_table;
-        curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+        scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
         return void_result();
     }
 
@@ -407,7 +410,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
         let storage: String = "global";
         if (node.is_const) { storage = "constant"; }
 
-        c.output_file.write(global_name + " = " + linkage + storage + " " + llvm_ty_str + " " + init_val_str + "\n");
+        write_ir(ref c, global_name + " = " + linkage + storage + " " + llvm_ty_str + " " + init_val_str + "\n");
 
         c.global_symbol_table.put(full_var_name, SymbolInfo(reg=global_name, type=target_type_id, origin_type=target_type_id, is_const=node.is_const));
         if (node.is_const && has_const_num) {
@@ -417,16 +420,16 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     }
 
     let local_scope: Scope = c.symbol_table;
-    if ((local_scope.table.lookup(var_name) is !null)) {
+    if ((scope_lookup(local_scope, var_name) is !null)) {
         throw_name_error(node.pos, "Variable '" + var_name + "' is already declared in this scope");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
     let ptr_reg: String = "";
     if (node.alloc_id < 0) {
         ptr_reg = next_reg(ref c);
-        c.output_file.write(c.indent + ptr_reg + " = alloca " + llvm_ty_str + "\n");
+        write_ir(ref c, c.indent + ptr_reg + " = alloca " + llvm_ty_str + "\n");
         if (needs_drop(ref c, target_type_id)) {
-            c.output_file.write(c.indent + "store " + llvm_ty_str + " zeroinitializer, " + llvm_ty_str + "* " + ptr_reg + "\n");
+            write_ir(ref c, c.indent + "store " + llvm_ty_str + " zeroinitializer, " + llvm_ty_str + "* " + ptr_reg + "\n");
         }
     } else { ptr_reg = c.alloc_regs[node.alloc_id]; }
     let origin_id: Int = target_type_id;
@@ -450,7 +453,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
             return void_result();
         }
         let scope: Scope = c.symbol_table;
-        scope.table.put(var_name, SymbolInfo(reg=target.reg, type=target_type_id, origin_type=target.origin_type, is_const=node.is_const, is_const_access=node.is_const, is_reference=true));
+        scope_put(scope, var_name, SymbolInfo(reg=target.reg, type=target_type_id, origin_type=target.origin_type, is_const=node.is_const, is_const_access=node.is_const, is_reference=true));
         return void_result();
     }
 
@@ -469,7 +472,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
 
         if (is_valid_struct && s_info is !null) {
             let fake_args: Vector(ArgNode) = [];
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=[], pos=node.pos, preserve_fallible=false);
             let val_res: CompileResult = CompileResult();
 
             if (s_info.is_class) {
@@ -482,11 +485,11 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
                 emit_retain_value(ref c, val_res.reg, target_type_id);
             }
 
-            c.output_file.write(c.indent + "store " + llvm_ty_str + " " + val_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
+            write_ir(ref c, c.indent + "store " + llvm_ty_str + " " + val_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
         } else {
             throw_missing_initializer(node.pos, "Local variable '" + var_name + "' must be initialised immediately upon declaration.");
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
             return void_result();
         }
     } else {
@@ -527,12 +530,12 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
                 emit_retain_value(ref c, val_res.reg, target_type_id);
             }
 
-            c.output_file.write(c.indent + "store " + llvm_ty_str + " " + val_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
+            write_ir(ref c, c.indent + "store " + llvm_ty_str + " " + val_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
         }
     }
 
     let curr_scope: Scope = c.symbol_table;
-    curr_scope.table.put(var_name, SymbolInfo(reg=ptr_reg, type=target_type_id, origin_type=origin_id, is_const=node.is_const, is_const_access=const_access));
+    scope_put(curr_scope, var_name, SymbolInfo(reg=ptr_reg, type=target_type_id, origin_type=origin_id, is_const=node.is_const, is_const_access=const_access));
 
     if (c.scope_depth > 0) {
         if (needs_drop(ref c, target_type_id)) {
@@ -548,7 +551,7 @@ func compile_var_assign(ref c: Compiler, node: VarAssignNode) -> CompileResult {
     if (!(info is !null)) {
         throw_name_error(node.pos, "Undefined variable '" + var_name + "'.");
         let curr_scope: Scope = c.symbol_table;
-        curr_scope.table.put(var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+        scope_put(curr_scope, var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
@@ -578,7 +581,7 @@ func compile_var_assign(ref c: Compiler, node: VarAssignNode) -> CompileResult {
 
     let ty_str: String = get_llvm_type_str(ref c, info.type);
 
-    c.output_file.write(c.indent + "store " + ty_str + " " + val_res.reg + ", " + ty_str + "* " + info.reg + "\n");
+    write_ir(ref c, c.indent + "store " + ty_str + " " + val_res.reg + ", " + ty_str + "* " + info.reg + "\n");
 
     return val_res;
 }
@@ -617,26 +620,26 @@ func compile_if(ref c: Compiler, node: IfNode) -> CompileResult {
     let target_else: String = label_else;
     if (!has_node(node.else_body)) { target_else = label_merge; }
 
-    c.output_file.write(c.indent + "br i1 " + cond_res.reg + ", label %" + label_then + ", label %" + target_else + "\n");
+    write_ir(ref c, c.indent + "br i1 " + cond_res.reg + ", label %" + label_then + ", label %" + target_else + "\n");
 
-    c.output_file.write("\n" + label_then + ":\n");
+    write_ir(ref c, "\n" + label_then + ":\n");
 
     let incoming = flow_copy(c.flow_types);
     apply_flow_guard(ref c, node.condition, true);
     compile_node(ref c, node.body);
     let then_facts = flow_copy(c.flow_types);
     if (!then_terminates) {
-        c.output_file.write(c.indent + "br label %" + label_merge + "\n");
+        write_ir(ref c, c.indent + "br label %" + label_merge + "\n");
     }
 
     c.flow_types = flow_copy(incoming);
     apply_flow_guard(ref c, node.condition, false);
     if (has_node(node.else_body)) {
-        c.output_file.write("\n" + label_else + ":\n");
+        write_ir(ref c, "\n" + label_else + ":\n");
 
         compile_node(ref c, node.else_body);
         if (!else_terminates) {
-            c.output_file.write(c.indent + "br label %" + label_merge + "\n");
+            write_ir(ref c, c.indent + "br label %" + label_merge + "\n");
         }
     }
 
@@ -646,7 +649,7 @@ func compile_if(ref c: Compiler, node: IfNode) -> CompileResult {
     }
 
     if needs_merge {
-        c.output_file.write("\n" + label_merge + ":\n");
+        write_ir(ref c, "\n" + label_merge + ":\n");
     }
     return void_result();
 }
@@ -660,8 +663,8 @@ func compile_while(ref c: Compiler, node_id: NodeID) -> CompileResult {
     let current_scope: LoopScope = LoopScope(label_continue=label_cond, label_break=label_end, parent=c.loop_stack, loop_scope=c.symbol_table);
     c.loop_stack = ref current_scope;
 
-    c.output_file.write(c.indent + "br label %" + label_cond + "\n");
-    c.output_file.write("\n" + label_cond + ":\n");
+    write_ir(ref c, c.indent + "br label %" + label_cond + "\n");
+    write_ir(ref c, "\n" + label_cond + ":\n");
 
     let cond_res: CompileResult = compile_node(ref c, node.condition);
     if (has_result(cond_res) && cond_res.type == TYPE_POISON) {
@@ -672,20 +675,20 @@ func compile_while(ref c: Compiler, node_id: NodeID) -> CompileResult {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    c.output_file.write(c.indent + "br i1 " + cond_res.reg + ", label %" + label_body + ", label %" + label_end + "\n");
+    write_ir(ref c, c.indent + "br i1 " + cond_res.reg + ", label %" + label_body + ", label %" + label_end + "\n");
 
-    c.output_file.write("\n" + label_body + ":\n");
+    write_ir(ref c, "\n" + label_body + ":\n");
 
     apply_flow_guard(ref c, node.condition, true);
     compile_node(ref c, node.body);
     if (!must_terminate(ref c, node.body)) {
-        c.output_file.write(c.indent + "br label %" + label_cond + "\n");
+        write_ir(ref c, c.indent + "br label %" + label_cond + "\n");
     }
 
-    c.output_file.write("\n" + label_end + ":\n");
+    write_ir(ref c, "\n" + label_end + ":\n");
 
     if (must_terminate(ref c, node_id)) {
-        c.output_file.write(c.indent + "unreachable\n");
+        write_ir(ref c, c.indent + "unreachable\n");
     }
     c.loop_stack = current_scope.parent;
     return void_result();
@@ -706,8 +709,8 @@ func compile_for(ref c: Compiler, node_id: NodeID) -> CompileResult {
     let current_scope: LoopScope = LoopScope(label_continue=label_step, label_break=label_end, parent=c.loop_stack, loop_scope=c.symbol_table);
     c.loop_stack = ref current_scope;
 
-    c.output_file.write(c.indent + "br label %" + label_cond + "\n");
-    c.output_file.write("\n" + label_cond + ":\n");
+    write_ir(ref c, c.indent + "br label %" + label_cond + "\n");
+    write_ir(ref c, "\n" + label_cond + ":\n");
 
     if (has_node(node.cond)) {
         let cond_res: CompileResult = compile_node(ref c, node.cond);
@@ -719,31 +722,31 @@ func compile_for(ref c: Compiler, node_id: NodeID) -> CompileResult {
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
 
-        c.output_file.write(c.indent + "br i1 " + cond_res.reg + ", label %" + label_body + ", label %" + label_end + "\n");
+        write_ir(ref c, c.indent + "br i1 " + cond_res.reg + ", label %" + label_body + ", label %" + label_end + "\n");
     } else {
-        c.output_file.write(c.indent + "br label %" + label_body + "\n");
+        write_ir(ref c, c.indent + "br label %" + label_body + "\n");
     }
 
-    c.output_file.write("\n" + label_body + ":\n");
+    write_ir(ref c, "\n" + label_body + ":\n");
 
     if (has_node(node.cond)) { apply_flow_guard(ref c, node.cond, true); }
     compile_node(ref c, node.body);
 
-    c.output_file.write(c.indent + "br label %" + label_step + "\n");
-    c.output_file.write("\n" + label_step + ":\n");
+    write_ir(ref c, c.indent + "br label %" + label_step + "\n");
+    write_ir(ref c, "\n" + label_step + ":\n");
 
     if (has_node(node.step)) {
         let step_res: CompileResult = compile_node(ref c, node.step);
         discard_statement_result(ref c, node.step, step_res);
     }
 
-    c.output_file.write(c.indent + "br label %" + label_cond + "\n");
-    c.output_file.write("\n" + label_end + ":\n");
+    write_ir(ref c, c.indent + "br label %" + label_cond + "\n");
+    write_ir(ref c, "\n" + label_end + ":\n");
 
     c.loop_stack = current_scope.parent;
     exit_scope(ref c);
     if (must_terminate(ref c, node_id)) {
-        c.output_file.write(c.indent + "unreachable\n");
+        write_ir(ref c, c.indent + "unreachable\n");
     }
 
     return void_result();
@@ -779,7 +782,7 @@ func compile_ptr_assign(ref c: Compiler, node: PtrAssignNode) -> CompileResult {
         emit_pointer_null_check(ref c, curr_reg, curr_type, node.pos);
         let ty_str: String = get_llvm_type_str(ref c, next_type);
         let next_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
+        write_ir(ref c, c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
 
         curr_reg = next_reg;
         curr_type = next_type;
@@ -815,7 +818,7 @@ func compile_ptr_assign(ref c: Compiler, node: PtrAssignNode) -> CompileResult {
         emit_drop_slot(ref c, curr_reg, target_type_id);
     }
 
-    c.output_file.write(c.indent + "store " + llvm_ty + " " + val_res.reg + ", " + llvm_ty + "* " + curr_reg + "\n");
+    write_ir(ref c, c.indent + "store " + llvm_ty + " " + val_res.reg + ", " + llvm_ty + "* " + curr_reg + "\n");
 
     return val_res;
 }
@@ -828,30 +831,30 @@ func emit_print_text(ref c: Compiler, value: CompileResult, fallback: String, po
     let hook: String = get_mangled_symbol(ref c, "print_bytes", pos);
     let id: Int = register_string_constant(ref c, fallback);
 
-    c.output_file.write(c.indent + "call void @" + hook + "(i8* " + get_string_ptr(id, fallback) + ", i32 " + fallback.length() + ")\n");
+    write_ir(ref c, c.indent + "call void @" + hook + "(i8* " + get_string_ptr(id, fallback) + ", i32 " + fallback.length() + ")\n");
 }
 
 func emit_print_item(ref c: Compiler, reg: String, type_id: Int, origin_id: Int, printed: String, separator: CompileResult, pos: Position) -> Void {
     let has_value: String = next_reg(ref c);
-    c.output_file.write(c.indent + has_value + " = load i1, i1* " + printed + "\n");
+    write_ir(ref c, c.indent + has_value + " = load i1, i1* " + printed + "\n");
 
     let separator_label: String = next_label(ref c);
     let value_label: String = next_label(ref c);
     let done_label: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + has_value + ", label %" + separator_label + ", label %" + value_label + "\n");
-    c.output_file.write("\n" + separator_label + ":\n");
+    write_ir(ref c, c.indent + "br i1 " + has_value + ", label %" + separator_label + ", label %" + value_label + "\n");
+    write_ir(ref c, "\n" + separator_label + ":\n");
 
     emit_print_text(ref c, separator, " ", pos);
 
-    c.output_file.write(c.indent + "br label %" + value_label + "\n");
-    c.output_file.write("\n" + value_label + ":\n");
+    write_ir(ref c, c.indent + "br label %" + value_label + "\n");
+    write_ir(ref c, "\n" + value_label + ":\n");
 
     compile_print(ref c, reg, type_id, pos, origin_id);
 
-    c.output_file.write(c.indent + "store i1 true, i1* " + printed + "\n");
-    c.output_file.write(c.indent + "br label %" + done_label + "\n");
-    c.output_file.write("\n" + done_label + ":\n");
+    write_ir(ref c, c.indent + "store i1 true, i1* " + printed + "\n");
+    write_ir(ref c, c.indent + "br label %" + done_label + "\n");
+    write_ir(ref c, "\n" + done_label + ":\n");
 }
 
 func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
@@ -862,7 +865,7 @@ func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
     let i: Int = 0;
     while (node.args is !null && i < node.args.length()) {
         let arg: ArgNode = node.args[i];
-        if (arg.name is !null && arg.name.length() > 0) {
+        if (arg.name.length() != 0) {
             saw_named = true;
             if (arg.name != "sep" && arg.name != "end") {
                 throw_name_error(node.pos, "Unknown print argument '" + arg.name + "'.");
@@ -910,27 +913,27 @@ func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
                     let parts: SliceParts = emit_slice_parts(ref c, value.reg, value.type, node.pos);
                     length = parts.length;
                     data = next_reg(ref c);
-                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
+                    write_ir(ref c, c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
                 } else {
                     length = "" + array_info.size;
                     data = next_reg(ref c);
-                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
+                    write_ir(ref c, c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
                 }
             } else if ((vector_info is !null)) {
                 elem_type = vector_info.type;
                 let elem_ty: String = get_llvm_type_str(ref c, elem_type);
                 let vector_ty: String = get_vector_llvm_type(ref c, elem_type);
                 let size_slot: String = next_reg(ref c);
-                c.output_file.write(c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
+                write_ir(ref c, c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
 
                 length = next_reg(ref c);
-                c.output_file.write(c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + size_slot + "\n");
+                write_ir(ref c, c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + size_slot + "\n");
 
                 let data_slot: String = next_reg(ref c);
-                c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
+                write_ir(ref c, c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
 
                 data = next_reg(ref c);
-                c.output_file.write(c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
+                write_ir(ref c, c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
             } else {
                 throw_type_error(node.pos, "Only an Array or Vector can be expanded into print.");
                 emit_release_owned(ref c, value);
@@ -947,8 +950,8 @@ func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
     }
 
     let printed: String = next_reg(ref c);
-    c.output_file.write(c.indent + printed + " = alloca i1\n");
-    c.output_file.write(c.indent + "store i1 false, i1* " + printed + "\n");
+    write_ir(ref c, c.indent + printed + " = alloca i1\n");
+    write_ir(ref c, c.indent + "store i1 false, i1* " + printed + "\n");
 
     i = 0;
     while (i < values.length()) {
@@ -959,39 +962,39 @@ func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
             let size_ty: String = get_size_llvm_type();
             let elem_ty: String = get_llvm_type_str(ref c, item.elem_type);
             let index: String = next_reg(ref c);
-            c.output_file.write(c.indent + index + " = alloca " + size_ty + "\n");
-            c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + index + "\n");
+            write_ir(ref c, c.indent + index + " = alloca " + size_ty + "\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " 0, " + size_ty + "* " + index + "\n");
 
             let cond_label: String = next_label(ref c);
             let body_label: String = next_label(ref c);
             let done_label: String = next_label(ref c);
 
-            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
-            c.output_file.write("\n" + cond_label + ":\n");
+            write_ir(ref c, c.indent + "br label %" + cond_label + "\n");
+            write_ir(ref c, "\n" + cond_label + ":\n");
 
             let current: String = next_reg(ref c);
-            c.output_file.write(c.indent + current + " = load " + size_ty + ", " + size_ty + "* " + index + "\n");
+            write_ir(ref c, c.indent + current + " = load " + size_ty + ", " + size_ty + "* " + index + "\n");
 
             let more: String = next_reg(ref c);
-            c.output_file.write(c.indent + more + " = icmp ult " + size_ty + " " + current + ", " + item.length + "\n");
-            c.output_file.write(c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
-            c.output_file.write("\n" + body_label + ":\n");
+            write_ir(ref c, c.indent + more + " = icmp ult " + size_ty + " " + current + ", " + item.length + "\n");
+            write_ir(ref c, c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
+            write_ir(ref c, "\n" + body_label + ":\n");
 
             let slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + item.data + ", " + size_ty + " " + current + "\n");
+            write_ir(ref c, c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + item.data + ", " + size_ty + " " + current + "\n");
 
             let value_reg: String = slot;
             let nested_array: Optional(ArrayInfo) = c.array_info_map.lookup(item.elem_type);
             if (!(nested_array is !null) || nested_array.size < 0) {
                 value_reg = next_reg(ref c);
-                c.output_file.write(c.indent + value_reg + " = load " + elem_ty + ", " + elem_ty + "* " + slot + "\n");
+                write_ir(ref c, c.indent + value_reg + " = load " + elem_ty + ", " + elem_ty + "* " + slot + "\n");
             }
             emit_print_item(ref c, value_reg, item.elem_type, item.elem_type, printed, separator, node.pos);
             let next: String = next_reg(ref c);
-            c.output_file.write(c.indent + next + " = add " + size_ty + " " + current + ", 1\n");
-            c.output_file.write(c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + index + "\n");
-            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
-            c.output_file.write("\n" + done_label + ":\n");
+            write_ir(ref c, c.indent + next + " = add " + size_ty + " " + current + ", 1\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + index + "\n");
+            write_ir(ref c, c.indent + "br label %" + cond_label + "\n");
+            write_ir(ref c, "\n" + done_label + ":\n");
         }
         emit_release_owned(ref c, item.value);
         i += 1;
@@ -1007,13 +1010,13 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
     let size_ty: String = get_size_llvm_type();
     let elem_ty: String = get_llvm_type_str(ref c, elem_type);
     let elem_size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + elem_size_ptr + " = getelementptr " + elem_ty + ", " + elem_ty + "* null, " + size_ty + " 1\n");
+    write_ir(ref c, c.indent + elem_size_ptr + " = getelementptr " + elem_ty + ", " + elem_ty + "* null, " + size_ty + " 1\n");
 
     let elem_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + elem_size + " = ptrtoint " + elem_ty + "* " + elem_size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + elem_size + " = ptrtoint " + elem_ty + "* " + elem_size_ptr + " to " + size_ty + "\n");
 
     let max_capacity: String = next_reg(ref c);
-    c.output_file.write(c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
+    write_ir(ref c, c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
 
     let total: String = "0";
     let i: Int = 0;
@@ -1041,26 +1044,26 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
                     let parts: SliceParts = emit_slice_parts(ref c, value.reg, value.type, pos);
                     length = parts.length;
                     data = next_reg(ref c);
-                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
+                    write_ir(ref c, c.indent + data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + parts.data + ", " + size_ty + " " + parts.start + "\n");
                 } else {
                     length = "" + array_info.size;
                     data = next_reg(ref c);
-                    c.output_file.write(c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
+                    write_ir(ref c, c.indent + data + " = getelementptr inbounds " + array_info.llvm_name + ", " + array_info.llvm_name + "* " + value.reg + ", i32 0, i32 0\n");
                 }
             } else if ((vector_info is !null)) {
                 source_elem = vector_info.type;
                 let vector_ty: String = get_vector_llvm_type(ref c, source_elem);
                 let length_slot: String = next_reg(ref c);
-                c.output_file.write(c.indent + length_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
+                write_ir(ref c, c.indent + length_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 0\n");
 
                 length = next_reg(ref c);
-                c.output_file.write(c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + length_slot + "\n");
+                write_ir(ref c, c.indent + length + " = load " + size_ty + ", " + size_ty + "* " + length_slot + "\n");
 
                 let data_slot: String = next_reg(ref c);
-                c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
+                write_ir(ref c, c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + value.reg + ", i32 0, i32 2\n");
 
                 data = next_reg(ref c);
-                c.output_file.write(c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
+                write_ir(ref c, c.indent + data + " = load " + elem_ty + "*, " + elem_ty + "** " + data_slot + "\n");
             } else {
                 throw_type_error(pos, "Only an Array or Vector can be expanded into a variadic argument.");
                 emit_release_owned(ref c, value);
@@ -1076,22 +1079,22 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
         }
 
         let remaining: String = next_reg(ref c);
-        c.output_file.write(c.indent + remaining + " = sub " + size_ty + " " + max_capacity + ", " + total + "\n");
+        write_ir(ref c, c.indent + remaining + " = sub " + size_ty + " " + max_capacity + ", " + total + "\n");
 
         let overflow: String = next_reg(ref c);
-        c.output_file.write(c.indent + overflow + " = icmp ugt " + size_ty + " " + length + ", " + remaining + "\n");
+        write_ir(ref c, c.indent + overflow + " = icmp ugt " + size_ty + " " + length + ", " + remaining + "\n");
 
         let fail_label: String = next_label(ref c);
         let next_label_: String = next_label(ref c);
 
-        c.output_file.write(c.indent + "br i1 " + overflow + ", label %" + fail_label + ", label %" + next_label_ + "\n");
-        c.output_file.write("\n" + fail_label + ":\n");
-        c.output_file.write(c.indent + "call void @__wl_oom()\n");
-        c.output_file.write(c.indent + "unreachable\n");
-        c.output_file.write("\n" + next_label_ + ":\n");
+        write_ir(ref c, c.indent + "br i1 " + overflow + ", label %" + fail_label + ", label %" + next_label_ + "\n");
+        write_ir(ref c, "\n" + fail_label + ":\n");
+        write_ir(ref c, c.indent + "call void @__wl_oom()\n");
+        write_ir(ref c, c.indent + "unreachable\n");
+        write_ir(ref c, "\n" + next_label_ + ":\n");
 
         let next_total: String = next_reg(ref c);
-        c.output_file.write(c.indent + next_total + " = add " + size_ty + " " + total + ", " + length + "\n");
+        write_ir(ref c, c.indent + next_total + " = add " + size_ty + " " + total + ", " + length + "\n");
 
         total = next_total;
         sources.append(VariadicSource(value=value, spread=arg.is_spread, length=length, data=data));
@@ -1101,110 +1104,110 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
     let vector_type: Int = get_vector_type_id(ref c, elem_type);
     let vector_ty: String = get_vector_llvm_type(ref c, elem_type);
     let vector_size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + vector_size_ptr + " = getelementptr " + vector_ty + ", " + vector_ty + "* null, i32 1\n");
+    write_ir(ref c, c.indent + vector_size_ptr + " = getelementptr " + vector_ty + ", " + vector_ty + "* null, i32 1\n");
 
     let vector_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + vector_size + " = ptrtoint " + vector_ty + "* " + vector_size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + vector_size + " = ptrtoint " + vector_ty + "* " + vector_size_ptr + " to " + size_ty + "\n");
 
     let vector: String = emit_alloc_obj(ref c, vector_size, "" + vector_type, vector_ty + "*");
 
     let empty: String = next_reg(ref c);
-    c.output_file.write(c.indent + empty + " = icmp eq " + size_ty + " " + total + ", 0\n");
+    write_ir(ref c, c.indent + empty + " = icmp eq " + size_ty + " " + total + ", 0\n");
 
     let alloc_count: String = next_reg(ref c);
-    c.output_file.write(c.indent + alloc_count + " = select i1 " + empty + ", " + size_ty + " 1, " + size_ty + " " + total + "\n");
+    write_ir(ref c, c.indent + alloc_count + " = select i1 " + empty + ", " + size_ty + " 1, " + size_ty + " " + total + "\n");
 
     let bytes: String = next_reg(ref c);
-    c.output_file.write(c.indent + bytes + " = mul " + size_ty + " " + alloc_count + ", " + elem_size + "\n");
+    write_ir(ref c, c.indent + bytes + " = mul " + size_ty + " " + alloc_count + ", " + elem_size + "\n");
 
     let alloc_hook: String = get_mangled_symbol(ref c, "memory_alloc", pos);
     let raw_data: String = next_reg(ref c);
-    c.output_file.write(c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + bytes + ")\n");
+    write_ir(ref c, c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + bytes + ")\n");
 
     emit_alloc_check(ref c, raw_data);
     let storage: String = next_reg(ref c);
-    c.output_file.write(c.indent + storage + " = bitcast i8* " + raw_data + " to " + elem_ty + "*\n");
+    write_ir(ref c, c.indent + storage + " = bitcast i8* " + raw_data + " to " + elem_ty + "*\n");
 
     let size_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 0\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + size_slot + "\n");
+    write_ir(ref c, c.indent + size_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 0\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + size_slot + "\n");
 
     let cap_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + cap_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 1\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + cap_slot + "\n");
+    write_ir(ref c, c.indent + cap_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 1\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + total + ", " + size_ty + "* " + cap_slot + "\n");
 
     let data_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 2\n");
-    c.output_file.write(c.indent + "store " + elem_ty + "* " + storage + ", " + elem_ty + "** " + data_slot + "\n");
+    write_ir(ref c, c.indent + data_slot + " = getelementptr inbounds " + vector_ty + ", " + vector_ty + "* " + vector + ", i32 0, i32 2\n");
+    write_ir(ref c, c.indent + "store " + elem_ty + "* " + storage + ", " + elem_ty + "** " + data_slot + "\n");
 
     let dest_index: String = next_reg(ref c);
-    c.output_file.write(c.indent + dest_index + " = alloca " + size_ty + "\n");
-    c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + dest_index + "\n");
+    write_ir(ref c, c.indent + dest_index + " = alloca " + size_ty + "\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " 0, " + size_ty + "* " + dest_index + "\n");
 
     i = 0;
     while (i < sources.length()) {
         let source: VariadicSource = sources[i];
         if (!source.spread) {
             let index: String = next_reg(ref c);
-            c.output_file.write(c.indent + index + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
+            write_ir(ref c, c.indent + index + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
 
             let slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + index + "\n");
+            write_ir(ref c, c.indent + slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + index + "\n");
 
             if (result_owns_value(ref c, elem_type) && !source.value.owns_ref) {
                 emit_retain_value(ref c, source.value.reg, elem_type);
             }
 
-            c.output_file.write(c.indent + "store " + elem_ty + " " + source.value.reg + ", " + elem_ty + "* " + slot + "\n");
+            write_ir(ref c, c.indent + "store " + elem_ty + " " + source.value.reg + ", " + elem_ty + "* " + slot + "\n");
 
             let next: String = next_reg(ref c);
-            c.output_file.write(c.indent + next + " = add " + size_ty + " " + index + ", 1\n");
-            c.output_file.write(c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + dest_index + "\n");
+            write_ir(ref c, c.indent + next + " = add " + size_ty + " " + index + ", 1\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " " + next + ", " + size_ty + "* " + dest_index + "\n");
         } else {
             let source_index: String = next_reg(ref c);
-            c.output_file.write(c.indent + source_index + " = alloca " + size_ty + "\n");
-            c.output_file.write(c.indent + "store " + size_ty + " 0, " + size_ty + "* " + source_index + "\n");
+            write_ir(ref c, c.indent + source_index + " = alloca " + size_ty + "\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " 0, " + size_ty + "* " + source_index + "\n");
 
             let cond_label: String = next_label(ref c);
             let body_label: String = next_label(ref c);
             let done_label: String = next_label(ref c);
 
-            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
-            c.output_file.write("\n" + cond_label + ":\n");
+            write_ir(ref c, c.indent + "br label %" + cond_label + "\n");
+            write_ir(ref c, "\n" + cond_label + ":\n");
 
             let source_i: String = next_reg(ref c);
-            c.output_file.write(c.indent + source_i + " = load " + size_ty + ", " + size_ty + "* " + source_index + "\n");
+            write_ir(ref c, c.indent + source_i + " = load " + size_ty + ", " + size_ty + "* " + source_index + "\n");
 
             let more: String = next_reg(ref c);
-            c.output_file.write(c.indent + more + " = icmp ult " + size_ty + " " + source_i + ", " + source.length + "\n");
-            c.output_file.write(c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
-            c.output_file.write("\n" + body_label + ":\n");
+            write_ir(ref c, c.indent + more + " = icmp ult " + size_ty + " " + source_i + ", " + source.length + "\n");
+            write_ir(ref c, c.indent + "br i1 " + more + ", label %" + body_label + ", label %" + done_label + "\n");
+            write_ir(ref c, "\n" + body_label + ":\n");
 
             let source_slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + source_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source.data + ", " + size_ty + " " + source_i + "\n");
+            write_ir(ref c, c.indent + source_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source.data + ", " + size_ty + " " + source_i + "\n");
 
             let item: String = next_reg(ref c);
-            c.output_file.write(c.indent + item + " = load " + elem_ty + ", " + elem_ty + "* " + source_slot + "\n");
+            write_ir(ref c, c.indent + item + " = load " + elem_ty + ", " + elem_ty + "* " + source_slot + "\n");
 
             let target_i: String = next_reg(ref c);
-            c.output_file.write(c.indent + target_i + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
+            write_ir(ref c, c.indent + target_i + " = load " + size_ty + ", " + size_ty + "* " + dest_index + "\n");
 
             let target_slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + target_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + target_i + "\n");
-            c.output_file.write(c.indent + "store " + elem_ty + " " + item + ", " + elem_ty + "* " + target_slot + "\n");
+            write_ir(ref c, c.indent + target_slot + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + storage + ", " + size_ty + " " + target_i + "\n");
+            write_ir(ref c, c.indent + "store " + elem_ty + " " + item + ", " + elem_ty + "* " + target_slot + "\n");
 
             if (result_owns_value(ref c, elem_type)) {
                 emit_retain_value(ref c, item, elem_type);
             }
             let next_source: String = next_reg(ref c);
-            c.output_file.write(c.indent + next_source + " = add " + size_ty + " " + source_i + ", 1\n");
-            c.output_file.write(c.indent + "store " + size_ty + " " + next_source + ", " + size_ty + "* " + source_index + "\n");
+            write_ir(ref c, c.indent + next_source + " = add " + size_ty + " " + source_i + ", 1\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " " + next_source + ", " + size_ty + "* " + source_index + "\n");
 
             let next_target: String = next_reg(ref c);
-            c.output_file.write(c.indent + next_target + " = add " + size_ty + " " + target_i + ", 1\n");
-            c.output_file.write(c.indent + "store " + size_ty + " " + next_target + ", " + size_ty + "* " + dest_index + "\n");
-            c.output_file.write(c.indent + "br label %" + cond_label + "\n");
-            c.output_file.write("\n" + done_label + ":\n");
+            write_ir(ref c, c.indent + next_target + " = add " + size_ty + " " + target_i + ", 1\n");
+            write_ir(ref c, c.indent + "store " + size_ty + " " + next_target + ", " + size_ty + "* " + dest_index + "\n");
+            write_ir(ref c, c.indent + "br label %" + cond_label + "\n");
+            write_ir(ref c, "\n" + done_label + ":\n");
 
             emit_release_owned(ref c, source.value);
         }
@@ -1212,7 +1215,7 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
     }
 
     let owner: String = next_reg(ref c);
-    c.output_file.write(c.indent + owner + " = bitcast " + vector_ty + "* " + vector + " to i8*\n");
+    write_ir(ref c, c.indent + owner + " = bitcast " + vector_ty + "* " + vector + " to i8*\n");
 
     return emit_make_slice(ref c, elem_type, owner, data_slot, size_slot, "0", total);
 }
@@ -1220,8 +1223,8 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
 func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
     let saved = c.flow_types;
     let exposed = c.flow_exposed;
-    c.flow_types = null;
-    c.flow_exposed = null;
+    c.flow_types = [];
+    c.flow_exposed = [];
     let result = compile_func_body(ref c, node);
     c.flow_types = saved;
     c.flow_exposed = exposed;
@@ -1283,8 +1286,8 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
     let func_attrs: String = "";
     if ((meta_f_info.ann_flags & FLAG_ANN_COMP_LINK) != 0) { func_attrs = "noinline "; }
 
-    c.output_file.write("define " + linkage + llvm_ret_type + " @" + meta_f_info.name + "(" + params_str + ") " + func_attrs + "{\n");
-    c.output_file.write("entry:\n");
+    write_ir(ref c, "define " + linkage + llvm_ret_type + " @" + meta_f_info.name + "(" + params_str + ") " + func_attrs + "{\n");
+    write_ir(ref c, "entry:\n");
 
     let old_sym: Scope = c.symbol_table;
     c.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
@@ -1302,16 +1305,16 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
         let llvm_ty: String = get_llvm_type_str(ref c, target_type_id);
         if (p.pass_mode == PARAM_REF) {
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_idx, type=target_type_id, origin_type=target_type_id, is_ref_param=true, is_reference=true));
+            scope_put(curr_scope, p_name, SymbolInfo(reg="%arg" + arg_idx, type=target_type_id, origin_type=target_type_id, is_ref_param=true, is_reference=true));
             arg_idx += 1;
             continue;
         }
         let addr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
-        c.output_file.write(c.indent + "store " + llvm_ty + " %arg" + arg_idx + ", " + llvm_ty + "* " + addr_reg + "\n");
+        write_ir(ref c, c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
+        write_ir(ref c, c.indent + "store " + llvm_ty + " %arg" + arg_idx + ", " + llvm_ty + "* " + addr_reg + "\n");
 
         let curr_scope: Scope = c.symbol_table;
-        curr_scope.table.put(p_name, SymbolInfo(reg=addr_reg, type=target_type_id, origin_type=target_type_id));
+        scope_put(curr_scope, p_name, SymbolInfo(reg=addr_reg, type=target_type_id, origin_type=target_type_id));
         if (needs_drop(ref c, target_type_id)) {
             emit_retain_slot(ref c, addr_reg, target_type_id);
             curr_scope.gc_vars.append(GCTracker(reg=addr_reg, type=target_type_id));
@@ -1334,24 +1337,24 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
     if (!has_term) {
         cleanup_all_scopes(ref c);
         if (ret_type_id == TYPE_VOID) {
-            c.output_file.write(c.indent + "ret void\n");
+            write_ir(ref c, c.indent + "ret void\n");
         } else if (is_fallible_type(ref c, ret_type_id) &&
                    get_inner_fallible_type(ref c, ret_type_id) == TYPE_VOID) {
-            c.output_file.write(c.indent + "ret " + llvm_ret_type + " zeroinitializer\n");
+            write_ir(ref c, c.indent + "ret " + llvm_ret_type + " zeroinitializer\n");
         } else {
             throw_type_error(node.pos, "Missing return. ");
 
-            c.output_file.write(c.indent + "ret " + llvm_ret_type + " undef\n");
+            write_ir(ref c, c.indent + "ret " + llvm_ret_type + " undef\n");
         }
     }
 
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "}\n\n");
 
     // restore scope
     c.symbol_table = old_sym;
     c.scope_depth = 0;
 
-    c.curr_func = FuncInfo();
+    c.curr_func = null;
 
     return void_result();
 }
@@ -1359,8 +1362,8 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
 func compile_method_def(ref c: Compiler, class_name: String, node: MethodDefNode) -> CompileResult {
     let saved = c.flow_types;
     let exposed = c.flow_exposed;
-    c.flow_types = null;
-    c.flow_exposed = null;
+    c.flow_types = [];
+    c.flow_exposed = [];
     let result = compile_method_body(ref c, class_name, node);
     c.flow_types = saved;
     c.flow_exposed = exposed;
@@ -1412,8 +1415,8 @@ func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNod
         arg_idx += 1;
     }
 
-    c.output_file.write("define internal " + llvm_ret_type + " @" + meta_f_info.name + "(" + params_str + ") {\n");
-    c.output_file.write("entry:\n");
+    write_ir(ref c, "define internal " + llvm_ret_type + " @" + meta_f_info.name + "(" + params_str + ") {\n");
+    write_ir(ref c, "entry:\n");
 
     let old_sym: Scope = c.symbol_table;
     c.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
@@ -1424,11 +1427,11 @@ func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNod
     c.curr_func = meta_f_info;
 
     let self_addr: String = next_reg(ref c);
-    c.output_file.write(c.indent + self_addr + " = alloca " + class_ptr_llvm + "\n");
-    c.output_file.write(c.indent + "store " + class_ptr_llvm + " %arg0, " + class_ptr_llvm + "* " + self_addr + "\n");
+    write_ir(ref c, c.indent + self_addr + " = alloca " + class_ptr_llvm + "\n");
+    write_ir(ref c, c.indent + "store " + class_ptr_llvm + " %arg0, " + class_ptr_llvm + "* " + self_addr + "\n");
 
     let curr_scope: Scope = c.symbol_table;
-    curr_scope.table.put("self", SymbolInfo(reg=self_addr, type=class_type_id, origin_type=class_type_id, is_const=false));
+    scope_put(curr_scope, "self", SymbolInfo(reg=self_addr, type=class_type_id, origin_type=class_type_id, is_const=false));
 
     arg_idx = 0;
     while (arg_idx < p_len) {
@@ -1438,15 +1441,15 @@ func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNod
         let llvm_ty: String = get_llvm_type_str(ref c, target_type_id);
         let arg_num: Int = arg_idx + 1;
         if (p.pass_mode == PARAM_REF) {
-            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_num, type=target_type_id, origin_type=target_type_id, is_const=false, is_ref_param=true, is_reference=true));
+            scope_put(curr_scope, p_name, SymbolInfo(reg="%arg" + arg_num, type=target_type_id, origin_type=target_type_id, is_const=false, is_ref_param=true, is_reference=true));
             arg_idx += 1;
             continue;
         }
         let addr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
-        c.output_file.write(c.indent + "store " + llvm_ty + " %arg" + arg_num + ", " + llvm_ty + "* " + addr_reg + "\n");
+        write_ir(ref c, c.indent + addr_reg + " = alloca " + llvm_ty + "\n");
+        write_ir(ref c, c.indent + "store " + llvm_ty + " %arg" + arg_num + ", " + llvm_ty + "* " + addr_reg + "\n");
 
-        curr_scope.table.put(p_name, SymbolInfo(reg=addr_reg, type=target_type_id, origin_type=target_type_id, is_const=false));
+        scope_put(curr_scope, p_name, SymbolInfo(reg=addr_reg, type=target_type_id, origin_type=target_type_id, is_const=false));
         if (needs_drop(ref c, target_type_id)) {
             emit_retain_slot(ref c, addr_reg, target_type_id);
             curr_scope.gc_vars.append(GCTracker(reg=addr_reg, type=target_type_id));
@@ -1467,41 +1470,41 @@ func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNod
     if (!has_term) {
         cleanup_all_scopes(ref c);
         if (ret_type_id == TYPE_VOID) {
-            c.output_file.write(c.indent + "ret void\n");
+            write_ir(ref c, c.indent + "ret void\n");
         } else if (is_fallible_type(ref c, ret_type_id) &&
                    get_inner_fallible_type(ref c, ret_type_id) == TYPE_VOID) {
-            c.output_file.write(c.indent + "ret " + llvm_ret_type + " zeroinitializer\n");
+            write_ir(ref c, c.indent + "ret " + llvm_ret_type + " zeroinitializer\n");
         } else {
             throw_type_error(node.pos, "Missing return. ");
 
-            c.output_file.write(c.indent + "ret " + llvm_ret_type + " undef\n");
+            write_ir(ref c, c.indent + "ret " + llvm_ret_type + " undef\n");
         }
     }
 
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "}\n\n");
 
     c.symbol_table = old_sym;
     c.scope_depth = 0;
-    c.curr_func = FuncInfo();
+    c.curr_func = null;
 
     return void_result();
 }
 
 func emit_method_nullcheck(ref c: Compiler, obj_ptr: String, class_llvm_ty: String, method_name: String, pos: Position) -> Void {
     let is_null: String = next_reg(ref c);
-    c.output_file.write(c.indent + is_null + " = icmp eq " + class_llvm_ty + "* " + obj_ptr + ", null\n");
+    write_ir(ref c, c.indent + is_null + " = icmp eq " + class_llvm_ty + "* " + obj_ptr + ", null\n");
 
     let panic_lbl: String = next_label(ref c);
     let cont_lbl: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + is_null + ", label %" + panic_lbl + ", label %" + cont_lbl + "\n");
+    write_ir(ref c, c.indent + "br i1 " + is_null + ", label %" + panic_lbl + ", label %" + cont_lbl + "\n");
 
-    c.output_file.write("\n" + panic_lbl + ":\n");
+    write_ir(ref c, "\n" + panic_lbl + ":\n");
 
     let msg: String = "Cannot call method '" + method_name + "' on null object.";
     emit_runtime_error(ref c, pos, msg);
 
-    c.output_file.write("\n" + cont_lbl + ":\n");
+    write_ir(ref c, "\n" + cont_lbl + ":\n");
 }
 
 func can_access_private_method(ref c: Compiler, owner: StructInfo) -> Bool {
@@ -1515,10 +1518,11 @@ func can_access_private_method(ref c: Compiler, owner: StructInfo) -> Bool {
         dot_idx -= 1;
     }
     if (c.current_package_prefix == class_prefix) { return true; }
-    if (!has_func(c.curr_func) || c.curr_func.arg_types is null || c.curr_func.arg_types.length() == 0) {
+    let current = c.curr_func;
+    if (current is null || current.arg_types is null || current.arg_types.length() == 0) {
         return false;
     }
-    let receiver: TypeListNode = c.curr_func.arg_types[0];
+    let receiver: TypeListNode = current.arg_types[0];
     return receiver.type == owner.type_id;
 }
 
@@ -1579,7 +1583,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
             throw_type_error(n_call.pos, "Generic methods cannot be called through an interface value.");
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
-        let types: Vector(Struct) = resolve_generic_method_args(ref c, method_template, n_call.type_args, n_call.args, n_call.pos);
+        let types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, n_call.type_args, n_call.args, n_call.pos);
         if (types is null) {
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
@@ -1624,7 +1628,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
         throw_name_error(n_call.pos, "Method '" + method_name + "' not found in '" + s_info.name + "'.");
         return void_result();
     }
-    if (!generic_method && n_call.type_args is !null) {
+    if (!generic_method && n_call.type_args.length() != 0) {
         throw_type_error(n_call.pos, "Method '" + method_name + "' is not generic.");
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
@@ -1658,14 +1662,14 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
         if (f_info.compiler_link_name == "hash_value") {
             let value: CompileResult = values[0];
 
-            c.output_file.write(c.indent + result + " = call i32 @__wl_hash_value_" + key_type + "(" + llvm_type + " " + value.reg + ")\n");
+            write_ir(ref c, c.indent + result + " = call i32 @__wl_hash_value_" + key_type + "(" + llvm_type + " " + value.reg + ")\n");
 
             emit_release_owned(ref c, value);
         } else {
             let left: CompileResult = values[0];
             let right: CompileResult = values[1];
 
-            c.output_file.write(c.indent + result + " = call i1 @__wl_values_equal_" + key_type + "(" + llvm_type + " " + left.reg + ", " + llvm_type + " " + right.reg + ")\n");
+            write_ir(ref c, c.indent + result + " = call i1 @__wl_values_equal_" + key_type + "(" + llvm_type + " " + left.reg + ", " + llvm_type + " " + right.reg + ")\n");
 
             emit_release_owned(ref c, left);
             emit_release_owned(ref c, right);
@@ -1691,8 +1695,8 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
     let func_ptr: String = "";
     let sig: String = "";
     let args_str: String = "";
-    let expected_types: Vector(Struct) = null;
-    let interface_params: Vector(ParamNode) = null;
+    let expected_types: Vector(Struct) = [];
+    let interface_params: Vector(ParamNode) = [];
     let ret_type: Int = 0;
 
     if (s_info.is_interface) {
@@ -1703,26 +1707,26 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
 
         let obj_box: String = obj_res.reg;
         let obj_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + obj_box + ", 0\n");
+        write_ir(ref c, c.indent + obj_ptr + " = extractvalue { i8*, i8* } " + obj_box + ", 0\n");
 
         let itable_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + itable_ptr + " = extractvalue { i8*, i8* } " + obj_box + ", 1\n");
+        write_ir(ref c, c.indent + itable_ptr + " = extractvalue { i8*, i8* } " + obj_box + ", 1\n");
 
         emit_method_nullcheck(ref c, obj_ptr, "i8", method_name, n_call.pos);
 
         let itable_typed_ptr: String = next_reg(ref c);
         let itable_type: String = "[ " + v_len + " x i8* ]";
 
-        c.output_file.write(c.indent + itable_typed_ptr + " = bitcast i8* " + itable_ptr + " to " + itable_type + "*\n");
+        write_ir(ref c, c.indent + itable_typed_ptr + " = bitcast i8* " + itable_ptr + " to " + itable_type + "*\n");
 
         let method_i8ptr_addr: String = next_reg(ref c);
-        c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + itable_type + ", " + itable_type + "* " + itable_typed_ptr + ", i32 0, i32 " + m_idx + "\n");
+        write_ir(ref c, c.indent + method_i8ptr_addr + " = getelementptr inbounds " + itable_type + ", " + itable_type + "* " + itable_typed_ptr + ", i32 0, i32 " + m_idx + "\n");
 
         let method_i8ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
+        write_ir(ref c, c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
 
         func_ptr = next_reg(ref c);
-        c.output_file.write(c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
+        write_ir(ref c, c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
 
         args_str = "i8* " + obj_ptr;
     } else {
@@ -1738,22 +1742,22 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
             func_ptr = "@" + f_info.name;
         } else {
             let vptr_addr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_ptr + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_ptr + ", i32 0, i32 0\n");
 
             let vtable_i8ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
+            write_ir(ref c, c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
 
             let vtable_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(ref c, s_info) + "*\n");
+            write_ir(ref c, c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(ref c, s_info) + "*\n");
 
             let method_i8ptr_addr: String = next_reg(ref c);
-            c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, s_info) + ", " + class_vtable_type(ref c, s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+            write_ir(ref c, c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, s_info) + ", " + class_vtable_type(ref c, s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
 
             let method_i8ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
+            write_ir(ref c, c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
 
             func_ptr = next_reg(ref c);
-            c.output_file.write(c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
+            write_ir(ref c, c.indent + func_ptr + " = bitcast i8* " + method_i8ptr + " to " + sig + "\n");
         }
 
         let self_type_node: TypeListNode = expected_types[0];
@@ -1803,10 +1807,11 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
             interface_names.append(param.name_tok.value);
             name_index += 1;
         }
-        args = bind_call_args(args, interface_names, 0, n_call.pos);
-        if (args is null && exp_len > 0) {
+        let bound = bind_call_args(args, interface_names, 0, n_call.pos);
+        if (bound is null) {
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
+        args = bound;
     }
 
     let arg_idx: Int = 0;
@@ -1854,14 +1859,14 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
 
     let llvm_ret_type: String = get_llvm_type_str(ref c, ret_type);
     if (ret_type == TYPE_VOID) {
-        c.output_file.write(c.indent + "call " + llvm_ret_type + " " + func_ptr + "(" + args_str + ")\n");
+        write_ir(ref c, c.indent + "call " + llvm_ret_type + " " + func_ptr + "(" + args_str + ")\n");
 
         emit_release_owned_args(ref c, owned_args);
         emit_release_owned(ref c, obj_res);
         return CompileResult(reg="", type=TYPE_VOID, origin_type=0);
     } else {
         let call_res: String = next_reg(ref c);
-        c.output_file.write(c.indent + call_res + " = call " + llvm_ret_type + " " + func_ptr + "(" + args_str + ")\n");
+        write_ir(ref c, c.indent + call_res + " = call " + llvm_ret_type + " " + func_ptr + "(" + args_str + ")\n");
 
         emit_release_owned_args(ref c, owned_args);
         emit_release_owned(ref c, obj_res);
@@ -1910,7 +1915,7 @@ func compile_dict_intrinsic(ref c: Compiler, info: FuncInfo, node: CallNode) -> 
     if (info.compiler_link_name == "dict_key_hash") {
         let value: CompileResult = values[0];
 
-        c.output_file.write(c.indent + result + " = call i32 @__wl_dict_key_hash(%struct.$Variant* " + value.reg + ")\n");
+        write_ir(ref c, c.indent + result + " = call i32 @__wl_dict_key_hash(%struct.$Variant* " + value.reg + ")\n");
 
         emit_release_owned(ref c, value);
         return CompileResult(reg=result, type=TYPE_INT);
@@ -1919,7 +1924,7 @@ func compile_dict_intrinsic(ref c: Compiler, info: FuncInfo, node: CallNode) -> 
     let left: CompileResult = values[0];
     let right: CompileResult = values[1];
 
-    c.output_file.write(c.indent + result + " = call i1 @__wl_dict_keys_equal(%struct.$Variant* " + left.reg + ", %struct.$Variant* " + right.reg + ")\n");
+    write_ir(ref c, c.indent + result + " = call i1 @__wl_dict_keys_equal(%struct.$Variant* " + left.reg + ", %struct.$Variant* " + right.reg + ")\n");
 
     emit_release_owned(ref c, left);
     emit_release_owned(ref c, right);
@@ -2020,11 +2025,11 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         is_class=false,
         vtable_name="",
         parent_id=0,
-        vtable=null,
+        vtable=[],
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=null,
+        interfaces=[],
         ann_flags=0,
         compiler_link_name=""
     );
@@ -2033,15 +2038,15 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     c.type_drop_list.append(TypeListNode(type=env_id));
 
     let size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_ptr + " = getelementptr " + llvm_env_name + ", " + llvm_env_name + "* null, i32 1\n");
+    write_ir(ref c, c.indent + size_ptr + " = getelementptr " + llvm_env_name + ", " + llvm_env_name + "* null, i32 1\n");
 
     let env_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + env_size + " = ptrtoint " + llvm_env_name + "* " + size_ptr + " to " + get_size_llvm_type() + "\n");
+    write_ir(ref c, c.indent + env_size + " = ptrtoint " + llvm_env_name + "* " + size_ptr + " to " + get_size_llvm_type() + "\n");
 
     let env_payload: String = emit_alloc_obj(ref c, env_size, "" + env_id, llvm_env_name + "*");
 
     let env_payload_i8: String = next_reg(ref c);
-    c.output_file.write(c.indent + env_payload_i8 + " = bitcast " + llvm_env_name + "* " + env_payload + " to i8*\n");
+    write_ir(ref c, c.indent + env_payload_i8 + " = bitcast " + llvm_env_name + "* " + env_payload + " to i8*\n");
 
     t_i = 0;
     while (t_i < t_len) {
@@ -2056,11 +2061,11 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         }
 
         let val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + val_reg + " = load " + llvm_ty + ", " + llvm_ty + "* " + info.reg + "\n");
+        write_ir(ref c, c.indent + val_reg + " = load " + llvm_ty + ", " + llvm_ty + "* " + info.reg + "\n");
 
         let slot_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + llvm_env_name + ", " + llvm_env_name + "* " + env_payload + ", i32 0, i32 " + t_i + "\n");
-        c.output_file.write(c.indent + "store " + llvm_ty + " " + val_reg + ", " + llvm_ty + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + llvm_env_name + ", " + llvm_env_name + "* " + env_payload + ", i32 0, i32 " + t_i + "\n");
+        write_ir(ref c, c.indent + "store " + llvm_ty + " " + val_reg + ", " + llvm_ty + "* " + slot_ptr + "\n");
 
         if (needs_drop(ref c, v_type)) {
             emit_retain_slot(ref c, slot_ptr, v_type);
@@ -2068,7 +2073,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         t_i += 1;
     }
 
-    let old_file: file.File = c.output_file;
+    let old_file: Optional(file.File) = c.output_file;
 
     let temp_dir: String = "";
     if (get_target_os() == sys.Os.Windows) {
@@ -2112,7 +2117,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         p_i += 1;
     }
 
-    c.output_file.write("define internal " + ret_ty_str + " @" + lambda_name + "(" + sig_def + ") {\nentry:\n");
+    write_ir(ref c, "define internal " + ret_ty_str + " @" + lambda_name + "(" + sig_def + ") {\nentry:\n");
 
     let old_sym: Scope = c.symbol_table;
     let old_depth: Int = c.scope_depth;
@@ -2134,22 +2139,22 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         let self_function: String = next_reg(ref c);
         let self_closure: String = next_reg(ref c);
         let self_address: String = next_reg(ref c);
-        c.output_file.write("  " + self_storage + " = alloca [2 x i8*]\n");
-        c.output_file.write("  " + self_function_slot + " = getelementptr inbounds [2 x i8*], [2 x i8*]* " + self_storage + ", i32 0, i32 0\n");
-        c.output_file.write("  " + self_environment_slot + " = getelementptr inbounds [2 x i8*], [2 x i8*]* " + self_storage + ", i32 0, i32 1\n");
-        c.output_file.write("  " + self_function + " = bitcast " + ret_ty_str + " (" + sig_ty + ")* @" + lambda_name + " to i8*\n");
-        c.output_file.write("  store i8* " + self_function + ", i8** " + self_function_slot + "\n");
-        c.output_file.write("  store i8* %raw_env, i8** " + self_environment_slot + "\n");
-        c.output_file.write("  " + self_closure + " = bitcast [2 x i8*]* " + self_storage + " to i8*\n");
-        c.output_file.write("  " + self_address + " = alloca i8*\n");
-        c.output_file.write("  store i8* " + self_closure + ", i8** " + self_address + "\n");
+        write_ir(ref c, "  " + self_storage + " = alloca [2 x i8*]\n");
+        write_ir(ref c, "  " + self_function_slot + " = getelementptr inbounds [2 x i8*], [2 x i8*]* " + self_storage + ", i32 0, i32 0\n");
+        write_ir(ref c, "  " + self_environment_slot + " = getelementptr inbounds [2 x i8*], [2 x i8*]* " + self_storage + ", i32 0, i32 1\n");
+        write_ir(ref c, "  " + self_function + " = bitcast " + ret_ty_str + " (" + sig_ty + ")* @" + lambda_name + " to i8*\n");
+        write_ir(ref c, "  store i8* " + self_function + ", i8** " + self_function_slot + "\n");
+        write_ir(ref c, "  store i8* %raw_env, i8** " + self_environment_slot + "\n");
+        write_ir(ref c, "  " + self_closure + " = bitcast [2 x i8*]* " + self_storage + " to i8*\n");
+        write_ir(ref c, "  " + self_address + " = alloca i8*\n");
+        write_ir(ref c, "  store i8* " + self_closure + ", i8** " + self_address + "\n");
 
-        c.symbol_table.table.put(func_def.name_tok.value, SymbolInfo(reg=self_address, type=specific_type_id, origin_type=ret_type_id, is_const=true));
+        scope_put(c.symbol_table, func_def.name_tok.value, SymbolInfo(reg=self_address, type=specific_type_id, origin_type=ret_type_id, is_const=true));
     }
 
     let lambda_env_ptr: String = "%lambda_env_ptr";
 
-    c.output_file.write("  " + lambda_env_ptr + " = bitcast i8* %raw_env to " + llvm_env_name + "*\n");
+    write_ir(ref c, "  " + lambda_env_ptr + " = bitcast i8* %raw_env to " + llvm_env_name + "*\n");
 
     t_i = 0;
     while (t_i < t_len) {
@@ -2160,9 +2165,9 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
 
         let slot_ptr: String = "%env.slot." + t_i;
 
-        c.output_file.write("  " + slot_ptr + " = getelementptr inbounds " + llvm_env_name + ", " + llvm_env_name + "* " + lambda_env_ptr + ", i32 0, i32 " + t_i + "\n");
+        write_ir(ref c, "  " + slot_ptr + " = getelementptr inbounds " + llvm_env_name + ", " + llvm_env_name + "* " + lambda_env_ptr + ", i32 0, i32 " + t_i + "\n");
 
-        c.symbol_table.table.put(v_name, SymbolInfo(reg=slot_ptr, type=v_type, origin_type=v_type, is_const=false));
+        scope_put(c.symbol_table, v_name, SymbolInfo(reg=slot_ptr, type=v_type, origin_type=v_type, is_const=false));
         t_i += 1;
     }
 
@@ -2173,16 +2178,16 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         let p_ty: String = get_llvm_type_str(ref c, p_ty_id);
 
         if (p_node.pass_mode == PARAM_REF) {
-            c.symbol_table.table.put(p_node.name_tok.value, SymbolInfo(reg="%arg" + p_i, type=p_ty_id, origin_type=p_ty_id, is_const=false, is_ref_param=true, is_reference=true));
+            scope_put(c.symbol_table, p_node.name_tok.value, SymbolInfo(reg="%arg" + p_i, type=p_ty_id, origin_type=p_ty_id, is_const=false, is_ref_param=true, is_reference=true));
             p_i += 1;
             continue;
         }
 
         let addr_reg: String = next_reg(ref c);
-        c.output_file.write("  " + addr_reg + " = alloca " + p_ty + "\n");
-        c.output_file.write("  store " + p_ty + " %arg" + p_i + ", " + p_ty + "* " + addr_reg + "\n");
+        write_ir(ref c, "  " + addr_reg + " = alloca " + p_ty + "\n");
+        write_ir(ref c, "  store " + p_ty + " %arg" + p_i + ", " + p_ty + "* " + addr_reg + "\n");
 
-        c.symbol_table.table.put(p_node.name_tok.value, SymbolInfo(reg=addr_reg, type=p_ty_id, origin_type=p_ty_id, is_const=false));
+        scope_put(c.symbol_table, p_node.name_tok.value, SymbolInfo(reg=addr_reg, type=p_ty_id, origin_type=p_ty_id, is_const=false));
         if (needs_drop(ref c, p_ty_id)) {
             emit_retain_slot(ref c, addr_reg, p_ty_id);
             c.symbol_table.gc_vars.append(GCTracker(reg=addr_reg, type=p_ty_id));
@@ -2202,7 +2207,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     if (!lambda_terminates) {
         cleanup_all_scopes(ref c);
         if (ret_type_id == TYPE_VOID) {
-            c.output_file.write("  ret void\n");
+            write_ir(ref c, "  ret void\n");
         } else {
             let zero_val: String = "0";
             if (ret_type_id == TYPE_FLOAT) { zero_val = "0.0"; }
@@ -2210,11 +2215,11 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
                 zero_val = "null";
             }
 
-            c.output_file.write("  ret " + ret_ty_str + " " + zero_val + "\n");
+            write_ir(ref c, "  ret " + ret_ty_str + " " + zero_val + "\n");
         }
     }
 
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "}\n\n");
 
     c.symbol_table = old_sym;
     c.scope_depth = old_depth;
@@ -2223,7 +2228,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     c.alloc_regs = old_alloc_regs;
     c.hoist_scope = old_hoist_scope;
 
-    c.output_file.close();
+    close_ir(ref c);
     c.output_file = old_file;
     let tmp_read: file.File = file.open(tmp_name)?;
     catch(err) {
@@ -2244,19 +2249,19 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
     let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
 
     let clo_func_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
+    write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
 
     let lambda_casted: String = next_reg(ref c);
-    c.output_file.write(c.indent + lambda_casted + " = bitcast " + ret_ty_str + " (" + sig_ty + ")* @" + lambda_name + " to i8*\n");
-    c.output_file.write(c.indent + "store i8* " + lambda_casted + ", i8** " + clo_func_ptr + "\n");
+    write_ir(ref c, c.indent + lambda_casted + " = bitcast " + ret_ty_str + " (" + sig_ty + ")* @" + lambda_name + " to i8*\n");
+    write_ir(ref c, c.indent + "store i8* " + lambda_casted + ", i8** " + clo_func_ptr + "\n");
 
     let clo_env_ptr_i8: String = next_reg(ref c);
-    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
+    write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
 
     let clo_env_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
-    c.output_file.write(c.indent + "store i8* " + env_payload_i8 + ", i8** " + clo_env_ptr + "\n");
-    c.output_file.write(c.indent + "call void @__wl_retain(i8* " + env_payload_i8 + ")\n");
+    write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
+    write_ir(ref c, c.indent + "store i8* " + env_payload_i8 + ", i8** " + clo_env_ptr + "\n");
+    write_ir(ref c, c.indent + "call void @__wl_retain(i8* " + env_payload_i8 + ")\n");
 
     emit_retain(ref c, clo_payload, specific_type_id);
     return CompileResult(reg=clo_payload, type=specific_type_id, origin_type=ret_type_id);
@@ -2293,16 +2298,16 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
 
         if is_ret_fallible {
             let ret_val_1: String = next_reg(ref c);
-            c.output_file.write(c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 false, 0\n");
+            write_ir(ref c, c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 false, 0\n");
 
             let ret_val_2: String = next_reg(ref c);
-            c.output_file.write(c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } zeroinitializer, 1\n");
+            write_ir(ref c, c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } zeroinitializer, 1\n");
 
             if (inner_ret_type != TYPE_VOID) {
                 let ret_val_3: String = next_reg(ref c);
                 let inner_llvm_ty: String = get_llvm_type_str(ref c, inner_ret_type);
 
-                c.output_file.write(c.indent + ret_val_3 + " = insertvalue " + target_ty + " " + ret_val_2 + ", " + inner_llvm_ty + " " + ret_val_reg + ", 2\n");
+                write_ir(ref c, c.indent + ret_val_3 + " = insertvalue " + target_ty + " " + ret_val_2 + ", " + inner_llvm_ty + " " + ret_val_reg + ", 2\n");
 
                 ret_val_reg = ret_val_3;
             } else {
@@ -2316,7 +2321,7 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
 
         cleanup_all_scopes(ref c);
 
-        c.output_file.write(c.indent + "ret " + target_ty + " " + ret_val_reg + "\n");
+        write_ir(ref c, c.indent + "ret " + target_ty + " " + ret_val_reg + "\n");
     } else {
         if (c.current_ret_type != TYPE_VOID) {
             if (is_fallible_type(ref c, c.current_ret_type)) {
@@ -2324,14 +2329,14 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
                 if (inner == TYPE_VOID) {
                     let target_ty: String = get_llvm_type_str(ref c, c.current_ret_type);
                     let ret_val_1: String = next_reg(ref c);
-                    c.output_file.write(c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 false, 0\n");
+                    write_ir(ref c, c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 false, 0\n");
 
                     let ret_val_2: String = next_reg(ref c);
-                    c.output_file.write(c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } zeroinitializer, 1\n");
+                    write_ir(ref c, c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } zeroinitializer, 1\n");
 
                     cleanup_all_scopes(ref c);
 
-                    c.output_file.write(c.indent + "ret " + target_ty + " " + ret_val_2 + "\n");
+                    write_ir(ref c, c.indent + "ret " + target_ty + " " + ret_val_2 + "\n");
 
                     return void_result();
                 }
@@ -2341,7 +2346,7 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
         }
         cleanup_all_scopes(ref c);
 
-        c.output_file.write(c.indent + "ret void\n");
+        write_ir(ref c, c.indent + "ret void\n");
     }
 
     return void_result();
@@ -2392,8 +2397,8 @@ func compile_struct_def(ref c: Compiler, node: StructDefNode) -> CompileResult {
 
 func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -> CompileResult {
     let obj_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + obj_ptr + " = alloca " + s_info.llvm_name + "\n");
-    c.output_file.write(c.indent + "store " + s_info.llvm_name + " zeroinitializer, " + s_info.llvm_name + "* " + obj_ptr + "\n");
+    write_ir(ref c, c.indent + obj_ptr + " = alloca " + s_info.llvm_name + "\n");
+    write_ir(ref c, c.indent + "store " + s_info.llvm_name + " zeroinitializer, " + s_info.llvm_name + "* " + obj_ptr + "\n");
 
     let fields_vec: Vector(Struct) = s_info.fields;
     let f_len: Int = 0;
@@ -2413,7 +2418,7 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
             previous = use_generic_context(ref c, instance, bindings);
         }
         enter_scope(ref c);
-        c.symbol_table.table.put("this", SymbolInfo(reg=obj_ptr, type=s_info.type_id, origin_type=s_info.type_id));
+        scope_put(c.symbol_table, "this", SymbolInfo(reg=obj_ptr, type=s_info.type_id, origin_type=s_info.type_id));
         compile_node(ref c, s_info.init_body);
         exit_scope(ref c);
         if ((template is !null)) {
@@ -2436,7 +2441,7 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
         let arg_curr: ArgNode = args[arg_idx];
 
         let target_f: Optional(FieldInfo) = null;
-        if (arg_curr.name is !null) {
+        if (arg_curr.name.length() != 0) {
             saw_named = true;
             target_f = find_field(s_info, arg_curr.name);
             if (target_f is null) {
@@ -2468,19 +2473,19 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
             val_res = emit_implicit_cast(ref c, val_res, target_f.type, n_call.pos);
             if (val_res.type != TYPE_POISON) {
                 let f_ptr: String = next_reg(ref c);
-                c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + target_f.offset + "\n");
+                write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + target_f.offset + "\n");
 
                 if (result_owns_value(ref c, target_f.type) && !val_res.owns_ref) {
                     emit_retain_value(ref c, val_res.reg, target_f.type);
                 }
 
-                c.output_file.write(c.indent + "store " + target_f.llvm_type + " " + val_res.reg + ", " + target_f.llvm_type + "* " + f_ptr + "\n");
+                write_ir(ref c, c.indent + "store " + target_f.llvm_type + " " + val_res.reg + ", " + target_f.llvm_type + "* " + f_ptr + "\n");
             }
         }
         arg_idx += 1;
     }
     let result: String = next_reg(ref c);
-    c.output_file.write(c.indent + result + " = load " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + "\n");
+    write_ir(ref c, c.indent + result + " = load " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + "\n");
 
     return CompileResult(reg=result, type=s_info.type_id, owns_ref=needs_drop(ref c, s_info.type_id));
 }
@@ -2513,10 +2518,10 @@ func zero_value(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResul
 func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -> CompileResult {
     let size_ty: String = get_size_llvm_type();
     let size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_ptr + " = getelementptr " + s_info.llvm_name + ", " + s_info.llvm_name + "* null, " + size_ty + " 1\n");
+    write_ir(ref c, c.indent + size_ptr + " = getelementptr " + s_info.llvm_name + ", " + s_info.llvm_name + "* null, " + size_ty + " 1\n");
 
     let object_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + object_size + " = ptrtoint " + s_info.llvm_name + "* " + size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + object_size + " = ptrtoint " + s_info.llvm_name + "* " + size_ptr + " to " + size_ty + "\n");
 
     let obj_ptr: String = emit_alloc_obj(ref c, object_size, "" + s_info.type_id, s_info.llvm_name + "*");
 
@@ -2528,12 +2533,12 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
     while (f_idx < f_len) {
         let f_curr: FieldInfo = fields_vec[f_idx];
         let f_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + f_curr.offset + "\n");
+        write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + f_curr.offset + "\n");
 
         if (f_curr.name == "_vptr") {
             let vtable_cast: String = next_reg(ref c);
-            c.output_file.write(c.indent + vtable_cast + " = bitcast " + class_vtable_type(ref c, s_info) + "* " + s_info.vtable_name + " to i8*\n");
-            c.output_file.write(c.indent + "store i8* " + vtable_cast + ", i8** " + f_ptr + "\n");
+            write_ir(ref c, c.indent + vtable_cast + " = bitcast " + class_vtable_type(ref c, s_info) + "* " + s_info.vtable_name + " to i8*\n");
+            write_ir(ref c, c.indent + "store i8* " + vtable_cast + ", i8** " + f_ptr + "\n");
         } else {
             let zero_val: String = "0";
             if (f_curr.type == TYPE_FLOAT) { zero_val = "0.0"; }
@@ -2552,7 +2557,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
                 }
             }
 
-            c.output_file.write(c.indent + "store " + f_curr.llvm_type + " " + zero_val + ", " + f_curr.llvm_type + "* " + f_ptr + "\n");
+            write_ir(ref c, c.indent + "store " + f_curr.llvm_type + " " + zero_val + ", " + f_curr.llvm_type + "* " + f_ptr + "\n");
         }
         f_idx += 1;
     }
@@ -2617,7 +2622,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
             arg_idx += 1;
         }
 
-        c.output_file.write(c.indent + "call void @" + meta_init_func.name + "(" + args_str + ")\n");
+        write_ir(ref c, c.indent + "call void @" + meta_init_func.name + "(" + args_str + ")\n");
 
         emit_release_owned_args(ref c, owned_args);
     } else {
@@ -2951,7 +2956,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
         vt_str += " ]\n\n";
     }
 
-    if (vt_str.length() > 0) { c.output_file.write(vt_str); }
+    if (vt_str.length() > 0) { write_ir(ref c, vt_str); }
 
     if (record.interfaces is !null) {
         let i_len: Int = record.interfaces.length();
@@ -2973,7 +2978,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
 
             let itable_name: String = "@itable." + class_name + "." + i_name;
 
-            c.output_file.write("%itable_type." + class_name + "." + i_name + " = type [ " + im_len + " x i8* ]\n");
+            write_ir(ref c, "%itable_type." + class_name + "." + i_name + " = type [ " + im_len + " x i8* ]\n");
 
             let it_str: String = itable_name + " = global %itable_type." + class_name + "." + i_name;
 
@@ -3001,7 +3006,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
                 it_str += " ]\n\n";
             }
 
-            c.output_file.write(it_str);
+            write_ir(ref c, it_str);
 
             i_idx += 1;
         }
@@ -3116,7 +3121,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             }
             let llvm_ty_str: String = get_llvm_type_str(ref c, g_info.type);
             let val_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + val_reg + " = load " + llvm_ty_str + ", " + llvm_ty_str + "* " + g_info.reg + "\n");
+            write_ir(ref c, c.indent + val_reg + " = load " + llvm_ty_str + ", " + llvm_ty_str + "* " + g_info.reg + "\n");
 
             return CompileResult(reg=val_reg, type=g_info.type, origin_type=g_info.origin_type);
         } else {
@@ -3145,23 +3150,23 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
                 let ptr_is_null: String = next_reg(ref c);
                 let ptr_ty_str: String = get_llvm_type_str(ref c, obj_res.type);
 
-                c.output_file.write(c.indent + ptr_is_null + " = icmp eq " + ptr_ty_str + " " + obj_res.reg + ", null\n");
+                write_ir(ref c, c.indent + ptr_is_null + " = icmp eq " + ptr_ty_str + " " + obj_res.reg + ", null\n");
 
                 let label_ok: String = "ptr_ok_" + c.reg_count;
                 let label_fail: String = "ptr_fail_" + c.reg_count;
                 c.reg_count += 1;
 
-                c.output_file.write(c.indent + "br i1 " + ptr_is_null + ", label %" + label_fail + ", label %" + label_ok + "\n");
-                c.output_file.write("\n" + label_fail + ":\n");
+                write_ir(ref c, c.indent + "br i1 " + ptr_is_null + ", label %" + label_fail + ", label %" + label_ok + "\n");
+                write_ir(ref c, "\n" + label_fail + ":\n");
 
                 emit_runtime_error(ref c, node.pos, "Null pointer dereference");
 
-                c.output_file.write("\n" + label_ok + ":\n");
+                write_ir(ref c, "\n" + label_ok + ":\n");
 
                 let loaded_reg: String = next_reg(ref c);
                 let base_ty_str: String = get_llvm_type_str(ref c, base_info.type);
 
-                c.output_file.write(c.indent + loaded_reg + " = load " + base_ty_str + ", " + base_ty_str + "* " + obj_res.reg + "\n");
+                write_ir(ref c, c.indent + loaded_reg + " = load " + base_ty_str + ", " + base_ty_str + "* " + obj_res.reg + "\n");
 
                 obj_res.reg = loaded_reg;
                 obj_res.type = base_info.type;
@@ -3182,22 +3187,22 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             null_check_reg = next_reg(ref c);
             null_check_type = "i8*";
 
-            c.output_file.write(c.indent + null_check_reg + " = extractvalue { i8*, i8* } " + obj_reg + ", 0\n");
+            write_ir(ref c, c.indent + null_check_reg + " = extractvalue { i8*, i8* } " + obj_reg + ", 0\n");
         }
 
-        c.output_file.write(c.indent + is_null + " = icmp eq " + null_check_type + " " + null_check_reg + ", null\n");
+        write_ir(ref c, c.indent + is_null + " = icmp eq " + null_check_type + " " + null_check_reg + ", null\n");
 
         let label_ok: String = "access_ok_" + c.reg_count;
         let label_fail: String = "access_fail_" + c.reg_count;
         c.reg_count += 1;
 
-        c.output_file.write(c.indent + "br i1 " + is_null + ", label %" + label_fail + ", label %" + label_ok + "\n");
+        write_ir(ref c, c.indent + "br i1 " + is_null + ", label %" + label_fail + ", label %" + label_ok + "\n");
 
-        c.output_file.write("\n" + label_fail + ":\n");
+        write_ir(ref c, "\n" + label_fail + ":\n");
 
         emit_runtime_error(ref c, node.pos, "Null pointer dereference");
 
-        c.output_file.write("\n" + label_ok + ":\n");
+        write_ir(ref c, "\n" + label_ok + ":\n");
     }
 
     if (type_id == TYPE_GENERIC_STRUCT || type_id == TYPE_GENERIC_CLASS) {
@@ -3212,7 +3217,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
                 let s_info_temp: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
                 if ((s_info_temp is !null)) {
                     let cast_reg: String = next_reg(ref c);
-                    c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + obj_reg + " to " + s_info_temp.llvm_name + "*\n");
+                    write_ir(ref c, c.indent + cast_reg + " = bitcast i8* " + obj_reg + " to " + s_info_temp.llvm_name + "*\n");
 
                     obj_reg = cast_reg;
                 }
@@ -3249,23 +3254,23 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             let arr_check: Optional(ArrayInfo) = c.array_info_map.lookup(field.type);
             if ((arr_check is !null) && arr_check.size != -1) {
                 let value_slot: String = next_reg(ref c);
-                c.output_file.write(c.indent + value_slot + " = alloca " + meta_s_info.llvm_name + "\n");
-                c.output_file.write(c.indent + "store " + meta_s_info.llvm_name + " " + obj_reg + ", " + meta_s_info.llvm_name + "* " + value_slot + "\n");
+                write_ir(ref c, c.indent + value_slot + " = alloca " + meta_s_info.llvm_name + "\n");
+                write_ir(ref c, c.indent + "store " + meta_s_info.llvm_name + " " + obj_reg + ", " + meta_s_info.llvm_name + "* " + value_slot + "\n");
 
                 let field_ptr: String = next_reg(ref c);
-                c.output_file.write(c.indent + field_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + value_slot + ", i32 0, i32 " + field.offset + "\n");
+                write_ir(ref c, c.indent + field_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + value_slot + ", i32 0, i32 " + field.offset + "\n");
 
                 return CompileResult(reg=field_ptr, type=field.type, is_const_access=obj_res.is_const_access);
             }
 
             let value_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + value_reg + " = extractvalue " + meta_s_info.llvm_name + " " + obj_reg + ", " + field.offset + "\n");
+            write_ir(ref c, c.indent + value_reg + " = extractvalue " + meta_s_info.llvm_name + " " + obj_reg + ", " + field.offset + "\n");
 
             return CompileResult(reg=value_reg, type=field.type, is_const_access=obj_res.is_const_access);
         }
 
         let f_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + obj_reg + ", i32 0, i32 " + field.offset + "\n");
+        write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + obj_reg + ", i32 0, i32 " + field.offset + "\n");
 
         let arr_check: Optional(ArrayInfo) = c.array_info_map.lookup(field.type);
         if ((arr_check is !null)) {
@@ -3275,7 +3280,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
         }
 
         let val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + val_reg + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + f_ptr + "\n");
+        write_ir(ref c, c.indent + val_reg + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + f_ptr + "\n");
 
         return CompileResult(reg=val_reg, type=field.type, is_const_access=obj_res.is_const_access);
     }
@@ -3298,17 +3303,17 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             }
             let object_ptr: String = next_reg(ref c);
             let table_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + object_ptr + " = extractvalue { i8*, i8* } " + obj_reg + ", 0\n");
-            c.output_file.write(c.indent + table_ptr + " = extractvalue { i8*, i8* } " + obj_reg + ", 1\n");
+            write_ir(ref c, c.indent + object_ptr + " = extractvalue { i8*, i8* } " + obj_reg + ", 0\n");
+            write_ir(ref c, c.indent + table_ptr + " = extractvalue { i8*, i8* } " + obj_reg + ", 1\n");
 
             let table_type: String = "[ " + method_count + " x i8* ]";
             let typed_table: String = next_reg(ref c);
-            c.output_file.write(c.indent + typed_table + " = bitcast i8* " + table_ptr + " to " + table_type + "*\n");
+            write_ir(ref c, c.indent + typed_table + " = bitcast i8* " + table_ptr + " to " + table_type + "*\n");
 
             let method_addr: String = next_reg(ref c);
             let method_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + method_addr + " = getelementptr inbounds " + table_type + ", " + table_type + "* " + typed_table + ", i32 0, i32 " + method_index + "\n");
-            c.output_file.write(c.indent + method_ptr + " = load i8*, i8** " + method_addr + "\n");
+            write_ir(ref c, c.indent + method_addr + " = getelementptr inbounds " + table_type + ", " + table_type + "* " + typed_table + ", i32 0, i32 " + method_index + "\n");
+            write_ir(ref c, c.indent + method_ptr + " = load i8*, i8** " + method_addr + "\n");
 
             let bound_args: Vector(Struct) = [];
             let param_index: Int = 0;
@@ -3321,14 +3326,14 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             let specific_type_id: Int = get_method_type_id(ref c, bound_args, return_type, 0, []);
             let closure: String = emit_alloc_closure(ref c, specific_type_id);
             let function_slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
-            c.output_file.write(c.indent + "store i8* " + method_ptr + ", i8** " + function_slot + "\n");
+            write_ir(ref c, c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
+            write_ir(ref c, c.indent + "store i8* " + method_ptr + ", i8** " + function_slot + "\n");
 
             let environment_bytes: String = next_reg(ref c);
             let environment_slot: String = next_reg(ref c);
-            c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
-            c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
-            c.output_file.write(c.indent + "store i8* " + object_ptr + ", i8** " + environment_slot + "\n");
+            write_ir(ref c, c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
+            write_ir(ref c, c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
+            write_ir(ref c, c.indent + "store i8* " + object_ptr + ", i8** " + environment_slot + "\n");
 
             emit_retain(ref c, obj_reg, type_id);
             emit_retain(ref c, closure, specific_type_id);
@@ -3360,19 +3365,19 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             }
             let class_llvm_ty: String = meta_s_info.llvm_name;
             let vptr_addr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_reg + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + vptr_addr + " = getelementptr inbounds " + class_llvm_ty + ", " + class_llvm_ty + "* " + obj_reg + ", i32 0, i32 0\n");
 
             let vtable_i8ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
+            write_ir(ref c, c.indent + vtable_i8ptr + " = load i8*, i8** " + vptr_addr + "\n");
 
             let vtable_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(ref c, meta_s_info) + "*\n");
+            write_ir(ref c, c.indent + vtable_ptr + " = bitcast i8* " + vtable_i8ptr + " to " + class_vtable_type(ref c, meta_s_info) + "*\n");
 
             let method_i8ptr_addr: String = next_reg(ref c);
-            c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, meta_s_info) + ", " + class_vtable_type(ref c, meta_s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+            write_ir(ref c, c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, meta_s_info) + ", " + class_vtable_type(ref c, meta_s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
 
             let method_i8ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
+            write_ir(ref c, c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
 
             let bound_args: Vector(Struct) = [];
             let ba_idx: Int = 1;
@@ -3388,18 +3393,18 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
 
             let clo_func_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
-            c.output_file.write(c.indent + "store i8* " + method_i8ptr + ", i8** " + clo_func_ptr + "\n");
+            write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
+            write_ir(ref c, c.indent + "store i8* " + method_i8ptr + ", i8** " + clo_func_ptr + "\n");
 
             let clo_env_ptr_i8: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
+            write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
 
             let clo_env_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
+            write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
 
             let obj_i8_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + obj_i8_ptr + " = bitcast " + class_llvm_ty + "* " + obj_reg + " to i8*\n");
-            c.output_file.write(c.indent + "store i8* " + obj_i8_ptr + ", i8** " + clo_env_ptr + "\n");
+            write_ir(ref c, c.indent + obj_i8_ptr + " = bitcast " + class_llvm_ty + "* " + obj_reg + " to i8*\n");
+            write_ir(ref c, c.indent + "store i8* " + obj_i8_ptr + ", i8** " + clo_env_ptr + "\n");
 
             emit_retain(ref c, obj_reg, type_id);
 
@@ -3483,7 +3488,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
 
         let store_ty: String = get_llvm_type_str(ref c, meta_g_info.type);
 
-        c.output_file.write(c.indent + "store " + store_ty + " " + val_res.reg + ", " + store_ty + "* " + f_ptr + "\n");
+        write_ir(ref c, c.indent + "store " + store_ty + " " + val_res.reg + ", " + store_ty + "* " + f_ptr + "\n");
 
         return val_res;
     }
@@ -3537,7 +3542,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
         let s_info_temp: Optional(StructInfo) = c.struct_id_map.lookup(struct_type_id);
         if ((s_info_temp is !null)) {
             let cast_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + struct_ptr_reg + " to " + s_info_temp.llvm_name + "*\n");
+            write_ir(ref c, c.indent + cast_reg + " = bitcast i8* " + struct_ptr_reg + " to " + s_info_temp.llvm_name + "*\n");
 
             struct_ptr_reg = cast_reg;
         }
@@ -3585,7 +3590,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
     val_res = emit_implicit_cast(ref c, val_res, meta_field.type, node.pos);
 
     let f_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 " + meta_field.offset + "\n");
+    write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 " + meta_field.offset + "\n");
 
     if (result_owns_value(ref c, meta_field.type)) {
         if (!val_res.owns_ref) {
@@ -3596,7 +3601,7 @@ func compile_field_assign(ref c: Compiler, node: FieldAssignNode) -> CompileResu
 
     let store_ty: String = get_llvm_type_str(ref c, meta_field.type);
 
-    c.output_file.write(c.indent + "store " + store_ty + " " + val_res.reg + ", " + store_ty + "* " + f_ptr + "\n");
+    write_ir(ref c, c.indent + "store " + store_ty + " " + val_res.reg + ", " + store_ty + "* " + f_ptr + "\n");
 
     return val_res;
 }
@@ -3615,14 +3620,14 @@ func compile_array_literal(ref c: Compiler, lit_node: VectorLitNode, target_arr_
     let lit_i: Int = 0;
     let elem_ty_str: String = get_llvm_type_str(ref c, meta_target_arr.base_type);
 
-    c.output_file.write(c.indent + "store " + meta_target_arr.llvm_name + " zeroinitializer, " + meta_target_arr.llvm_name + "* " + ptr_reg + "\n");
+    write_ir(ref c, c.indent + "store " + meta_target_arr.llvm_name + " zeroinitializer, " + meta_target_arr.llvm_name + "* " + ptr_reg + "\n");
 
     while (lit_i < lit_node.count) {
         let elem_node: ArgNode = lit_node.elements[lit_i];
         let elem_base: Int = node_tag(elem_node.val);
 
         let elem_ptr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + elem_ptr_reg + " = getelementptr inbounds " + meta_target_arr.llvm_name + ", " + meta_target_arr.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + lit_i + "\n");
+        write_ir(ref c, c.indent + elem_ptr_reg + " = getelementptr inbounds " + meta_target_arr.llvm_name + ", " + meta_target_arr.llvm_name + "* " + ptr_reg + ", i32 0, i32 " + lit_i + "\n");
 
         let is_nested: Bool = false;
         if (elem_base == NODE_VECTOR_LIT) {
@@ -3641,7 +3646,7 @@ func compile_array_literal(ref c: Compiler, lit_node: VectorLitNode, target_arr_
 
             let casted_res: CompileResult = emit_implicit_cast(ref c, elem_res, meta_target_arr.base_type, lit_node.pos);
 
-            c.output_file.write(c.indent + "store " + elem_ty_str + " " + casted_res.reg + ", " + elem_ty_str + "* " + elem_ptr_reg + "\n");
+            write_ir(ref c, c.indent + "store " + elem_ty_str + " " + casted_res.reg + ", " + elem_ty_str + "* " + elem_ptr_reg + "\n");
 
             if (c.scope_depth > 0 && result_owns_value(ref c, meta_target_arr.base_type) && !casted_res.owns_ref) {
                 emit_retain_value(ref c, casted_res.reg, meta_target_arr.base_type);
@@ -3664,10 +3669,11 @@ func compile_vector_append(ref c: Compiler, vec_node: NodeID, call_node: CallNod
         return void_result();
     }
     let append_names: Vector(String) = ["value"];
-    args = bind_call_args(args, append_names, 0, call_node.pos);
-    if (args is null) {
+    let bound = bind_call_args(args, append_names, 0, call_node.pos);
+    if (bound is null) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
+    args = bound;
 
     let arg_node: ArgNode = args[0];
     let vec_res: CompileResult = compile_node(ref c, vec_node);
@@ -3694,120 +3700,120 @@ func compile_vector_append(ref c: Compiler, vec_node: NodeID, call_node: CallNod
     let size_ty: String = get_size_llvm_type();
 
     let size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 0\n");
+    write_ir(ref c, c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 0\n");
 
     let size_val: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
 
     let cap_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + cap_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 1\n");
+    write_ir(ref c, c.indent + cap_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 1\n");
 
     let cap_val: String = next_reg(ref c);
-    c.output_file.write(c.indent + cap_val + " = load " + size_ty + ", " + size_ty + "* " + cap_ptr + "\n");
+    write_ir(ref c, c.indent + cap_val + " = load " + size_ty + ", " + size_ty + "* " + cap_ptr + "\n");
 
     let cmp_reg: String = next_reg(ref c);
-    c.output_file.write(c.indent + cmp_reg + " = icmp uge " + size_ty + " " + size_val + ", " + cap_val + "\n");
+    write_ir(ref c, c.indent + cmp_reg + " = icmp uge " + size_ty + " " + size_val + ", " + cap_val + "\n");
 
     let grow_label: String = next_label(ref c);
     let push_label: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + cmp_reg + ", label %" + grow_label + ", label %" + push_label + "\n");
+    write_ir(ref c, c.indent + "br i1 " + cmp_reg + ", label %" + grow_label + ", label %" + push_label + "\n");
 
-    c.output_file.write("\n" + grow_label + ":\n");
+    write_ir(ref c, "\n" + grow_label + ":\n");
 
     let is_zero_cap: String = next_reg(ref c);
-    c.output_file.write(c.indent + is_zero_cap + " = icmp eq " + size_ty + " " + cap_val + ", 0\n");
+    write_ir(ref c, c.indent + is_zero_cap + " = icmp eq " + size_ty + " " + cap_val + ", 0\n");
 
     let elem_size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + elem_size_ptr + " = getelementptr " + elem_ty_str + ", " + elem_ty_str + "* null, " + size_ty + " 1\n");
+    write_ir(ref c, c.indent + elem_size_ptr + " = getelementptr " + elem_ty_str + ", " + elem_ty_str + "* null, " + size_ty + " 1\n");
 
     let elem_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + elem_size + " = ptrtoint " + elem_ty_str + "* " + elem_size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + elem_size + " = ptrtoint " + elem_ty_str + "* " + elem_size_ptr + " to " + size_ty + "\n");
 
     let max_capacity: String = next_reg(ref c);
-    c.output_file.write(c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
+    write_ir(ref c, c.indent + max_capacity + " = udiv " + size_ty + " -1, " + elem_size + "\n");
 
     let growth_limit: String = next_reg(ref c);
-    c.output_file.write(c.indent + growth_limit + " = lshr " + size_ty + " " + max_capacity + ", 1\n");
+    write_ir(ref c, c.indent + growth_limit + " = lshr " + size_ty + " " + max_capacity + ", 1\n");
 
     let cap_overflow: String = next_reg(ref c);
-    c.output_file.write(c.indent + cap_overflow + " = icmp ugt " + size_ty + " " + cap_val + ", " + growth_limit + "\n");
+    write_ir(ref c, c.indent + cap_overflow + " = icmp ugt " + size_ty + " " + cap_val + ", " + growth_limit + "\n");
 
     let grow_fail: String = next_label(ref c);
     let grow_calc: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + cap_overflow + ", label %" + grow_fail + ", label %" + grow_calc + "\n");
+    write_ir(ref c, c.indent + "br i1 " + cap_overflow + ", label %" + grow_fail + ", label %" + grow_calc + "\n");
 
-    c.output_file.write("\n" + grow_fail + ":\n");
-    c.output_file.write(c.indent + "call void @__wl_oom()\n");
-    c.output_file.write(c.indent + "unreachable\n");
+    write_ir(ref c, "\n" + grow_fail + ":\n");
+    write_ir(ref c, c.indent + "call void @__wl_oom()\n");
+    write_ir(ref c, c.indent + "unreachable\n");
 
-    c.output_file.write("\n" + grow_calc + ":\n");
+    write_ir(ref c, "\n" + grow_calc + ":\n");
 
     let dbl_cap: String = next_reg(ref c);
-    c.output_file.write(c.indent + dbl_cap + " = mul " + size_ty + " " + cap_val + ", 2\n");
+    write_ir(ref c, c.indent + dbl_cap + " = mul " + size_ty + " " + cap_val + ", 2\n");
 
     let new_cap: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_cap + " = select i1 " + is_zero_cap + ", " + size_ty + " 4, " + size_ty + " " + dbl_cap + "\n");
+    write_ir(ref c, c.indent + new_cap + " = select i1 " + is_zero_cap + ", " + size_ty + " 4, " + size_ty + " " + dbl_cap + "\n");
 
     let data_field_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
+    write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
 
     let old_data: String = next_reg(ref c);
-    c.output_file.write(c.indent + old_data + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
+    write_ir(ref c, c.indent + old_data + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
 
     let old_data_i8: String = next_reg(ref c);
-    c.output_file.write(c.indent + old_data_i8 + " = bitcast " + elem_ty_str + "* " + old_data + " to i8*\n");
+    write_ir(ref c, c.indent + old_data_i8 + " = bitcast " + elem_ty_str + "* " + old_data + " to i8*\n");
 
     let bytes_overflow: String = next_reg(ref c);
-    c.output_file.write(c.indent + bytes_overflow + " = icmp ugt " + size_ty + " " + new_cap + ", " + max_capacity + "\n");
+    write_ir(ref c, c.indent + bytes_overflow + " = icmp ugt " + size_ty + " " + new_cap + ", " + max_capacity + "\n");
 
     let bytes_fail: String = next_label(ref c);
     let resize_label: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + bytes_overflow + ", label %" + bytes_fail + ", label %" + resize_label + "\n");
+    write_ir(ref c, c.indent + "br i1 " + bytes_overflow + ", label %" + bytes_fail + ", label %" + resize_label + "\n");
 
-    c.output_file.write("\n" + bytes_fail + ":\n");
-    c.output_file.write(c.indent + "call void @__wl_oom()\n");
-    c.output_file.write(c.indent + "unreachable\n");
+    write_ir(ref c, "\n" + bytes_fail + ":\n");
+    write_ir(ref c, c.indent + "call void @__wl_oom()\n");
+    write_ir(ref c, c.indent + "unreachable\n");
 
-    c.output_file.write("\n" + resize_label + ":\n");
+    write_ir(ref c, "\n" + resize_label + ":\n");
 
     let new_bytes: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_bytes + " = mul " + size_ty + " " + new_cap + ", " + elem_size + "\n");
+    write_ir(ref c, c.indent + new_bytes + " = mul " + size_ty + " " + new_cap + ", " + elem_size + "\n");
 
     let resize_hook: String = get_mangled_symbol(ref c, "memory_resize", call_node.pos);
     let new_data_i8: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_data_i8 + " = call i8* @" + resize_hook + "(i8* " + old_data_i8 + ", " + size_ty + " " + new_bytes + ")\n");
+    write_ir(ref c, c.indent + new_data_i8 + " = call i8* @" + resize_hook + "(i8* " + old_data_i8 + ", " + size_ty + " " + new_bytes + ")\n");
 
     emit_alloc_check(ref c, new_data_i8);
 
     let new_data_typed: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_data_typed + " = bitcast i8* " + new_data_i8 + " to " + elem_ty_str + "*\n");
-    c.output_file.write(c.indent + "store " + elem_ty_str + "* " + new_data_typed + ", " + elem_ty_str + "** " + data_field_ptr + "\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + new_cap + ", " + size_ty + "* " + cap_ptr + "\n");
+    write_ir(ref c, c.indent + new_data_typed + " = bitcast i8* " + new_data_i8 + " to " + elem_ty_str + "*\n");
+    write_ir(ref c, c.indent + "store " + elem_ty_str + "* " + new_data_typed + ", " + elem_ty_str + "** " + data_field_ptr + "\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + new_cap + ", " + size_ty + "* " + cap_ptr + "\n");
 
-    c.output_file.write(c.indent + "br label %" + push_label + "\n");
-    c.output_file.write("\n" + push_label + ":\n");
+    write_ir(ref c, c.indent + "br label %" + push_label + "\n");
+    write_ir(ref c, "\n" + push_label + ":\n");
 
     let final_data_field_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + final_data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
+    write_ir(ref c, c.indent + final_data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
 
     let final_data: String = next_reg(ref c);
-    c.output_file.write(c.indent + final_data + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + final_data_field_ptr + "\n");
+    write_ir(ref c, c.indent + final_data + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + final_data_field_ptr + "\n");
 
     let slot_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + final_data + ", " + size_ty + " " + size_val + "\n");
+    write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + final_data + ", " + size_ty + " " + size_val + "\n");
 
     if (result_owns_value(ref c, elem_type) && !arg_res.owns_ref) {
         emit_retain_value(ref c, arg_res.reg, elem_type);
     }
 
-    c.output_file.write(c.indent + "store " + elem_ty_str + " " + arg_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
+    write_ir(ref c, c.indent + "store " + elem_ty_str + " " + arg_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
     let new_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_size + " = add " + size_ty + " " + size_val + ", 1\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + new_size + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + new_size + " = add " + size_ty + " " + size_val + ", 1\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + new_size + ", " + size_ty + "* " + size_ptr + "\n");
 
     return void_result();
 }
@@ -3839,52 +3845,52 @@ func compile_vector_drop(ref c: Compiler, vec_node: NodeID, call_node: CallNode)
     let size_ty: String = get_size_llvm_type();
 
     let size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 0\n");
+    write_ir(ref c, c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 0\n");
 
     let size_val: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
 
     let cmp_reg: String = next_reg(ref c);
-    c.output_file.write(c.indent + cmp_reg + " = icmp ugt " + size_ty + " " + size_val + ", 0\n");
+    write_ir(ref c, c.indent + cmp_reg + " = icmp ugt " + size_ty + " " + size_val + ", 0\n");
 
     let pop_label: String = next_label(ref c);
     let empty_label: String = next_label(ref c);
     let end_label: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + cmp_reg + ", label %" + pop_label + ", label %" + empty_label + "\n");
+    write_ir(ref c, c.indent + "br i1 " + cmp_reg + ", label %" + pop_label + ", label %" + empty_label + "\n");
 
-    c.output_file.write("\n" + empty_label + ":\n");
+    write_ir(ref c, "\n" + empty_label + ":\n");
 
     emit_runtime_error(ref c, call_node.pos, "drop from empty vector");
 
-    c.output_file.write("\n" + pop_label + ":\n");
+    write_ir(ref c, "\n" + pop_label + ":\n");
 
     // size--
     let new_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + new_size + " = sub " + size_ty + " " + size_val + ", 1\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + new_size + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + new_size + " = sub " + size_ty + " " + size_val + ", 1\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + new_size + ", " + size_ty + "* " + size_ptr + "\n");
 
     let data_field_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
+    write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + vec_res.reg + ", i32 0, i32 2\n");
 
     let data_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
+    write_ir(ref c, c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
 
     let slot_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + size_ty + " " + new_size + "\n");
+    write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + size_ty + " " + new_size + "\n");
 
     let ret_val: String = next_reg(ref c);
-    c.output_file.write(c.indent + ret_val + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + slot_ptr + "\n");
+    write_ir(ref c, c.indent + ret_val + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
     if (is_ref_type(ref c, elem_type)) {
-        c.output_file.write(c.indent + "store " + elem_ty_str + " null, " + elem_ty_str + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + "store " + elem_ty_str + " null, " + elem_ty_str + "* " + slot_ptr + "\n");
     } else if (is_fallible_type(ref c, elem_type)) {
-        c.output_file.write(c.indent + "store " + elem_ty_str + " zeroinitializer, " + elem_ty_str + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + "store " + elem_ty_str + " zeroinitializer, " + elem_ty_str + "* " + slot_ptr + "\n");
     }
 
-    c.output_file.write(c.indent + "br label %" + end_label + "\n");
+    write_ir(ref c, c.indent + "br label %" + end_label + "\n");
 
-    c.output_file.write("\n" + end_label + ":\n");
+    write_ir(ref c, "\n" + end_label + ":\n");
 
     return CompileResult(reg=ret_val, type=elem_type, owns_ref=result_owns_value(ref c, elem_type));
 }
@@ -3922,10 +3928,10 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
     let size_ty: String = get_size_llvm_type();
 
     let struct_size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + struct_size_ptr + " = getelementptr " + struct_name + ", " + struct_name + "* null, i32 1\n");
+    write_ir(ref c, c.indent + struct_size_ptr + " = getelementptr " + struct_name + ", " + struct_name + "* null, i32 1\n");
 
     let struct_size: String = next_reg(ref c);
-    c.output_file.write(c.indent + struct_size + " = ptrtoint " + struct_name + "* " + struct_size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + struct_size + " = ptrtoint " + struct_name + "* " + struct_size_ptr + " to " + size_ty + "\n");
 
     let vec_ptr: String = emit_alloc_obj(ref c, struct_size, "" + vec_type_id, struct_name + "*");
 
@@ -3933,33 +3939,33 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
     let alloc_count: Int = count;
     if (alloc_count == 0) { alloc_count = 1; }
 
-    c.output_file.write(c.indent + arr_size_ptr + " = getelementptr " + elem_ty_str + ", " + elem_ty_str + "* null, " + size_ty + " " + alloc_count + "\n");
+    write_ir(ref c, c.indent + arr_size_ptr + " = getelementptr " + elem_ty_str + ", " + elem_ty_str + "* null, " + size_ty + " " + alloc_count + "\n");
 
     let arr_bytes: String = next_reg(ref c);
-    c.output_file.write(c.indent + arr_bytes + " = ptrtoint " + elem_ty_str + "* " + arr_size_ptr + " to " + size_ty + "\n");
+    write_ir(ref c, c.indent + arr_bytes + " = ptrtoint " + elem_ty_str + "* " + arr_size_ptr + " to " + size_ty + "\n");
 
     let alloc_hook: String = get_mangled_symbol(ref c, "memory_alloc", node.pos);
     let raw_data: String = next_reg(ref c);
-    c.output_file.write(c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + arr_bytes + ")\n");
+    write_ir(ref c, c.indent + raw_data + " = call i8* @" + alloc_hook + "(" + size_ty + " " + arr_bytes + ")\n");
 
     emit_alloc_check(ref c, raw_data);
     let data_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_ptr + " = bitcast i8* " + raw_data + " to " + elem_ty_str + "*\n");
+    write_ir(ref c, c.indent + data_ptr + " = bitcast i8* " + raw_data + " to " + elem_ty_str + "*\n");
 
     // vector length and capacity follow the target pointer width
     let size_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 0\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + count + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + size_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 0\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + count + ", " + size_ty + "* " + size_ptr + "\n");
 
     // capacity
     let cap_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + cap_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 1\n");
-    c.output_file.write(c.indent + "store " + size_ty + " " + count + ", " + size_ty + "* " + cap_ptr + "\n");
+    write_ir(ref c, c.indent + cap_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 1\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " " + count + ", " + size_ty + "* " + cap_ptr + "\n");
 
     // data pointer
     let data_field_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 2\n");
-    c.output_file.write(c.indent + "store " + elem_ty_str + "* " + data_ptr + ", " + elem_ty_str + "** " + data_field_ptr + "\n");
+    write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 2\n");
+    write_ir(ref c, c.indent + "store " + elem_ty_str + "* " + data_ptr + ", " + elem_ty_str + "** " + data_field_ptr + "\n");
 
     let idx: Int = 0;
     while (idx < e_len) {
@@ -3973,13 +3979,13 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
         val_res = emit_implicit_cast(ref c, val_res, elem_type_id, node.pos);
 
         let slot_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + size_ty + " " + idx + "\n");
+        write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + size_ty + " " + idx + "\n");
 
         if (result_owns_value(ref c, elem_type_id) && !val_res.owns_ref) {
             emit_retain_value(ref c, val_res.reg, elem_type_id);
         }
 
-        c.output_file.write(c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
         idx += 1;
     }
@@ -4007,10 +4013,10 @@ func compile_length_method(ref c: Compiler, obj_node: NodeID, call_node: CallNod
     if (type_id == TYPE_STRING) {
         // read len directly from struct field 1
         let len_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + len_ptr + " = getelementptr inbounds %struct.$String, %struct.$String* " + obj_res.reg + ", i32 0, i32 1\n");
+        write_ir(ref c, c.indent + len_ptr + " = getelementptr inbounds %struct.$String, %struct.$String* " + obj_res.reg + ", i32 0, i32 1\n");
 
         let len_val: String = next_reg(ref c);
-        c.output_file.write(c.indent + len_val + " = load i32, i32* " + len_ptr + "\n");
+        write_ir(ref c, c.indent + len_val + " = load i32, i32* " + len_ptr + "\n");
 
         return CompileResult(reg=len_val, type=TYPE_INT);
     }
@@ -4042,10 +4048,10 @@ func compile_length_method(ref c: Compiler, obj_node: NodeID, call_node: CallNod
         let size_ty: String = get_size_llvm_type();
 
         let size_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + obj_res.reg + ", i32 0, i32 0\n");
+        write_ir(ref c, c.indent + size_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + obj_res.reg + ", i32 0, i32 0\n");
 
         let size_val: String = next_reg(ref c);
-        c.output_file.write(c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
+        write_ir(ref c, c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
 
         let trunc_reg: String = emit_size_to_int(ref c, size_val);
 
@@ -4083,8 +4089,8 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
 
         if has_get {
             let fake_args: Vector(ArgNode) = [];
-            fake_args.append(ArgNode(val=node.index_node, name=null));
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=handled);
+            fake_args.append(ArgNode(val=node.index_node, name=""));
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=[], pos=node.pos, preserve_fallible=handled);
             return compile_class_method_call(ref c, meta_s_info, target_res, "get", fake_call);
         }
     }
@@ -4106,22 +4112,22 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
     if (target_type == TYPE_STRING) {
         let src_buf: String = next_reg(ref c);
         let src_struct_buf: String = next_reg(ref c);
-        c.output_file.write(c.indent + src_struct_buf + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 0\n");
-        c.output_file.write(c.indent + src_buf + " = load i8*, i8** " + src_struct_buf + "\n");
+        write_ir(ref c, c.indent + src_struct_buf + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 0\n");
+        write_ir(ref c, c.indent + src_buf + " = load i8*, i8** " + src_struct_buf + "\n");
 
         let src_len: String = next_reg(ref c);
         let src_struct_len: String = next_reg(ref c);
-        c.output_file.write(c.indent + src_struct_len + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
-        c.output_file.write(c.indent + src_len + " = load i32, i32* " + src_struct_len + "\n");
+        write_ir(ref c, c.indent + src_struct_len + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
+        write_ir(ref c, c.indent + src_len + " = load i32, i32* " + src_struct_len + "\n");
 
         // emit bounds check
         emit_array_bounds_check(ref c, index_res.reg, src_len, node.pos);
 
         let addr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + addr_reg + " = getelementptr inbounds i8, i8* " + src_buf + ", i32 " + index_res.reg + "\n");
+        write_ir(ref c, c.indent + addr_reg + " = getelementptr inbounds i8, i8* " + src_buf + ", i32 " + index_res.reg + "\n");
 
         let load_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + load_reg + " = load i8, i8* " + addr_reg + "\n");
+        write_ir(ref c, c.indent + load_reg + " = load i8, i8* " + addr_reg + "\n");
 
         return CompileResult(reg=load_reg, type=TYPE_BYTE, origin_type=0);
     }
@@ -4140,10 +4146,10 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
             let elem_ty_str: String = get_llvm_type_str(ref c, elem_type);
 
             let addr_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
+            write_ir(ref c, c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
 
             let load_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + load_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + addr_reg + "\n");
+            write_ir(ref c, c.indent + load_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + addr_reg + "\n");
 
             return CompileResult(reg=load_reg, type=elem_type, origin_type=elem_type);
         }
@@ -4163,24 +4169,24 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
             let parts: SliceParts = emit_slice_parts(ref c, target_res.reg, target_type, node.pos);
             curr_len = emit_size_to_int(ref c, parts.length);
             data_ptr = next_reg(ref c);
-            c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
+            write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
         } else {
             curr_len = "" + arr_info.size;
             data_ptr = next_reg(ref c);
-            c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
         }
 
         emit_array_bounds_check(ref c, idx_i32, curr_len, node.pos);
 
         let ptr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + idx_i32 + "\n");
+        write_ir(ref c, c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + idx_i32 + "\n");
 
         if ((c.array_info_map.lookup(elem_type) is !null)) {
             return CompileResult(reg=ptr_reg, type=elem_type, origin_type=elem_type, is_const_access=target_res.is_const_access);
         }
 
         let val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + val_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + ptr_reg + "\n");
+        write_ir(ref c, c.indent + val_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + ptr_reg + "\n");
 
         return CompileResult(reg=val_reg, type=elem_type, origin_type=elem_type, is_const_access=target_res.is_const_access);
     }
@@ -4205,19 +4211,19 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
         emit_vector_bounds_check(ref c, target_res.reg, index_res.reg, struct_ty, node.pos);
 
         let data_field_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
+        write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
 
         let data_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
+        write_ir(ref c, c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
 
         let slot_ptr: String = next_reg(ref c);
 
         let size_index: String = emit_int_to_size(ref c, index_res.reg, true);
 
-        c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
+        write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
 
         let val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + val_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + val_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
         return CompileResult(reg=val_reg, type=elem_type, is_const_access=target_res.is_const_access);
     }
@@ -4260,9 +4266,9 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
 
         if has_put {
             let fake_args: Vector(ArgNode) = [];
-            fake_args.append(ArgNode(val=node.index_node, name=null));
-            fake_args.append(ArgNode(val=node.value, name=null));
-            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=null, pos=node.pos, preserve_fallible=false);
+            fake_args.append(ArgNode(val=node.index_node, name=""));
+            fake_args.append(ArgNode(val=node.value, name=""));
+            let fake_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=fake_args, type_args=[], pos=node.pos, preserve_fallible=false);
             compile_class_method_call(ref c, meta_s_info, target_res, "put", fake_call);
             return void_result();
         }
@@ -4308,7 +4314,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
 
             let elem_ty_str: String = get_llvm_type_str(ref c, elem_type);
             let addr_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
+            write_ir(ref c, c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
 
             if (result_owns_value(ref c, elem_type)) {
                 if (!val_res.owns_ref) {
@@ -4317,7 +4323,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
                 emit_drop_slot(ref c, addr_reg, elem_type);
             }
 
-            c.output_file.write(c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + addr_reg + "\n");
+            write_ir(ref c, c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + addr_reg + "\n");
 
             return val_res;
         }
@@ -4349,17 +4355,17 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
             let parts: SliceParts = emit_slice_parts(ref c, target_res.reg, target_res.type, node.pos);
             curr_len = emit_size_to_int(ref c, parts.length);
             data_ptr = next_reg(ref c);
-            c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
+            write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
         } else {
             curr_len = "" + meta_arr_info.size;
             data_ptr = next_reg(ref c);
-            c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + meta_arr_info.llvm_name + ", " + meta_arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + meta_arr_info.llvm_name + ", " + meta_arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
         }
 
         emit_array_bounds_check(ref c, index_res.reg, curr_len, node.pos);
 
         let ptr_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + index_res.reg + "\n");
+        write_ir(ref c, c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + index_res.reg + "\n");
 
         if (result_owns_value(ref c, elem_type)) {
             if (!val_res.owns_ref) {
@@ -4368,7 +4374,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
             emit_drop_slot(ref c, ptr_reg, elem_type);
         }
 
-        c.output_file.write(c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + ptr_reg + "\n");
+        write_ir(ref c, c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + ptr_reg + "\n");
 
         return val_res;
     }
@@ -4380,8 +4386,9 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
 
     if (target_res.type == TYPE_STRING) {
         let is_magic_func: Bool = false;
-        if (has_func(c.curr_func)) {
-            if (c.curr_func.base_name == "string_slice") { is_magic_func = true; }
+        let current = c.curr_func;
+        if (current is !null) {
+            if (current.base_name == "string_slice") { is_magic_func = true; }
         }
 
         if is_magic_func {
@@ -4390,15 +4397,15 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
             // extract i8* buffer from %struct.$String*
             let src_struct_buf: String = next_reg(ref c);
             let src_buf: String = next_reg(ref c);
-            c.output_file.write(c.indent + src_struct_buf + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 0\n");
-            c.output_file.write(c.indent + src_buf + " = load i8*, i8** " + src_struct_buf + "\n");
+            write_ir(ref c, c.indent + src_struct_buf + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + src_buf + " = load i8*, i8** " + src_struct_buf + "\n");
 
             let ptr_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + ptr_reg + " = getelementptr inbounds i8, i8* " + src_buf + ", i32 " + index_res.reg + "\n");
+            write_ir(ref c, c.indent + ptr_reg + " = getelementptr inbounds i8, i8* " + src_buf + ", i32 " + index_res.reg + "\n");
 
             val_res = emit_implicit_cast(ref c, val_res, TYPE_BYTE, node.pos);
 
-            c.output_file.write(c.indent + "store i8 " + val_res.reg + ", i8* " + ptr_reg + "\n");
+            write_ir(ref c, c.indent + "store i8 " + val_res.reg + ", i8* " + ptr_reg + "\n");
 
             return val_res;
         }
@@ -4427,14 +4434,14 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
         emit_vector_bounds_check(ref c, target_res.reg, index_res.reg, struct_ty, node.pos);
 
         let data_field_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
+        write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
 
         let data_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
+        write_ir(ref c, c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
 
         let size_index: String = emit_int_to_size(ref c, index_res.reg, true);
         let slot_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
+        write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
 
         if (result_owns_value(ref c, elem_type)) {
             if (!val_res.owns_ref) {
@@ -4443,7 +4450,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
             emit_drop_slot(ref c, slot_ptr, elem_type);
         }
 
-        c.output_file.write(c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
+        write_ir(ref c, c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
         return val_res;
     }
@@ -4471,10 +4478,10 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
     let omitted: Bool = !has_node(node.start_idx) && !has_node(node.end_idx);
     if (target_type == TYPE_STRING) {
         let len_slot: String = next_reg(ref c);
-        c.output_file.write(c.indent + len_slot + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
+        write_ir(ref c, c.indent + len_slot + " = getelementptr inbounds %struct.$String, %struct.$String* " + target_res.reg + ", i32 0, i32 1\n");
 
         let source_len: String = next_reg(ref c);
-        c.output_file.write(c.indent + source_len + " = load i32, i32* " + len_slot + "\n");
+        write_ir(ref c, c.indent + source_len + " = load i32, i32* " + len_slot + "\n");
 
         if shared {
             if (!omitted) {
@@ -4497,7 +4504,7 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
         emit_slice_bounds_check(ref c, start, end, source_len, node.pos);
         let slice_hook: String = get_mangled_symbol(ref c, "string_slice", node.pos);
         let result: String = next_reg(ref c);
-        c.output_file.write(c.indent + result + " = call %struct.$String* @" + slice_hook + "(%struct.$String* " + target_res.reg + ", i32 " + start + ", i32 " + end + ")\n");
+        write_ir(ref c, c.indent + result + " = call %struct.$String* @" + slice_hook + "(%struct.$String* " + target_res.reg + ", i32 " + start + ", i32 " + end + ")\n");
 
         emit_release_owned(ref c, target_res);
         let result_type: Int = TYPE_STRING;
@@ -4524,12 +4531,12 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
             source_parts = emit_slice_parts(ref c, target_res.reg, target_type, node.pos);
             current_len = emit_size_to_int(ref c, source_parts.length);
             source_data = next_reg(ref c);
-            c.output_file.write(c.indent + source_data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source_parts.data + ", " + get_size_llvm_type() + " " + source_parts.start + "\n");
+            write_ir(ref c, c.indent + source_data + " = getelementptr inbounds " + elem_ty + ", " + elem_ty + "* " + source_parts.data + ", " + get_size_llvm_type() + " " + source_parts.start + "\n");
         } else {
             source_kind = 1;
             current_len = "" + arr_info.size;
             source_data = next_reg(ref c);
-            c.output_file.write(c.indent + source_data + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
+            write_ir(ref c, c.indent + source_data + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
         }
     } else if ((vec_info is !null)) {
         source_kind = 3;
@@ -4538,20 +4545,20 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
         let vec_ty: String = get_vector_llvm_type(ref c, elem_type);
         let size_ty: String = get_size_llvm_type();
         vec_size_slot = next_reg(ref c);
-        c.output_file.write(c.indent + vec_size_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + target_res.reg + ", i32 0, i32 0\n");
+        write_ir(ref c, c.indent + vec_size_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + target_res.reg + ", i32 0, i32 0\n");
 
         let vector_length: String = next_reg(ref c);
-        c.output_file.write(c.indent + vector_length + " = load " + size_ty + ", " + size_ty + "* " + vec_size_slot + "\n");
+        write_ir(ref c, c.indent + vector_length + " = load " + size_ty + ", " + size_ty + "* " + vec_size_slot + "\n");
 
         current_len = emit_size_to_int(ref c, vector_length);
         vec_data_slot = next_reg(ref c);
-        c.output_file.write(c.indent + vec_data_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
+        write_ir(ref c, c.indent + vec_data_slot + " = getelementptr inbounds " + vec_ty + ", " + vec_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
 
         source_data = next_reg(ref c);
-        c.output_file.write(c.indent + source_data + " = load " + elem_ty + "*, " + elem_ty + "** " + vec_data_slot + "\n");
+        write_ir(ref c, c.indent + source_data + " = load " + elem_ty + "*, " + elem_ty + "** " + vec_data_slot + "\n");
 
         vec_owner = next_reg(ref c);
-        c.output_file.write(c.indent + vec_owner + " = bitcast " + vec_ty + "* " + target_res.reg + " to i8*\n");
+        write_ir(ref c, c.indent + vec_owner + " = bitcast " + vec_ty + "* " + target_res.reg + " to i8*\n");
     } else {
         throw_type_error(node.pos, "Cannot slice type '" + get_type_name(ref c, target_res.type) + "'. Only Array, Vector, and String can be sliced.");
         return void_result();
@@ -4570,7 +4577,7 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
     emit_slice_bounds_check(ref c, start, end, current_len, node.pos);
 
     let length: String = next_reg(ref c);
-    c.output_file.write(c.indent + length + " = sub i32 " + end + ", " + start + "\n");
+    write_ir(ref c, c.indent + length + " = sub i32 " + end + ", " + start + "\n");
 
     if (!shared) {
         return emit_slice_copy(ref c, elem_type, source_data, start, length, node.pos);
@@ -4585,7 +4592,7 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
     let size_length: String = emit_int_to_size(ref c, length, false);
     if (source_kind == 2) {
         let absolute_start: String = next_reg(ref c);
-        c.output_file.write(c.indent + absolute_start + " = add " + get_size_llvm_type() + " " + source_parts.start + ", " + size_start + "\n");
+        write_ir(ref c, c.indent + absolute_start + " = add " + get_size_llvm_type() + " " + source_parts.start + ", " + size_start + "\n");
 
         return emit_make_slice(ref c, elem_type, source_parts.owner, source_parts.data_slot, source_parts.size_slot, absolute_start, size_length);
     }
@@ -4615,9 +4622,9 @@ func compile_map_lit(ref c: Compiler, node: MapLitNode) -> CompileResult {
     if (!is_typed_dict(ref c, record)) {
         let cap_tok: Token = Token(type=TOK_INT, value="" + cap, line=node.pos.ln, col=node.pos.col);
         let cap_node: NodeID = add_int_node(ref c.arena, IntNode(type=NODE_INT, tok=cap_tok, pos=node.pos));
-        init_args.append(ArgNode(val=cap_node, name=null));
+        init_args.append(ArgNode(val=cap_node, name=""));
     }
-    let fake_init_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=init_args, type_args=null, pos=node.pos, preserve_fallible=false);
+    let fake_init_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=init_args, type_args=[], pos=node.pos, preserve_fallible=false);
 
     let dict_res: CompileResult = compile_class_init(ref c, record, fake_init_call);
 
@@ -4626,9 +4633,9 @@ func compile_map_lit(ref c: Compiler, node: MapLitNode) -> CompileResult {
     while (i < pair_count) {
         let pair: MapPairNode = pairs[i];
         let put_args: Vector(ArgNode) = [];
-        put_args.append(ArgNode(val=pair.key, name=null));
-        put_args.append(ArgNode(val=pair.value, name=null));
-        let fake_put_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=put_args, type_args=null, pos=node.pos, preserve_fallible=false);
+        put_args.append(ArgNode(val=pair.key, name=""));
+        put_args.append(ArgNode(val=pair.value, name=""));
+        let fake_put_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=put_args, type_args=[], pos=node.pos, preserve_fallible=false);
 
         compile_class_method_call(ref c, record, dict_res, "put", fake_put_call);
         i += 1;
@@ -4675,7 +4682,7 @@ func compile_enum_def(ref c: Compiler, node: EnumDefNode) -> CompileResult {
         }
         let global_name: String = "@" + enum_name + "." + field_name;
 
-        c.output_file.write(global_name + " = global " + llvm_ty_str + " " + current_val + "\n");
+        write_ir(ref c, global_name + " = global " + llvm_ty_str + " " + current_val + "\n");
 
         c.global_symbol_table.put(enum_name + "." + field_name, SymbolInfo(reg=global_name, type=type_id, origin_type=type_id, is_const=true));
 
@@ -4721,41 +4728,41 @@ func compile_try_unwrap(ref c: Compiler, node: TryUnwrapNode) -> CompileResult {
     let fallible_llvm_ty: String = get_llvm_type_str(ref c, fallible_type);
 
     let is_err_reg: String = next_reg(ref c);
-    c.output_file.write(c.indent + is_err_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 0\n");
+    write_ir(ref c, c.indent + is_err_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 0\n");
 
     let success_label: String = next_label(ref c);
     let fail_label: String = next_label(ref c);
 
-    c.output_file.write(c.indent + "br i1 " + is_err_reg + ", label %" + fail_label + ", label %" + success_label + "\n\n");
-    c.output_file.write(fail_label + ":\n");
+    write_ir(ref c, c.indent + "br i1 " + is_err_reg + ", label %" + fail_label + ", label %" + success_label + "\n\n");
+    write_ir(ref c, fail_label + ":\n");
 
     let err_val_reg: String = next_reg(ref c);
-    c.output_file.write(c.indent + err_val_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 1\n");
+    write_ir(ref c, c.indent + err_val_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 1\n");
 
     if (c.current_catch_label is !null && c.current_catch_label != "") {
-        c.output_file.write(c.indent + "store { i64, i32 } " + err_val_reg + ", { i64, i32 }* " + c.current_catch_err_ptr + "\n");
-        c.output_file.write(c.indent + "br label %" + c.current_catch_label + "\n\n");
+        write_ir(ref c, c.indent + "store { i64, i32 } " + err_val_reg + ", { i64, i32 }* " + c.current_catch_err_ptr + "\n");
+        write_ir(ref c, c.indent + "br label %" + c.current_catch_label + "\n\n");
     } else {
         if (!is_fallible_type(ref c, c.current_ret_type)) {
             throw_invalid_syntax(node.pos, "Cannot use '?' without catch in a function that does not return a fallible type.");
         }
         let cur_ret_llvm_ty: String = get_llvm_type_str(ref c, c.current_ret_type);
         let ret_val_1: String = next_reg(ref c);
-        c.output_file.write(c.indent + ret_val_1 + " = insertvalue " + cur_ret_llvm_ty + " undef, i1 true, 0\n");
+        write_ir(ref c, c.indent + ret_val_1 + " = insertvalue " + cur_ret_llvm_ty + " undef, i1 true, 0\n");
 
         let ret_val_2: String = next_reg(ref c);
-        c.output_file.write(c.indent + ret_val_2 + " = insertvalue " + cur_ret_llvm_ty + " " + ret_val_1 + ", { i64, i32 } " + err_val_reg + ", 1\n");
+        write_ir(ref c, c.indent + ret_val_2 + " = insertvalue " + cur_ret_llvm_ty + " " + ret_val_1 + ", { i64, i32 } " + err_val_reg + ", 1\n");
 
         cleanup_all_scopes(ref c);
 
-        c.output_file.write(c.indent + "ret " + cur_ret_llvm_ty + " " + ret_val_2 + "\n\n");
+        write_ir(ref c, c.indent + "ret " + cur_ret_llvm_ty + " " + ret_val_2 + "\n\n");
     }
 
-    c.output_file.write(success_label + ":\n");
+    write_ir(ref c, success_label + ":\n");
 
     if (inner_type != TYPE_VOID) {
         let inner_val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + inner_val_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 2\n");
+        write_ir(ref c, c.indent + inner_val_reg + " = extractvalue " + fallible_llvm_ty + " " + expr_res.reg + ", 2\n");
 
         let inner_owned: Bool = expr_res.owns_ref && needs_drop(ref c, inner_type);
         return CompileResult(reg=inner_val_reg, type=inner_type, origin_type=0, owns_ref=inner_owned);
@@ -4785,18 +4792,18 @@ func compile_catch(ref c: Compiler, node: CatchNode) -> CompileResult {
     c.current_catch_err_ptr = old_err_ptr;
     c.current_catch_scope = old_catch_scope;
 
-    c.output_file.write(c.indent + "br label %" + success_label + "\n\n");
-    c.output_file.write(fail_label + ":\n");
+    write_ir(ref c, c.indent + "br label %" + success_label + "\n\n");
+    write_ir(ref c, fail_label + ":\n");
 
     enter_scope(ref c);
-    c.symbol_table.table.put(node.err_name.value, SymbolInfo(reg=err_reg_ptr, type=TYPE_ANY_ERROR, origin_type=TYPE_ANY_ERROR, is_const=false, func_arg_types=null));
+    scope_put(c.symbol_table, node.err_name.value, SymbolInfo(reg=err_reg_ptr, type=TYPE_ANY_ERROR, origin_type=TYPE_ANY_ERROR, is_const=false, func_arg_types=[]));
 
     compile_node(ref c, node.body);
 
     exit_scope(ref c);
 
-    c.output_file.write(c.indent + "br label %" + success_label + "\n\n");
-    c.output_file.write(success_label + ":\n");
+    write_ir(ref c, c.indent + "br label %" + success_label + "\n\n");
+    write_ir(ref c, success_label + ":\n");
 
     return res;
 }
@@ -4822,8 +4829,8 @@ func compile_throw(ref c: Compiler, node: ThrowNode) -> CompileResult {
     if (c.current_catch_label is !null && c.current_catch_label != "") {
         cleanup_scopes_until(ref c, c.current_catch_scope);
 
-        c.output_file.write(c.indent + "store { i64, i32 } " + err_val_reg + ", { i64, i32 }* " + c.current_catch_err_ptr + "\n");
-        c.output_file.write(c.indent + "br label %" + c.current_catch_label + "\n\n");
+        write_ir(ref c, c.indent + "store { i64, i32 } " + err_val_reg + ", { i64, i32 }* " + c.current_catch_err_ptr + "\n");
+        write_ir(ref c, c.indent + "br label %" + c.current_catch_label + "\n\n");
     } else {
         if (!is_fallible_type(ref c, c.current_ret_type)) {
             throw_invalid_syntax(node.pos, "Cannot use 'throw' without a catch block in a function that does not return a fallible type.");
@@ -4832,14 +4839,14 @@ func compile_throw(ref c: Compiler, node: ThrowNode) -> CompileResult {
 
         let target_ty: String = get_llvm_type_str(ref c, c.current_ret_type);
         let ret_val_1: String = next_reg(ref c);
-        c.output_file.write(c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 true, 0\n");
+        write_ir(ref c, c.indent + ret_val_1 + " = insertvalue " + target_ty + " undef, i1 true, 0\n");
 
         let ret_val_2: String = next_reg(ref c);
-        c.output_file.write(c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } " + err_val_reg + ", 1\n");
+        write_ir(ref c, c.indent + ret_val_2 + " = insertvalue " + target_ty + " " + ret_val_1 + ", { i64, i32 } " + err_val_reg + ", 1\n");
 
         cleanup_all_scopes(ref c);
 
-        c.output_file.write(c.indent + "ret " + target_ty + " " + ret_val_2 + "\n\n");
+        write_ir(ref c, c.indent + "ret " + target_ty + " " + ret_val_2 + "\n\n");
     }
 
     return void_result();
@@ -4886,26 +4893,26 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
             let sig: String = get_func_sig_str(ref c, f_info);
             let func_ptr: String = "@" + f_info.name;
             let cast_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
+            write_ir(ref c, c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
 
             let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
             let clo_func_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
-            c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
+            write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
+            write_ir(ref c, c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
 
             let clo_env_ptr_i8: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
+            write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
 
             let clo_env_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
-            c.output_file.write(c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
+            write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
+            write_ir(ref c, c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
 
             return CompileResult(reg=clo_payload, type=specific_type_id);
         }
 
         throw_name_error(v.pos, "Unknown variable or function '" + name + "'.");
         let curr_scope: Scope = c.symbol_table;
-        curr_scope.table.put(name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+        scope_put(curr_scope, name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
@@ -4937,7 +4944,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
                 emit_pointer_null_check(ref c, target_res.reg, target_res.type, ia.pos);
                 let elem_ty_str: String = get_llvm_type_str(ref c, elem_type);
                 let addr_reg: String = next_reg(ref c);
-                c.output_file.write(c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
+                write_ir(ref c, c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
 
                 return CompileResult(reg=addr_reg, type=elem_type, origin_type=elem_type);
             }
@@ -4953,15 +4960,15 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
                 let parts: SliceParts = emit_slice_parts(ref c, target_res.reg, target_res.type, ia.pos);
                 curr_len = emit_size_to_int(ref c, parts.length);
                 data_ptr = next_reg(ref c);
-                c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
+                write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + parts.data + ", " + get_size_llvm_type() + " " + parts.start + "\n");
             } else {
                 curr_len = "" + arr_info.size;
                 data_ptr = next_reg(ref c);
-                c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
+                write_ir(ref c, c.indent + data_ptr + " = getelementptr inbounds " + arr_info.llvm_name + ", " + arr_info.llvm_name + "* " + target_res.reg + ", i32 0, i32 0\n");
             }
             emit_array_bounds_check(ref c, index_res.reg, curr_len, ia.pos);
             let ptr_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + index_res.reg + "\n");
+            write_ir(ref c, c.indent + ptr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", i32 " + index_res.reg + "\n");
 
             return CompileResult(reg=ptr_reg, type=elem_type, origin_type=elem_type);
         }
@@ -4978,14 +4985,14 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
             emit_vector_bounds_check(ref c, target_res.reg, index_res.reg, struct_ty, ia.pos);
 
             let data_field_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
+            write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_ty + ", " + struct_ty + "* " + target_res.reg + ", i32 0, i32 2\n");
 
             let data_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
+            write_ir(ref c, c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_field_ptr + "\n");
 
             let size_index: String = emit_int_to_size(ref c, index_res.reg, true);
             let slot_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
+            write_ir(ref c, c.indent + slot_ptr + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + data_ptr + ", " + get_size_llvm_type() + " " + size_index + "\n");
 
             return CompileResult(reg=slot_ptr, type=elem_type, origin_type=elem_type);
         }
@@ -5027,7 +5034,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
             let s_info_temp: Optional(StructInfo) = c.struct_id_map.lookup(struct_type_id);
             if ((s_info_temp is !null)) {
                 let cast_reg: String = next_reg(ref c);
-                c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + struct_ptr_reg + " to " + s_info_temp.llvm_name + "*\n");
+                write_ir(ref c, c.indent + cast_reg + " = bitcast i8* " + struct_ptr_reg + " to " + s_info_temp.llvm_name + "*\n");
 
                 struct_ptr_reg = cast_reg;
             }
@@ -5089,34 +5096,34 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
                     let sig: String = get_func_sig_str(ref c, m_info);
 
                     let vtable_ptr_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + vtable_ptr_addr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 0\n");
+                    write_ir(ref c, c.indent + vtable_ptr_addr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 0\n");
 
                     let vtable_ptr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + vtable_ptr + " = load " + class_vtable_type(ref c, meta_s_info) + "*, " + class_vtable_type(ref c, meta_s_info) + "** " + vtable_ptr_addr + "\n");
+                    write_ir(ref c, c.indent + vtable_ptr + " = load " + class_vtable_type(ref c, meta_s_info) + "*, " + class_vtable_type(ref c, meta_s_info) + "** " + vtable_ptr_addr + "\n");
 
                     let method_i8ptr_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, meta_s_info) + ", " + class_vtable_type(ref c, meta_s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
+                    write_ir(ref c, c.indent + method_i8ptr_addr + " = getelementptr inbounds " + class_vtable_type(ref c, meta_s_info) + ", " + class_vtable_type(ref c, meta_s_info) + "* " + vtable_ptr + ", i32 0, i32 " + m_idx + "\n");
 
                     let method_i8ptr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
+                    write_ir(ref c, c.indent + method_i8ptr + " = load i8*, i8** " + method_i8ptr_addr + "\n");
 
                     let cast_reg: String = next_reg(ref c);
-                    c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + method_i8ptr + " to i8*\n");
+                    write_ir(ref c, c.indent + cast_reg + " = bitcast i8* " + method_i8ptr + " to i8*\n");
 
                     let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
                     let clo_func_ptr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
-                    c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
+                    write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
+                    write_ir(ref c, c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
 
                     let clo_env_ptr_i8: String = next_reg(ref c);
-                    c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
+                    write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
 
                     let clo_env_ptr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
+                    write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
 
                     let env_cast: String = next_reg(ref c);
-                    c.output_file.write(c.indent + env_cast + " = bitcast " + meta_s_info.llvm_name + "* " + struct_ptr_reg + " to i8*\n");
-                    c.output_file.write(c.indent + "store i8* " + env_cast + ", i8** " + clo_env_ptr + "\n");
+                    write_ir(ref c, c.indent + env_cast + " = bitcast " + meta_s_info.llvm_name + "* " + struct_ptr_reg + " to i8*\n");
+                    write_ir(ref c, c.indent + "store i8* " + env_cast + ", i8** " + clo_env_ptr + "\n");
 
                     return CompileResult(reg=clo_payload, type=specific_type_id, origin_type=specific_type_id);
                 }
@@ -5127,7 +5134,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
         let meta_field: FieldInfo = field;
 
         let f_ptr: String = next_reg(ref c);
-        c.output_file.write(c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 " + meta_field.offset + "\n");
+        write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + struct_ptr_reg + ", i32 0, i32 " + meta_field.offset + "\n");
 
         return CompileResult(reg=f_ptr, type=meta_field.type, origin_type=meta_field.type);
     }
@@ -5160,7 +5167,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
             emit_pointer_null_check(ref c, curr_reg, curr_type, d_node.pos);
             let ty_str: String = get_llvm_type_str(ref c, next_type);
             let next_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
+            write_ir(ref c, c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
 
             curr_reg = next_reg;
             curr_type = next_type;
@@ -5251,27 +5258,27 @@ func compile_protocol_comparison(ref c: Compiler, left: CompileResult, right: Co
     emit_method_nullcheck(ref c, left.reg, meta_info.llvm_name, method_name, pos);
 
     let vptr_addr: String = next_reg(ref c);
-    c.output_file.write(c.indent + vptr_addr + " = getelementptr inbounds " + meta_info.llvm_name + ", " + meta_info.llvm_name + "* " + left.reg + ", i32 0, i32 0\n");
+    write_ir(ref c, c.indent + vptr_addr + " = getelementptr inbounds " + meta_info.llvm_name + ", " + meta_info.llvm_name + "* " + left.reg + ", i32 0, i32 0\n");
 
     let vtable_raw: String = next_reg(ref c);
-    c.output_file.write(c.indent + vtable_raw + " = load i8*, i8** " + vptr_addr + "\n");
+    write_ir(ref c, c.indent + vtable_raw + " = load i8*, i8** " + vptr_addr + "\n");
 
     let vtable: String = next_reg(ref c);
-    c.output_file.write(c.indent + vtable + " = bitcast i8* " + vtable_raw + " to " + class_vtable_type(ref c, meta_info) + "*\n");
+    write_ir(ref c, c.indent + vtable + " = bitcast i8* " + vtable_raw + " to " + class_vtable_type(ref c, meta_info) + "*\n");
 
     let slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + slot + " = getelementptr inbounds " + class_vtable_type(ref c, meta_info) + ", " + class_vtable_type(ref c, meta_info) + "* " + vtable + ", i32 0, i32 " + method_index + "\n");
+    write_ir(ref c, c.indent + slot + " = getelementptr inbounds " + class_vtable_type(ref c, meta_info) + ", " + class_vtable_type(ref c, meta_info) + "* " + vtable + ", i32 0, i32 " + method_index + "\n");
 
     let method_raw: String = next_reg(ref c);
-    c.output_file.write(c.indent + method_raw + " = load i8*, i8** " + slot + "\n");
+    write_ir(ref c, c.indent + method_raw + " = load i8*, i8** " + slot + "\n");
 
     let method_ptr: String = next_reg(ref c);
-    c.output_file.write(c.indent + method_ptr + " = bitcast i8* " + method_raw + " to " + get_func_sig_str(ref c, method_info) + "\n");
+    write_ir(ref c, c.indent + method_ptr + " = bitcast i8* " + method_raw + " to " + get_func_sig_str(ref c, method_info) + "\n");
 
     let call_result: String = next_reg(ref c);
     let return_llvm: String = get_llvm_type_str(ref c, method_info.ret_type);
 
-    c.output_file.write(c.indent + call_result + " = call " + return_llvm + " " + method_ptr + "(" + meta_info.llvm_name + "* " + left.reg + ", " + meta_info.llvm_name + "* " + right.reg + ")\n");
+    write_ir(ref c, c.indent + call_result + " = call " + return_llvm + " " + method_ptr + "(" + meta_info.llvm_name + "* " + left.reg + ", " + meta_info.llvm_name + "* " + right.reg + ")\n");
 
     emit_release_owned(ref c, left);
     emit_release_owned(ref c, right);
@@ -5281,7 +5288,7 @@ func compile_protocol_comparison(ref c: Compiler, left: CompileResult, right: Co
             return CompileResult(reg=call_result, type=TYPE_BOOL);
         }
         let inverted: String = next_reg(ref c);
-        c.output_file.write(c.indent + inverted + " = xor i1 " + call_result + ", true\n");
+        write_ir(ref c, c.indent + inverted + " = xor i1 " + call_result + ", true\n");
 
         return CompileResult(reg=inverted, type=TYPE_BOOL);
     }
@@ -5298,7 +5305,7 @@ func compile_protocol_comparison(ref c: Compiler, left: CompileResult, right: Co
         predicate = "ne";
     }
 
-    c.output_file.write(c.indent + result + " = icmp " + predicate + " i32 " + call_result + ", " + ordinal + "\n");
+    write_ir(ref c, c.indent + result + " = icmp " + predicate + " i32 " + call_result + ", " + ordinal + "\n");
 
     return CompileResult(reg=result, type=TYPE_BOOL);
 }
@@ -5323,16 +5330,16 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         let label_left: String = "logic_left_" + c.type_counter;
         c.type_counter += 1;
 
-        c.output_file.write(c.indent + "br label %" + label_left + "\n");
-        c.output_file.write("\n" + label_left + ":\n");
+        write_ir(ref c, c.indent + "br label %" + label_left + "\n");
+        write_ir(ref c, "\n" + label_left + ":\n");
 
         if (op_type == TOK_AND) {
-            c.output_file.write(c.indent + "br i1 " + left.reg + ", label %" + label_rhs + ", label %" + label_merge + "\n");
+            write_ir(ref c, c.indent + "br i1 " + left.reg + ", label %" + label_rhs + ", label %" + label_merge + "\n");
         } else {
-            c.output_file.write(c.indent + "br i1 " + left.reg + ", label %" + label_merge + ", label %" + label_rhs + "\n");
+            write_ir(ref c, c.indent + "br i1 " + left.reg + ", label %" + label_merge + ", label %" + label_rhs + "\n");
         }
 
-        c.output_file.write("\n" + label_rhs + ":\n");
+        write_ir(ref c, "\n" + label_rhs + ":\n");
 
         let before_rhs = flow_copy(c.flow_types);
         apply_flow_guard(ref c, node.left, op_type == TOK_AND);
@@ -5346,14 +5353,14 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         let label_rhs_end: String = "logic_rhs_end_" + c.type_counter;
         c.type_counter += 1;
 
-        c.output_file.write(c.indent + "br label %" + label_rhs_end + "\n");
-        c.output_file.write("\n" + label_rhs_end + ":\n");
-        c.output_file.write(c.indent + "br label %" + label_merge + "\n");
+        write_ir(ref c, c.indent + "br label %" + label_rhs_end + "\n");
+        write_ir(ref c, "\n" + label_rhs_end + ":\n");
+        write_ir(ref c, c.indent + "br label %" + label_merge + "\n");
 
-        c.output_file.write("\n" + label_merge + ":\n");
+        write_ir(ref c, "\n" + label_merge + ":\n");
 
         let final_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + final_reg + " = phi i1 [ " + left.reg + ", %" + label_left + " ], [ " + right_res.reg + ", %" + label_rhs_end + " ]\n");
+        write_ir(ref c, c.indent + final_reg + " = phi i1 [ " + left.reg + ", %" + label_left + " ], [ " + right_res.reg + ", %" + label_rhs_end + " ]\n");
 
         return CompileResult(reg=final_reg, type=logic_type);
     }
@@ -5401,24 +5408,24 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         let right_domain: String = next_reg(ref c);
         let left_code: String = next_reg(ref c);
         let right_code: String = next_reg(ref c);
-        c.output_file.write(c.indent + left_domain + " = extractvalue { i64, i32 } " + left.reg + ", 0\n");
-        c.output_file.write(c.indent + right_domain + " = extractvalue { i64, i32 } " + right.reg + ", 0\n");
-        c.output_file.write(c.indent + left_code + " = extractvalue { i64, i32 } " + left.reg + ", 1\n");
-        c.output_file.write(c.indent + right_code + " = extractvalue { i64, i32 } " + right.reg + ", 1\n");
+        write_ir(ref c, c.indent + left_domain + " = extractvalue { i64, i32 } " + left.reg + ", 0\n");
+        write_ir(ref c, c.indent + right_domain + " = extractvalue { i64, i32 } " + right.reg + ", 0\n");
+        write_ir(ref c, c.indent + left_code + " = extractvalue { i64, i32 } " + left.reg + ", 1\n");
+        write_ir(ref c, c.indent + right_code + " = extractvalue { i64, i32 } " + right.reg + ", 1\n");
 
         let domain_equal: String = next_reg(ref c);
         let code_equal: String = next_reg(ref c);
         let equal: String = next_reg(ref c);
-        c.output_file.write(c.indent + domain_equal + " = icmp eq i64 " + left_domain + ", " + right_domain + "\n");
-        c.output_file.write(c.indent + code_equal + " = icmp eq i32 " + left_code + ", " + right_code + "\n");
-        c.output_file.write(c.indent + equal + " = and i1 " + domain_equal + ", " + code_equal + "\n");
+        write_ir(ref c, c.indent + domain_equal + " = icmp eq i64 " + left_domain + ", " + right_domain + "\n");
+        write_ir(ref c, c.indent + code_equal + " = icmp eq i32 " + left_code + ", " + right_code + "\n");
+        write_ir(ref c, c.indent + equal + " = and i1 " + domain_equal + ", " + code_equal + "\n");
 
         if (op_type == TOK_EE) {
             return CompileResult(reg=equal, type=TYPE_BOOL);
         }
 
         let not_equal: String = next_reg(ref c);
-        c.output_file.write(c.indent + not_equal + " = xor i1 " + equal + ", true\n");
+        write_ir(ref c, c.indent + not_equal + " = xor i1 " + equal + ", true\n");
 
         return CompileResult(reg=not_equal, type=TYPE_BOOL);
     }
@@ -5445,7 +5452,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
 
             let concat_hook: String = get_mangled_symbol(ref c, "string_concat", node.pos);
             let new_str_ptr: String = next_reg(ref c);
-            c.output_file.write(c.indent + new_str_ptr + " = call %struct.$String* @" + concat_hook + "(%struct.$String* " + left.reg + ", %struct.$String* " + right.reg + ")\n");
+            write_ir(ref c, c.indent + new_str_ptr + " = call %struct.$String* @" + concat_hook + "(%struct.$String* " + left.reg + ", %struct.$String* " + right.reg + ")\n");
 
             emit_release_owned(ref c, left);
             emit_release_owned(ref c, right);
@@ -5470,7 +5477,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
 
         let compare_hook: String = get_mangled_symbol(ref c, "string_compare", node.pos);
         let cmp_val: String = next_reg(ref c);
-        c.output_file.write(c.indent + cmp_val + " = call i32 @" + compare_hook + "(%struct.$String* " + left.reg + ", %struct.$String* " + right.reg + ")\n");
+        write_ir(ref c, c.indent + cmp_val + " = call i32 @" + compare_hook + "(%struct.$String* " + left.reg + ", %struct.$String* " + right.reg + ")\n");
 
         emit_release_owned(ref c, left);
         emit_release_owned(ref c, right);
@@ -5480,7 +5487,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
 
         if (op_type == TOK_NE) { op_code = "icmp ne"; }
 
-        c.output_file.write(c.indent + res_reg + " = " + op_code + " i32 " + cmp_val + ", 0\n");
+        write_ir(ref c, c.indent + res_reg + " = " + op_code + " i32 " + cmp_val + ", 0\n");
 
         return CompileResult(reg=res_reg, type=TYPE_BOOL);
     }
@@ -5497,7 +5504,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         let res_reg: String = next_reg(ref c);
         let pow_hook: String = get_mangled_symbol(ref c, "float_pow", node.pos);
 
-        c.output_file.write(c.indent + res_reg + " = call double @" + pow_hook + "(double " + left.reg + ", double " + right.reg + ")\n");
+        write_ir(ref c, c.indent + res_reg + " = call double @" + pow_hook + "(double " + left.reg + ", double " + right.reg + ")\n");
 
         return CompileResult(reg=res_reg, type=TYPE_FLOAT);
     }
@@ -5506,13 +5513,13 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         (left.type == TYPE_BYTE && right.type == TYPE_CHAR)) {
         if (left.type == TYPE_BYTE) {
             let promoted: String = next_reg(ref c);
-            c.output_file.write(c.indent + promoted + " = zext i8 " + left.reg + " to i32\n");
+            write_ir(ref c, c.indent + promoted + " = zext i8 " + left.reg + " to i32\n");
 
             left = CompileResult(reg=promoted, type=TYPE_CHAR, origin_type=TYPE_BYTE);
         }
         if (right.type == TYPE_BYTE) {
             let promoted: String = next_reg(ref c);
-            c.output_file.write(c.indent + promoted + " = zext i8 " + right.reg + " to i32\n");
+            write_ir(ref c, c.indent + promoted + " = zext i8 " + right.reg + " to i32\n");
 
             right = CompileResult(reg=promoted, type=TYPE_CHAR, origin_type=TYPE_BYTE);
         }
@@ -5551,7 +5558,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         else if (op_type == TOK_LTE) { op_code = "icmp ule"; }
 
         let res_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + res_reg + " = " + op_code + " i32 " + left.reg + ", " + right.reg + "\n");
+        write_ir(ref c, c.indent + res_reg + " = " + op_code + " i32 " + left.reg + ", " + right.reg + "\n");
 
         return CompileResult(reg=res_reg, type=TYPE_BOOL);
     }
@@ -5588,7 +5595,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
             let op_code: String = "icmp eq";
             if (op_type == TOK_NE) { op_code = "icmp ne"; }
 
-            c.output_file.write(c.indent + res_reg + " = " + op_code + " i32 " + left.reg + ", " + right.reg + "\n");
+            write_ir(ref c, c.indent + res_reg + " = " + op_code + " i32 " + left.reg + ", " + right.reg + "\n");
 
             return CompileResult(reg=res_reg, type=TYPE_BOOL);
         }
@@ -5610,7 +5617,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
             let op_code: String = "icmp eq";
             if (op_type == TOK_NE) { op_code = "icmp ne"; }
 
-            c.output_file.write(c.indent + res_reg + " = " + op_code + " i1 " + left.reg + ", " + right.reg + "\n");
+            write_ir(ref c, c.indent + res_reg + " = " + op_code + " i1 " + left.reg + ", " + right.reg + "\n");
 
             return CompileResult(reg=res_reg, type=TYPE_BOOL);
         }
@@ -5699,7 +5706,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
             }
         }
 
-        c.output_file.write(c.indent + res_reg + " = " + op_code + " " + type_str + " " + left.reg + ", " + right.reg + "\n");
+        write_ir(ref c, c.indent + res_reg + " = " + op_code + " " + type_str + " " + left.reg + ", " + right.reg + "\n");
 
         return CompileResult(reg=res_reg, type=TYPE_BOOL);
     }
@@ -5750,43 +5757,43 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         }
         let is_zero_reg: String = next_reg(ref c);
         if (target_type == TYPE_FLOAT || target_type == TYPE_FLOAT32) {
-            c.output_file.write(c.indent + is_zero_reg + " = fcmp oeq " + type_str + " " + right.reg + ", 0.0\n");
+            write_ir(ref c, c.indent + is_zero_reg + " = fcmp oeq " + type_str + " " + right.reg + ", 0.0\n");
         } else {
-            c.output_file.write(c.indent + is_zero_reg + " = icmp eq " + type_str + " " + right.reg + ", 0\n");
+            write_ir(ref c, c.indent + is_zero_reg + " = icmp eq " + type_str + " " + right.reg + ", 0\n");
         }
         let err_label: String = "div_zero_" + c.type_counter;
         let ok_label: String = "div_ok_" + c.type_counter;
         c.type_counter += 1;
 
-        c.output_file.write(c.indent + "br i1 " + is_zero_reg + ", label %" + err_label + ", label %" + ok_label + "\n");
-        c.output_file.write("\n" + err_label + ":\n");
+        write_ir(ref c, c.indent + "br i1 " + is_zero_reg + ", label %" + err_label + ", label %" + ok_label + "\n");
+        write_ir(ref c, "\n" + err_label + ":\n");
 
         emit_runtime_error(ref c, node.pos, "Division by zero");
 
-        c.output_file.write("\n" + ok_label + ":\n");
+        write_ir(ref c, "\n" + ok_label + ":\n");
 
         if (is_signed_integer(target_type)) {
             let min_literal: String = get_signed_min_literal(target_type);
             if (min_literal.length() > 0) {
                 let is_min: String = next_reg(ref c);
-                c.output_file.write(c.indent + is_min + " = icmp eq " + type_str + " " + left.reg + ", " + min_literal + "\n");
+                write_ir(ref c, c.indent + is_min + " = icmp eq " + type_str + " " + left.reg + ", " + min_literal + "\n");
 
                 let is_negative_one: String = next_reg(ref c);
-                c.output_file.write(c.indent + is_negative_one + " = icmp eq " + type_str + " " + right.reg + ", -1\n");
+                write_ir(ref c, c.indent + is_negative_one + " = icmp eq " + type_str + " " + right.reg + ", -1\n");
 
                 let is_overflow: String = next_reg(ref c);
-                c.output_file.write(c.indent + is_overflow + " = and i1 " + is_min + ", " + is_negative_one + "\n");
+                write_ir(ref c, c.indent + is_overflow + " = and i1 " + is_min + ", " + is_negative_one + "\n");
 
                 let overflow_label: String = "div_overflow_" + c.type_counter;
                 let arithmetic_label: String = "div_arithmetic_" + c.type_counter;
                 c.type_counter += 1;
 
-                c.output_file.write(c.indent + "br i1 " + is_overflow + ", label %" + overflow_label + ", label %" + arithmetic_label + "\n");
-                c.output_file.write("\n" + overflow_label + ":\n");
+                write_ir(ref c, c.indent + "br i1 " + is_overflow + ", label %" + overflow_label + ", label %" + arithmetic_label + "\n");
+                write_ir(ref c, "\n" + overflow_label + ":\n");
 
                 emit_runtime_error(ref c, node.pos, "Signed division overflow");
 
-                c.output_file.write("\n" + arithmetic_label + ":\n");
+                write_ir(ref c, "\n" + arithmetic_label + ":\n");
             }
         }
     }
@@ -5803,13 +5810,13 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
             let too_large: String = next_reg(ref c);
             let invalid: String = too_large;
 
-            c.output_file.write(c.indent + too_large + " = icmp uge " + type_str + " " + right.reg + ", " + shift_bits + "\n");
+            write_ir(ref c, c.indent + too_large + " = icmp uge " + type_str + " " + right.reg + ", " + shift_bits + "\n");
 
             if (is_signed_integer(target_type)) {
                 let negative: String = next_reg(ref c);
                 let combined: String = next_reg(ref c);
-                c.output_file.write(c.indent + negative + " = icmp slt " + type_str + " " + right.reg + ", 0\n");
-                c.output_file.write(c.indent + combined + " = or i1 " + negative + ", " + too_large + "\n");
+                write_ir(ref c, c.indent + negative + " = icmp slt " + type_str + " " + right.reg + ", 0\n");
+                write_ir(ref c, c.indent + combined + " = or i1 " + negative + ", " + too_large + "\n");
 
                 invalid = combined;
             }
@@ -5817,12 +5824,12 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
             let shift_label: String = "shift_ok_" + c.type_counter;
             c.type_counter += 1;
 
-            c.output_file.write(c.indent + "br i1 " + invalid + ", label %" + error_label + ", label %" + shift_label + "\n");
-            c.output_file.write("\n" + error_label + ":\n");
+            write_ir(ref c, c.indent + "br i1 " + invalid + ", label %" + error_label + ", label %" + shift_label + "\n");
+            write_ir(ref c, "\n" + error_label + ":\n");
 
             emit_runtime_error(ref c, node.pos, "Invalid shift count");
 
-            c.output_file.write("\n" + shift_label + ":\n");
+            write_ir(ref c, "\n" + shift_label + ":\n");
         }
     }
 
@@ -5835,7 +5842,7 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         }
         let arithmetic_hook: String = get_mangled_symbol(ref c, hook_name, node.pos);
 
-        c.output_file.write(c.indent + res_reg + " = call i128 @" + arithmetic_hook + "(i128 " + left.reg + ", i128 " + right.reg + ")\n");
+        write_ir(ref c, c.indent + res_reg + " = call i128 @" + arithmetic_hook + "(i128 " + left.reg + ", i128 " + right.reg + ")\n");
 
         let result_type: Int = target_type;
         if (named_result != 0) { result_type = named_result; }
@@ -5848,8 +5855,8 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         if (target_type == TYPE_FLOAT32) {
             let widened_left: String = next_reg(ref c);
             let widened_right: String = next_reg(ref c);
-            c.output_file.write(c.indent + widened_left + " = fpext float " + left_reg + " to double\n");
-            c.output_file.write(c.indent + widened_right + " = fpext float " + right_reg + " to double\n");
+            write_ir(ref c, c.indent + widened_left + " = fpext float " + left_reg + " to double\n");
+            write_ir(ref c, c.indent + widened_right + " = fpext float " + right_reg + " to double\n");
 
             left_reg = widened_left;
             right_reg = widened_right;
@@ -5857,17 +5864,17 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         let mod_hook: String = get_mangled_symbol(ref c, "float_mod", node.pos);
         let mod_result: String = res_reg;
         if (target_type == TYPE_FLOAT32) { mod_result = next_reg(ref c); }
-        c.output_file.write(c.indent + mod_result + " = call double @" + mod_hook + "(double " + left_reg + ", double " + right_reg + ")\n");
+        write_ir(ref c, c.indent + mod_result + " = call double @" + mod_hook + "(double " + left_reg + ", double " + right_reg + ")\n");
 
         if (target_type == TYPE_FLOAT32) {
-            c.output_file.write(c.indent + res_reg + " = fptrunc double " + mod_result + " to float\n");
+            write_ir(ref c, c.indent + res_reg + " = fptrunc double " + mod_result + " to float\n");
         }
         let result_type: Int = target_type;
         if (named_result != 0) { result_type = named_result; }
         return CompileResult(reg=res_reg, type=result_type);
     }
 
-    c.output_file.write(c.indent + res_reg + " = " + op_code + " " + type_str + " " + left.reg + ", " + right.reg + "\n");
+    write_ir(ref c, c.indent + res_reg + " = " + op_code + " " + type_str + " " + left.reg + ", " + right.reg + "\n");
 
     let result_type: Int = target_type;
     if (named_result != 0) { result_type = named_result; }
@@ -5886,18 +5893,18 @@ func emit_function_value(ref c: Compiler, info: FuncInfo, pos: Position) -> Comp
 
     let specific_type: Int = get_func_type_id(ref c, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
     let cast: String = next_reg(ref c);
-    c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(ref c, info) + " @" + info.name + " to i8*\n");
+    write_ir(ref c, c.indent + cast + " = bitcast " + get_func_sig_str(ref c, info) + " @" + info.name + " to i8*\n");
 
     let closure: String = emit_alloc_closure(ref c, specific_type);
     let function_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
-    c.output_file.write(c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
+    write_ir(ref c, c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
+    write_ir(ref c, c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
 
     let environment_bytes: String = next_reg(ref c);
     let environment_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
-    c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
-    c.output_file.write(c.indent + "store i8* null, i8** " + environment_slot + "\n");
+    write_ir(ref c, c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
+    write_ir(ref c, c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
+    write_ir(ref c, c.indent + "store i8* null, i8** " + environment_slot + "\n");
 
     return CompileResult(reg=closure, type=specific_type, origin_type=info.ret_type);
 }
@@ -5928,7 +5935,7 @@ func emit_generic_method_value(ref c: Compiler, generic: GenericTypeNode) -> Com
     }
     let meta_template: GenericTemplate = template;
 
-    let types: Vector(Struct) = resolve_generic_method_args(ref c, meta_template, generic.type_args, null, generic.pos);
+    let types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, meta_template, generic.type_args, [], generic.pos);
     if (types is null) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
@@ -5957,20 +5964,20 @@ func emit_generic_method_value(ref c: Compiler, generic: GenericTypeNode) -> Com
     let method_type: Int = get_method_type_id(ref c, args, meta_method_info.ret_type, meta_method_info.variadic_param, callable_arg_names(meta_method_info, 1));
     let closure: String = emit_alloc_closure(ref c, method_type);
     let cast: String = next_reg(ref c);
-    c.output_file.write(c.indent + cast + " = bitcast " + get_func_sig_str(ref c, meta_method_info) + " @" + meta_method_info.name + " to i8*\n");
+    write_ir(ref c, c.indent + cast + " = bitcast " + get_func_sig_str(ref c, meta_method_info) + " @" + meta_method_info.name + " to i8*\n");
 
     let function_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
-    c.output_file.write(c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
+    write_ir(ref c, c.indent + function_slot + " = bitcast i8* " + closure + " to i8**\n");
+    write_ir(ref c, c.indent + "store i8* " + cast + ", i8** " + function_slot + "\n");
 
     let environment_bytes: String = next_reg(ref c);
     let environment_slot: String = next_reg(ref c);
-    c.output_file.write(c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
-    c.output_file.write(c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
+    write_ir(ref c, c.indent + environment_bytes + " = getelementptr inbounds i8, i8* " + closure + ", i32 " + closure_env_offset() + "\n");
+    write_ir(ref c, c.indent + environment_slot + " = bitcast i8* " + environment_bytes + " to i8**\n");
 
     let object_bytes: String = next_reg(ref c);
-    c.output_file.write(c.indent + object_bytes + " = bitcast " + meta_info.llvm_name + "* " + object.reg + " to i8*\n");
-    c.output_file.write(c.indent + "store i8* " + object_bytes + ", i8** " + environment_slot + "\n");
+    write_ir(ref c, c.indent + object_bytes + " = bitcast " + meta_info.llvm_name + "* " + object.reg + " to i8*\n");
+    write_ir(ref c, c.indent + "store i8* " + object_bytes + ", i8** " + environment_slot + "\n");
 
     emit_retain(ref c, object.reg, object.type);
 
@@ -5990,7 +5997,7 @@ func compile_generic_value(ref c: Compiler, node: GenericTypeNode) -> CompileRes
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
 
-    let types: Vector(Struct) = resolve_generic_args(ref c, template, node.type_args, null, node.pos);
+    let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, template, node.type_args, [], node.pos);
     if (types is null) {
         return CompileResult(reg="poison", type=TYPE_POISON);
     }
@@ -6051,7 +6058,7 @@ func compile_builtin_protocol_call(ref c: Compiler, receiver: NodeID, receiver_t
         c.hash_types.put("" + receiver_type, StringConstant(id=receiver_type, value=""));
 
         let result: String = next_reg(ref c);
-        c.output_file.write(c.indent + result + " = call i32 @__wl_hash_value_" + receiver_type + "(" + get_llvm_type_str(ref c, receiver_type) + " " + value.reg + ")\n");
+        write_ir(ref c, c.indent + result + " = call i32 @__wl_hash_value_" + receiver_type + "(" + get_llvm_type_str(ref c, receiver_type) + " " + value.reg + ")\n");
 
         emit_release_owned(ref c, value);
 
@@ -6080,7 +6087,7 @@ func compile_builtin_protocol_call(ref c: Compiler, receiver: NodeID, receiver_t
         let compare_hook: String = get_mangled_symbol(ref c, "string_compare", call.pos);
 
         comparison = next_reg(ref c);
-        c.output_file.write(c.indent + comparison + " = call i32 @" + compare_hook + "(%struct.$String* " + value.reg + ", %struct.$String* " + other.reg + ")\n");
+        write_ir(ref c, c.indent + comparison + " = call i32 @" + compare_hook + "(%struct.$String* " + value.reg + ", %struct.$String* " + other.reg + ")\n");
     } else {
         let llvm_type: String = get_llvm_type_str(ref c, receiver_type);
         let suffix: String = "s";
@@ -6091,10 +6098,10 @@ func compile_builtin_protocol_call(ref c: Compiler, receiver: NodeID, receiver_t
         let greater_value: String = next_reg(ref c);
 
         comparison = next_reg(ref c);
-        c.output_file.write(c.indent + less + " = icmp " + suffix + "lt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
-        c.output_file.write(c.indent + greater + " = icmp " + suffix + "gt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
-        c.output_file.write(c.indent + greater_value + " = select i1 " + greater + ", i32 " + greater_ordinal + ", i32 " + equal_ordinal + "\n");
-        c.output_file.write(c.indent + comparison + " = select i1 " + less + ", i32 " + less_ordinal + ", i32 " + greater_value + "\n");
+        write_ir(ref c, c.indent + less + " = icmp " + suffix + "lt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
+        write_ir(ref c, c.indent + greater + " = icmp " + suffix + "gt " + llvm_type + " " + value.reg + ", " + other.reg + "\n");
+        write_ir(ref c, c.indent + greater_value + " = select i1 " + greater + ", i32 " + greater_ordinal + ", i32 " + equal_ordinal + "\n");
+        write_ir(ref c, c.indent + comparison + " = select i1 " + less + ", i32 " + less_ordinal + ", i32 " + greater_value + "\n");
     }
 
     emit_release_owned(ref c, value);
@@ -6110,10 +6117,10 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
     let old_facts = c.flow_types;
     let old_exposed = c.flow_exposed;
     if own_body {
-        c.flow_types = null;
-        c.flow_exposed = null;
+        c.flow_types = [];
+        c.flow_exposed = [];
     }
-    if (kind == NODE_WHILE || kind == NODE_FOR) { c.flow_types = null; }
+    if (kind == NODE_WHILE || kind == NODE_FOR) { c.flow_types = []; }
     if (kind == NODE_VAR_DECL) { flow_forget(ref c, get_var_decl_node(ref c.arena, node).name_tok.value, false); }
     if (kind == NODE_REF) { flow_expose(ref c, get_ref_node(ref c.arena, node).node); }
 
@@ -6133,7 +6140,7 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let field = get_field_assign_node(ref c.arena, node);
         flow_forget(ref c, format_ast_path(ref c, field.obj) + "." + field.field_name, false);
     }
-    if (kind == NODE_WHILE || kind == NODE_FOR || kind == NODE_CATCH) { c.flow_types = null; }
+    if (kind == NODE_WHILE || kind == NODE_FOR || kind == NODE_CATCH) { c.flow_types = []; }
     if own_body {
         c.flow_types = old_facts;
         c.flow_exposed = old_exposed;
@@ -6167,7 +6174,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let id: Int = register_string_constant(ref c, val);
         let len: Int = val.length() + 1;
         let res_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + res_reg + " = getelementptr inbounds { i32, i32, %struct.$String }, { i32, i32, %struct.$String }* @.str." + id + ", i32 0, i32 2\n");
+        write_ir(ref c, c.indent + res_reg + " = getelementptr inbounds { i32, i32, %struct.$String }, { i32, i32, %struct.$String }* @.str." + id + ", i32 0, i32 2\n");
 
         return CompileResult(reg=res_reg, type=TYPE_STRING, origin_type=0);
     }
@@ -6216,7 +6223,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             if ((array is !null) && array.size >= 0) {
                 let member = c.expected_type;
                 let slot = next_reg(ref c);
-                c.output_file.write(c.indent + slot + " = alloca " + array.llvm_name + "\n");
+                write_ir(ref c, c.indent + slot + " = alloca " + array.llvm_name + "\n");
                 compile_array_literal(ref c, literal, member, slot);
                 c.expected_type = expected;
                 return CompileResult(reg=slot, type=member, owns_ref=true);
@@ -6277,11 +6284,11 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 if (f_name != "") {
                     let llvm_ty_str: String = get_llvm_type_str(ref c, clo_res.type);
                     let ptr_reg: String = next_reg(ref c);
-                    c.output_file.write(c.indent + ptr_reg + " = alloca " + llvm_ty_str + "\n");
-                    c.output_file.write(c.indent + "store " + llvm_ty_str + " " + clo_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
+                    write_ir(ref c, c.indent + ptr_reg + " = alloca " + llvm_ty_str + "\n");
+                    write_ir(ref c, c.indent + "store " + llvm_ty_str + " " + clo_res.reg + ", " + llvm_ty_str + "* " + ptr_reg + "\n");
 
                     let curr_scope: Scope = c.symbol_table;
-                    curr_scope.table.put(f_name, SymbolInfo(reg=ptr_reg, type=clo_res.type, origin_type=clo_res.origin_type, is_const=true));
+                    scope_put(curr_scope, f_name, SymbolInfo(reg=ptr_reg, type=clo_res.type, origin_type=clo_res.origin_type, is_const=true));
                     curr_scope.gc_vars.append(GCTracker(reg=ptr_reg, type=clo_res.type));
                 }
 
@@ -6347,7 +6354,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             emit_pointer_null_check(ref c, curr_reg, curr_type, d_node.pos);
             let ty_str: String = get_llvm_type_str(ref c, next_type);
             let next_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
+            write_ir(ref c, c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
 
             curr_reg = next_reg;
             curr_type = next_type;
@@ -6424,14 +6431,14 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             let lhs_info: Optional(StructInfo) = c.struct_id_map.lookup(lhs_res.type);
             if ((lhs_info is !null) && lhs_info.is_interface) {
                 let object_l: String = next_reg(ref c);
-                c.output_file.write(c.indent + object_l + " = extractvalue { i8*, i8* } " + l_reg + ", 0\n");
+                write_ir(ref c, c.indent + object_l + " = extractvalue { i8*, i8* } " + l_reg + ", 0\n");
 
                 l_reg = object_l;
             } else {
                 let cast_l: String = next_reg(ref c);
                 let ty_l: String = get_llvm_type_str(ref c, lhs_res.type);
 
-                c.output_file.write(c.indent + cast_l + " = bitcast " + ty_l + " " + l_reg + " to i8*\n");
+                write_ir(ref c, c.indent + cast_l + " = bitcast " + ty_l + " " + l_reg + " to i8*\n");
 
                 l_reg = cast_l;
             }
@@ -6440,14 +6447,14 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             let rhs_info: Optional(StructInfo) = c.struct_id_map.lookup(rhs_res.type);
             if ((rhs_info is !null) && rhs_info.is_interface) {
                 let object_r: String = next_reg(ref c);
-                c.output_file.write(c.indent + object_r + " = extractvalue { i8*, i8* } " + r_reg + ", 0\n");
+                write_ir(ref c, c.indent + object_r + " = extractvalue { i8*, i8* } " + r_reg + ", 0\n");
 
                 r_reg = object_r;
             } else {
                 let cast_r: String = next_reg(ref c);
                 let ty_r: String = get_llvm_type_str(ref c, rhs_res.type);
 
-                c.output_file.write(c.indent + cast_r + " = bitcast " + ty_r + " " + r_reg + " to i8*\n");
+                write_ir(ref c, c.indent + cast_r + " = bitcast " + ty_r + " " + r_reg + " to i8*\n");
 
                 r_reg = cast_r;
             }
@@ -6457,7 +6464,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let cond: String = "eq";
         if (base == NODE_IS_NOT) { cond = "ne"; }
 
-        c.output_file.write(c.indent + cmp_reg + " = icmp " + cond + " i8* " + l_reg + ", " + r_reg + "\n");
+        write_ir(ref c, c.indent + cmp_reg + " = icmp " + cond + " i8* " + l_reg + ", " + r_reg + "\n");
 
         return CompileResult(reg=cmp_reg, type=TYPE_BOOL);
     }
@@ -6585,7 +6592,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
         if (c.expected_type == TYPE_FLOAT32 || (c.expected_type == 0 && is_f32)) {
             let tmp_reg: String = next_reg(ref c);
-            c.output_file.write(c.indent + tmp_reg + " = fptrunc double " + val_str + " to float\n");
+            write_ir(ref c, c.indent + tmp_reg + " = fptrunc double " + val_str + " to float\n");
 
             return CompileResult(reg=tmp_reg, type=TYPE_FLOAT32);
         }
@@ -6624,27 +6631,27 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 let func_ptr: String = "@" + f_info.name;
 
                 let cast_reg: String = next_reg(ref c);
-                c.output_file.write(c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
+                write_ir(ref c, c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
 
                 let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
                 let clo_func_ptr_i8: String = clo_payload;
                 let clo_func_ptr: String = next_reg(ref c);
-                c.output_file.write(c.indent + clo_func_ptr + " = bitcast i8* " + clo_func_ptr_i8 + " to i8**\n");
-                c.output_file.write(c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
+                write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_func_ptr_i8 + " to i8**\n");
+                write_ir(ref c, c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
 
                 let clo_env_ptr_i8: String = next_reg(ref c);
-                c.output_file.write(c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
+                write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
 
                 let clo_env_ptr: String = next_reg(ref c);
-                c.output_file.write(c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
-                c.output_file.write(c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
+                write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
+                write_ir(ref c, c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
 
                 return CompileResult(reg=clo_payload, type=specific_type_id);
             }
 
             throw_name_error(v.pos, "Undefined variable or function '" + var_name + "'. ");
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+            scope_put(curr_scope, var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
             return CompileResult(reg="poison", type=TYPE_POISON);
         }
 
@@ -6670,7 +6677,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         }
 
         let val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + val_reg + " = load " + llvm_ty_str + ", " + llvm_ty_str + "* " + info.reg + "\n");
+        write_ir(ref c, c.indent + val_reg + " = load " + llvm_ty_str + ", " + llvm_ty_str + "* " + info.reg + "\n");
 
         return CompileResult(reg=val_reg, type=info.type, origin_type=info.origin_type, is_const_access=info.is_const || info.is_const_access);
     }
@@ -6730,7 +6737,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
                 let self_ty_str: String = get_llvm_type_str(ref c, self_info.type);
                 let self_val_reg: String = next_reg(ref c);
-                c.output_file.write(c.indent + self_val_reg + " = load " + self_ty_str + ", " + self_ty_str + "* " + self_info.reg + "\n");
+                write_ir(ref c, c.indent + self_val_reg + " = load " + self_ty_str + ", " + self_ty_str + "* " + self_info.reg + "\n");
 
                 let self_res: CompileResult = CompileResult(reg=self_val_reg, type=self_info.type, origin_type=0);
 
@@ -6788,13 +6795,13 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
                 let llvm_ret_type: String = get_llvm_type_str(ref c, meta_f_info.ret_type);
                 if (meta_f_info.ret_type == TYPE_VOID) {
-                    c.output_file.write(c.indent + "call " + llvm_ret_type + " @" + meta_f_info.name + "(" + args_str + ")\n");
+                    write_ir(ref c, c.indent + "call " + llvm_ret_type + " @" + meta_f_info.name + "(" + args_str + ")\n");
 
                     emit_release_owned_args(ref c, owned_args);
                     return CompileResult(reg="", type=TYPE_VOID, origin_type=0);
                 } else {
                     let call_res: String = next_reg(ref c);
-                    c.output_file.write(c.indent + call_res + " = call " + llvm_ret_type + " @" + meta_f_info.name + "(" + args_str + ")\n");
+                    write_ir(ref c, c.indent + call_res + " = call " + llvm_ret_type + " @" + meta_f_info.name + "(" + args_str + ")\n");
 
                     emit_release_owned_args(ref c, owned_args);
                     return CompileResult(reg=call_res, type=meta_f_info.ret_type, origin_type=0, owns_ref=result_owns_value(ref c, meta_f_info.ret_type));
@@ -6882,7 +6889,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
         let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
         if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, n_call.type_args, n_call.args, c.expected_type)) {
-            let types: Vector(Struct) = resolve_generic_constructor_args(ref c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
+            let types: Optional(Vector(Struct)) = resolve_generic_constructor_args(ref c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
             if (types is null) {
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
@@ -6908,7 +6915,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             let generic_name: String = generic_symbol_name(ref c, callee_node, true);
             let template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
             if ((template is !null)) {
-                let types: Vector(Struct) = resolve_generic_args(ref c, template, n_call.type_args, n_call.args, n_call.pos);
+                let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, template, n_call.type_args, n_call.args, n_call.pos);
                 if (types is null) {
                     return CompileResult(reg="poison", type=TYPE_POISON);
                 }
@@ -6960,7 +6967,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 let conversion: Optional(FuncInfo) = find_class_conversion(source_info, cast_target);
                 if (conversion is !null && source_info is !null) {
                     let no_args: Vector(ArgNode) = [];
-                    let conversion_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=no_args, type_args=null, pos=n_call.pos, preserve_fallible=true);
+                    let conversion_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=no_args, type_args=[], pos=n_call.pos, preserve_fallible=true);
                     let converted: CompileResult = compile_class_method_call(
                         ref c,
                         source_info,
@@ -7128,7 +7135,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                     if (arg_val.type == TYPE_BYTE) { arg_val = promote_to_int(ref c, arg_val); }
                     if (arg_val.type == TYPE_BOOL) {
                         let zext_reg: String = next_reg(ref c);
-                        c.output_file.write(c.indent + zext_reg + " = zext i1 " + arg_val.reg + " to i32\n");
+                        write_ir(ref c, c.indent + zext_reg + " = zext i1 " + arg_val.reg + " to i32\n");
 
                         arg_val = CompileResult(reg=zext_reg, type=TYPE_INT);
                     }
@@ -7186,15 +7193,15 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
             if (meta_func_info.ret_type == TYPE_VOID) {
                 if (meta_func_info.is_varargs) {
-                    c.output_file.write(c.indent + "call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
+                    write_ir(ref c, c.indent + "call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
                 } else {
-                    c.output_file.write(c.indent + "call " + abi_callconv + "void @" + meta_func_info.name + "(" + args_str + ")\n");
+                    write_ir(ref c, c.indent + "call " + abi_callconv + "void @" + meta_func_info.name + "(" + args_str + ")\n");
                 }
                 emit_release_owned_args(ref c, owned_args);
                 return void_result();
             } else {
                 call_res_reg = next_reg(ref c);
-                c.output_file.write(c.indent + call_res_reg + " = call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
+                write_ir(ref c, c.indent + call_res_reg + " = call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
 
                 emit_release_owned_args(ref c, owned_args);
                 let returns_owned: Bool = result_owns_value(ref c, meta_func_info.ret_type) &&
@@ -7278,29 +7285,29 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 if (is_func || is_meth) {
                     is_closure = true;
                     let env_ptr_i8_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + env_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 " + closure_env_offset() + "\n");
+                    write_ir(ref c, c.indent + env_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 " + closure_env_offset() + "\n");
 
                     let env_ptr_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + env_ptr_addr + " = bitcast i8* " + env_ptr_i8_addr + " to i8**\n");
+                    write_ir(ref c, c.indent + env_ptr_addr + " = bitcast i8* " + env_ptr_i8_addr + " to i8**\n");
 
                     actual_env_reg = next_reg(ref c);
-                    c.output_file.write(c.indent + actual_env_reg + " = load i8*, i8** " + env_ptr_addr + "\n");
+                    write_ir(ref c, c.indent + actual_env_reg + " = load i8*, i8** " + env_ptr_addr + "\n");
 
                     let f_ptr_i8_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + f_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 0\n");
+                    write_ir(ref c, c.indent + f_ptr_i8_addr + " = getelementptr inbounds i8, i8* " + callee_res.reg + ", i32 0\n");
 
                     let f_ptr_addr: String = next_reg(ref c);
-                    c.output_file.write(c.indent + f_ptr_addr + " = bitcast i8* " + f_ptr_i8_addr + " to i8**\n");
+                    write_ir(ref c, c.indent + f_ptr_addr + " = bitcast i8* " + f_ptr_i8_addr + " to i8**\n");
 
                     raw_func_ptr = next_reg(ref c);
-                    c.output_file.write(c.indent + raw_func_ptr + " = load i8*, i8** " + f_ptr_addr + "\n");
+                    write_ir(ref c, c.indent + raw_func_ptr + " = load i8*, i8** " + f_ptr_addr + "\n");
                 }
 
                 let args: Vector(ArgNode) = n_call.args;
                 let a_len: Int = 0;
                 if (args is !null) { a_len = args.length(); }
 
-                let expected_args: Vector(Struct) = null;
+                let expected_args: Vector(Struct) = [];
                 let signature_info: Optional(SymbolInfo) = null;
                 let bound_args: BoundCallArgs = BoundCallArgs();
                 if (ptr_type != TYPE_GENERIC_FUNCTION && ptr_type != TYPE_GENERIC_METHOD) {
@@ -7401,46 +7408,46 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
 
                 if is_closure {
                     let is_env_null: String = next_reg(ref c);
-                    c.output_file.write(c.indent + is_env_null + " = icmp eq i8* " + actual_env_reg + ", null\n");
+                    write_ir(ref c, c.indent + is_env_null + " = icmp eq i8* " + actual_env_reg + ", null\n");
 
                     let l_global: String = "call_g_" + c.type_counter;
                     let l_closure: String = "call_c_" + c.type_counter;
                     let l_merge: String = "call_m_" + c.type_counter;
                     c.type_counter += 1;
 
-                    c.output_file.write(c.indent + "br i1 " + is_env_null + ", label %" + l_global + ", label %" + l_closure + "\n");
+                    write_ir(ref c, c.indent + "br i1 " + is_env_null + ", label %" + l_global + ", label %" + l_closure + "\n");
 
-                    c.output_file.write("\n" + l_global + ":\n");
+                    write_ir(ref c, "\n" + l_global + ":\n");
 
                     let cast_g: String = next_reg(ref c);
-                    c.output_file.write("  " + cast_g + " = bitcast i8* " + raw_func_ptr + " to " + ret_ty_str + " (" + sig_g + ")*\n");
+                    write_ir(ref c, "  " + cast_g + " = bitcast i8* " + raw_func_ptr + " to " + ret_ty_str + " (" + sig_g + ")*\n");
 
                     let res_g: String = "";
                     if (ret_type_id == TYPE_VOID) {
-                        c.output_file.write("  call void " + cast_g + "(" + args_g_str + ")\n");
+                        write_ir(ref c, "  call void " + cast_g + "(" + args_g_str + ")\n");
                     } else {
                         res_g = next_reg(ref c);
-                        c.output_file.write("  " + res_g + " = call " + ret_ty_str + " " + cast_g + "(" + args_g_str + ")\n");
+                        write_ir(ref c, "  " + res_g + " = call " + ret_ty_str + " " + cast_g + "(" + args_g_str + ")\n");
                     }
 
-                    c.output_file.write("  br label %" + l_merge + "\n");
+                    write_ir(ref c, "  br label %" + l_merge + "\n");
 
-                    c.output_file.write("\n" + l_closure + ":\n");
+                    write_ir(ref c, "\n" + l_closure + ":\n");
 
                     let cast_c: String = next_reg(ref c);
-                    c.output_file.write("  " + cast_c + " = bitcast i8* " + raw_func_ptr + " to " + ret_ty_str + " (" + sig_c + ")*\n");
+                    write_ir(ref c, "  " + cast_c + " = bitcast i8* " + raw_func_ptr + " to " + ret_ty_str + " (" + sig_c + ")*\n");
 
                     let res_c: String = "";
                     if (ret_type_id == TYPE_VOID) {
-                        c.output_file.write("  call void " + cast_c + "(" + args_c_str + ")\n");
+                        write_ir(ref c, "  call void " + cast_c + "(" + args_c_str + ")\n");
                     } else {
                         res_c = next_reg(ref c);
-                        c.output_file.write("  " + res_c + " = call " + ret_ty_str + " " + cast_c + "(" + args_c_str + ")\n");
+                        write_ir(ref c, "  " + res_c + " = call " + ret_ty_str + " " + cast_c + "(" + args_c_str + ")\n");
                     }
 
-                    c.output_file.write("  br label %" + l_merge + "\n");
+                    write_ir(ref c, "  br label %" + l_merge + "\n");
 
-                    c.output_file.write("\n" + l_merge + ":\n");
+                    write_ir(ref c, "\n" + l_merge + ":\n");
 
                     if (ret_type_id == TYPE_VOID) {
                         emit_release_owned_args(ref c, owned_args);
@@ -7448,7 +7455,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                         return void_result();
                     } else {
                         let final_res: String = next_reg(ref c);
-                        c.output_file.write("  " + final_res + " = phi " + ret_ty_str + " [ " + res_g + ", %" + l_global + " ], [ " + res_c + ", %" + l_closure + " ]\n");
+                        write_ir(ref c, "  " + final_res + " = phi " + ret_ty_str + " [ " + res_g + ", %" + l_global + " ], [ " + res_c + ", %" + l_closure + " ]\n");
 
                         emit_release_owned_args(ref c, owned_args);
                         emit_release_owned(ref c, callee_res);
@@ -7471,7 +7478,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let ptr scope: LoopScope = c.loop_stack;
         cleanup_scopes_until(ref c, scope.loop_scope);
 
-        c.output_file.write(c.indent + "br label %" + scope.label_break + "\n");
+        write_ir(ref c, c.indent + "br label %" + scope.label_break + "\n");
 
         return void_result();
     }
@@ -7485,7 +7492,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let ptr scope: LoopScope = c.loop_stack;
         cleanup_scopes_until(ref c, scope.loop_scope);
 
-        c.output_file.write(c.indent + "br label %" + scope.label_continue + "\n");
+        write_ir(ref c, c.indent + "br label %" + scope.label_continue + "\n");
 
         return void_result();
     }
@@ -7508,7 +7515,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             if (!(info is !null)) {
                 throw_name_error(v_acc.pos, "Undefined variable '" + var_name + "'. ");
                 let curr_scope: Scope = c.symbol_table;
-                curr_scope.table.put(var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
+                scope_put(curr_scope, var_name, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
             if (info.type == TYPE_POISON) {
@@ -7549,7 +7556,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         }
 
         let old_val_reg: String = next_reg(ref c);
-        c.output_file.write(c.indent + old_val_reg + " = load " + type_str + ", " + type_str + "* " + target_reg + "\n");
+        write_ir(ref c, c.indent + old_val_reg + " = load " + type_str + ", " + type_str + "* " + target_reg + "\n");
 
         let new_val_reg: String = next_reg(ref c);
 
@@ -7557,20 +7564,20 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             let op_code: String = "add";
             if (op_type == TOK_DEC) { op_code = "sub"; }
 
-            c.output_file.write(c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1\n");
+            write_ir(ref c, c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1\n");
         }
         else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
             let op_code: String = "fadd";
             if (op_type == TOK_DEC) { op_code = "fsub"; }
 
-            c.output_file.write(c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1.0\n");
+            write_ir(ref c, c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1.0\n");
         }
         else {
             throw_type_error(u.pos, "Cannot increment/decrement type " + get_type_name(ref c, target_type));
             return void_result();
         }
 
-        c.output_file.write(c.indent + "store " + type_str + " " + new_val_reg + ", " + type_str + "* " + target_reg + "\n");
+        write_ir(ref c, c.indent + "store " + type_str + " " + new_val_reg + ", " + type_str + "* " + target_reg + "\n");
 
         return CompileResult(reg=old_val_reg, type=target_type);
     }
@@ -7591,13 +7598,13 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             if (is_integer_type(operation_type)) {
                 let ty_str: String = get_llvm_type_str(ref c, operand.type);
 
-                c.output_file.write(c.indent + res_reg + " = sub " + ty_str + " 0, " + operand.reg + "\n");
+                write_ir(ref c, c.indent + res_reg + " = sub " + ty_str + " 0, " + operand.reg + "\n");
 
                 return CompileResult(reg=res_reg, type=operand_type);
             } else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
                 let ty_str: String = get_llvm_type_str(ref c, operand.type);
 
-                c.output_file.write(c.indent + res_reg + " = fneg " + ty_str + " " + operand.reg + "\n");
+                write_ir(ref c, c.indent + res_reg + " = fneg " + ty_str + " " + operand.reg + "\n");
 
                 return CompileResult(reg=res_reg, type=operand_type);
             } else {
@@ -7611,7 +7618,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
                 return void_result();
             }
 
-            c.output_file.write(c.indent + res_reg + " = xor i1 " + operand.reg + ", 1\n");
+            write_ir(ref c, c.indent + res_reg + " = xor i1 " + operand.reg + ", 1\n");
 
             return CompileResult(reg=res_reg, type=operand_type);
         }
@@ -7619,7 +7626,7 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
             if (is_integer_type(operation_type)) {
                 let ty_str: String = get_llvm_type_str(ref c, operand.type);
 
-                c.output_file.write(c.indent + res_reg + " = xor " + ty_str + " " + operand.reg + ", -1\n");
+                write_ir(ref c, c.indent + res_reg + " = xor " + ty_str + " " + operand.reg + ", -1\n");
 
                 return CompileResult(reg=res_reg, type=operand_type);
             } else {
@@ -7687,14 +7694,14 @@ func compile_string_method_call(ref c: Compiler, obj_node: NodeID, method_name: 
     let ret_ty_str: String = get_llvm_type_str(ref c, meta_f_info.ret_type);
     let call_reg: String = "";
     if (meta_f_info.ret_type == TYPE_VOID) {
-        c.output_file.write(c.indent + "call void @" + meta_f_info.name + "(" + args_str + ")\n");
+        write_ir(ref c, c.indent + "call void @" + meta_f_info.name + "(" + args_str + ")\n");
 
         emit_release_owned_args(ref c, owned_args);
         emit_release_owned(ref c, obj_res);
         return void_result();
     } else {
         call_reg = next_reg(ref c);
-        c.output_file.write(c.indent + call_reg + " = call " + ret_ty_str + " @" + meta_f_info.name + "(" + args_str + ")\n");
+        write_ir(ref c, c.indent + call_reg + " = call " + ret_ty_str + " @" + meta_f_info.name + "(" + args_str + ")\n");
 
         emit_release_owned_args(ref c, owned_args);
         emit_release_owned(ref c, obj_res);
@@ -7721,13 +7728,13 @@ func init_compiler_intrinsics(ref c: Compiler) -> Void {
         is_class=true,
         vtable_name="",
         parent_id=0,
-        vtable=null,
+        vtable=[],
         ann_flags=FLAG_ANN_INTRINSIC,
         compiler_link_name="",
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=null
+        interfaces=[]
     );
     c.struct_table.put("$Variant", variant_info);
     c.struct_id_map.put(variant_id, variant_info);
@@ -7736,18 +7743,18 @@ func init_compiler_intrinsics(ref c: Compiler) -> Void {
     let string_info: StructInfo = StructInfo(
         name="String",
         type_id=TYPE_STRING,
-        fields=null,
+        fields=[],
         llvm_name="%struct.$String",
         init_body=NO_NODE, is_class=false,
         vtable_name="",
         parent_id=0,
-        vtable=null,
+        vtable=[],
         ann_flags=FLAG_ANN_INTRINSIC,
         compiler_link_name="",
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=null
+        interfaces=[]
     );
     c.struct_table.put("String", string_info);
     c.struct_id_map.put(TYPE_STRING, string_info);
@@ -7755,39 +7762,45 @@ func init_compiler_intrinsics(ref c: Compiler) -> Void {
 }
 
 func emit_llvm_prelude(ref c: Compiler) -> Void {
-    c.output_file.write("target triple = \"" + get_target_triple() + "\"\n\n");
-    c.output_file.write("declare void @llvm.trap()\n\n");
+    write_ir(ref c, "target triple = \"" + get_target_triple() + "\"\n\n");
+    write_ir(ref c, "declare void @llvm.trap()\n\n");
 
-    c.output_file.write("@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"\n");
-    c.output_file.write("@.fmt_long = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
-    c.output_file.write("@.fmt_float = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\"\n");
-    c.output_file.write("@.fmt_str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n\n");
-    c.output_file.write("@.fmt_char = private unnamed_addr constant [3 x i8] c\"%c\\00\"\n");
-    c.output_file.write("@.fmt_hex_ptr = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n");
+    write_ir(ref c, "@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"\n");
+    write_ir(ref c, "@.fmt_long = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
+    write_ir(ref c, "@.fmt_float = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\"\n");
+    write_ir(ref c, "@.fmt_str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n\n");
+    write_ir(ref c, "@.fmt_char = private unnamed_addr constant [3 x i8] c\"%c\\00\"\n");
+    write_ir(ref c, "@.fmt_hex_ptr = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n");
 
-    c.output_file.write("@.str_true = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
-    c.output_file.write("@.str_false = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
-    c.output_file.write("@.str_null = private unnamed_addr constant [5 x i8] c\"null\\00\"\n\n");
-    c.output_file.write("@.str_newline = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n");
-    c.output_file.write("@.str_idx_err = private unnamed_addr constant [21 x i8] c\"Index out of bounds\\0A\\00\"\n\n");
-    c.output_file.write("@.fmt_err_bounds = private unnamed_addr constant [66 x i8] c\"\\0ARuntimeError\\1B[0m: Index out of bounds\\0A    at Line %d, Column %d\\0A\\00\"\n\n");
+    write_ir(ref c, "@.str_true = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
+    write_ir(ref c, "@.str_false = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
+    write_ir(ref c, "@.str_null = private unnamed_addr constant [5 x i8] c\"null\\00\"\n\n");
+    write_ir(ref c, "@.str_newline = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n");
+    write_ir(ref c, "@.str_idx_err = private unnamed_addr constant [21 x i8] c\"Index out of bounds\\0A\\00\"\n\n");
+    write_ir(ref c, "@.fmt_err_bounds = private unnamed_addr constant [66 x i8] c\"\\0ARuntimeError\\1B[0m: Index out of bounds\\0A    at Line %d, Column %d\\0A\\00\"\n\n");
 
-    c.output_file.write("@.str_open_bracket = private unnamed_addr constant [2 x i8] c\"[\\00\"\n");
-    c.output_file.write("@.str_close_bracket = private unnamed_addr constant [2 x i8] c\"]\\00\"\n");
-    c.output_file.write("@.str_comma_space = private unnamed_addr constant [3 x i8] c\", \\00\"\n");
-    c.output_file.write("@.str_open_paren = private unnamed_addr constant [2 x i8] c\"(\\00\"\n");
-    c.output_file.write("@.str_close_paren = private unnamed_addr constant [2 x i8] c\")\\00\"\n");
-    c.output_file.write("@.str_equal = private unnamed_addr constant [2 x i8] c\"=\\00\"\n");
+    write_ir(ref c, "@.str_open_bracket = private unnamed_addr constant [2 x i8] c\"[\\00\"\n");
+    write_ir(ref c, "@.str_close_bracket = private unnamed_addr constant [2 x i8] c\"]\\00\"\n");
+    write_ir(ref c, "@.str_comma_space = private unnamed_addr constant [3 x i8] c\", \\00\"\n");
+    write_ir(ref c, "@.str_open_paren = private unnamed_addr constant [2 x i8] c\"(\\00\"\n");
+    write_ir(ref c, "@.str_close_paren = private unnamed_addr constant [2 x i8] c\")\\00\"\n");
+    write_ir(ref c, "@.str_equal = private unnamed_addr constant [2 x i8] c\"=\\00\"\n");
 
-    c.output_file.write("; ====== COMPILER INTRINSICS ======\n");
-    c.output_file.write("%struct.$Variant = type { i64, i64, i64 }\n");
-    c.output_file.write("%struct.$String = type { i8*, i32, i32 }\n\n");
+    write_ir(ref c, "; ====== COMPILER INTRINSICS ======\n");
+    write_ir(ref c, "%struct.$Variant = type { i64, i64, i64 }\n");
+    write_ir(ref c, "%struct.$String = type { i8*, i32, i32 }\n\n");
 }
 
 func compile_end(ref c: Compiler) -> Void {
 // generated helpers depend on the complete type table, so they are emitted last
+    let found_output = c.output_file;
+    if (found_output is null) {
+        throw_internal_compiler_error(no_position(), "LLVM output file is not open.");
+        return;
+    }
+    let output: file.File = found_output;
     if (GLOBAL_ERROR_COUNT > 0) {
-        c.output_file.close();
+        close_ir(ref c);
         return;
     }
     if (!c.has_main && !c.is_shared) {
@@ -7822,20 +7835,20 @@ func compile_end(ref c: Compiler) -> Void {
             i32 0
         ), i32 " + real_len + ", i32 " + real_len + " } }\n";
 
-        c.output_file.write(bytes_def);
-        c.output_file.write(struct_def);
+        write_ir(ref c, bytes_def);
+        write_ir(ref c, struct_def);
 
         s_idx += 1;
     }
 
-    c.output_file.write("; ====== Lambda Lifted Closures and Envs =====\n");
-    c.output_file.write(c.global_buffer);
-    c.output_file.write("\n");
+    write_ir(ref c, "; ====== Lambda Lifted Closures and Envs =====\n");
+    write_ir(ref c, c.global_buffer);
+    write_ir(ref c, "\n");
 
-    c.output_file.close();
+    close_ir(ref c);
 
     if (c.generic_type_defs.length() > 0) {
-        let original: file.File = file.open(c.output_file.path)?;
+        let original: file.File = file.open(output.path)?;
         catch(err) {
             throw_internal_compiler_error(no_position(), "Cannot reopen generated LLVM IR while finalizing generic types.");
             return;
@@ -7849,7 +7862,7 @@ func compile_end(ref c: Compiler) -> Void {
         }
         original.close();
 
-        let rewrite: file.File = file.create(c.output_file.path)?;
+        let rewrite: file.File = file.create(output.path)?;
         catch(err) {
             throw_internal_compiler_error(no_position(), "Cannot rewrite generated LLVM IR while finalizing generic types.");
             return;
@@ -7866,7 +7879,7 @@ func compile_end(ref c: Compiler) -> Void {
         rewrite.close();
     }
 
-    hoist_llvm_allocas(c.output_file.path)?;
+    hoist_llvm_allocas(output.path)?;
     catch(err) {
         throw_internal_compiler_error(no_position(), "Cannot finalize generated LLVM IR.");
         return;

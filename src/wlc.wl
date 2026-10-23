@@ -595,13 +595,13 @@ func main(argc: Int, ptr argv: String) -> Int {
             WhitelangTarget.get_target_pointer_bits()
         )?;
         catch(err) {
-            compiler.output_file.close();
+            WhitelangUtils.close_ir(ref compiler);
             print("Build Failed: WIR backend ran out of memory while producing LLVM IR.");
             return 1;
         }
         WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
-            compiler.output_file.close();
+            WhitelangUtils.close_ir(ref compiler);
             let error_index: Int = 0;
             while (error_index < result.errors.length()) {
                 print("InternalCompilerError: " + result.errors[error_index]);
@@ -610,9 +610,9 @@ func main(argc: Int, ptr argv: String) -> Int {
             return 1;
         }
 
-        compiler.output_file.write(result.text);
+        WhitelangUtils.write_ir(ref compiler, result.text);
 
-        compiler.output_file.close();
+        WhitelangUtils.close_ir(ref compiler);
     } else if (cfg.backend == "machine") {
         WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
@@ -658,7 +658,8 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
 
     WhitelangExceptions.check_errors_and_abort();
-    if (compiler.output_file is !null && compiler.output_file.last_error() != file.Error.None) {
+    let generated_ir = compiler.output_file;
+    if (generated_ir is !null && generated_ir.last_error() != file.Error.None) {
         print("Error: Could not write temporary IR file " + ll_file);
         return 1;
     }

@@ -116,7 +116,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
         i += 1;
     }
 
-    if (info.interfaces is !null) { return true; }
+    if (info.layout_ready) { return true; }
 
     stack.append(TypeListNode(type=info.type_id));
     info.interfaces = [];
@@ -170,6 +170,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
         i += 1;
     }
     info.vtable = methods;
+    info.layout_ready = true;
     store_struct(ref c, info);
     stack.drop();
     return true;
@@ -245,18 +246,18 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let info: StructInfo = StructInfo(
                 name=s_name,
                 type_id=new_id,
-                fields=null,
+                fields=[],
                 llvm_name="%struct." + s_name,
                 init_body=n.body, is_class=false,
                 vtable_name="",
                 parent_id=0,
-                vtable=null,
+                vtable=[],
                 ann_flags=sys_anns.ann_flags,
                 compiler_link_name=sys_anns.compiler_link_name,
                 is_enum=false,
                 is_error=false,
                 is_interface=false,
-                interfaces=null
+                interfaces=[]
             );
             c.struct_table.put(s_name, info);
             c.struct_id_map.put(new_id, info);
@@ -299,19 +300,19 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let info: StructInfo = StructInfo(
                 name=c_name,
                 type_id=new_id,
-                fields=null,
+                fields=[],
                 llvm_name="%class." + c_name,
                 init_body=stmts[i],
                 is_class=true,
                 vtable_name="@vtable." + c_name,
                 parent_id=0,
-                vtable=null,
+                vtable=[],
                 ann_flags=sys_anns.ann_flags,
                 compiler_link_name=sys_anns.compiler_link_name,
                 is_enum=false,
                 is_error=false,
                 is_interface=false,
-                interfaces=null
+                interfaces=[]
             );
             c.struct_table.put(c_name, info);
             c.struct_id_map.put(new_id, info);
@@ -375,7 +376,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
             let info: StructInfo = StructInfo(
                 name=i_name,
                 type_id=new_id,
-                fields=null,
+                fields=[],
                 llvm_name="{ i8*, i8* }",
                 init_body=stmts[i],
                 is_class=false,
@@ -387,7 +388,7 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_enum=false,
                 is_error=false,
                 is_interface=true,
-                interfaces=null
+                interfaces=[]
             );
             c.struct_table.put(i_name, info);
             c.struct_id_map.put(new_id, info);
@@ -415,13 +416,13 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_class=false,
                 vtable_name="",
                 parent_id=0,
-                vtable=null,
+                vtable=[],
                 ann_flags=sys_anns.ann_flags,
                 compiler_link_name=sys_anns.compiler_link_name,
                 is_enum=true,
                 is_error=e_node.is_error || sys_anns.compiler_link_name == "Error",
                 is_interface=false,
-                interfaces=null
+                interfaces=[]
             );
             c.struct_table.put(e_name, info);
             c.struct_id_map.put(new_id, info);

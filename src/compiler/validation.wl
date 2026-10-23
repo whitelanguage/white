@@ -298,7 +298,7 @@ func is_unsuffix_int_literal(ref c: Compiler, node: NodeID) -> Bool {
     return !text.ends_with("u") && !text.ends_with("U") && !text.ends_with("ul") && !text.ends_with("UL") && !text.ends_with("ull") && !text.ends_with("ULL");
 }
 
-func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos: Position) -> Vector(ArgNode) {
+func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos: Position) -> Optional(Vector(ArgNode)) {
     let expected: Int = 0;
     if (names is !null) { expected = names.length() - skip; }
     let count: Int = 0;
@@ -310,7 +310,7 @@ func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos
     let ordered: Vector(ArgNode) = [];
     let i: Int = 0;
     while (i < expected) {
-        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        ordered.append(ArgNode(val=NO_NODE, name="", is_spread=false));
         i += 1;
     }
     let next_positional: Int = 0;
@@ -323,7 +323,7 @@ func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos
             return null;
         }
         let target: Int = -1;
-        if (arg.name is null || arg.name.length() == 0) {
+        if (arg.name.length() == 0) {
             if saw_named {
                 throw_invalid_syntax(pos, "Positional argument cannot follow a named argument");
                 return null;
@@ -379,7 +379,7 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
 
     let i: Int = 0;
     while (i < expected) {
-        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        ordered.append(ArgNode(val=NO_NODE, name="", is_spread=false));
         i += 1;
     }
 
@@ -389,7 +389,7 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
     i = 0;
     while (args is !null && i < args.length()) {
         let arg: ArgNode = args[i];
-        if (arg.name is null || arg.name.length() == 0) {
+        if (arg.name.length() == 0) {
             if saw_named {
                 throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
                 return BoundCallArgs();
@@ -523,7 +523,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
 
     let i: Int = 0;
     while (i < expected) {
-        ordered.append(ArgNode(val=NO_NODE, name=null, is_spread=false));
+        ordered.append(ArgNode(val=NO_NODE, name="", is_spread=false));
         i += 1;
     }
 
@@ -533,7 +533,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
     i = 0;
     while (i < count) {
         let arg: ArgNode = args[i];
-        if (arg.name is null || arg.name.length() == 0) {
+        if (arg.name.length() == 0) {
             if saw_named {
                 throw_invalid_syntax(pos, "Positional argument cannot follow a named argument.");
                 return BoundCallArgs();
@@ -597,7 +597,7 @@ func reject_named_args(args: Vector(ArgNode), pos: Position, target: String) -> 
     let i: Int = 0;
     while (args is !null && i < args.length()) {
         let arg: ArgNode = args[i];
-        if (arg.name is !null && arg.name.length() > 0) {
+        if (arg.name.length() != 0) {
             throw_invalid_syntax(pos, "Named arguments are not available when calling " + target);
             return true;
         }

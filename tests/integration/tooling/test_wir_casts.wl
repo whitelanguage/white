@@ -133,7 +133,7 @@ func check_checked_cast() -> Bool {
     let pos: Position = cast_position();
     let callee: NodeID = cast_access(source.arena, "Byte", pos);
     let argument: NodeID = cast_access(source.arena, "value", pos);
-    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
@@ -167,7 +167,7 @@ func check_fallible_cast() -> Bool {
     let pos: Position = cast_position();
     let callee: NodeID = cast_access(source.arena, "Byte", pos);
     let argument: NodeID = cast_access(source.arena, "value", pos);
-    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=true));
+    let call: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=callee, args=[ArgNode(val=argument, name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=true));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
@@ -193,13 +193,13 @@ func check_pointer_casts() -> Bool {
     let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict());
     let pos: Position = cast_position();
 
-    let to_size: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let to_size: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let size_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_size, pos=pos));
     let size_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[size_return]));
     let size_args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
     let size_info: FuncInfo = FuncInfo(name="pointer_bits", base_name="pointer_bits", ret_type=TYPE_INTSIZE, arg_types=size_args, arg_names=["handle"], is_varargs=false, abi_name="");
 
-    let to_pointer: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name=null, is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
+    let to_pointer: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let pointer_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_pointer, pos=pos));
     let pointer_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[pointer_return]));
     let pointer_args: Vector(Struct) = [TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];

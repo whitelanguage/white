@@ -33,7 +33,7 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
         let target: Int = wir_static_cast_target(ref source, call.callee);
         if (target != 0 && call.args is !null && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
-            if ((argument.name is null || argument.name.length() == 0) && !argument.is_spread &&
+            if ((argument.name.length() == 0) && !argument.is_spread &&
                 get_repr_type(ref source, target) == get_repr_type(ref source, source_type)) {
                 value_node = argument.val;
             }

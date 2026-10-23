@@ -985,16 +985,14 @@ func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, obje
     let target_reg: String = object_reg;
     if (class_info.llvm_name != object_llvm_type) {
         target_reg = next_reg(ref c);
-        c.output_file.write(
-
+        write_ir(ref c,
             c.indent + target_reg + " = bitcast " +
             object_llvm_type + "* " + object_reg + " to " +
             class_info.llvm_name + "*\n"
         );
     }
 
-    c.output_file.write(
-
+    write_ir(ref c,
         c.indent + "call void @" + initializer.name + "(" +
         class_info.llvm_name + "* " + target_reg + ")\n"
     );

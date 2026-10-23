@@ -7,10 +7,10 @@ import Dict from "dict"
 let GLOBAL_ERROR_COUNT: Int = 0;
 let LAST_ERROR_FILE: String = "";
 let CLEAN_TMP_LL: String = "";
-let ACTIVE_FILE: file.File = null;
-let ERROR_BUFFER: Vector(String) = null;
-let REPORTED_ERRORS: Dict(String, Bool) = null;
-let STRUCTURED_ERRORS: Vector(Struct) = null;
+let ACTIVE_FILE: Optional(file.File) = null;
+let ERROR_BUFFER: Optional(Vector(String)) = null;
+let REPORTED_ERRORS: Optional(Dict(String, Bool)) = null;
+let STRUCTURED_ERRORS: Optional(Vector(Struct)) = null;
 let COLLECT_ERRORS_ONLY: Bool = false;
 
 const DIAGNOSTIC_ERROR: Int = 1;
@@ -62,11 +62,11 @@ struct __SourceUnit(
 )
 
 func no_position() -> Position {
-    return Position(idx=0, ln=0, col=0, text=null, fn=null);
+    return Position(idx=0, ln=0, col=0, text="", fn="");
 }
 
 func has_position(pos: Position) -> Bool {
-    return pos.text is !null || pos.fn is !null;
+    return (pos.text is !null && pos.text.length() != 0) || (pos.fn is !null && pos.fn.length() != 0);
 }
 
 func __source_unit(text: String, offset: Int) -> __SourceUnit {
@@ -297,8 +297,9 @@ func advance_pos(pos: Position, current_char: Char) -> Void {
 }
 
 func abort_and_clean(status: Int) -> Void {
-    if (ACTIVE_FILE is !null) {
-        ACTIVE_FILE.close();
+    let active = ACTIVE_FILE;
+    if (active is !null) {
+        active.close();
     }
     if (CLEAN_TMP_LL.length() > 0) {
         file.remove(CLEAN_TMP_LL)?;
@@ -316,14 +317,20 @@ func report_error(pos: Position, name: String, details: String) -> Void {
 
     let error_key: String = pos.fn + ":" + pos.ln + ":" + pos.col + ":" + name + ":" + details;
     if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(); }
-    if (REPORTED_ERRORS.contains_key(error_key)) { return; }
-    REPORTED_ERRORS.put(error_key, true);
+    let found = REPORTED_ERRORS;
+    if (found is null) { return; }
+    let reported: Dict(String, Bool) = found;
+    if (reported.contains_key(error_key)) { return; }
+    reported.put(error_key, true);
 
     GLOBAL_ERROR_COUNT = GLOBAL_ERROR_COUNT + 1;
     if (STRUCTURED_ERRORS is null) { STRUCTURED_ERRORS = []; }
+    let found_errors = STRUCTURED_ERRORS;
+    if (found_errors is null) { return; }
+    let errors: Vector(Struct) = found_errors;
     let range: SourceRange =
         source_range(pos.fn, pos.text, pos.ln, pos.col, __diagnostic_width(pos));
-    STRUCTURED_ERRORS.append(CompilerDiagnostic(
+    errors.append(CompilerDiagnostic(
         code=diagnostic_code(name),
         severity=DIAGNOSTIC_ERROR,
         category=name,
@@ -337,6 +344,9 @@ func report_error(pos: Position, name: String, details: String) -> Void {
     let col: Int = pos.col + 1;
 
     if (ERROR_BUFFER is null) { ERROR_BUFFER = []; }
+    let found_buffer = ERROR_BUFFER;
+    if (found_buffer is null) { return; }
+    let buffer: Vector(String) = found_buffer;
     let err_msg: String = "";
 
     if (LAST_ERROR_FILE != pos.fn) { err_msg += "In file:\n"; }
@@ -408,10 +418,10 @@ func report_error(pos: Position, name: String, details: String) -> Void {
     }
 
     err_msg += name + ": " + details + "\n\n";
-    ERROR_BUFFER.append(err_msg);
+    buffer.append(err_msg);
 
     if (GLOBAL_ERROR_COUNT > 50 && !COLLECT_ERRORS_ONLY) {
-        ERROR_BUFFER.append("fatal error: too many errors emitted, stopping now\n");
+        buffer.append("fatal error: too many errors emitted, stopping now\n");
         check_errors_and_abort();
     }
 }
@@ -482,11 +492,13 @@ func throw_environment_error(details: String) -> Void { // special
 func check_errors_and_abort() -> Void {
     if (GLOBAL_ERROR_COUNT > 0) {
         let i: Int = 0;
-        let buf_len: Int = 0;
-        if (ERROR_BUFFER is !null) { buf_len = ERROR_BUFFER.length(); }
-        while (i < buf_len) {
-            print(ERROR_BUFFER[i]);
-            i += 1;
+        let found_buffer = ERROR_BUFFER;
+        if (found_buffer is !null) {
+            let buffer: Vector(String) = found_buffer;
+            while (i < buffer.length()) {
+                print(buffer[i]);
+                i += 1;
+            }
         }
 
         let suffix: String = " error.\n";

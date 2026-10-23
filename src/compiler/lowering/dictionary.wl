@@ -83,81 +83,81 @@ func append_variant_ref_case(ref c: Compiler, cases: String, seen: Dict(String, 
 }
 
 func emit_dict_key_helpers(ref c: Compiler) -> Void {
-    c.output_file.write("define internal i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %mixed.0 = xor i64 %tag, %low\n");
-    c.output_file.write("  %mixed.1 = xor i64 %mixed.0, %high\n");
-    c.output_file.write("  %shifted.0 = lshr i64 %mixed.1, 30\n");
-    c.output_file.write("  %mixed.2 = xor i64 %mixed.1, %shifted.0\n");
-    c.output_file.write("  %mixed.3 = mul i64 %mixed.2, -4658895280553007687\n");
-    c.output_file.write("  %shifted.1 = lshr i64 %mixed.3, 27\n");
-    c.output_file.write("  %mixed.4 = xor i64 %mixed.3, %shifted.1\n");
-    c.output_file.write("  %mixed.5 = mul i64 %mixed.4, -7723592293110705685\n");
-    c.output_file.write("  %shifted.2 = lshr i64 %mixed.5, 31\n");
-    c.output_file.write("  %mixed.6 = xor i64 %mixed.5, %shifted.2\n");
-    c.output_file.write("  %raw = trunc i64 %mixed.6 to i32\n");
-    c.output_file.write("  %positive = and i32 %raw, 2147483647\n");
-    c.output_file.write("  %small = icmp ult i32 %positive, 2\n");
-    c.output_file.write("  %adjusted = add i32 %positive, 2\n");
-    c.output_file.write("  %result = select i1 %small, i32 %adjusted, i32 %positive\n");
-    c.output_file.write("  ret i32 %result\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "define internal i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %mixed.0 = xor i64 %tag, %low\n");
+    write_ir(ref c, "  %mixed.1 = xor i64 %mixed.0, %high\n");
+    write_ir(ref c, "  %shifted.0 = lshr i64 %mixed.1, 30\n");
+    write_ir(ref c, "  %mixed.2 = xor i64 %mixed.1, %shifted.0\n");
+    write_ir(ref c, "  %mixed.3 = mul i64 %mixed.2, -4658895280553007687\n");
+    write_ir(ref c, "  %shifted.1 = lshr i64 %mixed.3, 27\n");
+    write_ir(ref c, "  %mixed.4 = xor i64 %mixed.3, %shifted.1\n");
+    write_ir(ref c, "  %mixed.5 = mul i64 %mixed.4, -7723592293110705685\n");
+    write_ir(ref c, "  %shifted.2 = lshr i64 %mixed.5, 31\n");
+    write_ir(ref c, "  %mixed.6 = xor i64 %mixed.5, %shifted.2\n");
+    write_ir(ref c, "  %raw = trunc i64 %mixed.6 to i32\n");
+    write_ir(ref c, "  %positive = and i32 %raw, 2147483647\n");
+    write_ir(ref c, "  %small = icmp ult i32 %positive, 2\n");
+    write_ir(ref c, "  %adjusted = add i32 %positive, 2\n");
+    write_ir(ref c, "  %result = select i1 %small, i32 %adjusted, i32 %positive\n");
+    write_ir(ref c, "  ret i32 %result\n");
+    write_ir(ref c, "}\n\n");
 
-    c.output_file.write("define internal i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %same = icmp eq %struct.$String* %left, %right\n");
-    c.output_file.write("  br i1 %same, label %equal, label %check.null\n");
-    c.output_file.write("check.null:\n");
-    c.output_file.write("  %left.null = icmp eq %struct.$String* %left, null\n");
-    c.output_file.write("  %right.null = icmp eq %struct.$String* %right, null\n");
-    c.output_file.write("  %has.null = or i1 %left.null, %right.null\n");
-    c.output_file.write("  br i1 %has.null, label %different, label %check.length\n");
-    c.output_file.write("check.length:\n");
-    c.output_file.write("  %left.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 1\n");
-    c.output_file.write("  %right.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 1\n");
-    c.output_file.write("  %left.len = load i32, i32* %left.len.addr\n");
-    c.output_file.write("  %right.len = load i32, i32* %right.len.addr\n");
-    c.output_file.write("  %same.len = icmp eq i32 %left.len, %right.len\n");
-    c.output_file.write("  br i1 %same.len, label %prepare, label %different\n");
-    c.output_file.write("prepare:\n");
-    c.output_file.write("  %left.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 0\n");
-    c.output_file.write("  %right.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 0\n");
-    c.output_file.write("  %left.buf = load i8*, i8** %left.buf.addr\n");
-    c.output_file.write("  %right.buf = load i8*, i8** %right.buf.addr\n");
-    c.output_file.write("  br label %compare\n");
-    c.output_file.write("compare:\n");
-    c.output_file.write("  %index = phi i32 [ 0, %prepare ], [ %next, %matched ]\n");
-    c.output_file.write("  %done = icmp uge i32 %index, %left.len\n");
-    c.output_file.write("  br i1 %done, label %equal, label %read\n");
-    c.output_file.write("read:\n");
-    c.output_file.write("  %left.byte.addr = getelementptr inbounds i8, i8* %left.buf, i32 %index\n");
-    c.output_file.write("  %right.byte.addr = getelementptr inbounds i8, i8* %right.buf, i32 %index\n");
-    c.output_file.write("  %left.byte = load i8, i8* %left.byte.addr\n");
-    c.output_file.write("  %right.byte = load i8, i8* %right.byte.addr\n");
-    c.output_file.write("  %byte.equal = icmp eq i8 %left.byte, %right.byte\n");
-    c.output_file.write("  br i1 %byte.equal, label %matched, label %different\n");
-    c.output_file.write("matched:\n");
-    c.output_file.write("  %next = add i32 %index, 1\n");
-    c.output_file.write("  br label %compare\n");
-    c.output_file.write("equal:\n");
-    c.output_file.write("  ret i1 true\n");
-    c.output_file.write("different:\n");
-    c.output_file.write("  ret i1 false\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "define internal i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %same = icmp eq %struct.$String* %left, %right\n");
+    write_ir(ref c, "  br i1 %same, label %equal, label %check.null\n");
+    write_ir(ref c, "check.null:\n");
+    write_ir(ref c, "  %left.null = icmp eq %struct.$String* %left, null\n");
+    write_ir(ref c, "  %right.null = icmp eq %struct.$String* %right, null\n");
+    write_ir(ref c, "  %has.null = or i1 %left.null, %right.null\n");
+    write_ir(ref c, "  br i1 %has.null, label %different, label %check.length\n");
+    write_ir(ref c, "check.length:\n");
+    write_ir(ref c, "  %left.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 1\n");
+    write_ir(ref c, "  %right.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 1\n");
+    write_ir(ref c, "  %left.len = load i32, i32* %left.len.addr\n");
+    write_ir(ref c, "  %right.len = load i32, i32* %right.len.addr\n");
+    write_ir(ref c, "  %same.len = icmp eq i32 %left.len, %right.len\n");
+    write_ir(ref c, "  br i1 %same.len, label %prepare, label %different\n");
+    write_ir(ref c, "prepare:\n");
+    write_ir(ref c, "  %left.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %left, i32 0, i32 0\n");
+    write_ir(ref c, "  %right.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %right, i32 0, i32 0\n");
+    write_ir(ref c, "  %left.buf = load i8*, i8** %left.buf.addr\n");
+    write_ir(ref c, "  %right.buf = load i8*, i8** %right.buf.addr\n");
+    write_ir(ref c, "  br label %compare\n");
+    write_ir(ref c, "compare:\n");
+    write_ir(ref c, "  %index = phi i32 [ 0, %prepare ], [ %next, %matched ]\n");
+    write_ir(ref c, "  %done = icmp uge i32 %index, %left.len\n");
+    write_ir(ref c, "  br i1 %done, label %equal, label %read\n");
+    write_ir(ref c, "read:\n");
+    write_ir(ref c, "  %left.byte.addr = getelementptr inbounds i8, i8* %left.buf, i32 %index\n");
+    write_ir(ref c, "  %right.byte.addr = getelementptr inbounds i8, i8* %right.buf, i32 %index\n");
+    write_ir(ref c, "  %left.byte = load i8, i8* %left.byte.addr\n");
+    write_ir(ref c, "  %right.byte = load i8, i8* %right.byte.addr\n");
+    write_ir(ref c, "  %byte.equal = icmp eq i8 %left.byte, %right.byte\n");
+    write_ir(ref c, "  br i1 %byte.equal, label %matched, label %different\n");
+    write_ir(ref c, "matched:\n");
+    write_ir(ref c, "  %next = add i32 %index, 1\n");
+    write_ir(ref c, "  br label %compare\n");
+    write_ir(ref c, "equal:\n");
+    write_ir(ref c, "  ret i1 true\n");
+    write_ir(ref c, "different:\n");
+    write_ir(ref c, "  ret i1 false\n");
+    write_ir(ref c, "}\n\n");
 
-    c.output_file.write("define internal i32 @__wl_dict_key_hash(%struct.$Variant* %key) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %is.null = icmp eq %struct.$Variant* %key, null\n");
-    c.output_file.write("  br i1 %is.null, label %invalid, label %read\n");
-    c.output_file.write("read:\n");
-    c.output_file.write("  %tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 0\n");
-    c.output_file.write("  %low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 1\n");
-    c.output_file.write("  %high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 2\n");
-    c.output_file.write("  %tag = load i64, i64* %tag.addr\n");
-    c.output_file.write("  %low = load i64, i64* %low.addr\n");
-    c.output_file.write("  %high = load i64, i64* %high.addr\n");
-    c.output_file.write("  switch i64 %tag, label %invalid [\n");
-    c.output_file.write("    i64 0, label %bits\n");
+    write_ir(ref c, "define internal i32 @__wl_dict_key_hash(%struct.$Variant* %key) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %is.null = icmp eq %struct.$Variant* %key, null\n");
+    write_ir(ref c, "  br i1 %is.null, label %invalid, label %read\n");
+    write_ir(ref c, "read:\n");
+    write_ir(ref c, "  %tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 0\n");
+    write_ir(ref c, "  %low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 1\n");
+    write_ir(ref c, "  %high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %key, i32 0, i32 2\n");
+    write_ir(ref c, "  %tag = load i64, i64* %tag.addr\n");
+    write_ir(ref c, "  %low = load i64, i64* %low.addr\n");
+    write_ir(ref c, "  %high = load i64, i64* %high.addr\n");
+    write_ir(ref c, "  switch i64 %tag, label %invalid [\n");
+    write_ir(ref c, "    i64 0, label %bits\n");
 
     let key_cases: String = "";
     let class_hash_blocks: String = "";
@@ -188,69 +188,69 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
         type_id++;
     }
 
-    c.output_file.write(key_cases);
-    c.output_file.write("  ]\n");
-    c.output_file.write("bits:\n");
-    c.output_file.write("  %bits.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high)\n");
-    c.output_file.write("  ret i32 %bits.hash\n");
-    c.output_file.write("float:\n");
-    c.output_file.write("  %float.value = bitcast i64 %low to double\n");
-    c.output_file.write("  %float.nan = fcmp uno double %float.value, %float.value\n");
-    c.output_file.write("  br i1 %float.nan, label %invalid, label %float.valid\n");
-    c.output_file.write("float.valid:\n");
-    c.output_file.write("  %float.zero = fcmp oeq double %float.value, 0.0\n");
-    c.output_file.write("  %float.bits = select i1 %float.zero, i64 0, i64 %low\n");
-    c.output_file.write("  %float.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %float.bits, i64 0)\n");
-    c.output_file.write("  ret i32 %float.hash\n");
-    c.output_file.write("string:\n");
-    c.output_file.write("  %string.ptr = inttoptr i64 %low to %struct.$String*\n");
-    c.output_file.write("  %string.null = icmp eq %struct.$String* %string.ptr, null\n");
-    c.output_file.write("  br i1 %string.null, label %invalid, label %string.read\n");
-    c.output_file.write("string.read:\n");
-    c.output_file.write("  %string.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 0\n");
-    c.output_file.write("  %string.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 1\n");
-    c.output_file.write("  %string.buf = load i8*, i8** %string.buf.addr\n");
-    c.output_file.write("  %string.len = load i32, i32* %string.len.addr\n");
-    c.output_file.write("  %string.bad.len = icmp slt i32 %string.len, 0\n");
-    c.output_file.write("  br i1 %string.bad.len, label %invalid, label %string.loop\n");
-    c.output_file.write("string.loop:\n");
-    c.output_file.write("  %string.index = phi i32 [ 0, %string.read ], [ %string.next, %string.body ]\n");
-    c.output_file.write("  %string.state = phi i64 [ 14695981039346656037, %string.read ], [ %string.next.state, %string.body ]\n");
-    c.output_file.write("  %string.done = icmp uge i32 %string.index, %string.len\n");
-    c.output_file.write("  br i1 %string.done, label %string.end, label %string.body\n");
-    c.output_file.write("string.body:\n");
-    c.output_file.write("  %string.byte.addr = getelementptr inbounds i8, i8* %string.buf, i32 %string.index\n");
-    c.output_file.write("  %string.byte = load i8, i8* %string.byte.addr\n");
-    c.output_file.write("  %string.byte.wide = zext i8 %string.byte to i64\n");
-    c.output_file.write("  %string.xor = xor i64 %string.state, %string.byte.wide\n");
-    c.output_file.write("  %string.next.state = mul i64 %string.xor, 1099511628211\n");
-    c.output_file.write("  %string.next = add i32 %string.index, 1\n");
-    c.output_file.write("  br label %string.loop\n");
-    c.output_file.write("string.end:\n");
-    c.output_file.write("  %string.len.wide = zext i32 %string.len to i64\n");
-    c.output_file.write("  %string.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %string.state, i64 %string.len.wide)\n");
-    c.output_file.write("  ret i32 %string.hash\n");
-    c.output_file.write(class_hash_blocks);
-    c.output_file.write("invalid:\n");
-    c.output_file.write("  ret i32 0\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, key_cases);
+    write_ir(ref c, "  ]\n");
+    write_ir(ref c, "bits:\n");
+    write_ir(ref c, "  %bits.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %low, i64 %high)\n");
+    write_ir(ref c, "  ret i32 %bits.hash\n");
+    write_ir(ref c, "float:\n");
+    write_ir(ref c, "  %float.value = bitcast i64 %low to double\n");
+    write_ir(ref c, "  %float.nan = fcmp uno double %float.value, %float.value\n");
+    write_ir(ref c, "  br i1 %float.nan, label %invalid, label %float.valid\n");
+    write_ir(ref c, "float.valid:\n");
+    write_ir(ref c, "  %float.zero = fcmp oeq double %float.value, 0.0\n");
+    write_ir(ref c, "  %float.bits = select i1 %float.zero, i64 0, i64 %low\n");
+    write_ir(ref c, "  %float.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %float.bits, i64 0)\n");
+    write_ir(ref c, "  ret i32 %float.hash\n");
+    write_ir(ref c, "string:\n");
+    write_ir(ref c, "  %string.ptr = inttoptr i64 %low to %struct.$String*\n");
+    write_ir(ref c, "  %string.null = icmp eq %struct.$String* %string.ptr, null\n");
+    write_ir(ref c, "  br i1 %string.null, label %invalid, label %string.read\n");
+    write_ir(ref c, "string.read:\n");
+    write_ir(ref c, "  %string.buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 0\n");
+    write_ir(ref c, "  %string.len.addr = getelementptr inbounds %struct.$String, %struct.$String* %string.ptr, i32 0, i32 1\n");
+    write_ir(ref c, "  %string.buf = load i8*, i8** %string.buf.addr\n");
+    write_ir(ref c, "  %string.len = load i32, i32* %string.len.addr\n");
+    write_ir(ref c, "  %string.bad.len = icmp slt i32 %string.len, 0\n");
+    write_ir(ref c, "  br i1 %string.bad.len, label %invalid, label %string.loop\n");
+    write_ir(ref c, "string.loop:\n");
+    write_ir(ref c, "  %string.index = phi i32 [ 0, %string.read ], [ %string.next, %string.body ]\n");
+    write_ir(ref c, "  %string.state = phi i64 [ 14695981039346656037, %string.read ], [ %string.next.state, %string.body ]\n");
+    write_ir(ref c, "  %string.done = icmp uge i32 %string.index, %string.len\n");
+    write_ir(ref c, "  br i1 %string.done, label %string.end, label %string.body\n");
+    write_ir(ref c, "string.body:\n");
+    write_ir(ref c, "  %string.byte.addr = getelementptr inbounds i8, i8* %string.buf, i32 %string.index\n");
+    write_ir(ref c, "  %string.byte = load i8, i8* %string.byte.addr\n");
+    write_ir(ref c, "  %string.byte.wide = zext i8 %string.byte to i64\n");
+    write_ir(ref c, "  %string.xor = xor i64 %string.state, %string.byte.wide\n");
+    write_ir(ref c, "  %string.next.state = mul i64 %string.xor, 1099511628211\n");
+    write_ir(ref c, "  %string.next = add i32 %string.index, 1\n");
+    write_ir(ref c, "  br label %string.loop\n");
+    write_ir(ref c, "string.end:\n");
+    write_ir(ref c, "  %string.len.wide = zext i32 %string.len to i64\n");
+    write_ir(ref c, "  %string.hash = call i32 @__wl_dict_hash_bits(i64 %tag, i64 %string.state, i64 %string.len.wide)\n");
+    write_ir(ref c, "  ret i32 %string.hash\n");
+    write_ir(ref c, class_hash_blocks);
+    write_ir(ref c, "invalid:\n");
+    write_ir(ref c, "  ret i32 0\n");
+    write_ir(ref c, "}\n\n");
 
-    c.output_file.write("define internal i1 @__wl_dict_keys_equal(%struct.$Variant* %left, %struct.$Variant* %right) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %same = icmp eq %struct.$Variant* %left, %right\n");
-    c.output_file.write("  br i1 %same, label %equal, label %check.null\n");
-    c.output_file.write("check.null:\n");
-    c.output_file.write("  %left.null = icmp eq %struct.$Variant* %left, null\n");
-    c.output_file.write("  %right.null = icmp eq %struct.$Variant* %right, null\n");
-    c.output_file.write("  %has.null = or i1 %left.null, %right.null\n");
-    c.output_file.write("  br i1 %has.null, label %different, label %read\n");
-    c.output_file.write("read:\n");
-    c.output_file.write("  %left.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 0\n");
-    c.output_file.write("  %right.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 0\n");
-    c.output_file.write("  %left.tag = load i64, i64* %left.tag.addr\n");
-    c.output_file.write("  %right.tag = load i64, i64* %right.tag.addr\n");
-    c.output_file.write("  %same.tag = icmp eq i64 %left.tag, %right.tag\n");
-    c.output_file.write("  br i1 %same.tag, label %dispatch, label %different\n");
+    write_ir(ref c, "define internal i1 @__wl_dict_keys_equal(%struct.$Variant* %left, %struct.$Variant* %right) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %same = icmp eq %struct.$Variant* %left, %right\n");
+    write_ir(ref c, "  br i1 %same, label %equal, label %check.null\n");
+    write_ir(ref c, "check.null:\n");
+    write_ir(ref c, "  %left.null = icmp eq %struct.$Variant* %left, null\n");
+    write_ir(ref c, "  %right.null = icmp eq %struct.$Variant* %right, null\n");
+    write_ir(ref c, "  %has.null = or i1 %left.null, %right.null\n");
+    write_ir(ref c, "  br i1 %has.null, label %different, label %read\n");
+    write_ir(ref c, "read:\n");
+    write_ir(ref c, "  %left.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 0\n");
+    write_ir(ref c, "  %right.tag.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 0\n");
+    write_ir(ref c, "  %left.tag = load i64, i64* %left.tag.addr\n");
+    write_ir(ref c, "  %right.tag = load i64, i64* %right.tag.addr\n");
+    write_ir(ref c, "  %same.tag = icmp eq i64 %left.tag, %right.tag\n");
+    write_ir(ref c, "  br i1 %same.tag, label %dispatch, label %different\n");
 
     let class_equal_cases: String = "";
     let class_equal_blocks: String = "";
@@ -273,50 +273,50 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
         type_id += 1;
     }
 
-    c.output_file.write("dispatch:\n");
-    c.output_file.write("  switch i64 %left.tag, label %bits [\n");
-    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_STRING) + ", label %string\n");
-    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_FLOAT) + ", label %float\n");
-    c.output_file.write("    i64 " + type_fingerprint(ref c, TYPE_FLOAT32) + ", label %float\n");
-    c.output_file.write(class_equal_cases);
-    c.output_file.write("  ]\n");
-    c.output_file.write("bits:\n");
-    c.output_file.write("  %left.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
-    c.output_file.write("  %right.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
-    c.output_file.write("  %left.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 2\n");
-    c.output_file.write("  %right.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 2\n");
-    c.output_file.write("  %left.low = load i64, i64* %left.low.addr\n");
-    c.output_file.write("  %right.low = load i64, i64* %right.low.addr\n");
-    c.output_file.write("  %left.high = load i64, i64* %left.high.addr\n");
-    c.output_file.write("  %right.high = load i64, i64* %right.high.addr\n");
-    c.output_file.write("  %same.low = icmp eq i64 %left.low, %right.low\n");
-    c.output_file.write("  %same.high = icmp eq i64 %left.high, %right.high\n");
-    c.output_file.write("  %same.bits = and i1 %same.low, %same.high\n");
-    c.output_file.write("  ret i1 %same.bits\n");
-    c.output_file.write("float:\n");
-    c.output_file.write("  %float.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
-    c.output_file.write("  %float.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
-    c.output_file.write("  %float.left.bits = load i64, i64* %float.left.addr\n");
-    c.output_file.write("  %float.right.bits = load i64, i64* %float.right.addr\n");
-    c.output_file.write("  %float.left = bitcast i64 %float.left.bits to double\n");
-    c.output_file.write("  %float.right = bitcast i64 %float.right.bits to double\n");
-    c.output_file.write("  %float.equal = fcmp oeq double %float.left, %float.right\n");
-    c.output_file.write("  ret i1 %float.equal\n");
-    c.output_file.write("string:\n");
-    c.output_file.write("  %string.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
-    c.output_file.write("  %string.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
-    c.output_file.write("  %string.left.raw = load i64, i64* %string.left.addr\n");
-    c.output_file.write("  %string.right.raw = load i64, i64* %string.right.addr\n");
-    c.output_file.write("  %string.left = inttoptr i64 %string.left.raw to %struct.$String*\n");
-    c.output_file.write("  %string.right = inttoptr i64 %string.right.raw to %struct.$String*\n");
-    c.output_file.write("  %string.equal = call i1 @__wl_dict_string_equal(%struct.$String* %string.left, %struct.$String* %string.right)\n");
-    c.output_file.write("  ret i1 %string.equal\n");
-    c.output_file.write(class_equal_blocks);
-    c.output_file.write("equal:\n");
-    c.output_file.write("  ret i1 true\n");
-    c.output_file.write("different:\n");
-    c.output_file.write("  ret i1 false\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "dispatch:\n");
+    write_ir(ref c, "  switch i64 %left.tag, label %bits [\n");
+    write_ir(ref c, "    i64 " + type_fingerprint(ref c, TYPE_STRING) + ", label %string\n");
+    write_ir(ref c, "    i64 " + type_fingerprint(ref c, TYPE_FLOAT) + ", label %float\n");
+    write_ir(ref c, "    i64 " + type_fingerprint(ref c, TYPE_FLOAT32) + ", label %float\n");
+    write_ir(ref c, class_equal_cases);
+    write_ir(ref c, "  ]\n");
+    write_ir(ref c, "bits:\n");
+    write_ir(ref c, "  %left.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    write_ir(ref c, "  %right.low.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    write_ir(ref c, "  %left.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 2\n");
+    write_ir(ref c, "  %right.high.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 2\n");
+    write_ir(ref c, "  %left.low = load i64, i64* %left.low.addr\n");
+    write_ir(ref c, "  %right.low = load i64, i64* %right.low.addr\n");
+    write_ir(ref c, "  %left.high = load i64, i64* %left.high.addr\n");
+    write_ir(ref c, "  %right.high = load i64, i64* %right.high.addr\n");
+    write_ir(ref c, "  %same.low = icmp eq i64 %left.low, %right.low\n");
+    write_ir(ref c, "  %same.high = icmp eq i64 %left.high, %right.high\n");
+    write_ir(ref c, "  %same.bits = and i1 %same.low, %same.high\n");
+    write_ir(ref c, "  ret i1 %same.bits\n");
+    write_ir(ref c, "float:\n");
+    write_ir(ref c, "  %float.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    write_ir(ref c, "  %float.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    write_ir(ref c, "  %float.left.bits = load i64, i64* %float.left.addr\n");
+    write_ir(ref c, "  %float.right.bits = load i64, i64* %float.right.addr\n");
+    write_ir(ref c, "  %float.left = bitcast i64 %float.left.bits to double\n");
+    write_ir(ref c, "  %float.right = bitcast i64 %float.right.bits to double\n");
+    write_ir(ref c, "  %float.equal = fcmp oeq double %float.left, %float.right\n");
+    write_ir(ref c, "  ret i1 %float.equal\n");
+    write_ir(ref c, "string:\n");
+    write_ir(ref c, "  %string.left.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %left, i32 0, i32 1\n");
+    write_ir(ref c, "  %string.right.addr = getelementptr inbounds %struct.$Variant, %struct.$Variant* %right, i32 0, i32 1\n");
+    write_ir(ref c, "  %string.left.raw = load i64, i64* %string.left.addr\n");
+    write_ir(ref c, "  %string.right.raw = load i64, i64* %string.right.addr\n");
+    write_ir(ref c, "  %string.left = inttoptr i64 %string.left.raw to %struct.$String*\n");
+    write_ir(ref c, "  %string.right = inttoptr i64 %string.right.raw to %struct.$String*\n");
+    write_ir(ref c, "  %string.equal = call i1 @__wl_dict_string_equal(%struct.$String* %string.left, %struct.$String* %string.right)\n");
+    write_ir(ref c, "  ret i1 %string.equal\n");
+    write_ir(ref c, class_equal_blocks);
+    write_ir(ref c, "equal:\n");
+    write_ir(ref c, "  ret i1 true\n");
+    write_ir(ref c, "different:\n");
+    write_ir(ref c, "  ret i1 false\n");
+    write_ir(ref c, "}\n\n");
 }
 
 func class_method_index(info: StructInfo, name: String) -> Int {
@@ -339,48 +339,48 @@ func emit_class_hash_helpers(ref c: Compiler, info: StructInfo, type_id: Int, ll
 
     let table_type: String = class_vtable_type(ref c, info);
 
-    c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %is.null = icmp eq " + llvm_type + " %key, null\n");
-    c.output_file.write("  br i1 %is.null, label %invalid, label %call\n");
-    c.output_file.write("call:\n");
-    c.output_file.write("  %vptr.addr = getelementptr inbounds " + info.llvm_name + ", " + llvm_type + " %key, i32 0, i32 0\n");
-    c.output_file.write("  %vptr.raw = load i8*, i8** %vptr.addr\n");
-    c.output_file.write("  %vtable = bitcast i8* %vptr.raw to " + table_type + "*\n");
-    c.output_file.write("  %slot = getelementptr inbounds " + table_type + ", " + table_type + "* %vtable, i32 0, i32 " + hash_index + "\n");
-    c.output_file.write("  %method.raw = load i8*, i8** %slot\n");
-    c.output_file.write("  %method = bitcast i8* %method.raw to i32 (" + llvm_type + ")*\n");
-    c.output_file.write("  %value = call i32 %method(" + llvm_type + " %key)\n");
-    c.output_file.write("  %wide = sext i32 %value to i64\n");
-    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %wide, i64 0)\n");
-    c.output_file.write("  ret i32 %result\n");
-    c.output_file.write("invalid:\n");
-    c.output_file.write("  ret i32 0\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "define internal i32 " + hash_name + "(" + llvm_type + " %key) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %is.null = icmp eq " + llvm_type + " %key, null\n");
+    write_ir(ref c, "  br i1 %is.null, label %invalid, label %call\n");
+    write_ir(ref c, "call:\n");
+    write_ir(ref c, "  %vptr.addr = getelementptr inbounds " + info.llvm_name + ", " + llvm_type + " %key, i32 0, i32 0\n");
+    write_ir(ref c, "  %vptr.raw = load i8*, i8** %vptr.addr\n");
+    write_ir(ref c, "  %vtable = bitcast i8* %vptr.raw to " + table_type + "*\n");
+    write_ir(ref c, "  %slot = getelementptr inbounds " + table_type + ", " + table_type + "* %vtable, i32 0, i32 " + hash_index + "\n");
+    write_ir(ref c, "  %method.raw = load i8*, i8** %slot\n");
+    write_ir(ref c, "  %method = bitcast i8* %method.raw to i32 (" + llvm_type + ")*\n");
+    write_ir(ref c, "  %value = call i32 %method(" + llvm_type + " %key)\n");
+    write_ir(ref c, "  %wide = sext i32 %value to i64\n");
+    write_ir(ref c, "  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %wide, i64 0)\n");
+    write_ir(ref c, "  ret i32 %result\n");
+    write_ir(ref c, "invalid:\n");
+    write_ir(ref c, "  ret i32 0\n");
+    write_ir(ref c, "}\n\n");
 
-    c.output_file.write("define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\n");
-    c.output_file.write("entry:\n");
-    c.output_file.write("  %same = icmp eq " + llvm_type + " %left, %right\n");
-    c.output_file.write("  br i1 %same, label %equal, label %check.null\n");
-    c.output_file.write("check.null:\n");
-    c.output_file.write("  %left.null = icmp eq " + llvm_type + " %left, null\n");
-    c.output_file.write("  %right.null = icmp eq " + llvm_type + " %right, null\n");
-    c.output_file.write("  %has.null = or i1 %left.null, %right.null\n");
-    c.output_file.write("  br i1 %has.null, label %different, label %call\n");
-    c.output_file.write("call:\n");
-    c.output_file.write("  %vptr.addr = getelementptr inbounds " + info.llvm_name + ", " + llvm_type + " %left, i32 0, i32 0\n");
-    c.output_file.write("  %vptr.raw = load i8*, i8** %vptr.addr\n");
-    c.output_file.write("  %vtable = bitcast i8* %vptr.raw to " + table_type + "*\n");
-    c.output_file.write("  %slot = getelementptr inbounds " + table_type + ", " + table_type + "* %vtable, i32 0, i32 " + equal_index + "\n");
-    c.output_file.write("  %method.raw = load i8*, i8** %slot\n");
-    c.output_file.write("  %method = bitcast i8* %method.raw to i1 (" + llvm_type + ", " + llvm_type + ")*\n");
-    c.output_file.write("  %result = call i1 %method(" + llvm_type + " %left, " + llvm_type + " %right)\n");
-    c.output_file.write("  ret i1 %result\n");
-    c.output_file.write("equal:\n");
-    c.output_file.write("  ret i1 true\n");
-    c.output_file.write("different:\n");
-    c.output_file.write("  ret i1 false\n");
-    c.output_file.write("}\n\n");
+    write_ir(ref c, "define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\n");
+    write_ir(ref c, "entry:\n");
+    write_ir(ref c, "  %same = icmp eq " + llvm_type + " %left, %right\n");
+    write_ir(ref c, "  br i1 %same, label %equal, label %check.null\n");
+    write_ir(ref c, "check.null:\n");
+    write_ir(ref c, "  %left.null = icmp eq " + llvm_type + " %left, null\n");
+    write_ir(ref c, "  %right.null = icmp eq " + llvm_type + " %right, null\n");
+    write_ir(ref c, "  %has.null = or i1 %left.null, %right.null\n");
+    write_ir(ref c, "  br i1 %has.null, label %different, label %call\n");
+    write_ir(ref c, "call:\n");
+    write_ir(ref c, "  %vptr.addr = getelementptr inbounds " + info.llvm_name + ", " + llvm_type + " %left, i32 0, i32 0\n");
+    write_ir(ref c, "  %vptr.raw = load i8*, i8** %vptr.addr\n");
+    write_ir(ref c, "  %vtable = bitcast i8* %vptr.raw to " + table_type + "*\n");
+    write_ir(ref c, "  %slot = getelementptr inbounds " + table_type + ", " + table_type + "* %vtable, i32 0, i32 " + equal_index + "\n");
+    write_ir(ref c, "  %method.raw = load i8*, i8** %slot\n");
+    write_ir(ref c, "  %method = bitcast i8* %method.raw to i1 (" + llvm_type + ", " + llvm_type + ")*\n");
+    write_ir(ref c, "  %result = call i1 %method(" + llvm_type + " %left, " + llvm_type + " %right)\n");
+    write_ir(ref c, "  ret i1 %result\n");
+    write_ir(ref c, "equal:\n");
+    write_ir(ref c, "  ret i1 true\n");
+    write_ir(ref c, "different:\n");
+    write_ir(ref c, "  ret i1 false\n");
+    write_ir(ref c, "}\n\n");
 }
 
 func emit_hash_helpers(ref c: Compiler) -> Void {
@@ -395,90 +395,90 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
             let equal_name: String = "@__wl_values_equal_" + type_id;
             let key_info: Optional(StructInfo) = c.struct_id_map.lookup(repr_type);
             if (repr_type == TYPE_STRING) {
-                c.output_file.write("define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
-                c.output_file.write("entry:\n");
-                c.output_file.write("  %is.null = icmp eq %struct.$String* %key, null\n");
-                c.output_file.write("  br i1 %is.null, label %invalid, label %read\n");
-                c.output_file.write("read:\n");
-                c.output_file.write("  %buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 0\n");
-                c.output_file.write("  %len.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 1\n");
-                c.output_file.write("  %buf = load i8*, i8** %buf.addr\n");
-                c.output_file.write("  %len = load i32, i32* %len.addr\n");
-                c.output_file.write("  br label %loop\n");
-                c.output_file.write("loop:\n");
-                c.output_file.write("  %index = phi i32 [ 0, %read ], [ %next, %body ]\n");
-                c.output_file.write("  %state = phi i64 [ 14695981039346656037, %read ], [ %next.state, %body ]\n");
-                c.output_file.write("  %done = icmp uge i32 %index, %len\n");
-                c.output_file.write("  br i1 %done, label %finish, label %body\n");
-                c.output_file.write("body:\n");
-                c.output_file.write("  %byte.addr = getelementptr inbounds i8, i8* %buf, i32 %index\n");
-                c.output_file.write("  %byte = load i8, i8* %byte.addr\n");
-                c.output_file.write("  %wide = zext i8 %byte to i64\n");
-                c.output_file.write("  %mixed = xor i64 %state, %wide\n");
-                c.output_file.write("  %next.state = mul i64 %mixed, 1099511628211\n");
-                c.output_file.write("  %next = add i32 %index, 1\n");
-                c.output_file.write("  br label %loop\n");
-                c.output_file.write("finish:\n");
-                c.output_file.write("  %len.wide = zext i32 %len to i64\n");
-                c.output_file.write("  %hash = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %state, i64 %len.wide)\n");
-                c.output_file.write("  ret i32 %hash\n");
-                c.output_file.write("invalid:\n");
-                c.output_file.write("  ret i32 0\n");
-                c.output_file.write("}\n\n");
-                c.output_file.write("define internal i1 " + equal_name + "(%struct.$String* %left, %struct.$String* %right) {\nentry:\n  %result = call i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right)\n  ret i1 %result\n}\n\n");
+                write_ir(ref c, "define internal i32 " + hash_name + "(%struct.$String* %key) {\n");
+                write_ir(ref c, "entry:\n");
+                write_ir(ref c, "  %is.null = icmp eq %struct.$String* %key, null\n");
+                write_ir(ref c, "  br i1 %is.null, label %invalid, label %read\n");
+                write_ir(ref c, "read:\n");
+                write_ir(ref c, "  %buf.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 0\n");
+                write_ir(ref c, "  %len.addr = getelementptr inbounds %struct.$String, %struct.$String* %key, i32 0, i32 1\n");
+                write_ir(ref c, "  %buf = load i8*, i8** %buf.addr\n");
+                write_ir(ref c, "  %len = load i32, i32* %len.addr\n");
+                write_ir(ref c, "  br label %loop\n");
+                write_ir(ref c, "loop:\n");
+                write_ir(ref c, "  %index = phi i32 [ 0, %read ], [ %next, %body ]\n");
+                write_ir(ref c, "  %state = phi i64 [ 14695981039346656037, %read ], [ %next.state, %body ]\n");
+                write_ir(ref c, "  %done = icmp uge i32 %index, %len\n");
+                write_ir(ref c, "  br i1 %done, label %finish, label %body\n");
+                write_ir(ref c, "body:\n");
+                write_ir(ref c, "  %byte.addr = getelementptr inbounds i8, i8* %buf, i32 %index\n");
+                write_ir(ref c, "  %byte = load i8, i8* %byte.addr\n");
+                write_ir(ref c, "  %wide = zext i8 %byte to i64\n");
+                write_ir(ref c, "  %mixed = xor i64 %state, %wide\n");
+                write_ir(ref c, "  %next.state = mul i64 %mixed, 1099511628211\n");
+                write_ir(ref c, "  %next = add i32 %index, 1\n");
+                write_ir(ref c, "  br label %loop\n");
+                write_ir(ref c, "finish:\n");
+                write_ir(ref c, "  %len.wide = zext i32 %len to i64\n");
+                write_ir(ref c, "  %hash = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %state, i64 %len.wide)\n");
+                write_ir(ref c, "  ret i32 %hash\n");
+                write_ir(ref c, "invalid:\n");
+                write_ir(ref c, "  ret i32 0\n");
+                write_ir(ref c, "}\n\n");
+                write_ir(ref c, "define internal i1 " + equal_name + "(%struct.$String* %left, %struct.$String* %right) {\nentry:\n  %result = call i1 @__wl_dict_string_equal(%struct.$String* %left, %struct.$String* %right)\n  ret i1 %result\n}\n\n");
             } else if ((key_info is !null) && key_info.is_class) {
                 emit_class_hash_helpers(ref c, key_info, type_id, llvm_type, hash_name, equal_name);
             } else {
-                c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
+                write_ir(ref c, "define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
 
                 let bits: String = "%bits";
                 if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR ||
                     (c.func_ret_map.lookup(repr_type) is !null) ||
                     (c.method_ret_map.lookup(repr_type) is !null)) {
-                    c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
+                    write_ir(ref c, "  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
                 else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {
-                    c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
+                    write_ir(ref c, "  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
 
                     bits = "";
                 }
                 else if (repr_type == TYPE_FLOAT) {
-                    c.output_file.write("  %is.nan = fcmp uno double %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq double %key, 0.0\n  %raw = bitcast double %key to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %raw\n");
+                    write_ir(ref c, "  %is.nan = fcmp uno double %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq double %key, 0.0\n  %raw = bitcast double %key to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %raw\n");
                 }
                 else if (repr_type == TYPE_FLOAT32) {
-                    c.output_file.write("  %is.nan = fcmp uno float %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq float %key, 0.0\n  %raw = bitcast float %key to i32\n  %wide = zext i32 %raw to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %wide\n");
+                    write_ir(ref c, "  %is.nan = fcmp uno float %key, %key\n  br i1 %is.nan, label %invalid, label %float.valid\nfloat.valid:\n  %is.zero = fcmp oeq float %key, 0.0\n  %raw = bitcast float %key to i32\n  %wide = zext i32 %raw to i64\n  " + bits + " = select i1 %is.zero, i64 0, i64 %wide\n");
                 }
                 else if ((key_info is !null) && key_info.is_enum) {
-                    c.output_file.write("  " + bits + " = zext i32 %key to i64\n");
+                    write_ir(ref c, "  " + bits + " = zext i32 %key to i64\n");
                 }
                 else {
                     let width: Int = get_type_bitwidth(repr_type);
                     if (width < 64) {
-                        c.output_file.write("  " + bits + " = zext " + llvm_type + " %key to i64\n");
+                        write_ir(ref c, "  " + bits + " = zext " + llvm_type + " %key to i64\n");
                     } else {
-                        c.output_file.write("  " + bits + " = add i64 %key, 0\n");
+                        write_ir(ref c, "  " + bits + " = add i64 %key, 0\n");
                     }
                 }
 
                 if (bits.length() > 0) {
-                    c.output_file.write("  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
+                    write_ir(ref c, "  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 " + bits + ", i64 0)\n  ret i32 %result\n");
                 }
                 if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
-                    c.output_file.write("invalid:\n  ret i32 0\n");
+                    write_ir(ref c, "invalid:\n  ret i32 0\n");
                 }
                 if (bits.length() > 0) {
-                    c.output_file.write("}\n\n");
+                    write_ir(ref c, "}\n\n");
                 }
 
-                c.output_file.write("define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\nentry:\n");
+                write_ir(ref c, "define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\nentry:\n");
 
                 if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
-                    c.output_file.write("  %result = fcmp oeq " + llvm_type + " %left, %right\n");
+                    write_ir(ref c, "  %result = fcmp oeq " + llvm_type + " %left, %right\n");
                 } else {
-                    c.output_file.write("  %result = icmp eq " + llvm_type + " %left, %right\n");
+                    write_ir(ref c, "  %result = icmp eq " + llvm_type + " %left, %right\n");
                 }
 
-                c.output_file.write("  ret i1 %result\n}\n\n");
+                write_ir(ref c, "  ret i1 %result\n}\n\n");
             }
         }
         slot += 1;

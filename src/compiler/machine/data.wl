@@ -194,7 +194,7 @@ func machine_emit_globals(
     layouts: Vector(WirTypeLayout),
     readonly_name: String,
     readonly_writable: Bool,
-    live: Vector(Bool) = null
+    live: Optional(Vector(Bool)) = null
 ) -> MachineDataResult {
 // The caller selects the target's read-only relocation section name. ELF uses
 // .data.rel.ro because loaders must write absolute addresses before RELRO seals it.

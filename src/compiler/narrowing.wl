@@ -82,7 +82,7 @@ func flow_has_field(path: String) -> Bool {
 }
 
 func flow_copy(values: Vector(FlowType)) -> Vector(FlowType) {
-    if (values is null || values.length() == 0) { return null; }
+    if (values.length() == 0) { return []; }
     let result: Vector(FlowType) = [];
     let i = 0;
     while (i < values.length()) {
@@ -121,7 +121,7 @@ func flow_is_exposed(ref c: Compiler, path: String) -> Bool {
 func flow_expose(ref c: Compiler, node: NodeID) -> Void {
     let path = format_ast_path(ref c, node);
     if (path.starts_with("<unknown_path>")) {
-        c.flow_types = null;
+        c.flow_types = [];
         return;
     }
     if (c.flow_exposed is null) { c.flow_exposed = []; }
@@ -182,7 +182,7 @@ func flow_has_guard(ref c: Compiler, node: NodeID) -> Bool {
 
 func flow_intersect(left: Vector(FlowType), right: Vector(FlowType)) -> Vector(FlowType) {
 // only facts reaching the join along every live edge survive
-    if (left is null || right is null) { return null; }
+    if (left.length() == 0 || right.length() == 0) { return []; }
     let result: Vector(FlowType) = [];
     let i = 0;
     while (i < left.length()) {

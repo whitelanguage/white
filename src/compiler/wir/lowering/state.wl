@@ -44,7 +44,7 @@ struct WirFunctionLowering(
     entry: WirBlockID,
     block: WirBlockID,
     bindings: Vector(WirBinding),
-    binding_indices: Dict(String, Int),
+    binding_indices: Optional(Dict(String, Int)),
     indexed_bindings: Int,
     loops: Vector(WirLoop),
     error_targets: Vector(WirErrorTarget),
@@ -61,12 +61,16 @@ func wir_local_index(ref state: WirFunctionLowering, name: String) -> Int {
         state.binding_indices = Dict();
         state.indexed_bindings = 0;
     }
+    let found = state.binding_indices;
+    if (found is null) { return -1; }
+    let indices: Dict(String, Int) = found;
+
     while (state.indexed_bindings < state.bindings.length()) {
         let index = state.indexed_bindings;
-        state.binding_indices.put(state.bindings[index].name, index + 1);
+        indices.put(state.bindings[index].name, index + 1);
         state.indexed_bindings++;
     }
-    let index = state.binding_indices.lookup(name);
+    let index = indices.lookup(name);
     if (index is !null) { return index - 1; }
     return -1;
 }

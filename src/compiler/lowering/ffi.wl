@@ -114,7 +114,7 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     let existing_decl: Optional(StringConstant) = c.declared_externs.lookup(func_name);
     if (!(existing_decl is !null)) {
         if (backend_signature.length() == 0) {
-            c.output_file.write("declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n");
+            write_ir(ref c, "declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n");
         }
         c.declared_externs.put(func_name, StringConstant(id=0, value=signature));
     } else if (existing_decl.value.length() > 0 && existing_decl.value != signature) {

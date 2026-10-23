@@ -994,7 +994,7 @@ func atom(ref p: Parser) -> NodeID {
         if (p.current_tok.type != TOK_RBRACKET) {
             while (true) {
                 let val: NodeID = expression(ref p);
-                elements.append(ArgNode(val=val, name=null));
+                elements.append(ArgNode(val=val, name=""));
                 count += 1;
 
                 if (p.current_tok.type == TOK_COMMA) {
@@ -1024,12 +1024,12 @@ func atom(ref p: Parser) -> NodeID {
 }
 
 func parse_args(ref p: Parser) -> Vector(ArgNode) {
-    if (p.current_tok.type == TOK_RPAREN) { return null; }
+    if (p.current_tok.type == TOK_RPAREN) { return []; }
 
     let args: Vector(ArgNode) = [];
 
     while (p.current_tok.type != TOK_RPAREN && p.current_tok.type != TOK_EOF) {
-        let arg_name: String = null;
+        let arg_name: String = "";
         if (is_name_token(p.current_tok.type) && peek_type(ref p) == TOK_ASSIGN) {
             arg_name = p.current_tok.value;
             parser_advance(ref p);
@@ -1039,7 +1039,7 @@ func parse_args(ref p: Parser) -> Vector(ArgNode) {
         let val: NodeID = expression(ref p);
         let is_spread: Bool = false;
         if (p.current_tok.type == TOK_ELLIPSIS) {
-            if (arg_name is !null) {
+            if (arg_name.length() != 0) {
                 let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
                 throw_invalid_syntax(err_pos, "A spread argument cannot be named.");
             }
@@ -1105,7 +1105,7 @@ func postfix_expr(ref p: Parser) -> NodeID {
 
             let pos: Position = Position(idx=0, ln=paren_tok.line, col=paren_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
 
-            let type_args: Vector(NodeID) = null;
+            let type_args: Vector(NodeID) = [];
             let call_base: Int = node_tag(node);
             if (call_base == NODE_GENERIC_TYPE) {
                 let generic: GenericTypeNode = get_generic_type_node(ref p.arena, node);
@@ -1763,7 +1763,7 @@ func is_default_param(arena: AstArena, node: NodeID) -> Bool {
 }
 
 func parse_params(ref p: Parser, callable: Bool) -> Vector(ParamNode) {
-    if (p.current_tok.type == TOK_RPAREN) { return null; }
+    if (p.current_tok.type == TOK_RPAREN) { return []; }
     let params: Vector(ParamNode) = [];
 
     let saw_variadic: Bool = false;
@@ -1834,7 +1834,7 @@ func func_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let name_tok: Token = p.current_tok;
     parser_advance(ref p);
 
-    let type_params: Vector(GenericParamNode) = null;
+    let type_params: Vector(GenericParamNode) = [];
     if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
     if (p.current_tok.type != TOK_LPAREN) {
@@ -1909,7 +1909,7 @@ func parse_struct_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let name_tok: Token = p.current_tok;
     parser_advance(ref p);
 
-    let type_params: Vector(GenericParamNode) = null;
+    let type_params: Vector(GenericParamNode) = [];
     if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
     if (p.current_tok.type != TOK_LPAREN) {
@@ -2118,7 +2118,7 @@ func parse_import(ref p: Parser) -> NodeID {
     let start_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
     parser_advance(ref p); // skip 'import'
 
-    let symbols: Vector(ImportSymbolNode) = null;
+    let symbols: Vector(ImportSymbolNode) = [];
     let path_tok: Token = Token();
 
     // import * from "..."
@@ -2186,7 +2186,7 @@ func parse_import(ref p: Parser) -> NodeID {
 
     let alias_tok: Token = Token();
     if (p.current_tok.type == TOK_AS) {
-        if (symbols is !null) {
+        if (symbols.length() != 0) {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "A module alias can only be used with 'import \"module\" as name'. Alias imported symbols before 'from'.");
         }
@@ -2217,7 +2217,7 @@ func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID 
     let name_tok: Token = p.current_tok;
     parser_advance(ref p);
 
-    let type_params: Vector(GenericParamNode) = null;
+    let type_params: Vector(GenericParamNode) = [];
     if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
     let interfaces: Vector(NodeID) = [];
@@ -2253,7 +2253,7 @@ func parse_interface_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID 
             let m_name: Token = p.current_tok;
             parser_advance(ref p);
 
-            let type_params: Vector(GenericParamNode) = null;
+            let type_params: Vector(GenericParamNode) = [];
             if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
             if (p.current_tok.type != TOK_LPAREN) {
@@ -2331,7 +2331,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
     let name_tok: Token = p.current_tok;
     parser_advance(ref p);
 
-    let type_params: Vector(GenericParamNode) = null;
+    let type_params: Vector(GenericParamNode) = [];
     if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
     let parent_tok: NodeID = NO_NODE;
@@ -2409,7 +2409,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             let m_name: Token = p.current_tok;
             parser_advance(ref p);
 
-            let type_params: Vector(GenericParamNode) = null;
+            let type_params: Vector(GenericParamNode) = [];
             if (p.current_tok.type == TOK_LT) { type_params = parse_type_params(ref p); }
 
             if (p.current_tok.type != TOK_LPAREN) {
@@ -2463,12 +2463,12 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 type=NODE_METHOD_DEF,
                 pos=type_pos,
                 name_tok=type_name_tok,
-                type_params=null,
+                type_params=[],
                 params=[],
                 return_type=target_type,
                 body=body,
                 is_override=false,
-                annotations=null
+                annotations=[]
             );
             methods.append(add_method_def_node(ref p.arena, conversion));
         } else if (p.current_tok.type == TOK_IDENTIFIER && p.current_tok.value == "init") {
@@ -2504,7 +2504,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 type=NODE_METHOD_DEF,
                 pos=init_pos,
                 name_tok=init_name_tok,
-                type_params=null,
+                type_params=[],
                 params=params,
                 return_type=ret_type,
                 body=body,
@@ -2544,7 +2544,7 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
                 type=NODE_METHOD_DEF,
                 pos=deinit_pos,
                 name_tok=deinit_name_tok,
-                type_params=null,
+                type_params=[],
                 params=params,
                 return_type=ret_type,
                 body=body,
@@ -2613,12 +2613,12 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
             type=NODE_METHOD_DEF,
             pos=pos,
             name_tok=field_init_tok,
-            type_params=null,
+            type_params=[],
             params=[],
             return_type=return_type,
             body=add_block_node(ref p.arena, BlockNode(type=NODE_BLOCK, stmts=field_init_stmts)),
             is_override=false,
-            annotations=null
+            annotations=[]
         )));
     }
 

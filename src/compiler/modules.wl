@@ -118,7 +118,7 @@ func bind_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
     let i: Int = 0;
     while (imports is !null && i < imports.length()) {
         let node: ImportNode = get_import_node(ref c.arena, imports[i]);
-        if (node.symbols is !null) {
+        if (node.symbols.length() != 0) {
             let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
             if (final_path is !null && final_path.length() > 0) {
                 let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
@@ -178,7 +178,7 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
                     module_name = node.alias_tok.value;
                 }
 
-                if (node.symbols is null) {
+                if (node.symbols.length() == 0) {
                     let old_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(module_name);
                     if (old_prefix is !null && old_prefix != meta_loaded.value) {
                         throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
@@ -230,7 +230,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let module_name: String = canonical_name;
     if (node.alias_tok.value is !null) { module_name = node.alias_tok.value; }
 
-    if (node.symbols is !null) {
+    if (node.symbols.length() != 0) {
         unbind_namespace(ref c, module_name);
     }
 
@@ -241,7 +241,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     } else {
         import_prefix = reserve_module_prefix(ref c, canonical_name, final_path);
     }
-    if (node.symbols is null) {
+    if (node.symbols.length() == 0) {
         if (c.current_file_namespaces.contains_key(module_name)) {
             unbind_namespace(ref c, module_name);
         }
@@ -254,7 +254,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     }
 
     if ((loaded_module is !null)) {
-        if (node.symbols is !null) {
+        if (node.symbols.length() != 0) {
             bind_import_symbols(ref c, node, import_prefix, true, false);
             unbind_namespace(ref c, module_name);
             let s_len: Int = node.symbols.length();
@@ -330,7 +330,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     c.current_module_is_package = old_is_package;
     c.current_dir = old_dir;
 
-    if (node.symbols is !null) {
+    if (node.symbols.length() != 0) {
         bind_import_symbols(ref c, node, import_prefix, true, false);
         let s_len: Int = node.symbols.length();
         let i: Int = 0;

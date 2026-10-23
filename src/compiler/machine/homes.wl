@@ -2,7 +2,7 @@
 
 struct StackRegion(offset: Int, size: Int, alignment: Int, next: Int)
 
-struct StackHomes(size: Int, regions: Vector(StackRegion), free: Dict(UInt64, Int), ends: Vector(Int))
+struct StackHomes(size: Int, regions: Vector(StackRegion), free: Optional(Dict(UInt64, Int)), ends: Vector(Int))
 
 
 func stack_index_count(count: Int, slots: Int) -> Int {
@@ -50,10 +50,13 @@ func stack_expire(ref pool: StackHomes, position: Int) -> Void {
         let next = region.next;
         let key = stack_home_key(region.size, region.alignment);
         if (pool.free is null) { pool.free = Dict(); }
-        region.next = pool.free.get(key)?;
+        let found = pool.free;
+        if (found is null) { return; }
+        let free: Dict(UInt64, Int) = found;
+        region.next = free.get(key)?;
         catch(err) { region.next = 0; }
         pool.regions[index - 1] = region;
-        pool.free.put(key, index);
+        free.put(key, index);
         index = next;
     }
 }
@@ -72,7 +75,9 @@ func stack_reuse(ref pool: StackHomes, bytes: Int, alignment: Int, last: Int, fr
 
     if (index != 0) {
         let region = pool.regions[index - 1];
-        pool.free.put(key, region.next);
+        let free = pool.free;
+        if (free is null) { return -1; }
+        free.put(key, region.next);
         offset = region.offset;
     } else {
         offset = stack_reserve(ref pool, bytes, alignment, from_end);

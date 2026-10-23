@@ -81,7 +81,7 @@ struct TypeListNode(
 )
 
 struct Scope(
-    table: Dict(String, SymbolInfo), // symbol table of the current level
+    table: Optional(Dict(String, SymbolInfo)), // inactive scopes do not allocate a symbol table
     parent: Int,  // parent scope index, or -1 at the root
     gc_vars: Vector(Struct),
     depth: Int
@@ -160,7 +160,8 @@ struct StructInfo(
     is_error: Bool,
     is_interface: Bool,
     interfaces: Vector(Struct),
-    compiler_link_name: String
+    compiler_link_name: String,
+    layout_ready: Bool
 )
 
 struct GenericTemplate(
@@ -250,7 +251,7 @@ struct FlowType(path: String, type: Int, unstable: Bool)
 struct Compiler(
     // shared state for discovery, checking and lowering, per-function state stays in Scope
     arena: AstArena,
-    output_file: file.File,
+    output_file: Optional(file.File),
     reg_count: Int,
     symbol_table: Scope,
     scope_stack: Vector(Scope),
@@ -303,7 +304,7 @@ struct Compiler(
     global_func_aliases: Dict(String, String),
     global_var_aliases: Dict(String, String),
     compiler_link: Dict(String, String),
-    curr_func: FuncInfo,
+    curr_func: Optional(FuncInfo),
     expected_type: Int,
     hoist_scope: Scope,
     hoist_scope_stack: Vector(Scope),
@@ -419,6 +420,21 @@ func has_result(info: CompileResult) -> Bool {
     return info.type != 0 || info.reg is !null;
 }
 
+func scope_lookup(scope: Scope, name: String) -> Optional(SymbolInfo) {
+    let table = scope.table;
+    if (table is null) { return null; }
+    return table.lookup(name);
+}
+
+func scope_put(scope: Scope, name: String, info: SymbolInfo) -> Void {
+    let table = scope.table;
+    if (table is null) {
+        throw_internal_compiler_error(no_position(), "Cannot bind a symbol in an inactive scope.");
+        return;
+    }
+    table.put(name, info);
+}
+
 func store_struct(ref c: Compiler, info: StructInfo) -> Void {
     if (!has_struct(info)) {
         return;
@@ -440,8 +456,24 @@ func store_named_type(ref c: Compiler, info: NamedTypeInfo) -> Void {
 }
 
 // compiler init & state utils
+func write_ir(ref c: Compiler, text: String) -> Void {
+// machine emission has no text file, reaching this path without one is a driver error
+    let output = c.output_file;
+    if (output is null) {
+        throw_internal_compiler_error(no_position(), "LLVM output file is not open.");
+        abort_and_clean(1);
+        return;
+    }
+    output.write(text);
+}
+
+func close_ir(ref c: Compiler) -> Void {
+    let output = c.output_file;
+    if (output is !null) { output.close(); }
+}
+
 func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, arena: AstArena) -> Compiler? {
-    let f: file.File = null;
+    let f: Optional(file.File) = null;
     if (out_path is !null && out_path.length() != 0) { f = file.create(out_path)?; }
     // initialize empty scope
     let root_scope: Scope = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
@@ -496,9 +528,9 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         global_var_aliases = Dict(),
         compiler_link = Dict(),
         current_package_prefix = "",
-        curr_func = FuncInfo(),
+        curr_func = null,
         expected_type = 0,
-        hoist_scope = Scope(table=null, parent=-1, gc_vars=null, depth=0),
+        hoist_scope = Scope(table=null, parent=-1, gc_vars=[], depth=0),
         hoist_scope_stack = [],
         type_drop_list = [],
         global_buffer = "",
@@ -513,7 +545,7 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         fallible_base_map = Dict(),
         current_catch_label = "",
         current_catch_err_ptr = "",
-        current_catch_scope = Scope(table=null, parent=-1, gc_vars=null, depth=0),
+        current_catch_scope = Scope(table=null, parent=-1, gc_vars=[], depth=0),
         extra_libs = [],
         error_types = [],
         generic_structs = Dict(),
@@ -631,7 +663,7 @@ func find_symbol(ref c: Compiler, name: String) -> Optional(SymbolInfo) {
     let curr: Scope = c.symbol_table;
     while true {
         if (curr.table is !null) {
-            let info: Optional(SymbolInfo) = curr.table.lookup(name);
+            let info: Optional(SymbolInfo) = scope_lookup(curr, name);
             if ((info is !null)) { return info; }
         }
         if (curr.parent < 0 || c.scope_stack is null || curr.parent >= c.scope_stack.length()) {
@@ -673,8 +705,8 @@ func find_symbol(ref c: Compiler, name: String) -> Optional(SymbolInfo) {
 func update_symbol(ref c: Compiler, name: String, info: SymbolInfo) -> Void {
     let curr: Scope = c.symbol_table;
     while true {
-        if ((curr.table.lookup(name) is !null)) {
-            curr.table.put(name, info);
+        if ((scope_lookup(curr, name) is !null)) {
+            scope_put(curr, name, info);
             return;
         }
         if (curr.parent < 0) {
@@ -891,7 +923,7 @@ func is_direct_export(name: String) -> Bool {
 func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, include_submodules: Bool, keep_existing: Bool) -> Void {
     let symbols: Vector(ImportSymbolNode) = node.symbols;
     let s_len: Int = 0;
-    if (symbols is !null) { s_len = symbols.length(); }
+    if (symbols.length() != 0) { s_len = symbols.length(); }
     let i: Int = 0;
 
     while (i < s_len) {
@@ -1192,7 +1224,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
 }
 
 func export_named_imports(ref c: Compiler, node: ImportNode) -> Void {
-    if (!c.current_module_is_package || node.symbols is null) { return; }
+    if (!c.current_module_is_package || node.symbols.length() == 0) { return; }
 
     let i: Int = 0;
     while (i < node.symbols.length()) {
@@ -2197,8 +2229,8 @@ func get_fallible_type_id(ref c: Compiler, base_id: Int) -> Int {
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    let sym: SymbolInfo = SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=null);
-    let base_sym: SymbolInfo = SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, func_arg_types=null);
+    let sym: SymbolInfo = SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=[]);
+    let base_sym: SymbolInfo = SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, func_arg_types=[]);
 
     c.fallible_cache.put(key, sym);
     c.fallible_base_map.put(new_id, base_sym);
@@ -2544,7 +2576,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_owner.name + "_" + field.field_name);
             if (!(method_template is !null)) { return TYPE_POISON; }
 
-            let method_types: Vector(Struct) = resolve_generic_method_args(ref c, method_template, generic.type_args, null, generic.pos);
+            let method_types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, generic.type_args, [], generic.pos);
             if (method_types is null) { return TYPE_POISON; }
 
             let method_info: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_owner, method_types, generic.pos);
@@ -2565,7 +2597,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         if (!(template is !null)) { return TYPE_POISON; }
         let meta_template: GenericTemplate = template;
 
-        let types: Vector(Struct) = resolve_generic_args(ref c, meta_template, generic.type_args, null, generic.pos);
+        let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, meta_template, generic.type_args, [], generic.pos);
         if (types is null) { return TYPE_POISON; }
         let instance: Optional(FuncInfo) = register_generic_func(ref c, meta_template, types, generic.pos);
         if (!(instance is !null)) { return TYPE_POISON; }
@@ -2580,7 +2612,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
         let h_curr: Scope = c.hoist_scope;
         while (h_curr.table is !null) {
-            let h_info: Optional(SymbolInfo) = h_curr.table.lookup(v.name_tok.value);
+            let h_info: Optional(SymbolInfo) = scope_lookup(h_curr, v.name_tok.value);
             if ((h_info is !null)) { return h_info.type; }
             if (h_curr.parent < 0 || c.hoist_scope_stack is null || h_curr.parent >= c.hoist_scope_stack.length()) { break; }
             h_curr = c.hoist_scope_stack[h_curr.parent];
@@ -2775,7 +2807,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
         let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
         if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
-            let types: Vector(Struct) = resolve_generic_constructor_args(ref c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
+            let types: Optional(Vector(Struct)) = resolve_generic_constructor_args(ref c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
             if (types is null) { return TYPE_POISON; }
 
             let template_base: Int = node_tag(generic_type_template.node);
@@ -2788,7 +2820,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         let generic_name: String = generic_symbol_name(ref c, callee_node, true);
         let generic_template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
         if ((generic_template is !null)) {
-            let types: Vector(Struct) = resolve_generic_args(ref c, generic_template, call_node.type_args, call_node.args, call_node.pos);
+            let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, generic_template, call_node.type_args, call_node.args, call_node.pos);
             if (types is null) { return TYPE_POISON; }
 
             let instance: Optional(FuncInfo) = register_generic_func(ref c, generic_template, types, call_node.pos);
@@ -2927,7 +2959,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
                     let meta_s_info: StructInfo = s_info;
                     let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_s_info.name + "_" + f.field_name);
                     if ((method_template is !null)) {
-                        let types: Vector(Struct) = resolve_generic_method_args(ref c, method_template, call_node.type_args, call_node.args, call_node.pos);
+                        let types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, call_node.type_args, call_node.args, call_node.pos);
                         if (types is null) { return TYPE_POISON; }
                         let instance: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_s_info, types, call_node.pos);
                         if (!(instance is !null)) { return TYPE_POISON; }
@@ -3323,7 +3355,7 @@ func use_generic_context(ref c: Compiler, template: GenericTemplate, bindings: D
     let previous: GenericTemplate = GenericTemplate(
         name=c.current_package_prefix,
         node=NO_NODE,
-        type_params=null,
+        type_params=[],
         prefix=c.current_package_prefix,
         dir=c.current_dir,
         visible=c.current_file_visible_prefixes,
@@ -3463,19 +3495,19 @@ func register_generic_struct(ref c: Compiler, template: GenericTemplate, types: 
     let info: StructInfo = StructInfo(
         name=key,
         type_id=new_id,
-        fields=null,
+        fields=[],
         llvm_name=llvm_name,
         init_body=node.body,
         is_class=false,
         vtable_name="",
         parent_id=0,
-        vtable=null,
+        vtable=[],
         ann_flags=0,
         compiler_link_name="",
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=null
+        interfaces=[]
     );
     c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, ref c)));
@@ -3658,7 +3690,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
     let info: StructInfo = StructInfo(
         name=key,
         type_id=new_id,
-        fields=null,
+        fields=[],
         llvm_name="{ i8*, i8* }",
         init_body=template.node,
         is_class=false,
@@ -3670,7 +3702,8 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
         is_enum=false,
         is_error=false,
         is_interface=true,
-        interfaces=interfaces
+        interfaces=interfaces,
+        layout_ready=true
     );
     c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, ref c)));
@@ -3698,7 +3731,7 @@ func type_node_contains_self(arena: AstArena, node: NodeID) -> Bool {
         let generic: GenericTypeNode = get_generic_type_node(ref arena, node);
         if (type_node_contains_self(arena, generic.base_type)) { return true; }
         let i: Int = 0;
-        while (generic.type_args is !null && i < generic.type_args.length()) {
+        while (generic.type_args.length() != 0 && i < generic.type_args.length()) {
             if (type_node_contains_self(arena, generic.type_args[i])) { return true; }
             i += 1;
         }
@@ -3775,7 +3808,7 @@ func interface_uses_self(ref c: Compiler, info: StructInfo) -> Bool {
 
 func interface_type_bindings(ref c: Compiler, info: StructInfo, self_type: Int) -> Dict(String, SymbolInfo) {
     let bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + info.type_id);
-    let result: Dict(String, SymbolInfo) = extend_generic_bindings(bindings, null, null);
+    let result: Dict(String, SymbolInfo) = extend_generic_bindings(bindings, [], []);
     if (self_type != 0) {
         result.put("Self", SymbolInfo(reg="", type=self_type, origin_type=self_type));
     }
@@ -4007,19 +4040,19 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
     let info: StructInfo = StructInfo(
         name=key,
         type_id=new_id,
-        fields=null,
+        fields=[],
         llvm_name="%class.__generic." + new_id,
         init_body=template.node,
         is_class=true,
         vtable_name="@vtable.__generic." + new_id,
         parent_id=0,
-        vtable=null,
+        vtable=[],
         ann_flags=0,
         compiler_link_name="",
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=null
+        interfaces=[]
     );
     // publish the shell before resolving fields so recursive types find this instance
     c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
@@ -4221,7 +4254,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         );
         c.func_table.put(method_key, func_info);
         let class_method: GenericTemplate = GenericTemplate(
-            name=method_key, node=node.methods[method_index], type_params=null,
+            name=method_key, node=node.methods[method_index], type_params=[],
             prefix=template.prefix, dir=template.dir, visible=template.visible,
             namespaces=template.namespaces, types=template.types,
             funcs=template.funcs, globals=template.globals
@@ -4491,7 +4524,7 @@ func concrete_constructor_accepts(ref c: Compiler, name: String, args: Vector(Ar
 
 func use_generic_constructor(ref c: Compiler, name: String, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), expected: Int) -> Bool {
     if (!has_template(template)) { return false; }
-    if (explicit is !null) { return true; }
+    if (explicit.length() != 0) { return true; }
 
     expected = generic_constructor_context(ref c, template, expected);
     let expected_template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + expected);
@@ -4514,12 +4547,12 @@ func generic_constructor_params(ref c: Compiler, template: GenericTemplate) -> V
             i += 1;
         }
     }
-    return null;
+    return [];
 }
 
 func generic_call_param(params: Vector(ParamNode), arg: ArgNode, index: Int) -> Int {
     if (params is null) { return -1; }
-    if (arg.name is null) {
+    if (arg.name.length() == 0) {
         let variadic: Int = variadic_param_index(params);
         if (variadic > 0 && index >= variadic - 1) {
             return variadic - 1;
@@ -4557,11 +4590,11 @@ func generic_arg_type(ref c: Compiler, arg: ArgNode, params: Vector(ParamNode), 
     return actual_type;
 }
 
-func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), expected: Int, pos: Position) -> Vector(Struct) {
+func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), expected: Int, pos: Position) -> Optional(Vector(Struct)) {
     let result: Vector(Struct) = [];
     let count: Int = template.type_params.length();
     let i: Int = 0;
-    if (explicit is !null) {
+    if (explicit.length() != 0) {
         if (explicit.length() != count) {
             throw_type_error(pos, "Type '" + template.name + "' expects " + count + " type arguments, got " + explicit.length() + ".");
             return null;
@@ -4609,11 +4642,11 @@ func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate
     return result;
 }
 
-func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), pos: Position) -> Vector(Struct) {
+func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), pos: Position) -> Optional(Vector(Struct)) {
     let result: Vector(Struct) = [];
     let count: Int = template.type_params.length();
     let i: Int = 0;
-    if (explicit is !null) {
+    if (explicit.length() != 0) {
         if (explicit.length() != count) {
             throw_type_error(pos, "Function '" + template.name + "' expects " + count + " type arguments, got " + explicit.length() + ".");
             return null;
@@ -4665,11 +4698,11 @@ func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: 
     return result;
 }
 
-func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), pos: Position) -> Vector(Struct) {
+func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, explicit: Vector(NodeID), args: Vector(ArgNode), pos: Position) -> Optional(Vector(Struct)) {
     let result: Vector(Struct) = [];
     let count: Int = template.type_params.length();
     let i: Int = 0;
-    if (explicit is !null) {
+    if (explicit.length() != 0) {
         if (explicit.length() != count) {
             let method_node: MethodDefNode = get_method_def_node(ref c.arena, template.node);
             throw_type_error(pos, "Method '" + method_node.name_tok.value + "' expects " + count + " type arguments, got " + explicit.length() + ".");
@@ -5465,15 +5498,17 @@ func mangle_wl_name(ref c: Compiler, prefix: String, base_name: String, arg_type
 
 func get_mangled_symbol(ref c: Compiler, link_name: String, pos: Position) -> String {
     let func_key: Optional(String) = c.compiler_link.lookup(link_name);
-    let name: String = null;
+    let name: Optional(String) = null;
 
     if (func_key is !null) {
         let f_info: Optional(FuncInfo) = c.func_table.lookup(func_key);
         if ((f_info is !null)) { name = f_info.name; }
     }
 
-    if (name is null && has_position(pos)) {
-        throw_type_error(pos, "Missing CompilerLink hook '" + link_name + "'. Did you import 'builtin'?");
+    if (name is null) {
+        if (has_position(pos)) {
+            throw_type_error(pos, "Missing CompilerLink hook '" + link_name + "'. Did you import 'builtin'?");
+        }
         return "__wl_missing_hook";
     }
 

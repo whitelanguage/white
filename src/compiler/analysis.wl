@@ -78,7 +78,7 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
         return false;
     }
     let meta_info: StructInfo = info;
-    if ((meta_info.ann_flags & FLAG_ANN_INTRINSIC) != 0 || meta_info.fields is !null) { return true; }
+    if ((meta_info.ann_flags & FLAG_ANN_INTRINSIC) != 0 || meta_info.layout_ready) { return true; }
 
     let path: Vector(Int) = extend_type_path(stack, meta_info.type_id);
 
@@ -125,6 +125,7 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
     }
 
     meta_info.fields = fields;
+    meta_info.layout_ready = true;
     store_struct(ref c, meta_info);
     return true;
 }
@@ -196,7 +197,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
         return false;
     }
     let meta_info: StructInfo = info;
-    if (meta_info.fields is !null && meta_info.vtable is !null && meta_info.interfaces is !null) { return true; }
+    if (meta_info.layout_ready) { return true; }
 
     let path: Vector(Int) = extend_type_path(stack, meta_info.type_id);
     let parent_info: Optional(StructInfo) = null;
@@ -338,6 +339,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
 
     meta_info.fields = fields;
     meta_info.vtable = methods;
+    meta_info.layout_ready = true;
     store_struct(ref c, meta_info);
     return validate_class_interfaces(ref c, meta_info, node.pos);
 }

@@ -82,7 +82,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
     let i: Int = 0;
     while (i < literal.elements.length()) {
         let argument: ArgNode = literal.elements[i];
-        if ((argument.name is !null && argument.name.length() != 0) || argument.is_spread) {
+        if ((argument.name.length() != 0) || argument.is_spread) {
             types.errors.append("Static array initializer contains a named or spread element");
             return NO_WIR_VALUE;
         }
@@ -130,7 +130,7 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
             return NO_WIR_VALUE;
         }
         let field_index: Int = i;
-        if (argument.name is !null && argument.name.length() != 0) {
+        if (argument.name.length() != 0) {
             saw_named = true;
             let named_field: Optional(FieldInfo) = find_field(record, argument.name);
             if (named_field is null) {
@@ -192,7 +192,7 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         let target: Int = wir_static_cast_target(ref source, call.callee);
         if (target != 0 && call.args is !null && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
-            if ((argument.name is null || argument.name.length() == 0) && !argument.is_spread &&
+            if ((argument.name.length() == 0) && !argument.is_spread &&
                 get_repr_type(ref source, target) == repr) {
                 return wir_lower_static_value(ref types, ref source, ref program, argument.val, source_type, pos);
             }
