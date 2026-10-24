@@ -68,10 +68,10 @@ func main() -> Int {
     probes.put("value", DictProbe(2));
     if (DROPPED != 1 || !probes.remove("value") || DROPPED != 2) { print("FAIL: Typed Dict ownership"); return 1; }
     probes.put("value", DictProbe(3));
-    let loaded: DictProbe = probes.get("value")?;
+    let loaded: Optional(DictProbe) = probes.get("value")?;
     catch(err) { print("FAIL: Typed Dict class value"); return 1; }
     probes.clear();
-    if (DROPPED != 2 || loaded.value != 3) { print("FAIL: Typed Dict class value"); return 1; }
+    if (loaded is null || DROPPED != 2 || loaded.value != 3) { print("FAIL: Typed Dict class value"); return 1; }
     loaded = null;
     if (DROPPED != 3) { print("FAIL: Typed Dict cleanup"); return 1; }
 

@@ -1,7 +1,7 @@
-// Test: RUNTIME_NULL_ACCESS
+// Test: NULL_CLASS_ASSIGNMENT
 // File: tests/diagnostics/failures/test_null_access.wl
-// Focus: Reporting a null class access before reading object storage.
-// Expected Error: "RuntimeError: Null pointer dereference"
+// Focus: Rejecting null before it can become an ordinary class value.
+// Expected Error: "TypeError: Type Box cannot be null."
 
 class Box {
     let value: Int = 1;

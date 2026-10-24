@@ -18,7 +18,7 @@ import * from "unions.wl"
 func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: Int, pos: Position) -> CompileResult {
     if (!has_result(val_res) || val_res.reg == "") {
         let dummy_reg: String = "0";
-        if (is_nullable_reference_type(ref c, expected_type) || is_pointer_type(ref c, expected_type)) {
+        if (has_reference_storage(ref c, expected_type) || is_pointer_type(ref c, expected_type)) {
             dummy_reg = "null";
         } else if (expected_type == TYPE_FLOAT) {
             dummy_reg = "0.0";
@@ -205,7 +205,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         let null_return_label: String = "ret_null_" + c.type_counter;
         c.type_counter += 1;
 
-        let can_be_null: Bool = is_ref_type(ref c, expected_type) || is_pointer_type(ref c, expected_type);
+        let can_be_null: Bool = is_nullable_reference_type(ref c, expected_type);
 
         let is_null_ptr: String = next_reg(ref c);
         write_ir(ref c, c.indent + is_null_ptr + " = icmp eq " + variant_llvm + "* " + val_res.reg + ", null\n");
@@ -278,7 +278,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
         write_ir(ref c, "\n" + fail_label + ":\n");
 
-        emit_runtime_error(ref c, pos, "Dict value type mismatch or missing. Expected " + get_type_name(ref c, expected_type) + ".");
+        emit_runtime_error(ref c, pos, "Erased value has the wrong concrete type");
 
         write_ir(ref c, "\n" + unbox_label + ":\n");
 
@@ -365,7 +365,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let zero_val: String = "0";
             if (expected_repr == TYPE_FLOAT) {
                 zero_val = "0.0";
-            } else if (is_nullable_reference_type(ref c, expected_type)) {
+            } else if (has_reference_storage(ref c, expected_type)) {
                 zero_val = "null";
             }
             let expected_info: Optional(StructInfo) = c.struct_id_map.lookup(expected_repr);
@@ -401,17 +401,13 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         return CompileResult(reg="0", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
     }
     if (val_res.type == TYPE_NULL) {
-        let ex_s: Optional(StructInfo) = c.struct_id_map.lookup(expected_type);
-        if ((ex_s is !null) && ex_s.is_interface) {
-            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
-        }
         if (is_pointer_type(ref c, expected_type)) {
             throw_type_error(pos, "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
             return CompileResult(reg="0", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
         }
         if (!is_nullable_reference_type(ref c, expected_type)) {
             throw_type_error(pos, "Type " + get_type_name(ref c, expected_type) + " cannot be null.");
-            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
         return CompileResult(reg="null", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
     }

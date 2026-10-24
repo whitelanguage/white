@@ -54,8 +54,12 @@ func main() -> Int {
     print("");
 
     print("--- Null & Pointer Test ---");
-    let n: String = null;
-    print("Null string:", n);
+    let n: Optional(String) = null;
+    if (n is null) {
+        print("Absent string:", null);
+    } else {
+        print("String:", n);
+    }
     
     print("PASS: Variadic print and complex type stringification");
 

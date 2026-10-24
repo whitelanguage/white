@@ -226,7 +226,15 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR)) {
         return wir_null(ref program, type_id);
     }
-    if (kind == NODE_NULL && !is_pointer_type(ref source, source_type) && is_nullable_reference_type(ref source, source_type)) {
+    if (kind == NODE_NULL) {
+        if (is_pointer_type(ref source, source_type)) {
+            throw_type_error(pos, "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
+            return NO_WIR_VALUE;
+        }
+        if (!is_nullable_reference_type(ref source, source_type)) {
+            throw_type_error(pos, "Type " + get_type_name(ref source, source_type) + " cannot be null.");
+            return NO_WIR_VALUE;
+        }
         if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) {
             return wir_null(ref program, type_id);
         }

@@ -61,21 +61,24 @@ func exercise() -> Bool {
     other.value = null;
     if (DROPS != 2) { return false; }
 
-    let elements: Vector(Optional(Probe)) = [];
-    elements.append(Probe(3));
-    elements.append(null);
-    elements.append(make(4));
-    elements[0] = null;
-    if (DROPS != 3) { return false; }
-    elements = null;
+    {
+        let elements: Vector(Optional(Probe)) = [];
+        elements.append(Probe(3));
+        elements.append(null);
+        elements.append(make(4));
+        elements[0] = null;
+        if (DROPS != 3) { return false; }
+    }
     if (DROPS != 4) { return false; }
 
-    let owner = Owner();
-    owner = null;
+    {
+        let owner = Owner();
+    }
     if (DROPS != 5) { return false; }
-    let callback = make_callback();
-    if (!callback() || DROPS != 5) { return false; }
-    callback = null;
+    {
+        let callback = make_callback();
+        if (!callback() || DROPS != 5) { return false; }
+    }
     if (DROPS != 6) { return false; }
 
     let result: Optional(Probe) = null;
@@ -88,8 +91,7 @@ func exercise() -> Bool {
     result = null;
     if (DROPS != 7) { return false; }
 
-    let old_null: String = null;
-    let text: Optional(String) = old_null;
+    let text: Optional(String) = "";
     if (text is null) { return false; }
     text = null;
     return text is null;

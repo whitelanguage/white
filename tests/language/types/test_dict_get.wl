@@ -87,7 +87,7 @@ func main() -> Int {
 
     if (check_owned() != 0 || DROPPED != 2) { return 7; }
     let dynamic: Dict = { "null": null, "zero": 0, "empty": "", "false": false };
-    let stored_null: String = dynamic.get("null")?;
+    let stored_null: Null = dynamic.get("null")?;
     catch(err) { return 8; }
     if (stored_null is !null) { return 8; }
     let zero: Int = dynamic["zero"]?;

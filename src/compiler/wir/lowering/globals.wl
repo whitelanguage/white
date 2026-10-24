@@ -7,6 +7,7 @@ import * from "../../context.wl"
 import eval_const_bool, eval_const_float, eval_const_long, eval_const_wide from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+import GLOBAL_ERROR_COUNT from "../../../frontend/diagnostics.wl"
 
 
 struct WirSourceGlobal(
@@ -145,6 +146,7 @@ func wir_global_initializer(ref types: WirTypeMap, ref source: Compiler, ref pro
 
     let value: WirValueID = wir_lower_static_value(ref types, ref source, ref program, node.value, source_type, node.pos);
     if (value != NO_WIR_VALUE) { return value; }
+    if (GLOBAL_ERROR_COUNT > 0) { return NO_WIR_VALUE; }
     types.errors.append("Global '" + node.name_tok.value + "' does not have a WIR initializer yet");
     return NO_WIR_VALUE;
 }

@@ -49,7 +49,6 @@ func global_contains(text: String, needle: String) -> Bool {
 
 func check_null_global() -> Bool {
     let symbols: Dict(String, SymbolInfo) = Dict();
-    symbols.put("buffer", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     let source: Compiler = new_fixture_compiler()?;
     catch(err) { return false; }
     source.arena = new_ast_arena();
@@ -61,8 +60,11 @@ func check_null_global() -> Bool {
     source.global_var_aliases = Dict();
     source.generic_bindings = Dict();
     let pos: Position = global_position();
+    let optional: Int = get_union_type_id(ref source, [TYPE_STRING, TYPE_NULL], pos);
+    symbols.put("buffer", SymbolInfo(reg="poison", type=optional, origin_type=optional, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     let value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
     let declaration: VarDeclareNode = global_decl(source.arena, "buffer", "String", value, false, pos);
+    declaration.type_node = add_union_type_node(ref source.arena, UnionTypeNode(type=NODE_UNION_TYPE, members=[global_access(source.arena, "String", pos), global_access(source.arena, "Null", pos)], pos=pos));
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_global_decl(ref types, ref source, ref program, declaration);
@@ -71,12 +73,12 @@ func check_null_global() -> Bool {
     if (errors.length() != 0) { return false; }
     let text: String = print_wir(program)?;
     catch(err) { return false; }
-    return global_contains(text, "@buffer") && global_contains(text, " = null");
+    return global_contains(text, "@buffer") && global_contains(text, "storage {");
 }
 
 func main() -> Int {
     if (!check_null_global()) {
-        print("FAIL: null String global");
+        print("FAIL: Optional String global");
         return 1;
     }
     let symbols: Dict(String, SymbolInfo) = Dict();

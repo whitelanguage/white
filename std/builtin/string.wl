@@ -160,7 +160,6 @@ func string_char_at(self: String, index: Int) -> Char? {
 
 @CompilerLink
 func string_slice(self: String, start: Int, end: Int) -> String {
-    if (self is null) { return null; }
     let source_len: Int = self.length();
     if (start < 0) { start = 0; }
     if (end > source_len) { end = source_len; }
@@ -182,7 +181,6 @@ func string_slice(self: String, start: Int, end: Int) -> String {
 
 @CompilerLink("string_concat")
 func string_concat(left: String, right: String) -> String {
-    if (left is null || right is null) { return null; }
 
     let left_len: Int = left.length();
     let right_len: Int = right.length();

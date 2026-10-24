@@ -298,6 +298,10 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
                 init_val_str = "null";
             }
             else if (val_node == NODE_NULL) {
+                if (!is_nullable_reference_type(ref c, target_type_id) && !is_pointer_type(ref c, target_type_id)) {
+                    throw_type_error(node.pos, "Type " + get_type_name(ref c, target_type_id) + " cannot be null.");
+                    return void_result();
+                }
                 if (is_pointer_type(ref c, target_type_id)) {
                     throw_invalid_syntax(node.pos, "Global 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
                     return void_result();
@@ -2212,7 +2216,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         } else {
             let zero_val: String = "0";
             if (ret_type_id == TYPE_FLOAT) { zero_val = "0.0"; }
-            else if (is_nullable_reference_type(ref c, ret_type_id)) {
+            else if (has_reference_storage(ref c, ret_type_id)) {
                 zero_val = "null";
             }
 
@@ -2579,7 +2583,7 @@ func zero_value(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResul
     let value: String = "0";
     if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
         value = "0.0";
-    } else if (is_nullable_reference_type(ref c, type_id) || is_pointer_type(ref c, type_id)) {
+    } else if (has_reference_storage(ref c, type_id) || is_pointer_type(ref c, type_id)) {
         value = "null";
     } else {
         let type_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
@@ -2631,7 +2635,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
                     ((field_info is !null) && field_info.is_interface) ||
                     ((field_array is !null) && field_array.size >= 0)) {
                     zero_val = "zeroinitializer";
-                } else if (is_nullable_reference_type(ref c, f_curr.type)) {
+                } else if (has_reference_storage(ref c, f_curr.type)) {
                     zero_val = "null";
                 }
             }
@@ -3109,6 +3113,16 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
     return void_result();
 }
 
+func finish_field_value(ref c: Compiler, receiver: CompileResult, value: String, field_type: Int) -> CompileResult {
+// a narrowed receiver can own a temporary reference, keep its field alive before releasing it
+    let owned = receiver.owns_ref && needs_drop(ref c, field_type);
+    if owned {
+        emit_retain_value(ref c, value, field_type);
+    }
+    emit_release_owned(ref c, receiver);
+    return CompileResult(reg=value, type=field_type, is_const_access=receiver.is_const_access, origin_type=0, owns_ref=owned);
+}
+
 func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResult {
     let obj_base: Int = node_tag(node.obj);
 
@@ -3262,7 +3276,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
 
     let obj_llvm_ty: String = get_llvm_type_str(ref c, obj_res.type);
     let null_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_res.type);
-    if (is_nullable_reference_type(ref c, obj_res.type)) {
+    if (has_reference_storage(ref c, obj_res.type)) {
         let is_null: String = next_reg(ref c);
         let null_check_reg: String = obj_reg;
         let null_check_type: String = obj_llvm_ty;
@@ -3349,7 +3363,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             let value_reg: String = next_reg(ref c);
             write_ir(ref c, c.indent + value_reg + " = extractvalue " + meta_s_info.llvm_name + " " + obj_reg + ", " + field.offset + "\n");
 
-            return CompileResult(reg=value_reg, type=field.type, is_const_access=obj_res.is_const_access, origin_type=0, owns_ref=false);
+            return finish_field_value(ref c, obj_res, value_reg, field.type);
         }
 
         let f_ptr: String = next_reg(ref c);
@@ -3365,7 +3379,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
         let val_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + val_reg + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + f_ptr + "\n");
 
-        return CompileResult(reg=val_reg, type=field.type, is_const_access=obj_res.is_const_access, origin_type=0, owns_ref=false);
+        return finish_field_value(ref c, obj_res, val_reg, field.type);
     }
 
     if (meta_s_info.is_interface) {

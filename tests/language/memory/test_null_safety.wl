@@ -1,13 +1,13 @@
 // Test: NULL_POINTER_SAFETY
 // File: tests/language/memory/test_null_safety.wl
-// Focus: 'null' for reference types, 'nullptr' for raw pointers, and 'is' operator checks.
+// Focus: 'null' for Optional values, 'nullptr' for raw pointers, and 'is' operator checks.
 
 
 class Box {}
 
 func main() -> Int {
-    let s: String = null;
-    let b: Box = null;
+    let s: Optional(String) = null;
+    let b: Optional(Box) = null;
     let ptr p: Int = nullptr;
     
     let is_null_ok: Bool = (s is null) && (b is null) && (p is nullptr);

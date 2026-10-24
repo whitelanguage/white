@@ -2195,9 +2195,14 @@ func is_small_primitive_type(t: Int) -> Bool {
 }
 
 func is_nullable_reference_type(ref c: Compiler, t: Int) -> Bool {
+// inactive storage may contain zero bits, source values still need an explicit Null member
+    return get_repr_type(ref c, t) == TYPE_NULL || union_member_index(ref c, t, TYPE_NULL) >= 0;
+}
+
+func has_reference_storage(ref c: Compiler, t: Int) -> Bool {
     let named: Optional(NamedTypeInfo) = get_named_type(ref c, t);
     if ((named is !null)) {
-        return is_nullable_reference_type(ref c, named.underlying_type);
+        return has_reference_storage(ref c, named.underlying_type);
     }
     if (t == TYPE_NULL || t == TYPE_STRING || t == TYPE_ANYPTR || t == TYPE_NULLPTR ||
         t == TYPE_GENERIC_STRUCT || t == TYPE_GENERIC_CLASS ||

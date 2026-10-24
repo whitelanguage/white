@@ -232,10 +232,10 @@ func check_pointer_casts() -> Bool {
     let pointer_args: Vector(Struct) = [TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];
     let pointer_info: FuncInfo = FuncInfo(name="from_bits", base_name="from_bits", ret_type=TYPE_ANYPTR, arg_types=pointer_args, arg_names=["bits"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
-    let null_value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
+    let null_value: NodeID = add_nullptr_node(ref source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
     let null_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
     let null_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
-    let null_info: FuncInfo = FuncInfo(name="empty_string", base_name="empty_string", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let null_info: FuncInfo = FuncInfo(name="empty_pointer", base_name="empty_pointer", ret_type=TYPE_ANYPTR, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

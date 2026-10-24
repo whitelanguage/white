@@ -1243,7 +1243,7 @@ func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     let expected_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, target_type)));
     let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected_tag, "", no_wir_location());
     // a stored null has a box with tag zero, get already distinguishes it from a missing key
-    if (is_nullable_reference_type(ref source, target_type) || is_pointer_type(ref source, target_type)) {
+    if (is_nullable_reference_type(ref source, target_type)) {
         let null_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(0U));
         let stored_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, null_tag, "", no_wir_location());
         matches = wir_bool_or(ref program, state.block, matches, stored_null);
@@ -2268,10 +2268,6 @@ func wir_cast_expr(
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
         return wir_no_expr();
     }
-    if (target_type == TYPE_NULL && value.source_type != TYPE_NULLPTR) {
-        throw_type_error(no_position(), "Type mismatch. Expected Null, got " + get_type_name(ref source, value.source_type) + ".");
-        return wir_no_expr();
-    }
     let source_info: Optional(StructInfo) = null;
     let target_info: Optional(StructInfo) = null;
     if (source.struct_id_map is !null) {
@@ -2283,6 +2279,10 @@ func wir_cast_expr(
     }
     if ((source_info is !null) && source_info.name == "$Variant") {
         return wir_unbox_variant(ref state, ref types, ref source, ref program, value, target_type);
+    }
+    if (target_type == TYPE_NULL && value.source_type != TYPE_NULLPTR) {
+        throw_type_error(pos, "Type mismatch. Expected Null, got " + get_type_name(ref source, value.source_type) + ".");
+        return wir_no_expr();
     }
     if ((source_info is !null) && source_info.is_class && (target_info is !null) && target_info.is_interface) {
         return wir_lower_interface_value(ref state, ref types, ref source, ref program, value, target_type);
@@ -2398,18 +2398,18 @@ func wir_cast_expr(
     let target_integer: Bool = target_kind == WirTypeKind.BoolType || target_kind == WirTypeKind.SignedInt || target_kind == WirTypeKind.UnsignedInt;
     if (value.source_type == TYPE_NULLPTR) {
         if (!is_pointer_type(ref source, target_type)) {
-            throw_type_error(no_position(), "'nullptr' can only be assigned to explicit pointer types.");
+            throw_type_error(pos, "'nullptr' can only be assigned to explicit pointer types.");
             return wir_no_expr();
         }
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
     }
     if (value.source_type == TYPE_NULL) {
         if (is_pointer_type(ref source, target_type)) {
-            throw_type_error(no_position(), "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
+            throw_type_error(pos, "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
             return wir_no_expr();
         }
         if (!is_nullable_reference_type(ref source, target_type)) {
-            throw_type_error(no_position(), "Type " + get_type_name(ref source, target_type) + " cannot be null.");
+            throw_type_error(pos, "Type " + get_type_name(ref source, target_type) + " cannot be null.");
             return wir_no_expr();
         }
         if (target_kind == WirTypeKind.Struct) {

@@ -25,7 +25,7 @@ func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let structs: Dict(String, StructInfo) = Dict();
     let struct_ids: Dict(Int, StructInfo) = Dict();
-    let info: StructInfo = StructInfo(name="Pair", type_id=100, fields=null, llvm_name="%struct.Pair", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false);
+    let info: StructInfo = StructInfo(name="Pair", type_id=100, fields=[], llvm_name="%struct.Pair", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false);
     structs.put("Pair", info);
     struct_ids.put(100, info);
     let source: Compiler = new_fixture_compiler()?;
@@ -85,7 +85,7 @@ func main() -> Int {
         return 1;
     }
 
-    let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=null, llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=null, interfaces=null, vtable_name="", parent_id=0, ann_flags=0, is_error=false, compiler_link_name="", layout_ready=false);
+    let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=[], llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=[], interfaces=[], vtable_name="", parent_id=0, ann_flags=0, is_error=false, compiler_link_name="", layout_ready=false);
     source.struct_table.put("Box", class_info);
     source.struct_id_map.put(101, class_info);
     let default_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=Token(type=TOK_INT, value="1", line=1, col=1), pos=pos));

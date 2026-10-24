@@ -7,7 +7,7 @@ struct Vector3(x: Int, y: Int, z: Int)
 
 class BankAccount {
     let _id: Int = 0;
-    let owner: String = null;
+    let owner: String;
     let balance: Int = 0;
 
     init(id: Int, name: String, val: Int) -> Void {
