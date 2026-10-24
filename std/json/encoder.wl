@@ -50,7 +50,7 @@ class Encoder {
     }
 
     func __write_string(output: Builder, value: String) -> Void? {
-        if (value is null || !value.is_valid_utf8()) {
+        if (!value.is_valid_utf8()) {
             throw JsonError.InvalidUtf8;
         }
 
@@ -148,7 +148,6 @@ class Encoder {
     }
 
     func __write_value(output: Builder, value: Value, depth: Int) -> Void? {
-        if (value is null) { throw JsonError.InvalidValue; }
         let kind: Kind = value.kind();
         if (kind == Kind.Null) {
             output.write("null")?;

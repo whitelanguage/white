@@ -13,7 +13,7 @@ import flush as stdout_flush from "../io/stdout.wl"
 
 func __prompt(text: String) -> Void? {
 // write prompts without adding a line ending
-    if (text is null || text.length() == 0) {
+    if (text.length() == 0) {
         return;
     }
     stdout_write_all(text)?;

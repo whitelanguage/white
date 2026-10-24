@@ -256,7 +256,7 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
     }
 
     let type: WirType = program.arena.types[wir_id_index(UInt32(constant.type_id))];
-    if (constant.kind != WirConstKind.Storage && constant.offsets is !null && constant.offsets.length() != 0) {
+    if (constant.kind != WirConstKind.Storage && constant.offsets.length() != 0) {
         wir_report(errors, "constant contains unused storage offsets");
     }
     if (constant.kind == WirConstKind.Zero) {
@@ -329,7 +329,7 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
         if (!layout.valid || (type.kind != WirTypeKind.Struct && type.kind != WirTypeKind.Array)) {
             wir_report(errors, "storage constant requires a sized aggregate type");
         }
-        if (constant.offsets is null || constant.offsets.length() != constant.elements.length()) {
+        if (constant.offsets.length() != constant.elements.length()) {
             wir_report(errors, "storage constant has the wrong offset count");
         } else {
             let end: UInt64 = 0UL;

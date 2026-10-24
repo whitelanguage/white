@@ -66,11 +66,11 @@ func no_position() -> Position {
 }
 
 func has_position(pos: Position) -> Bool {
-    return (pos.text is !null && pos.text.length() != 0) || (pos.fn is !null && pos.fn.length() != 0);
+    return pos.text.length() != 0 || pos.fn.length() != 0;
 }
 
 func __source_unit(text: String, offset: Int) -> __SourceUnit {
-    if (text is null || offset < 0 || offset >= text.length()) {
+    if (offset < 0 || offset >= text.length()) {
         return __SourceUnit(scalar=0, width=0, valid=true);
     }
 
@@ -134,16 +134,6 @@ func __source_unit(text: String, offset: Int) -> __SourceUnit {
 func source_position(text: String, line: Int, byte_column: Int) -> SourcePosition {
     let target_line: Int = line;
     if (target_line < 0) { target_line = 0; }
-    if (text is null) {
-        return SourcePosition(
-            byte_offset=0,
-            line=target_line,
-            byte_column=0,
-            unicode_column=0,
-            utf16_column=0
-        );
-    }
-
     let line_start: Int = 0;
     let current_line: Int = 0;
     while (line_start < text.length() && current_line < target_line) {
@@ -312,9 +302,6 @@ func report_error(pos: Position, name: String, details: String) -> Void {
     if (COLLECT_ERRORS_ONLY && GLOBAL_ERROR_COUNT >= 50) {
         return;
     }
-    if (pos.fn is null) { pos.fn = ""; }
-    if (pos.text is null) { pos.text = ""; }
-
     let error_key: String = pos.fn + ":" + pos.ln + ":" + pos.col + ":" + name + ":" + details;
     if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(); }
     let found = REPORTED_ERRORS;

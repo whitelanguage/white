@@ -716,8 +716,7 @@ func parse_type_member(ref p: Parser) -> NodeID {
         parser_advance(ref p); // skip ']'
     }
 
-    let s_len: Int = 0;
-    if (sizes is !null) { s_len = sizes.length(); }
+    let s_len: Int = sizes.length();
     let s_i: Int = s_len - 1;
     while (s_i >= 0) {
         let s_tok: Token = sizes[s_i];

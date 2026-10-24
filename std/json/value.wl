@@ -31,12 +31,10 @@ class Object {
     }
 
     func contains(key: String) -> Bool {
-        if (key is null) { return false; }
         return self.__values.contains_key(key);
     }
 
     func find(key: String) -> Optional(Value) {
-        if (key is null) { return null; }
         let value: Value = self.__values.get(key)?;
         catch(err) { return null; }
         return value;
@@ -52,9 +50,6 @@ class Object {
 
     func set(key: String, value: Value) -> Void? {
     // copy new keys because Dict hashes the stored bytes
-        if (key is null || value is null) {
-            throw JsonError.InvalidValue;
-        }
         if (!self.__values.contains_key(key)) {
             let stored_key: String = runtime_string.copy(key)?;
             self.__keys.append(stored_key);
@@ -149,7 +144,7 @@ class Value {
             throw JsonError.TypeMismatch;
         }
         let source: String = self.__number_text;
-        if (source is null || source.length() == 0) { throw JsonError.InvalidNumber; }
+        if (source.length() == 0) { throw JsonError.InvalidNumber; }
 
         let negative: Bool = source[0] == '-';
         let i: Int = 0;
@@ -241,9 +236,6 @@ class Value {
     func append(value: Value) -> Void? {
     // append to an array value, other kinds report TypeMismatch
         let values: Vector(Value) = self.__array_values()?;
-        if (value is null) {
-            throw JsonError.InvalidValue;
-        }
         values.append(value);
         return;
     }
@@ -289,7 +281,7 @@ func __is_digit(value: Int) -> Bool {
 }
 
 func __parse_number(source: String) -> Float? {
-    if (source is null || source.length() == 0) {
+    if (source.length() == 0) {
         throw JsonError.InvalidNumber;
     }
     let i: Int = 0;
@@ -404,7 +396,7 @@ func integer(value: Long) -> Value? {
 }
 
 func string(value: String) -> Value? {
-    if (value is null || !value.is_valid_utf8()) {
+    if (!value.is_valid_utf8()) {
         throw JsonError.InvalidUtf8;
     }
     let copy: String = runtime_string.copy(value)?;

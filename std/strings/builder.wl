@@ -66,18 +66,13 @@ class Builder {
 
     func write(value: String) -> Void? {
     // append a complete UTF-8 string
-        if (value is null) {
-            throw Error.InvalidArgument;
-        }
         let length: Int = value.length();
         if (length == 0) { return; }
         self.__reserve(length)?;
         let storage: String = self.__buffer()?;
-        if (length > 0) {
-            let target: AnyPtr = runtime_string.data(storage);
-            let ptr target_bytes: Byte = target;
-            memory.mem_copy(ref target_bytes[self.__length], runtime_string.data(value), UIntSize(length));
-        }
+        let target: AnyPtr = runtime_string.data(storage);
+        let ptr target_bytes: Byte = target;
+        memory.mem_copy(ref target_bytes[self.__length], runtime_string.data(value), UIntSize(length));
         self.__length += length;
         runtime_string.set_length(storage, self.__length);
         return;

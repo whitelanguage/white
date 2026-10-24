@@ -74,8 +74,7 @@ func __quote_windows_arg(arg: String) -> String {
 
 func __windows_command_line(program: String, args: Vector(String)) -> String {
     let result: String = __quote_windows_arg(program);
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let count: Int = args.length();
     let i: Int = 0;
     while (i < count) {
         result += " " + __quote_windows_arg(args[i]);
@@ -104,8 +103,7 @@ func run(program: String, args: Vector(String)) -> Int? {
     if (!runtime_string.is_native_text(program) || program.length() == 0) {
         throw CoreError.InvalidArgument;
     }
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let count: Int = args.length();
     let arg_index: Int = 0;
     while (arg_index < count) {
         if (!runtime_string.is_native_text(args[arg_index])) { throw CoreError.InvalidArgument; }

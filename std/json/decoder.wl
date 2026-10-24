@@ -1,6 +1,5 @@
 // std/json/decoder.wl
 
-import Error from "errors"
 import Builder from "strings"
 import JsonError from "errors.wl"
 import Value from "value.wl"
@@ -55,7 +54,7 @@ class Decoder {
     }
 
     func __peek() -> Int {
-        if (self.__source is null || self.__index >= self.__source.length()) { return -1; }
+        if (self.__index >= self.__source.length()) { return -1; }
         return Int(self.__source[self.__index]);
     }
 
@@ -246,9 +245,6 @@ class Decoder {
         }
 
         let source: String = self.__source[start:self.__index];
-        if (source is null) {
-            throw Error.OutOfMemory;
-        }
         return number_from_text(source)?;
     }
 
@@ -357,9 +353,6 @@ class Decoder {
         self.__error_line = 0;
         self.__error_column = 0;
 
-        if (self.__source is null) {
-            self.__fail(JsonError.InvalidValue)?;
-        }
         if (self.__max_depth < 1 || self.__max_depth > __MAX_DEPTH) {
             self.__fail(JsonError.InvalidOption)?;
         }

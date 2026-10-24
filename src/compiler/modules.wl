@@ -15,8 +15,7 @@ func precompile_ast(ref c: Compiler, node: NodeID, final_path: String, import_pr
 // imports must be bound before this module publishes its declarations
     let block: BlockNode = get_block_node(ref c.arena, node);
     let stmts: Vector(NodeID) = block.stmts;
-    let len: Int = 0;
-    if (stmts is !null) { len = stmts.length(); }
+    let len: Int = stmts.length();
 
     let imports: Vector(NodeID) = [];
     let i: Int = 0;
@@ -91,7 +90,7 @@ func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: 
 
 func bind_loaded_prelude(ref c: Compiler, path: String, pos: Position) -> Void {
     let final_path: String = resolve_import_path(ref c, path, pos);
-    if (final_path is null || final_path.length() == 0) {
+    if (final_path.length() == 0) {
         return;
     }
     let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
@@ -116,11 +115,11 @@ func bind_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
 
     let imports: Vector(NodeID) = module.imports;
     let i: Int = 0;
-    while (imports is !null && i < imports.length()) {
+    while (i < imports.length()) {
         let node: ImportNode = get_import_node(ref c.arena, imports[i]);
         if (node.symbols.length() != 0) {
             let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
-            if (final_path is !null && final_path.length() > 0) {
+            if (final_path.length() > 0) {
                 let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
                 if ((loaded is !null)) {
                     let meta_loaded: StringConstant = loaded;
@@ -156,11 +155,11 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
 
     let imports: Vector(NodeID) = module.imports;
     let i: Int = 0;
-    while (imports is !null && i < imports.length()) {
+    while (i < imports.length()) {
         let node: ImportNode = get_import_node(ref c.arena, imports[i]);
         let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
 
-        if (final_path is !null && final_path.length() > 0) {
+        if (final_path.length() > 0) {
             let loaded: Optional(StringConstant) = c.imported_modules.lookup(final_path);
             if ((loaded is !null)) {
                 let meta_loaded: StringConstant = loaded;
@@ -206,7 +205,7 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
 func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let raw_path: String = node.path_tok.value;
     let final_path: String = resolve_import_path(ref c, raw_path, node.pos);
-    if (final_path is null || final_path.length() == 0) {
+    if (final_path.length() == 0) {
         return;
     }
 

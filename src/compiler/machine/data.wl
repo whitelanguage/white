@@ -102,7 +102,7 @@ func machine_write_initializer(
     if (constant.kind == WirConstKind.Zero) { return ""; }
 
     if (constant.kind == WirConstKind.Storage) {
-        if (constant.offsets is null || constant.offsets.length() != constant.elements.length()) {
+        if (constant.offsets.length() != constant.elements.length()) {
             return "storage initializer has the wrong offset count";
         }
         let end: UInt64 = 0UL;

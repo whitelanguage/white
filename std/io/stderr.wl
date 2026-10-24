@@ -7,8 +7,6 @@ import "internal/runtime/string" as runtime_string
 
 func write(value: String) -> Int? {
 // write once and return the number of bytes accepted by the operating system
-    if (value is null) { value = "null"; }
-
     let count: Int = standard_io.write(
 
         standard_io.STDERR,
@@ -20,7 +18,6 @@ func write(value: String) -> Int? {
 
 func write_all(value: String) -> Void? {
 // write the complete string or return an I/O error
-    if (value is null) { value = "null"; }
     standard_io.write_all(standard_io.STDERR, runtime_string.data(value), value.length())?;
     return;
 }
