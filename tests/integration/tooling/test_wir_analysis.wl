@@ -11,6 +11,7 @@ import * from "../../../src/frontend/ast.wl"
 import * from "../../../src/frontend/arena.wl"
 import * from "../../../src/frontend/tokens.wl"
 import Position, GLOBAL_ERROR_COUNT from "../../../src/frontend/diagnostics.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func analysis_token(value: String) -> Token {
     return Token(type=TOK_IDENTIFIER, value=value, line=1, col=1);
@@ -24,10 +25,25 @@ func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let structs: Dict(String, StructInfo) = Dict();
     let struct_ids: Dict(Int, StructInfo) = Dict();
-    let info: StructInfo = StructInfo(name="Pair", type_id=100, fields=null, llvm_name="%struct.Pair", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false);
+    let info: StructInfo = StructInfo(name="Pair", type_id=100, fields=null, llvm_name="%struct.Pair", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false);
     structs.put("Pair", info);
     struct_ids.put(100, info);
-    let source: Compiler = Compiler(arena=arena, struct_table=structs, struct_id_map=struct_ids, named_types=Dict(), named_type_ids=Dict(), generic_bindings=Dict(), ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), current_package_prefix="", all_modules=[]);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = arena;
+    source.struct_table = structs;
+    source.struct_id_map = struct_ids;
+    source.named_types = Dict();
+    source.named_type_ids = Dict();
+    source.generic_bindings = Dict();
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.vector_base_map = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.current_package_prefix = "";
+    source.all_modules = [];
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
     let fields: Vector(ParamNode) = [
         ParamNode(type=NODE_PARAM, name_tok=analysis_token("left"), type_tok=analysis_type(arena, "Int", pos), pos=pos, pass_mode=PARAM_VALUE, is_variadic=false, default_val=NO_NODE),
@@ -69,7 +85,7 @@ func main() -> Int {
         return 1;
     }
 
-    let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=null, llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=null, interfaces=null);
+    let class_info: StructInfo = StructInfo(name="Box", type_id=101, fields=null, llvm_name="%class.Box", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=null, interfaces=null, vtable_name="", parent_id=0, ann_flags=0, is_error=false, compiler_link_name="", layout_ready=false);
     source.struct_table.put("Box", class_info);
     source.struct_id_map.put(101, class_info);
     let default_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=Token(type=TOK_INT, value="1", line=1, col=1), pos=pos));

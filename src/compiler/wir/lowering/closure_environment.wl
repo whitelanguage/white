@@ -104,7 +104,10 @@ func wir_closure_environment_drop(
         owned_values=[],
         errors=[],
         terminated=false,
-        next_block=0
+        next_block=0,
+        binding_indices=null,
+        indexed_bindings=0,
+        reference_checked=false
     );
     let environment: WirValueID = wir_cast(ref program, entry, function.parameters[0], wir_pointer_type(ref program, env_type), "environment", no_wir_location());
 

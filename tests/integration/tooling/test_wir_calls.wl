@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func call_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -23,10 +24,14 @@ func call_token(kind: Int, value: String) -> Token {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), func_table=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.func_table = Dict();
     let pos: Position = call_position();
     let abs_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let abs_info: FuncInfo = FuncInfo(name="abs", base_name="abs", ret_type=TYPE_INT, arg_types=abs_args, arg_names=["value"], is_varargs=false, abi_name="C");
+    let abs_info: FuncInfo = FuncInfo(name="abs", base_name="abs", ret_type=TYPE_INT, arg_types=abs_args, arg_names=["value"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     source.func_table.put("abs", abs_info);
 
     let callee: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=call_token(TOK_IDENTIFIER, "abs"), pos=pos));
@@ -35,7 +40,7 @@ func main() -> Int {
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[call, result]));
 
-    let caller: FuncInfo = FuncInfo(name="call_abs", base_name="call_abs", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let caller: FuncInfo = FuncInfo(name="call_abs", base_name="call_abs", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, caller, body);

@@ -10,7 +10,7 @@ func promote_to_float(ref c: Compiler, res: CompileResult) -> CompileResult {
         let fpext_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + fpext_reg + " = fpext float " + input_reg + " to double\n");
 
-        return CompileResult(reg=fpext_reg, type=TYPE_FLOAT);
+        return CompileResult(reg=fpext_reg, type=TYPE_FLOAT, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (res.type == TYPE_BOOL) {
@@ -20,7 +20,7 @@ func promote_to_float(ref c: Compiler, res: CompileResult) -> CompileResult {
         let uitofp_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + uitofp_reg + " = uitofp i32 " + zext_reg + " to double\n");
 
-        return CompileResult(reg=uitofp_reg, type=TYPE_FLOAT);
+        return CompileResult(reg=uitofp_reg, type=TYPE_FLOAT, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     let ty_str: String = get_llvm_type_str(ref c, res.type);
@@ -29,13 +29,13 @@ func promote_to_float(ref c: Compiler, res: CompileResult) -> CompileResult {
     if (is_signed_integer(res.type)) {
         write_ir(ref c, c.indent + fp_reg + " = sitofp " + ty_str + " " + input_reg + " to double\n");
 
-        return CompileResult(reg=fp_reg, type=TYPE_FLOAT);
+        return CompileResult(reg=fp_reg, type=TYPE_FLOAT, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (is_unsigned_integer(res.type)) {
         write_ir(ref c, c.indent + fp_reg + " = uitofp " + ty_str + " " + input_reg + " to double\n");
 
-        return CompileResult(reg=fp_reg, type=TYPE_FLOAT);
+        return CompileResult(reg=fp_reg, type=TYPE_FLOAT, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     return res;
@@ -53,19 +53,19 @@ func promote_to_long(ref c: Compiler, res: CompileResult) -> CompileResult {
     if (res.type == TYPE_BOOL) {
         write_ir(ref c, c.indent + ext_reg + " = zext i1 " + input_reg + " to i64\n");
 
-        return CompileResult(reg=ext_reg, type=TYPE_LONG);
+        return CompileResult(reg=ext_reg, type=TYPE_LONG, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (is_signed_integer(res.type)) {
         write_ir(ref c, c.indent + ext_reg + " = sext " + ty_str + " " + input_reg + " to i64\n");
 
-        return CompileResult(reg=ext_reg, type=TYPE_LONG);
+        return CompileResult(reg=ext_reg, type=TYPE_LONG, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (is_unsigned_integer(res.type)) {
         write_ir(ref c, c.indent + ext_reg + " = zext " + ty_str + " " + input_reg + " to i64\n");
 
-        return CompileResult(reg=ext_reg, type=TYPE_LONG);
+        return CompileResult(reg=ext_reg, type=TYPE_LONG, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     return res;
@@ -86,7 +86,7 @@ func promote_to_int(ref c: Compiler, res: CompileResult) -> CompileResult {
         write_ir(ref c, c.indent + ext_reg + " = zext " + ty_str + " " + input_reg + " to i32\n");
     }
 
-    return CompileResult(reg=ext_reg, type=TYPE_INT);
+    return CompileResult(reg=ext_reg, type=TYPE_INT, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func widen_int(ref c: Compiler, value: CompileResult, target: Int) -> CompileResult {
@@ -103,7 +103,7 @@ func widen_int(ref c: Compiler, value: CompileResult, target: Int) -> CompileRes
 
     write_ir(ref c, c.indent + result + " = " + op + " " + source_type + " " + value.reg + " to " + target_type + "\n");
 
-    return CompileResult(reg=result, type=target, origin_type=value.type, owns_ref=value.owns_ref);
+    return CompileResult(reg=result, type=target, origin_type=value.type, owns_ref=value.owns_ref, is_const_access=false);
 }
 
 func combine_i128_words(ref c: Compiler, low: String, high: String) -> String {

@@ -10,6 +10,7 @@ import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
 import WirLLVMResult, emit_wir_llvm from "../../../src/compiler/wir/backend/llvm.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func print_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -44,16 +45,28 @@ func main() -> Int {
     let links: Dict(String, String) = Dict();
     let bytes_args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let int_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    functions.put("main", FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name=""));
-    functions.put("print", FuncInfo(name="print", base_name="print", ret_type=TYPE_VOID, arg_types=[], arg_names=[], is_varargs=true, abi_name="", ann_flags=FLAG_ANN_INTRINSIC));
-    functions.put("runtime.write_bytes", FuncInfo(name="runtime.write_bytes", base_name="write_bytes", ret_type=TYPE_VOID, arg_types=bytes_args, arg_names=["data", "length"], is_varargs=false, abi_name="C"));
-    functions.put("runtime.write_int", FuncInfo(name="runtime.write_int", base_name="write_int", ret_type=TYPE_VOID, arg_types=int_args, arg_names=["value"], is_varargs=false, abi_name="C"));
+    functions.put("main", FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    functions.put("print", FuncInfo(name="print", base_name="print", ret_type=TYPE_VOID, arg_types=[], arg_names=[], is_varargs=true, abi_name="", ann_flags=FLAG_ANN_INTRINSIC, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    functions.put("runtime.write_bytes", FuncInfo(name="runtime.write_bytes", base_name="write_bytes", ret_type=TYPE_VOID, arg_types=bytes_args, arg_names=["data", "length"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    functions.put("runtime.write_int", FuncInfo(name="runtime.write_int", base_name="write_int", ret_type=TYPE_VOID, arg_types=int_args, arg_names=["value"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     links.put("print_bytes", "runtime.write_bytes");
     links.put("print_int", "runtime.write_int");
 
     let symbols: Dict(String, SymbolInfo) = Dict();
     let aliases: Dict(String, String) = Dict();
-    let source: Compiler = Compiler(arena=arena, symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, func_table=functions, compiler_link=links, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=Dict(), generic_bindings=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = arena;
+    source.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = symbols;
+    source.func_table = functions;
+    source.compiler_link = links;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = aliases;
+    source.global_var_aliases = aliases;
+    source.named_type_ids = Dict();
+    source.generic_bindings = Dict();
     let pos: Position = print_position();
     let arguments: Vector(ArgNode) = [
         ArgNode(name="", val=print_string(arena, "value", pos), is_spread=false),

@@ -11,6 +11,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
 import wir_find_function from "../../../src/compiler/wir/lowering/declarations.wl"
 import * from "../../../src/compiler/wir/backend/llvm.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func class_token(value: String) -> Token {
     return Token(type=TOK_IDENTIFIER, value=value, line=1, col=1);
@@ -24,21 +25,21 @@ func main() -> Int {
     let functions: Dict(String, FuncInfo) = Dict();
     let int_type_node: NodeID = add_var_access_node(ref arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=class_token("Int"), pos=pos));
     let interface_method: MethodDefNode = MethodDefNode(type=NODE_METHOD_DEF, pos=pos, name_tok=class_token("get_value"), type_params=[], params=[], return_type=int_type_node, body=NO_NODE, is_override=false, annotations=[]);
-    let interface_info: StructInfo = StructInfo(name="Reader", type_id=101, fields=[], llvm_name="", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=true, vtable=[interface_method], interfaces=[]);
+    let interface_info: StructInfo = StructInfo(name="Reader", type_id=101, fields=[], llvm_name="", init_body=NO_NODE, is_class=false, is_enum=false, is_interface=true, vtable=[interface_method], interfaces=[], vtable_name="", parent_id=0, ann_flags=0, is_error=false, compiler_link_name="", layout_ready=false);
     let fields: Vector(Struct) = [
-        FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true),
-        FieldInfo(name="value", type=TYPE_INT, llvm_type="", offset=1, is_const=false),
-        FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=2, is_const=false)
+        FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true, default_val=NodeID(0U)),
+        FieldInfo(name="value", type=TYPE_INT, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U)),
+        FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=2, is_const=false, default_val=NodeID(0U))
     ];
-    let class_info: StructInfo = StructInfo(name="Box", type_id=100, fields=fields, llvm_name="", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=[], interfaces=[TypeListNode(type=101)]);
+    let class_info: StructInfo = StructInfo(name="Box", type_id=100, fields=fields, llvm_name="", init_body=NO_NODE, is_class=true, is_enum=false, is_interface=false, vtable=[], interfaces=[TypeListNode(type=101, pass_mode=0)], vtable_name="", parent_id=0, ann_flags=0, is_error=false, compiler_link_name="", layout_ready=false);
     let args: Vector(Struct) = [TypeListNode(type=100, pass_mode=PARAM_VALUE)];
-    let method_info: FuncInfo = FuncInfo(name="Box.get_value", base_name="get_value", ret_type=TYPE_INT, arg_types=args, arg_names=["self"], is_varargs=false, abi_name="");
-    let read_info: FuncInfo = FuncInfo(name="read", base_name="read", ret_type=TYPE_INT, arg_types=args, arg_names=["box"], is_varargs=false, abi_name="");
+    let method_info: FuncInfo = FuncInfo(name="Box.get_value", base_name="get_value", ret_type=TYPE_INT, arg_types=args, arg_names=["self"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let read_info: FuncInfo = FuncInfo(name="read", base_name="read", ret_type=TYPE_INT, arg_types=args, arg_names=["box"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let interface_args: Vector(Struct) = [TypeListNode(type=101, pass_mode=PARAM_VALUE)];
-    let read_interface_info: FuncInfo = FuncInfo(name="read_interface", base_name="read_interface", ret_type=TYPE_INT, arg_types=interface_args, arg_names=["reader"], is_varargs=false, abi_name="");
-    let make_box_info: FuncInfo = FuncInfo(name="make_box", base_name="make_box", ret_type=100, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
-    let make_reader_info: FuncInfo = FuncInfo(name="make_reader", base_name="make_reader", ret_type=101, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
-    let allocator_info: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C");
+    let read_interface_info: FuncInfo = FuncInfo(name="read_interface", base_name="read_interface", ret_type=TYPE_INT, arg_types=interface_args, arg_names=["reader"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let make_box_info: FuncInfo = FuncInfo(name="make_box", base_name="make_box", ret_type=100, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let make_reader_info: FuncInfo = FuncInfo(name="make_reader", base_name="make_reader", ret_type=101, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let allocator_info: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     class_info.vtable.append(method_info);
     structs.put("Box", class_info);
     structs.put("Reader", interface_info);
@@ -87,7 +88,29 @@ func main() -> Int {
     let modules: Vector(ParsedModule) = [ParsedModule(path="memory.wl", prefix="", dir="", is_package=false, ast=root, visible=Dict(), namespaces=Dict(), types=Dict(), funcs=Dict(), globals=Dict(), imports=[])];
     let links: Dict(String, String) = Dict();
     links.put("memory_alloc", "memory_alloc");
-    let source: Compiler = Compiler(arena=arena, struct_table=structs, struct_id_map=struct_ids, func_table=functions, compiler_link=links, ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), named_type_ids=Dict(), generic_bindings=Dict(), generic_instance_templates=Dict(), generic_instance_bindings=Dict(), current_file_visible_prefixes=Dict(), current_file_type_aliases=Dict(), current_file_func_aliases=Dict(), current_file_global_aliases=Dict(), global_var_aliases=Dict(), global_symbol_table=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = arena;
+    source.struct_table = structs;
+    source.struct_id_map = struct_ids;
+    source.func_table = functions;
+    source.compiler_link = links;
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.vector_base_map = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.named_type_ids = Dict();
+    source.generic_bindings = Dict();
+    source.generic_instance_templates = Dict();
+    source.generic_instance_bindings = Dict();
+    source.current_file_visible_prefixes = Dict();
+    source.current_file_type_aliases = Dict();
+    source.current_file_func_aliases = Dict();
+    source.current_file_global_aliases = Dict();
+    source.global_var_aliases = Dict();
+    source.global_symbol_table = Dict();
     let result: WirLoweringResult = wir_lower_program(ref source, modules, "x86_64-pc-windows-msvc", 64);
     if (result.errors.length() != 0) {
         print("FAIL: class method lowering failed: ", result.errors[0]);

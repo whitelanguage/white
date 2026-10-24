@@ -12,6 +12,7 @@ import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func ownership_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -58,21 +59,32 @@ func ownership_opcode_count(program: WirModule, function_id: WirFuncID, opcode: 
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict(), func_table=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.vector_base_map = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.struct_id_map = Dict();
+    source.named_type_ids = Dict();
+    source.func_table = Dict();
     let pos: Position = ownership_position();
     let holder_type: Int = 103;
     let string_array_type: Int = 104;
-    source.struct_id_map.put(TYPE_STRING, StructInfo(name="$String", type_id=TYPE_STRING, fields=[], is_class=false, is_enum=false, is_interface=false));
-    let fields: Vector(Struct) = [FieldInfo(name="text", type=TYPE_STRING, llvm_type="", offset=0, is_const=false)];
-    source.struct_id_map.put(holder_type, StructInfo(name="Holder", type_id=holder_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    source.struct_id_map.put(TYPE_STRING, StructInfo(name="$String", type_id=TYPE_STRING, fields=[], is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
+    let fields: Vector(Struct) = [FieldInfo(name="text", type=TYPE_STRING, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U))];
+    source.struct_id_map.put(holder_type, StructInfo(name="Holder", type_id=holder_type, fields=fields, is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
     source.array_info_map.put(string_array_type, ArrayInfo(base_type=TYPE_STRING, size=2, llvm_name=""));
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
-    let string_info: FuncInfo = FuncInfo(name="copy_string", base_name="copy_string", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
-    let holder_info: FuncInfo = FuncInfo(name="copy_holder", base_name="copy_holder", ret_type=holder_type, arg_types=[TypeListNode(type=holder_type, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
-    let array_info: FuncInfo = FuncInfo(name="copy_string_array", base_name="copy_string_array", ret_type=string_array_type, arg_types=[TypeListNode(type=string_array_type, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
-    let discard_info: FuncInfo = FuncInfo(name="discard_string", base_name="discard_string", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let string_info: FuncInfo = FuncInfo(name="copy_string", base_name="copy_string", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let holder_info: FuncInfo = FuncInfo(name="copy_holder", base_name="copy_holder", ret_type=holder_type, arg_types=[TypeListNode(type=holder_type, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let array_info: FuncInfo = FuncInfo(name="copy_string_array", base_name="copy_string_array", ret_type=string_array_type, arg_types=[TypeListNode(type=string_array_type, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let discard_info: FuncInfo = FuncInfo(name="discard_string", base_name="discard_string", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     source.func_table.put("copy_string", string_info);
     let string_id: WirFuncID = wir_lower_function_body(ref types, ref source, ref program, string_info, ownership_copy_body(source.arena, "value", pos));
     let holder_id: WirFuncID = wir_lower_function_body(ref types, ref source, ref program, holder_info, ownership_copy_body(source.arena, "value", pos));

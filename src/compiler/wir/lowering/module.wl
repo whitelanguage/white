@@ -60,7 +60,14 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> Optional(Fun
         arg_names=argument_names,
         is_varargs=node.is_varargs,
         abi_name=node.abi_name,
-        mutates_self=false
+        mutates_self=false,
+        ann_flags=0,
+        compiler_link_name="",
+        variadic_param=0,
+        default_args=[],
+        ref_body=NodeID(0U),
+        ref_context=null,
+        ref_bindings=null
     );
     source.func_table.put(key, created);
     return created;
@@ -127,7 +134,7 @@ func wir_register_enum(ref types: WirTypeMap, ref source: Compiler, node: EnumDe
         }
         types.enum_values.put(name + "." + field.name_tok.value, WirEnumValue(source_type=meta_info.type_id, value=value));
         if record_fields {
-            meta_info.fields.append(FieldInfo(name=field.name_tok.value, type=meta_info.type_id, llvm_type="i32", offset=Int(value), is_const=true));
+            meta_info.fields.append(FieldInfo(name=field.name_tok.value, type=meta_info.type_id, llvm_type="i32", offset=Int(value), is_const=true, default_val=NodeID(0U)));
         }
         value++;
         i++;

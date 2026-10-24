@@ -10,6 +10,7 @@ import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
 import * from "../../../src/compiler/wir/pipeline.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func program_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -53,12 +54,23 @@ func program_contains(text: String, needle: String) -> Bool {
 func main() -> Int {
     let arena: AstArena = new_ast_arena();
     let functions: Dict(String, FuncInfo) = Dict();
-    functions.put("main", FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name=""));
-    functions.put("lib.answer", FuncInfo(name="lib.answer", base_name="answer", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name=""));
+    functions.put("main", FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    functions.put("lib.answer", FuncInfo(name="lib.answer", base_name="answer", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
 
     let aliases: Dict(String, String) = Dict();
     aliases.put("answer", "lib.answer");
-    let source: Compiler = Compiler(arena=arena, symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=Dict(), func_table=functions, current_package_prefix="", current_file_global_aliases=Dict(), global_var_aliases=Dict(), named_type_ids=Dict(), generic_bindings=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = arena;
+    source.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = Dict();
+    source.func_table = functions;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = Dict();
+    source.global_var_aliases = Dict();
+    source.named_type_ids = Dict();
+    source.generic_bindings = Dict();
     let pos: Position = program_position();
 
     let answer_value: NodeID = add_int_node(ref arena, IntNode(type=NODE_INT, tok=program_token(TOK_INT, "42"), pos=pos));

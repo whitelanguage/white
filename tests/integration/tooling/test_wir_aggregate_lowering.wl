@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func aggregate_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -27,9 +28,15 @@ func aggregate_access(arena: AstArena, name: String, pos: Position) -> NodeID {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict());
-    let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false)];
-    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.struct_id_map = Dict();
+    source.named_type_ids = Dict();
+    let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U)), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U))];
+    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=fields, is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
     source.array_info_map.put(104, ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
 
     let pos: Position = aggregate_position();
@@ -42,7 +49,7 @@ func main() -> Int {
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[set_x, set_value, return_value]));
 
     let args: Vector(Struct) = [TypeListNode(type=103, pass_mode=PARAM_VALUE), TypeListNode(type=104, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="aggregate_lowering", base_name="aggregate_lowering", ret_type=TYPE_INT, arg_types=args, arg_names=["point", "values", "i"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="aggregate_lowering", base_name="aggregate_lowering", ret_type=TYPE_INT, arg_types=args, arg_names=["point", "values", "i"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);

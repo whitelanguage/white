@@ -120,11 +120,20 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
             return false;
         }
 
-        fields.append(FieldInfo(name=name, type=type_id, llvm_type="", offset=i, is_const=false));
+        fields.append(FieldInfo(name=name, type=type_id, llvm_type="", offset=i, is_const=false, default_val=parameter.default_val));
         i++;
     }
 
     meta_info.fields = fields;
+    let has_defaults = has_node(node.body);
+    i = 0;
+    while (i < parameters.length()) {
+        if (has_node(parameters[i].default_val)) { has_defaults = true; }
+        i++;
+    }
+    if has_defaults {
+        c.struct_contexts.put(meta_info.type_id, capture_type_context(ref c));
+    }
     meta_info.layout_ready = true;
     store_struct(ref c, meta_info);
     return true;
@@ -251,7 +260,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
         let i: Int = 0;
         while (meta_parent_info.fields is !null && i < meta_parent_info.fields.length()) {
             let field: FieldInfo = meta_parent_info.fields[i];
-            fields.append(FieldInfo(name=field.name, type=field.type, llvm_type="", offset=field.offset, is_const=field.is_const));
+            fields.append(FieldInfo(name=field.name, type=field.type, llvm_type="", offset=field.offset, is_const=field.is_const, default_val=NodeID(0U)));
             names.put(field.name, StringConstant(id=0, value=field.name));
             offset++;
             i++;
@@ -262,7 +271,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
             i++;
         }
     } else {
-        fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true));
+        fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true, default_val=NodeID(0U)));
         names.put("_vptr", StringConstant(id=0, value="_vptr"));
         offset = 1;
     }
@@ -293,7 +302,7 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
             }
         }
         names.put(field_name, StringConstant(id=0, value=field_name));
-        fields.append(FieldInfo(name=field_name, type=field_type, llvm_type="", offset=offset, is_const=declaration.is_const));
+        fields.append(FieldInfo(name=field_name, type=field_type, llvm_type="", offset=offset, is_const=declaration.is_const, default_val=NodeID(0U)));
         offset++;
         field_index++;
     }

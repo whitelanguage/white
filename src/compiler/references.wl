@@ -190,7 +190,8 @@ func ref_plain_drop(ref c: Compiler, type_id: Int, depth: Int) -> Bool {
 
 func has_index_refs(ref c: Compiler) -> Bool {
 // skip the extra body walk in files which only use stable slots or explicit pointers
-    if (c.ref_files is null) {
+    if (!c.ref_index_ready) {
+        c.ref_index_ready = true;
         c.ref_files = Dict();
         c.ref_targets = Dict();
         c.ref_scan = 0;
@@ -476,9 +477,13 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     let facts = c.flow_types;
     let exposed = c.flow_exposed;
     let bindings = c.generic_bindings;
-    let callee_bindings = info.ref_bindings;
-    if (callee_bindings is null) { callee_bindings = Dict(); }
-    let context = use_generic_context(ref c, info.ref_context, callee_bindings);
+    let saved_context = info.ref_context;
+    if (saved_context is null) { return false; }
+    let body_context: GenericTemplate = saved_context;
+    let saved_bindings = info.ref_bindings;
+    let callee_bindings: Dict(String, SymbolInfo) = Dict();
+    if (saved_bindings is !null) { callee_bindings = saved_bindings; }
+    let context = use_generic_context(ref c, body_context, callee_bindings);
     let frame = state.frame;
     let loop_depth = state.loop_depth;
     state.next_frame++;
@@ -487,13 +492,13 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
     state.calls.append(info.name);
     c.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
     c.scope_stack = [];
-    c.hoist_scope = Scope();
+    c.hoist_scope = Scope(table=null, parent=0, gc_vars=[], depth=0);
     c.hoist_scope_stack = [];
     i = 0;
     while (i < info.arg_names.length()) {
         let param: TypeListNode = info.arg_types[i];
         let slot = "arg." + state.frame + "." + i;
-        scope_put(c.symbol_table, info.arg_names[i], SymbolInfo(reg=slot, type=param.type, is_reference=param.pass_mode == PARAM_REF));
+        scope_put(c.symbol_table, info.arg_names[i], SymbolInfo(reg=slot, type=param.type, is_reference=param.pass_mode == PARAM_REF, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, func_arg_types=[], arg_names=[], variadic_param=0));
         if (ref_storage(ref c, param.type)) {
             if (param.pass_mode == PARAM_REF && sources[i].length() != 0) { state.slot_refs.put(slot, sources[i]); }
             ref_set_slot(ref state, slot, owners[i]);
@@ -734,7 +739,7 @@ func ref_drop_effects(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
 func ref_drop_record(ref c: Compiler, ref state: RefCheck, record: StructInfo, pos: Position, depth: Int) -> Bool {
     let deinit = c.func_table.lookup(record.name + "_$deinit");
     if ((deinit is !null)) {
-        let call = CallNode(callee=NO_NODE, args=[], pos=pos);
+        let call = CallNode(callee=NO_NODE, args=[], pos=pos, type=0, type_args=[], preserve_fallible=false);
         if (!ref_call_body(ref c, ref state, call, deinit)) { return false; }
     }
     let i = 0;
@@ -879,7 +884,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
             }
             ref_set_slot(ref state, slot, ref_owner(ref c, ref state, declaration.value));
         }
-        scope_put(c.symbol_table, declaration.name_tok.value, SymbolInfo(reg=slot, type=type, is_const=declaration.is_const, is_reference=reference));
+        scope_put(c.symbol_table, declaration.name_tok.value, SymbolInfo(reg=slot, type=type, is_const=declaration.is_const, is_reference=reference, origin_type=0, is_const_access=false, is_ref_param=false, func_arg_types=[], arg_names=[], variadic_param=0));
         if ((c.func_ret_map.lookup(type) is !null) && has_node(declaration.value)) {
             // declarations keep a known direct target, assignments clear it conservatively
             let known = ref_call_info(ref c, declaration.value);
@@ -947,7 +952,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         let call = get_call_node(ref c.arena, node);
         ref_check_node(ref c, ref state, call.callee);
         let active = state.active.length();
-        let info: FuncInfo = FuncInfo();
+        let info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
         let candidates = false;
         let probe = 0;
         while (call.args is !null && probe < call.args.length()) {
@@ -986,7 +991,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
                 if ((signature is !null)) {
                     let ordered = bind_callable_args(arguments, signature, call.pos);
                     if (has_bound_args(ordered)) { arguments = ordered.ordered; }
-                    info = FuncInfo(name="$dynamic", arg_types=signature.func_arg_types, arg_names=signature.arg_names);
+                    info = FuncInfo(name="$dynamic", arg_types=signature.func_arg_types, arg_names=signature.arg_names, base_name="", ret_type=0, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
                 }
             }
         }
@@ -1225,9 +1230,9 @@ func check_body_refs(ref c: Compiler, body: NodeID, found_inputs: Optional(Dict(
     let exposed = c.flow_exposed;
     c.symbol_table = Scope(table=inputs, parent=-1, gc_vars=[], depth=0);
     c.scope_stack = [];
-    c.hoist_scope = Scope();
+    c.hoist_scope = Scope(table=null, parent=0, gc_vars=[], depth=0);
     c.hoist_scope_stack = [];
-    let state = RefCheck(active=[], parents=[0], escaped=[true], slots=Dict(), slot_names=[], slot_refs=Dict(), allocations=Dict(), collecting=true, calls=[], budget=20000, functions=Dict());
+    let state = RefCheck(active=[], parents=[0], escaped=[true], slots=Dict(), slot_names=[], slot_refs=Dict(), allocations=Dict(), collecting=true, calls=[], budget=20000, functions=Dict(), loop_depth=0, frame=0, next_frame=0);
     c.flow_types = [];
     c.flow_exposed = [];
     ref_check_node(ref c, ref state, body);

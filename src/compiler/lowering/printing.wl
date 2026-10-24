@@ -110,7 +110,7 @@ func compile_interface_display(ref c: Compiler, reg: String, info: StructInfo, p
     write_ir(ref c, c.indent + text + " = call %struct.$String* " + method_ptr + "(i8* " + object + ")\n");
 
     compile_print(ref c, text, TYPE_STRING, pos, TYPE_STRING);
-    emit_release_owned(ref c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true));
+    emit_release_owned(ref c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false));
 
     write_ir(ref c, c.indent + "br label %" + end_label + "\n");
     write_ir(ref c, "\n" + end_label + ":\n");
@@ -124,7 +124,7 @@ func compile_display(ref c: Compiler, reg: String, info: StructInfo, pos: Positi
     }
 
     let method_index: Int = 0;
-    let method_info: FuncInfo = FuncInfo();
+    let method_info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     while (info.vtable is !null && method_index < info.vtable.length()) {
         let candidate: FuncInfo = info.vtable[method_index];
         if (candidate.base_name == "display") {
@@ -181,7 +181,7 @@ func compile_display(ref c: Compiler, reg: String, info: StructInfo, pos: Positi
     write_ir(ref c, c.indent + text + " = call %struct.$String* " + method_ptr + "(" + info.llvm_name + "* " + reg + ")\n");
 
     compile_print(ref c, text, TYPE_STRING, pos, TYPE_STRING);
-    emit_release_owned(ref c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true));
+    emit_release_owned(ref c, CompileResult(reg=text, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false));
 
     write_ir(ref c, c.indent + "br label %" + end_label + "\n");
     write_ir(ref c, "\n" + end_label + ":\n");
@@ -200,7 +200,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
     }
 
     if (type_id == TYPE_INT128 || type_id == TYPE_UINT128) {
-        let formatted: CompileResult = convert_to_string(ref c, CompileResult(reg=reg, type=type_id, origin_type=origin_id));
+        let formatted: CompileResult = convert_to_string(ref c, CompileResult(reg=reg, type=type_id, origin_type=origin_id, owns_ref=false, is_const_access=false));
         compile_print(ref c, formatted.reg, TYPE_STRING, pos, TYPE_STRING);
         emit_release_owned(ref c, formatted);
         return;
@@ -251,7 +251,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
     }
 
     if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) {
-        let formatted: CompileResult = convert_to_string(ref c, CompileResult(reg=reg, type=type_id, origin_type=origin_id));
+        let formatted: CompileResult = convert_to_string(ref c, CompileResult(reg=reg, type=type_id, origin_type=origin_id, owns_ref=false, is_const_access=false));
         compile_print(ref c, formatted.reg, TYPE_STRING, pos, TYPE_STRING);
         emit_release_owned(ref c, formatted);
         return;
@@ -259,7 +259,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
 
     if (is_primitive_type(type_id)) {
         if (type_id == TYPE_INT || type_id == TYPE_INT8 || type_id == TYPE_INT16 || type_id == TYPE_UINT16) {
-            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id);
+            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id, owns_ref=false, is_const_access=false);
             if (type_id != TYPE_INT) { temp_res = promote_to_int(ref c, temp_res); }
             let hook_int: String = get_mangled_symbol(ref c, "print_int", pos);
 
@@ -268,7 +268,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
             return;
         }
         if (type_id == TYPE_LONG || type_id == TYPE_UINT32 || type_id == TYPE_INTSIZE) {
-            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id);
+            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id, owns_ref=false, is_const_access=false);
             if (type_id != TYPE_LONG) { temp_res = promote_to_long(ref c, temp_res); }
             let hook_long: String = get_mangled_symbol(ref c, "print_long", pos);
 
@@ -277,7 +277,7 @@ func compile_print(ref c: Compiler, reg: String, type_id: Int, pos: Position, or
             return;
         }
         if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) {
-            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id);
+            let temp_res: CompileResult = CompileResult(reg=reg, type=type_id, origin_type=origin_id, owns_ref=false, is_const_access=false);
             if (type_id != TYPE_FLOAT) { temp_res = promote_to_float(ref c, temp_res); }
             let hook_float: String = get_mangled_symbol(ref c, "print_float", pos);
 
@@ -597,7 +597,7 @@ func compile_print_array_internal(ref c: Compiler, arr_reg: String, type_id: Int
     write_ir(ref c, c.indent + "call void @" + hook_raw_str + "(i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str_open_bracket, i32 0, i32 0), i32 1)\n");
 
     let size_val: String = next_reg(ref c);
-    let slice_parts: SliceParts = SliceParts();
+    let slice_parts: SliceParts = SliceParts(start="", length="", owner="", data_slot="", size_slot="", data="");
     if (arr_info.size == -1) {
         slice_parts = emit_slice_parts(ref c, arr_reg, type_id, pos);
         let slice_length: String = emit_size_to_int(ref c, slice_parts.length);

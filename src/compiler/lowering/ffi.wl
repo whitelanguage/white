@@ -82,7 +82,7 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
             return void_result();
         }
 
-        arg_types.append(TypeListNode(type=p_id));
+        arg_types.append(TypeListNode(type=p_id, pass_mode=0));
         arg_names.append(p.name_tok.value);
         if (p_idx > 0) { params_str += ", "; }
         params_str += get_llvm_type_str(ref c, p_id);
@@ -122,7 +122,7 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
         return void_result();
     }
 
-    c.func_table.put(full_func_name, FuncInfo(name=func_name, base_name=func_name, ret_type=ret_type_id, arg_types=arg_types, arg_names=arg_names, is_varargs=node.is_varargs, abi_name=abi_name, mutates_self=false));
+    c.func_table.put(full_func_name, FuncInfo(name=func_name, base_name=func_name, ret_type=ret_type_id, arg_types=arg_types, arg_names=arg_names, is_varargs=node.is_varargs, abi_name=abi_name, mutates_self=false, ann_flags=0, compiler_link_name="", variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     register_extern_library(ref c, node.link_name, node.pos);
     return void_result();
 }

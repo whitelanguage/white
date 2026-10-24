@@ -14,6 +14,7 @@ import * from "../../../src/compiler/wir/print.wl"
 import WirLLVMResult, emit_wir_llvm from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func fallible_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -36,8 +37,10 @@ func fallible_call(arena: AstArena, name: String, pos: Position) -> NodeID {
     return add_try_unwrap_node(ref arena, TryUnwrapNode(type=NODE_TRY_UNWRAP, expr=call, pos=pos));
 }
 
-func fallible_source(arena: AstArena) -> Compiler {
-    return Compiler(arena=arena, ptr_base_map=Dict(), fallible_cache=Dict(), fallible_base_map=Dict(), func_table=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), generic_type_names=Dict(), struct_id_map=Dict(), current_package_prefix="", type_counter=100);
+func fallible_source(arena: AstArena) -> Compiler? {
+    let source = new_fixture_compiler()?;
+    source.arena = arena;
+    return source;
 }
 
 func fallible_contains(text: String, needle: String) -> Bool {
@@ -59,13 +62,14 @@ func fallible_emits_llvm(program: WirModule) -> Bool {
 
 func check_propagation() -> Bool {
     let arena: AstArena = new_ast_arena();
-    let source: Compiler = fallible_source(arena);
+    let source: Compiler = fallible_source(arena)?;
+    catch(err) { return false; }
     let fallible_string: Int = get_fallible_type_id(ref source, TYPE_STRING);
-    source.func_table.put("read", FuncInfo(name="read", base_name="read", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="C"));
+    source.func_table.put("read", FuncInfo(name="read", base_name="read", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     let pos: Position = fallible_position();
     let result: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_call(arena, "read", pos), pos=pos));
     let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
-    let info: FuncInfo = FuncInfo(name="forward", base_name="forward", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="forward", base_name="forward", ret_type=fallible_string, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -79,16 +83,17 @@ func check_propagation() -> Bool {
 
 func check_catch() -> Bool {
     let arena: AstArena = new_ast_arena();
-    let source: Compiler = fallible_source(arena);
+    let source: Compiler = fallible_source(arena)?;
+    catch(err) { return false; }
     let fallible_void: Int = get_fallible_type_id(ref source, TYPE_VOID);
-    source.func_table.put("flush", FuncInfo(name="flush", base_name="flush", ret_type=fallible_void, arg_types=[], arg_names=[], is_varargs=false, abi_name="C"));
+    source.func_table.put("flush", FuncInfo(name="flush", base_name="flush", ret_type=fallible_void, arg_types=[], arg_names=[], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     let pos: Position = fallible_position();
     let caught_return: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "7", pos), pos=pos));
     let catch_body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[caught_return]));
     let caught: NodeID = add_catch_node(ref arena, CatchNode(type=NODE_CATCH, stmt=fallible_call(arena, "flush", pos), err_name=fallible_token(TOK_IDENTIFIER, "err"), body=catch_body, pos=pos, alloc_id=0));
     let normal_return: NodeID = add_return_node(ref arena, ReturnNode(type=NODE_RETURN, value=fallible_integer(arena, "0", pos), pos=pos));
     let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[caught, normal_return]));
-    let info: FuncInfo = FuncInfo(name="recover", base_name="recover", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="recover", base_name="recover", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -102,17 +107,18 @@ func check_catch() -> Bool {
 
 func check_throw() -> Bool {
     let arena: AstArena = new_ast_arena();
-    let source: Compiler = fallible_source(arena);
+    let source: Compiler = fallible_source(arena)?;
+    catch(err) { return false; }
     let error_type: Int = 150;
-    let fields: Vector(Struct) = [FieldInfo(name="Failure", type=error_type, llvm_type="i32", offset=1)];
-    source.struct_id_map.put(error_type, StructInfo(name="ProbeError", type_id=error_type, fields=fields, is_enum=true, is_error=true));
+    let fields: Vector(Struct) = [FieldInfo(name="Failure", type=error_type, llvm_type="i32", offset=1, is_const=false, default_val=NodeID(0U))];
+    source.struct_id_map.put(error_type, StructInfo(name="ProbeError", type_id=error_type, fields=fields, is_enum=true, is_error=true, llvm_name="", init_body=NodeID(0U), is_class=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_interface=false, interfaces=[], compiler_link_name="", layout_ready=false));
     let fallible_int: Int = get_fallible_type_id(ref source, TYPE_INT);
     let pos: Position = fallible_position();
     let owner: NodeID = fallible_access(arena, "ProbeError", pos);
     let member: NodeID = add_field_access_node(ref arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Failure", pos=pos));
     let statement: NodeID = add_throw_node(ref arena, ThrowNode(type=NODE_THROW, value=member, pos=pos));
     let body: NodeID = add_block_node(ref arena, BlockNode(type=NODE_BLOCK, stmts=[statement]));
-    let info: FuncInfo = FuncInfo(name="fail", base_name="fail", ret_type=fallible_int, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="fail", base_name="fail", ret_type=fallible_int, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     types.enum_values.put("ProbeError.Failure", WirEnumValue(value=1, source_type=error_type));

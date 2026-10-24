@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func test_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -23,7 +24,10 @@ func test_token(kind: Int, value: String) -> Token {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = test_position();
     let left: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "a"), pos=pos));
     let right: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=test_token(TOK_IDENTIFIER, "b"), pos=pos));
@@ -38,7 +42,7 @@ func main() -> Int {
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[sum, update_sum, return_sum]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);

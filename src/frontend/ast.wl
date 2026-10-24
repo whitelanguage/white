@@ -252,6 +252,7 @@ struct ParamListNode(
 )
 
 struct BoundCallArgs(
+    valid: Bool,
     ordered : Vector(ArgNode),
     variadic : Vector(ArgNode)
 )

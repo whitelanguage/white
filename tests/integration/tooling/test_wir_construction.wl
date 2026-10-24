@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func construction_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -27,9 +28,16 @@ func construction_int(arena: AstArena, value: String, pos: Position) -> NodeID {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), struct_table=Dict(), struct_id_map=Dict(), named_type_ids=Dict());
-    let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false)];
-    let point: StructInfo = StructInfo(name="Point", type_id=103, fields=fields, init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.struct_table = Dict();
+    source.struct_id_map = Dict();
+    source.named_type_ids = Dict();
+    let fields: Vector(Struct) = [FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U)), FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U))];
+    let point: StructInfo = StructInfo(name="Point", type_id=103, fields=fields, init_body=NO_NODE, is_class=false, is_enum=false, is_interface=false, llvm_name="", vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false);
     source.struct_table.put("Point", point);
     source.struct_id_map.put(103, point);
     source.array_info_map.put(104, ArrayInfo(base_type=TYPE_INT, size=3, llvm_name=""));
@@ -47,8 +55,8 @@ func main() -> Int {
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
-    let point_info: FuncInfo = FuncInfo(name="make_point", base_name="make_point", ret_type=103, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
-    let array_info: FuncInfo = FuncInfo(name="make_values", base_name="make_values", ret_type=104, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let point_info: FuncInfo = FuncInfo(name="make_point", base_name="make_point", ret_type=103, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let array_info: FuncInfo = FuncInfo(name="make_values", base_name="make_values", ret_type=104, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_body(ref types, ref source, ref program, point_info, point_body);
     wir_lower_function_body(ref types, ref source, ref program, array_info, array_body);
 

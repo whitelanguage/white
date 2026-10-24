@@ -9,6 +9,7 @@ import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func module_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -38,12 +39,23 @@ func main() -> Int {
     let named_types: Dict(Int, NamedTypeInfo) = Dict();
     let generics: Dict(String, SymbolInfo) = Dict();
     let locals: Dict(String, SymbolInfo) = Dict();
-    symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false));
-    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
-    let helper_info: FuncInfo = FuncInfo(name="helper", base_name="helper", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let helper_info: FuncInfo = FuncInfo(name="helper", base_name="helper", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     functions.put("main", main_info);
     functions.put("helper", helper_info);
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=locals, parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, func_table=functions, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=named_types, generic_bindings=generics);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.symbol_table = Scope(table=locals, parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = symbols;
+    source.func_table = functions;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = aliases;
+    source.global_var_aliases = aliases;
+    source.named_type_ids = named_types;
+    source.generic_bindings = generics;
     let pos: Position = module_position();
 
     let global_type: NodeID = module_access(source.arena, "Int", pos);

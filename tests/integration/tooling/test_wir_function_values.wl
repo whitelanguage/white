@@ -9,6 +9,7 @@ import * from "../../../src/frontend/tokens.wl"
 import Position from "../../../src/frontend/diagnostics.wl"
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func function_value_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -43,19 +44,36 @@ func main() -> Int {
     let links: Dict(String, String) = Dict();
     links.put("memory_alloc", "memory_alloc");
     links.put("memory_free", "memory_free");
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=Dict(), func_table=Dict(), compiler_link=links, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=Dict(), generic_bindings=Dict(), ptr_base_map=Dict(), ptr_cache=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), type_counter=200);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = Dict();
+    source.func_table = Dict();
+    source.compiler_link = links;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = aliases;
+    source.global_var_aliases = aliases;
+    source.named_type_ids = Dict();
+    source.generic_bindings = Dict();
+    source.ptr_base_map = Dict();
+    source.ptr_cache = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.type_counter = 200;
     let pos: Position = function_value_position();
     let int_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let function_type: Int = get_func_type_id(ref source, int_args, TYPE_INT, 0, ["", ""]);
 
-    let add_info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=int_args, arg_names=["a", "b"], is_varargs=false, abi_name="");
-    let apply_info: FuncInfo = FuncInfo(name="apply", base_name="apply", ret_type=TYPE_INT, arg_types=[TypeListNode(type=function_type, pass_mode=PARAM_VALUE)], arg_names=["f"], is_varargs=false, abi_name="");
-    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let add_info: FuncInfo = FuncInfo(name="add", base_name="add", ret_type=TYPE_INT, arg_types=int_args, arg_names=["a", "b"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let apply_info: FuncInfo = FuncInfo(name="apply", base_name="apply", ret_type=TYPE_INT, arg_types=[TypeListNode(type=function_type, pass_mode=PARAM_VALUE)], arg_names=["f"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     source.func_table.put("add", add_info);
     source.func_table.put("apply", apply_info);
     source.func_table.put("main", main_info);
-    source.func_table.put("memory_alloc", FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C"));
-    source.func_table.put("memory_free", FuncInfo(name="memory_free", base_name="memory_free", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)], arg_names=["block"], is_varargs=false, abi_name="C"));
+    source.func_table.put("memory_alloc", FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    source.func_table.put("memory_free", FuncInfo(name="memory_free", base_name="memory_free", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)], arg_names=["block"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
 
     let add_sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=function_value_access(source.arena, "a", pos), op_tok=function_value_token(TOK_PLUS, "+"), right=function_value_access(source.arena, "b", pos), pos=pos));
     let add_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[function_value_return(source.arena, add_sum, pos)]));

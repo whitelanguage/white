@@ -23,15 +23,15 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         } else if (expected_type == TYPE_FLOAT) {
             dummy_reg = "0.0";
         }
-        return CompileResult(reg=dummy_reg, type=expected_type, origin_type=expected_type);
+        return CompileResult(reg=dummy_reg, type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
     }
 
     if (val_res.type == expected_type) { return val_res; }
     if (has_result(val_res) && val_res.type == TYPE_POISON) {
-        return CompileResult(reg="poison", type=TYPE_POISON);
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     if (expected_type == TYPE_POISON) {
-        return CompileResult(reg="poison", type=TYPE_POISON);
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let expected_named: Optional(NamedTypeInfo) = get_named_type(ref c, expected_type);
     let current = c.curr_func;
@@ -52,7 +52,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     let source_union: Bool = is_union_type(ref c, val_res.type);
     if (source_union) {
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref c, expected_type) + ", got " + get_type_name(ref c, val_res.type) + ".");
-        return CompileResult(reg="poison", type=TYPE_POISON);
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let origin: Int = val_res.origin_type;
 
@@ -69,7 +69,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                                            boxed_enum;
         if (!boxed_type_supported) {
             throw_type_error(pos, "Type " + get_type_name(ref c, val_res.type) + " cannot be stored in Dict.");
-            return CompileResult(reg="poison", type=TYPE_POISON);
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
 
         let variant_llvm: String = variant_info.llvm_name;
@@ -188,7 +188,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         write_ir(ref c, c.indent + "store i64 " + payload_low + ", i64* " + payload_low_ptr + "\n");
         write_ir(ref c, c.indent + "store i64 " + payload_high + ", i64* " + payload_high_ptr + "\n");
 
-        return CompileResult(reg=box_ptr, type=expected_type, origin_type=val_res.type);
+        return CompileResult(reg=box_ptr, type=expected_type, origin_type=val_res.type, owns_ref=false, is_const_access=false);
     }
 
     let variant_info_check: Optional(StructInfo) = c.struct_table.lookup("$Variant");
@@ -390,30 +390,30 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             emit_release_owned(ref c, val_res);
         }
 
-        return CompileResult(reg=final_val_reg, type=expected_type, origin_type=0, owns_ref=result_owned);
+        return CompileResult(reg=final_val_reg, type=expected_type, origin_type=0, owns_ref=result_owned, is_const_access=false);
     }
 
     if (val_res.type == TYPE_NULLPTR) {
         if (is_pointer_type(ref c, expected_type)) {
-            return CompileResult(reg="null", type=expected_type, origin_type=expected_type);
+            return CompileResult(reg="null", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
         }
         throw_type_error(pos, "'nullptr' can only be assigned to explicit pointer types.");
-        return CompileResult(reg="0", type=expected_type, origin_type=expected_type);
+        return CompileResult(reg="0", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
     }
     if (val_res.type == TYPE_NULL) {
         let ex_s: Optional(StructInfo) = c.struct_id_map.lookup(expected_type);
         if ((ex_s is !null) && ex_s.is_interface) {
-            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type);
+            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
         }
         if (is_pointer_type(ref c, expected_type)) {
             throw_type_error(pos, "Keyword 'null' cannot be assigned to explicit pointer types. Use 'nullptr'.");
-            return CompileResult(reg="0", type=expected_type, origin_type=expected_type);
+            return CompileResult(reg="0", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
         }
         if (!is_nullable_reference_type(ref c, expected_type)) {
             throw_type_error(pos, "Type " + get_type_name(ref c, expected_type) + " cannot be null.");
-            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type);
+            return CompileResult(reg="zeroinitializer", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
         }
-        return CompileResult(reg="null", type=expected_type, origin_type=expected_type);
+        return CompileResult(reg="null", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
     }
 
     if (is_integer_type(expected_type) && is_integer_type(val_res.type)) {
@@ -424,7 +424,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         let char_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + char_reg + " = zext i8 " + val_res.reg + " to i32\n");
 
-        return CompileResult(reg=char_reg, type=TYPE_CHAR, origin_type=TYPE_BYTE);
+        return CompileResult(reg=char_reg, type=TYPE_CHAR, origin_type=TYPE_BYTE, owns_ref=false, is_const_access=false);
     }
     if (expected_type == TYPE_FLOAT && val_res.type == TYPE_INT) {
         return promote_to_float(ref c, val_res);
@@ -440,14 +440,14 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (val_res.type >= 100) {
             let s_info: Optional(StructInfo) = c.struct_id_map.lookup(val_res.type);
             if ((s_info is !null) && s_info.is_enum) {
-                return CompileResult(reg=val_res.reg, type=TYPE_GENERIC_ENUM, origin_type=val_res.type);
+                return CompileResult(reg=val_res.reg, type=TYPE_GENERIC_ENUM, origin_type=val_res.type, owns_ref=false, is_const_access=false);
             }
         }
     }
     if (val_res.type == TYPE_GENERIC_ENUM && expected_type >= 100) {
         let s_info: Optional(StructInfo) = c.struct_id_map.lookup(expected_type);
         if ((s_info is !null) && s_info.is_enum) {
-            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin);
+            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=false, is_const_access=false);
         }
     }
 
@@ -458,11 +458,11 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if ((val_info is !null) && val_info.is_class) {
             if (interface_uses_self(ref c, ex_info)) {
                 throw_type_error(pos, "Interface '" + interface_diagnostic_name(ref c, expected_type) + "' uses Self and can only be used as a static constraint.");
-                return CompileResult(reg="poison", type=TYPE_POISON);
+                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
             if (!class_has_interface(ref c, val_info, ex_info)) {
                 throw_type_error(pos, "Class '" + val_info.name + "' does not implement interface '" + ex_info.name + "'.");
-                return CompileResult(reg="poison", type=TYPE_POISON);
+                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
             let itable_name: String = "@itable." + val_info.name + "." + ex_info.name;
             let itable_len: Int = 0;
@@ -506,7 +506,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 let erased: String = next_reg(ref c);
                 write_ir(ref c, c.indent + erased + " = bitcast " + value_ty + "* " + value_ptr + " to i8*\n");
 
-                return CompileResult(reg=erased, type=expected_type, origin_type=val_res.type, is_const_access=val_res.is_const_access);
+                return CompileResult(reg=erased, type=expected_type, origin_type=val_res.type, is_const_access=val_res.is_const_access, owns_ref=false);
             }
             let cast_reg: String = next_reg(ref c);
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
@@ -528,7 +528,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 }
                 if (!compatible) {
                     throw_type_error(pos, "Cannot restore " + get_type_name(ref c, val_res.type) + " as " + get_type_name(ref c, expected_type));
-                    return CompileResult(reg="poison", type=TYPE_POISON);
+                    return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
                 }
             } else {
                 emit_erased_type_check(ref c, val_res.reg, expected_type, pos);
@@ -564,9 +564,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             if (dest_ty != src_ty) {
                 write_ir(ref c, c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to " + dest_ty + "\n");
 
-                return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin);
+                return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=false, is_const_access=false);
             }
-            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin);
+            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=false, is_const_access=false);
         }
     }
 
@@ -577,7 +577,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
             write_ir(ref c, c.indent + cast_reg + " = bitcast %struct.$String* " + val_res.reg + " to " + dest_ty + "\n");
 
-            return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
+            return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref, is_const_access=false);
         }
     }
 
@@ -588,7 +588,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
             write_ir(ref c, c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to %struct.$String*\n");
 
-            return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref);
+            return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref, is_const_access=false);
         }
     }
 
@@ -596,7 +596,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (val_res.type >= 100) {
             let f_check: Optional(SymbolInfo) = c.func_ret_map.lookup(val_res.type);
             if ((f_check is !null)) {
-                return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
+                return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref, is_const_access=false);
             }
         }
     }
@@ -604,7 +604,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (val_res.type >= 100) {
             let m_check: Optional(SymbolInfo) = c.method_ret_map.lookup(val_res.type);
             if ((m_check is !null)) {
-                return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
+                return CompileResult(reg=val_res.reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref, is_const_access=false);
             }
         }
     }
@@ -612,20 +612,20 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if ((c.func_ret_map.lookup(expected_type) is !null)) {
             if (origin != 0 && !callable_types_compatible(ref c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Function as " + get_type_name(ref c, expected_type));
-                return CompileResult(reg="poison", type=TYPE_POISON);
+                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
             emit_erased_type_check(ref c, val_res.reg, expected_type, pos);
-            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref);
+            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref, is_const_access=false);
         }
     }
     if (val_res.type == TYPE_GENERIC_METHOD && expected_type >= 100) {
         if ((c.method_ret_map.lookup(expected_type) is !null)) {
             if (origin != 0 && !callable_types_compatible(ref c, origin, expected_type)) {
                 throw_type_error(pos, "Cannot restore Method as " + get_type_name(ref c, expected_type));
-                return CompileResult(reg="poison", type=TYPE_POISON);
+                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
             emit_erased_type_check(ref c, val_res.reg, expected_type, pos);
-            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref);
+            return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref, is_const_access=false);
         }
     }
 
@@ -637,7 +637,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
             write_ir(ref c, c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to " + dest_ty + "\n");
 
-            return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.origin_type, owns_ref=val_res.owns_ref);
+            return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.origin_type, owns_ref=val_res.owns_ref, is_const_access=false);
         }
     }
 
@@ -682,7 +682,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     }
 
     throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref c, expected_type) + ", got " + get_type_name(ref c, val_res.type));
-    return CompileResult(reg="0", type=expected_type, origin_type=expected_type);
+    return CompileResult(reg="0", type=expected_type, origin_type=expected_type, owns_ref=false, is_const_access=false);
 }
 
 func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
@@ -697,7 +697,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let widened: String = next_reg(ref c);
         write_ir(ref c, c.indent + widened + " = sext " + get_size_llvm_type() + " " + res.reg + " to i64\n");
 
-        res = CompileResult(reg=widened, type=TYPE_LONG);
+        res = CompileResult(reg=widened, type=TYPE_LONG, origin_type=0, owns_ref=false, is_const_access=false);
     } else if (res.type == TYPE_INTSIZE) {
         res.type = TYPE_LONG;
     }
@@ -705,7 +705,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let widened: String = next_reg(ref c);
         write_ir(ref c, c.indent + widened + " = zext " + get_size_llvm_type() + " " + res.reg + " to i64\n");
 
-        res = CompileResult(reg=widened, type=TYPE_UINT64);
+        res = CompileResult(reg=widened, type=TYPE_UINT64, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (res.type == TYPE_INT128 || res.type == TYPE_UINT128) {
@@ -715,7 +715,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(i128 " + res.reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     if (res.type == TYPE_UINT64 || res.type == TYPE_UINTSIZE) {
@@ -723,7 +723,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     if (res.type == TYPE_INT || res.type == TYPE_BYTE) {
@@ -737,7 +737,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + val_reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     if (res.type == TYPE_LONG) {
@@ -745,7 +745,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     if (res.type == TYPE_FLOAT) {
@@ -753,7 +753,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(double " + res.reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     if (res.type == TYPE_BOOL) {
@@ -762,7 +762,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = select i1 " + res.reg + ", %struct.$String* " + get_string_object_ptr(true_id) + ", %struct.$String* " + get_string_object_ptr(false_id) + "\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING);
+        return CompileResult(reg=result, type=TYPE_STRING, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (res.type == TYPE_CHAR) {
@@ -770,12 +770,12 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let result: String = next_reg(ref c);
         write_ir(ref c, c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + res.reg + ")\n");
 
-        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
+        return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true, origin_type=0, is_const_access=false);
     }
 
     // fallback for null uses an immortal string literal and requires no allocation.
     let null_id: Int = register_string_constant(ref c, "null");
-    return CompileResult(reg=get_string_object_ptr(null_id), type=TYPE_STRING);
+    return CompileResult(reg=get_string_object_ptr(null_id), type=TYPE_STRING, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func integer_max_literal(type_id: Int) -> String {
@@ -1219,13 +1219,13 @@ func standard_overflow_error(ref c: Compiler, pos: Position) -> CompileResult {
         if (info.compiler_link_name == "Error") {
             let field: Optional(FieldInfo) = find_field(info, "Overflow");
             if ((field is !null)) {
-                return emit_error_value(ref c, CompileResult(reg="" + field.offset, type=info.type_id, origin_type=info.type_id), pos);
+                return emit_error_value(ref c, CompileResult(reg="" + field.offset, type=info.type_id, origin_type=info.type_id, owns_ref=false, is_const_access=false), pos);
             }
         }
         i += 1;
     }
     throw_internal_compiler_error(pos, "The standard Error enum does not define Overflow.");
-    return CompileResult(reg="zeroinitializer", type=TYPE_ANY_ERROR);
+    return CompileResult(reg="zeroinitializer", type=TYPE_ANY_ERROR, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func emit_fallible_cast(ref c: Compiler, value: CompileResult, valid: String, target_type: Int, pos: Position) -> CompileResult {
@@ -1263,7 +1263,7 @@ func emit_fallible_cast(ref c: Compiler, value: CompileResult, valid: String, ta
     let result: String = next_reg(ref c);
     write_ir(ref c, c.indent + result + " = phi " + fallible_llvm + " [ " + fail_2 + ", %" + fail_label + " ], [ " + success_3 + ", %" + success_label + " ]\n");
 
-    return CompileResult(reg=result, type=fallible_type, origin_type=0, owns_ref=false);
+    return CompileResult(reg=result, type=fallible_type, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func unwrap_conversion_or_panic(ref c: Compiler, value: CompileResult, source_type: Int, target_type: Int, pos: Position) -> CompileResult {
@@ -1284,7 +1284,7 @@ func unwrap_conversion_or_panic(ref c: Compiler, value: CompileResult, source_ty
     let result: String = next_reg(ref c);
     write_ir(ref c, c.indent + result + " = extractvalue " + fallible_llvm + " " + value.reg + ", 2\n");
 
-    return CompileResult(reg=result, type=target_type, origin_type=0, owns_ref=value.owns_ref && needs_drop(ref c, target_type));
+    return CompileResult(reg=result, type=target_type, origin_type=0, owns_ref=value.owns_ref && needs_drop(ref c, target_type), is_const_access=false);
 }
 
 func compile_explicit_type_cast(ref c: Compiler, value: CompileResult, target_type: Int, pos: Position, preserve_failure: Bool) -> CompileResult {
@@ -1294,7 +1294,7 @@ func compile_explicit_type_cast(ref c: Compiler, value: CompileResult, target_ty
         let code: String = next_reg(ref c);
         write_ir(ref c, c.indent + code + " = extractvalue { i64, i32 } " + value.reg + ", 1\n");
 
-        return compile_explicit_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT), target_type, pos, preserve_failure);
+        return compile_explicit_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT, origin_type=0, owns_ref=false, is_const_access=false), target_type, pos, preserve_failure);
     }
 
     if (!needs_explicit_cast(ref c, value.type, target_type)) {
@@ -1362,7 +1362,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         let code: String = next_reg(ref c);
         write_ir(ref c, c.indent + code + " = extractvalue { i64, i32 } " + val_res.reg + ", 1\n");
 
-        return compile_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT), target_type, pos);
+        return compile_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT, origin_type=0, owns_ref=false, is_const_access=false), target_type, pos);
     }
 
     let src_is_float: Bool = val_res.type == TYPE_FLOAT || val_res.type == TYPE_FLOAT32;
@@ -1376,14 +1376,14 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     if (src_is_enum && is_integer_type(target_type)) {
         let dst_bits: Int = get_type_bitwidth(target_type);
         if (dst_bits == 32) {
-            return CompileResult(reg=val_res.reg, type=target_type, origin_type=0);
+            return CompileResult(reg=val_res.reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
         }
         if (dst_bits < 32) {
             write_ir(ref c, c.indent + res_reg + " = trunc i32 " + val_res.reg + " to " + dst_ty_str + "\n");
         } else {
             write_ir(ref c, c.indent + res_reg + " = zext i32 " + val_res.reg + " to " + dst_ty_str + "\n");
         }
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     let src_is_erased_struct: Bool = val_res.type == TYPE_GENERIC_STRUCT;
@@ -1394,18 +1394,18 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     if (src_is_ptr && dst_is_ptr) {
         write_ir(ref c, c.indent + res_reg + " = bitcast " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
 
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (src_is_ptr && dst_is_int) {
         write_ir(ref c, c.indent + res_reg + " = ptrtoint " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
 
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
     if (src_is_int && dst_is_ptr) {
         write_ir(ref c, c.indent + res_reg + " = inttoptr " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
 
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (src_is_float && dst_is_float) {
@@ -1414,7 +1414,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         } else {
             write_ir(ref c, c.indent + res_reg + " = fpext float " + val_res.reg + " to double\n");
         }
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (src_is_int && dst_is_float) {
@@ -1423,7 +1423,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
 
         write_ir(ref c, c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
 
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
     if (src_is_float && dst_is_int) {
         let op: String = "fptosi";
@@ -1431,7 +1431,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
 
         write_ir(ref c, c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
 
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     if (src_is_int && dst_is_int) {
@@ -1439,7 +1439,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         let dst_bits: Int = get_type_bitwidth(target_type);
 
         if (src_bits == dst_bits) {
-            return CompileResult(reg=val_res.reg, type=target_type, origin_type=0);
+            return CompileResult(reg=val_res.reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
         }
         if (src_bits > dst_bits) {
             write_ir(ref c, c.indent + res_reg + " = trunc " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
@@ -1449,7 +1449,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
 
             write_ir(ref c, c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
         }
-        return CompileResult(reg=res_reg, type=target_type, origin_type=0);
+        return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     throw_type_error(pos, "Unsupported explicit type cast.");

@@ -14,7 +14,7 @@ struct Entity(hp: Int, tag: String, conf: Config) {
 
 func main() -> Int {
     // test default values
-    let h1: Entity;
+    let h1: Entity = Entity(tag="", conf=Config());
     
     // test manual override
     let h2: Entity = Entity(hp=500, tag="Hero", conf=Config(ratio=0.8));

@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func comparison_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -34,7 +35,10 @@ func comparison_contains(text: String, needle: String) -> Bool {
 }
 
 func check_comparison(source_type: Int, token_kind: Int, token_value: String, wir_type: String, opcode: String) -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = comparison_position();
     let left: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "a"), pos=pos));
     let right: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "b"), pos=pos));
@@ -43,7 +47,7 @@ func check_comparison(source_type: Int, token_kind: Int, token_value: String, wi
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
 
     let args: Vector(Struct) = [TypeListNode(type=source_type, pass_mode=PARAM_VALUE), TypeListNode(type=source_type, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="compare", base_name="compare", ret_type=TYPE_BOOL, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="compare", base_name="compare", ret_type=TYPE_BOOL, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -58,7 +62,10 @@ func check_comparison(source_type: Int, token_kind: Int, token_value: String, wi
 }
 
 func check_identity() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = comparison_position();
     let value: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=comparison_token(TOK_IDENTIFIER, "value"), pos=pos));
     let null_value: NodeID = add_nullptr_node(ref source.arena, NullPtrNode(type=NODE_NULLPTR, pos=pos));
@@ -66,7 +73,7 @@ func check_identity() -> Bool {
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=identity, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="has_value", base_name="has_value", ret_type=TYPE_BOOL, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="has_value", base_name="has_value", ret_type=TYPE_BOOL, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);

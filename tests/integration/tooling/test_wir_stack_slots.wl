@@ -12,13 +12,17 @@ import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func stack_slot_token(kind: Int, value: String) -> Token {
     return Token(type=kind, value=value, line=1, col=1);
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
     let condition: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=stack_slot_token(TOK_IDENTIFIER, "flag"), pos=pos));
     let one: NodeID = add_int_node(ref source.arena, IntNode(type=NODE_INT, tok=stack_slot_token(TOK_INT, "1"), pos=pos));
@@ -30,7 +34,7 @@ func main() -> Int {
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=zero, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, result]));
 
-    let info: FuncInfo = FuncInfo(name="stack_slots", base_name="stack_slots", ret_type=TYPE_INT, arg_types=[TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE)], arg_names=["flag"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="stack_slots", base_name="stack_slots", ret_type=TYPE_INT, arg_types=[TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE)], arg_names=["flag"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     let function_id: WirFuncID = wir_lower_function_body(ref types, ref source, ref program, info, body);

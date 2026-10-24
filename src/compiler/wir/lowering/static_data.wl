@@ -6,6 +6,7 @@ import * from "../runtime.wl"
 import * from "types.wl"
 import * from "../../context.wl"
 import * from "../../constants.wl"
+import check_struct_init from "../../initialization.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 import throw_type_error from "../../../frontend/diagnostics.wl"
@@ -104,15 +105,11 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
 
     let call: CallNode = get_call_node(ref source.arena, node);
     let record: StructInfo = info;
+    if (!check_struct_init(ref source, record, call)) { return NO_WIR_VALUE; }
     let field_count: Int = 0;
     if (record.fields is !null) { field_count = record.fields.length(); }
     let argument_count: Int = 0;
     if (call.args is !null) { argument_count = call.args.length(); }
-    if (argument_count != field_count) {
-        types.errors.append("Static struct initializer must provide every field");
-        return NO_WIR_VALUE;
-    }
-
     let values: Vector(WirValueID) = [];
     let assigned: Vector(Bool) = [];
     let i: Int = 0;
@@ -151,6 +148,32 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
         if (value == NO_WIR_VALUE) { return NO_WIR_VALUE; }
         values[field_index] = value;
         assigned[field_index] = true;
+        i++;
+    }
+    i = 0;
+    while (i < field_count) {
+        if (!assigned[i]) {
+            let field: FieldInfo = record.fields[i];
+            let bindings = source.generic_bindings;
+            let scope = source.symbol_table;
+            let scopes = source.scope_stack;
+            let saved: Optional(GenericTemplate) = null;
+            let context = source.struct_contexts.lookup(record.type_id);
+            if (context is !null) {
+                let instance_bindings: Dict(String, SymbolInfo) = Dict();
+                let found = source.generic_instance_bindings.lookup("" + record.type_id);
+                if (found is !null) { instance_bindings = found; }
+                saved = use_generic_context(ref source, context, instance_bindings);
+            }
+            source.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
+            source.scope_stack = [];
+            let value = wir_lower_static_value(ref types, ref source, ref program, field.default_val, field.type, pos);
+            source.symbol_table = scope;
+            source.scope_stack = scopes;
+            if (saved is !null) { restore_generic_context(ref source, saved, bindings); }
+            if (value == NO_WIR_VALUE) { return NO_WIR_VALUE; }
+            values[i] = value;
+        }
         i++;
     }
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);

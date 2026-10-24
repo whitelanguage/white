@@ -174,7 +174,7 @@ func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
                 }
 
                 let module_name: String = raw_path.slice(start + 1, end);
-                if (node.alias_tok.value is !null) {
+                if (node.alias_tok.value.length() != 0) {
                     module_name = node.alias_tok.value;
                 }
 
@@ -228,7 +228,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let canonical_name: String = raw_path.slice(start_idx, end_idx);
 
     let module_name: String = canonical_name;
-    if (node.alias_tok.value is !null) { module_name = node.alias_tok.value; }
+    if (node.alias_tok.value.length() != 0) { module_name = node.alias_tok.value; }
 
     if (node.symbols.length() != 0) {
         unbind_namespace(ref c, module_name);

@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func pointer_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -36,7 +37,13 @@ func pointer_type(arena: AstArena, level: Int, pos: Position) -> NodeID {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), type_counter=100, ptr_cache=Dict(), ptr_base_map=Dict(), generic_bindings=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.type_counter = 100;
+    source.ptr_cache = Dict();
+    source.ptr_base_map = Dict();
+    source.generic_bindings = Dict();
     let pos: Position = pointer_position();
 
     let local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=pointer_int(source.arena, "5", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
@@ -59,8 +66,8 @@ func main() -> Int {
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
-    let pointer_info: FuncInfo = FuncInfo(name="pointer_ops", base_name="pointer_ops", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
-    let null_info: FuncInfo = FuncInfo(name="null_pointer", base_name="null_pointer", ret_type=int_pointer, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let pointer_info: FuncInfo = FuncInfo(name="pointer_ops", base_name="pointer_ops", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let null_info: FuncInfo = FuncInfo(name="null_pointer", base_name="null_pointer", ret_type=int_pointer, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_body(ref types, ref source, ref program, pointer_info, body);
     wir_lower_function_body(ref types, ref source, ref program, null_info, null_body);
 

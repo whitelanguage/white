@@ -368,4 +368,9 @@ struct Token(
     value : String,
     line  : Int,
     col   : Int
-)
+) {
+    this.type = TOK_EOF;
+    this.value = "";
+    this.line = 0;
+    this.col = 0;
+}

@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func loop_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -23,7 +24,10 @@ func loop_token(kind: Int, value: String) -> Token {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = loop_position();
     let condition: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=loop_token(TOK_IDENTIFIER, "flag"), pos=pos));
     let stop: NodeID = add_break_node(ref source.arena, BreakNode(type=NODE_BREAK, pos=pos));
@@ -34,7 +38,7 @@ func main() -> Int {
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[loop, return_zero]));
 
     let args: Vector(Struct) = [TypeListNode(type=TYPE_BOOL, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="loop", base_name="loop", ret_type=TYPE_INT, arg_types=args, arg_names=["flag"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="loop", base_name="loop", ret_type=TYPE_INT, arg_types=args, arg_names=["flag"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);

@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func ref_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -27,10 +28,14 @@ func ref_access(arena: AstArena, name: String, pos: Position) -> NodeID {
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), func_table=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.func_table = Dict();
     let pos: Position = ref_position();
     let ref_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_REF)];
-    let read_info: FuncInfo = FuncInfo(name="read_ref", base_name="read_ref", ret_type=TYPE_INT, arg_types=ref_args, arg_names=["value"], is_varargs=false, abi_name="");
+    let read_info: FuncInfo = FuncInfo(name="read_ref", base_name="read_ref", ret_type=TYPE_INT, arg_types=ref_args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     source.func_table.put("read_ref", read_info);
 
     let read_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=ref_access(source.arena, "value", pos), pos=pos));
@@ -47,7 +52,7 @@ func main() -> Int {
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, read_info, read_body);
-    let caller_info: FuncInfo = FuncInfo(name="call_ref", base_name="call_ref", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let caller_info: FuncInfo = FuncInfo(name="call_ref", base_name="call_ref", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_body(ref types, ref source, ref program, caller_info, caller_body);
 
     if (types.errors.length() != 0) {

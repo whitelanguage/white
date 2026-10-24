@@ -16,6 +16,7 @@ import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/state.wl"
 import * from "../../../src/compiler/wir/lowering/ownership.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func cast_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -41,12 +42,15 @@ func cast_contains(text: String, needle: String) -> Bool {
 }
 
 func check_return_cast() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = cast_position();
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=cast_access(source.arena, "value", pos), pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="widen", base_name="widen", ret_type=TYPE_LONG, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="widen", base_name="widen", ret_type=TYPE_LONG, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -61,13 +65,16 @@ func check_return_cast() -> Bool {
 }
 
 func check_binary_cast() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = cast_position();
     let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=cast_access(source.arena, "a", pos), op_tok=cast_token(TOK_PLUS, "+"), right=cast_access(source.arena, "b", pos), pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_LONG, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="add_wide", base_name="add_wide", ret_type=TYPE_LONG, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="add_wide", base_name="add_wide", ret_type=TYPE_LONG, arg_types=args, arg_names=["a", "b"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -129,7 +136,10 @@ func check_low_level_casts() -> Bool {
 }
 
 func check_checked_cast() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = cast_position();
     let callee: NodeID = cast_access(source.arena, "Byte", pos);
     let argument: NodeID = cast_access(source.arena, "value", pos);
@@ -137,7 +147,7 @@ func check_checked_cast() -> Bool {
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=call, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="checked_byte", base_name="checked_byte", ret_type=TYPE_BYTE, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="checked_byte", base_name="checked_byte", ret_type=TYPE_BYTE, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -157,10 +167,23 @@ func check_checked_cast() -> Bool {
 }
 
 func check_fallible_cast() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_cache=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), generic_type_names=Dict(), struct_id_map=Dict(), error_types=[], type_counter=100);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.vector_base_map = Dict();
+    source.fallible_cache = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.generic_type_names = Dict();
+    source.struct_id_map = Dict();
+    source.error_types = [];
+    source.type_counter = 100;
     let error_type: Int = 150;
-    let error_fields: Vector(Struct) = [FieldInfo(name="Overflow", type=error_type, llvm_type="i32", offset=8)];
-    let error_info: StructInfo = StructInfo(name="Error", type_id=error_type, fields=error_fields, compiler_link_name="Error", is_enum=true, is_error=true);
+    let error_fields: Vector(Struct) = [FieldInfo(name="Overflow", type=error_type, llvm_type="i32", offset=8, is_const=false, default_val=NodeID(0U))];
+    let error_info: StructInfo = StructInfo(name="Error", type_id=error_type, fields=error_fields, compiler_link_name="Error", is_enum=true, is_error=true, llvm_name="", init_body=NodeID(0U), is_class=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_interface=false, interfaces=[], layout_ready=false);
     source.struct_id_map.put(error_type, error_info);
     source.error_types.append(error_info);
 
@@ -172,7 +195,7 @@ func check_fallible_cast() -> Bool {
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
     let return_type: Int = get_fallible_type_id(ref source, TYPE_BYTE);
-    let info: FuncInfo = FuncInfo(name="fallible_byte", base_name="fallible_byte", ret_type=return_type, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="fallible_byte", base_name="fallible_byte", ret_type=return_type, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -190,25 +213,29 @@ func check_fallible_cast() -> Bool {
 }
 
 func check_pointer_casts() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.struct_id_map = Dict();
     let pos: Position = cast_position();
 
     let to_size: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "IntSize", pos), args=[ArgNode(val=cast_access(source.arena, "handle", pos), name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let size_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_size, pos=pos));
     let size_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[size_return]));
     let size_args: Vector(Struct) = [TypeListNode(type=TYPE_ANYPTR, pass_mode=PARAM_VALUE)];
-    let size_info: FuncInfo = FuncInfo(name="pointer_bits", base_name="pointer_bits", ret_type=TYPE_INTSIZE, arg_types=size_args, arg_names=["handle"], is_varargs=false, abi_name="");
+    let size_info: FuncInfo = FuncInfo(name="pointer_bits", base_name="pointer_bits", ret_type=TYPE_INTSIZE, arg_types=size_args, arg_names=["handle"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
     let to_pointer: NodeID = add_call_node(ref source.arena, CallNode(type=NODE_CALL, callee=cast_access(source.arena, "AnyPtr", pos), args=[ArgNode(val=cast_access(source.arena, "bits", pos), name="", is_spread=false)], type_args=[], pos=pos, preserve_fallible=false));
     let pointer_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=to_pointer, pos=pos));
     let pointer_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[pointer_return]));
     let pointer_args: Vector(Struct) = [TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];
-    let pointer_info: FuncInfo = FuncInfo(name="from_bits", base_name="from_bits", ret_type=TYPE_ANYPTR, arg_types=pointer_args, arg_names=["bits"], is_varargs=false, abi_name="");
+    let pointer_info: FuncInfo = FuncInfo(name="from_bits", base_name="from_bits", ret_type=TYPE_ANYPTR, arg_types=pointer_args, arg_names=["bits"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
     let null_value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
     let null_return: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=null_value, pos=pos));
     let null_body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[null_return]));
-    let null_info: FuncInfo = FuncInfo(name="empty_string", base_name="empty_string", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let null_info: FuncInfo = FuncInfo(name="empty_string", base_name="empty_string", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -229,11 +256,22 @@ func check_pointer_casts() -> Bool {
 }
 
 func check_erased_struct_casts() -> Bool {
-    let source: Compiler = Compiler(ptr_base_map=Dict(), array_info_map=Dict(), vector_base_map=Dict(), fallible_base_map=Dict(), func_ret_map=Dict(), method_ret_map=Dict(), struct_id_map=Dict(), named_type_ids=Dict(), func_table=Dict(), compiler_link=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.ptr_base_map = Dict();
+    source.array_info_map = Dict();
+    source.vector_base_map = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.struct_id_map = Dict();
+    source.named_type_ids = Dict();
+    source.func_table = Dict();
+    source.compiler_link = Dict();
     let record_type: Int = 180;
-    let fields: Vector(Struct) = [FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=0, is_const=false)];
-    source.struct_id_map.put(record_type, StructInfo(name="Record", type_id=record_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
-    let allocator: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C");
+    let fields: Vector(Struct) = [FieldInfo(name="name", type=TYPE_STRING, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U))];
+    source.struct_id_map.put(record_type, StructInfo(name="Record", type_id=record_type, fields=fields, is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
+    let allocator: FuncInfo = FuncInfo(name="memory_alloc", base_name="memory_alloc", ret_type=TYPE_ANYPTR, arg_types=[TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)], arg_names=["size"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     source.func_table.put("memory_alloc", allocator);
     source.compiler_link.put("memory_alloc", "memory_alloc");
 
@@ -241,7 +279,7 @@ func check_erased_struct_casts() -> Bool {
     let types: WirTypeMap = new_wir_type_map();
     let function_id: WirFuncID = wir_add_function(ref program, "erase_record", [], program.void_type, false, WirLinkage.Internal, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
-    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=TYPE_VOID, entry=entry, block=entry, bindings=[], loops=[], error_targets=[], owned_values=[], errors=[], terminated=false, next_block=0);
+    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=TYPE_VOID, entry=entry, block=entry, bindings=[], loops=[], error_targets=[], owned_values=[], errors=[], terminated=false, next_block=0, binding_indices=null, indexed_bindings=0, reference_checked=false);
     let record_wir: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, record_type);
     let record: WirExpr = WirExpr(value=wir_const_zero(ref program, record_wir), source_type=record_type);
     let erased: WirExpr = wir_cast_expr(ref state, ref types, ref source, ref program, record, TYPE_GENERIC_STRUCT, true, cast_position());

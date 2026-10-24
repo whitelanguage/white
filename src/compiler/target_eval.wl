@@ -186,5 +186,5 @@ func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
 
 func emit_target_intrinsic(ref c: Compiler, info: SymbolInfo) -> CompileResult {
     let name: String = info.reg.slice(11, info.reg.length());
-    return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type);
+    return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type, owns_ref=false, is_const_access=false);
 }

@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/static_data.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func static_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -41,13 +42,18 @@ func main() -> Int {
     let arrays: Dict(Int, ArrayInfo) = Dict();
     let named: Dict(Int, NamedTypeInfo) = Dict();
     let fields: Vector(Struct) = [
-        FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false),
-        FieldInfo(name="label", type=TYPE_STRING, llvm_type="", offset=1, is_const=false)
+        FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U)),
+        FieldInfo(name="label", type=TYPE_STRING, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U))
     ];
-    structs.put(point_type, StructInfo(name="Point", type_id=point_type, fields=fields, is_class=false, is_enum=false, is_interface=false));
+    structs.put(point_type, StructInfo(name="Point", type_id=point_type, fields=fields, is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
     arrays.put(array_type, ArrayInfo(base_type=point_type, size=2, llvm_name=""));
     arrays.put(buffer_type, ArrayInfo(base_type=TYPE_BYTE, size=4096, llvm_name=""));
-    let source: Compiler = Compiler(arena=new_ast_arena(), struct_id_map=structs, array_info_map=arrays, named_type_ids=named);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.struct_id_map = structs;
+    source.array_info_map = arrays;
+    source.named_type_ids = named;
     let pos: Position = static_position();
     let literal: NodeID = add_vector_lit_node(ref source.arena, VectorLitNode(type=NODE_VECTOR_LIT, elements=[ArgNode(val=static_point(source.arena, "1", pos), name="", is_spread=false), ArgNode(val=static_point(source.arena, "2", pos), name="", is_spread=false)], count=2, pos=pos));
 

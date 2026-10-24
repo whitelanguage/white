@@ -160,7 +160,7 @@ func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref prog
     let annotations: SystemAnnResult = consume_annotations(ref source, node.annotations, node.name_tok.value);
     if ((annotations.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
         let source_name: String = source.current_package_prefix + node.name_tok.value;
-        source.global_symbol_table.put(source_name, SymbolInfo(reg="$intrinsic." + annotations.intrinsic_name, type=source_type, origin_type=source_type, is_const=true));
+        source.global_symbol_table.put(source_name, SymbolInfo(reg="$intrinsic." + annotations.intrinsic_name, type=source_type, origin_type=source_type, is_const=true, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
         return NO_WIR_GLOBAL;
     }
     let name: String = source.current_package_prefix + node.name_tok.value;
@@ -183,7 +183,7 @@ func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref prog
     }
     let source_name: String = source.current_package_prefix + node.name_tok.value;
     let register_name: String = "@" + name;
-    let symbol: SymbolInfo = SymbolInfo(reg=register_name, type=source_type, origin_type=source_type, is_const=node.is_const);
+    let symbol: SymbolInfo = SymbolInfo(reg=register_name, type=source_type, origin_type=source_type, is_const=node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0);
     update_symbol(ref source, source_name, symbol);
     wir_record_numeric_constant(ref source, node, source_type, register_name);
     return global_id;

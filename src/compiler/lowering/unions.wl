@@ -20,7 +20,7 @@ func emit_union_payload(ref c: Compiler, slot: String, union_type: Int, member: 
 
 func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> CompileResult {
 // a dominating check selected this member, no conversion or extra ownership is involved
-    if (member == TYPE_NULL) { return CompileResult(reg="null", type=TYPE_NULL); }
+    if (member == TYPE_NULL) { return CompileResult(reg="null", type=TYPE_NULL, origin_type=0, owns_ref=false, is_const_access=false); }
     let storage = get_llvm_type_str(ref c, value.type);
     let slot = next_reg(ref c);
     write_ir(ref c, c.indent + slot + " = alloca " + storage + "\n");
@@ -28,12 +28,12 @@ func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> Comp
     let address = emit_union_payload(ref c, slot, value.type, member);
     let array = c.array_info_map.lookup(member);
     if ((array is !null) && array.size >= 0) {
-        return CompileResult(reg=address, type=member, is_const_access=value.is_const_access);
+        return CompileResult(reg=address, type=member, is_const_access=value.is_const_access, origin_type=0, owns_ref=false);
     }
     let result = next_reg(ref c);
     let member_type = get_llvm_type_str(ref c, member);
     write_ir(ref c, c.indent + result + " = load " + member_type + ", " + member_type + "* " + address + "\n");
-    return CompileResult(reg=result, type=member, is_const_access=value.is_const_access);
+    return CompileResult(reg=result, type=member, is_const_access=value.is_const_access, origin_type=0, owns_ref=false);
 }
 
 func apply_flow_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
@@ -56,7 +56,7 @@ func emit_union_member(ref c: Compiler, slot: String, target: Int, member: Int, 
 func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Position) -> CompileResult {
     if (!union_accepts_type(ref c, target, value.type)) {
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref c, target) + ", got " + get_type_name(ref c, value.type) + ".");
-        return CompileResult(reg="poison", type=TYPE_POISON);
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     let storage: String = get_llvm_type_str(ref c, target);
@@ -111,7 +111,7 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
 
     let result: String = next_reg(ref c);
     write_ir(ref c, c.indent + result + " = load " + storage + ", " + storage + "* " + slot + "\n");
-    return CompileResult(reg=result, type=target, owns_ref=value.owns_ref, is_const_access=value.is_const_access);
+    return CompileResult(reg=result, type=target, owns_ref=value.owns_ref, is_const_access=value.is_const_access, origin_type=0);
 }
 
 func emit_union_null_check(ref c: Compiler, value: CompileResult, negate: Bool) -> CompileResult {
@@ -119,7 +119,7 @@ func emit_union_null_check(ref c: Compiler, value: CompileResult, negate: Bool) 
     if (member < 0) {
         let result: String = "false";
         if negate { result = "true"; }
-        return CompileResult(reg=result, type=TYPE_BOOL);
+        return CompileResult(reg=result, type=TYPE_BOOL, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     let tag: String = next_reg(ref c);
@@ -129,5 +129,5 @@ func emit_union_null_check(ref c: Compiler, value: CompileResult, negate: Bool) 
     write_ir(ref c, c.indent + tag + " = extractvalue " + get_llvm_type_str(ref c, value.type) + " " + value.reg + ", 0\n");
     write_ir(ref c, c.indent + result + " = icmp " + condition + " i32 " + tag + ", " + member + "\n");
 
-    return CompileResult(reg=result, type=TYPE_BOOL);
+    return CompileResult(reg=result, type=TYPE_BOOL, origin_type=0, owns_ref=false, is_const_access=false);
 }

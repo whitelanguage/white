@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func indexing_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -48,11 +49,11 @@ func literal_length_body(arena: AstArena, pos: Position) -> NodeID {
 }
 
 func indexing_info(name: String, target_type: Int, result_type: Int) -> FuncInfo {
-    return FuncInfo(name=name, base_name=name, ret_type=result_type, arg_types=[TypeListNode(type=target_type, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["values", "index"], is_varargs=false, abi_name="");
+    return FuncInfo(name=name, base_name=name, ret_type=result_type, arg_types=[TypeListNode(type=target_type, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["values", "index"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 }
 
 func length_info(name: String, target_type: Int) -> FuncInfo {
-    return FuncInfo(name=name, base_name=name, ret_type=TYPE_INT, arg_types=[TypeListNode(type=target_type, pass_mode=PARAM_VALUE)], arg_names=["values"], is_varargs=false, abi_name="");
+    return FuncInfo(name=name, base_name=name, ret_type=TYPE_INT, arg_types=[TypeListNode(type=target_type, pass_mode=PARAM_VALUE)], arg_names=["values"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 }
 
 func indexing_contains(text: String, needle: String) -> Bool {
@@ -70,10 +71,16 @@ func main() -> Int {
     let vectors: Dict(Int, SymbolInfo) = Dict();
     let arrays: Dict(Int, ArrayInfo) = Dict();
     let pointers: Dict(Int, SymbolInfo) = Dict();
-    vectors.put(100, SymbolInfo(type=TYPE_INT));
+    vectors.put(100, SymbolInfo(type=TYPE_INT, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     arrays.put(101, ArrayInfo(base_type=TYPE_INT, size=-1, llvm_name=""));
-    pointers.put(102, SymbolInfo(type=TYPE_INT));
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=pointers, vector_base_map=vectors, array_info_map=arrays, struct_id_map=Dict());
+    pointers.put(102, SymbolInfo(type=TYPE_INT, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = pointers;
+    source.vector_base_map = vectors;
+    source.array_info_map = arrays;
+    source.struct_id_map = Dict();
     let pos: Position = indexing_position();
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -92,7 +99,7 @@ func main() -> Int {
     if (types.errors.length() != 0) { print("FAIL: Vector length lowering: ", types.errors[0]); return 1; }
     wir_lower_function_body(ref types, ref source, ref program, length_info("slice_length", 101), indexing_length_body(source.arena, "values", pos));
     if (types.errors.length() != 0) { print("FAIL: Slice length lowering: ", types.errors[0]); return 1; }
-    let literal_info: FuncInfo = FuncInfo(name="literal_length", base_name="literal_length", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let literal_info: FuncInfo = FuncInfo(name="literal_length", base_name="literal_length", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_body(ref types, ref source, ref program, literal_info, literal_length_body(source.arena, pos));
     if (types.errors.length() != 0) { print("FAIL: Temporary String length lowering: ", types.errors[0]); return 1; }
 

@@ -994,7 +994,7 @@ func atom(ref p: Parser) -> NodeID {
         if (p.current_tok.type != TOK_RBRACKET) {
             while (true) {
                 let val: NodeID = expression(ref p);
-                elements.append(ArgNode(val=val, name=""));
+                elements.append(ArgNode(val=val, name="", is_spread=false));
                 count += 1;
 
                 if (p.current_tok.type == TOK_COMMA) {
@@ -1797,16 +1797,14 @@ func parse_params(ref p: Parser, callable: Bool) -> Vector(ParamNode) {
 
         let default_val: NodeID = NO_NODE;
         if (p.current_tok.type == TOK_ASSIGN) {
-            if (!callable) {
-                throw_invalid_syntax(pos, "Default values are only allowed in functions and methods.");
-            } else if (pass_mode == PARAM_REF) {
+            if (pass_mode == PARAM_REF) {
                 throw_invalid_syntax(pos, "A reference parameter cannot have a default value.");
             } else if is_variadic {
                 throw_invalid_syntax(pos, "A variadic parameter cannot have a default value.");
             }
             parser_advance(ref p);
             default_val = expression(ref p);
-            if (!is_default_param(p.arena, default_val)) {
+            if (callable && !is_default_param(p.arena, default_val)) {
                 throw_invalid_syntax(pos, "A default parameter value must be a constant expression.");
             }
             saw_default = true;
@@ -1972,7 +1970,7 @@ func parse_extern_func(ref p: Parser) -> NodeID {
                 }
                 let tid: TypedIdent = parse_typed_name(ref p, false);
                 let param_pos: Position = Position(idx=0, ln=tid.name_tok.line, col=tid.name_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
-                let new_param: ParamNode = ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pass_mode=pass_mode, pos=param_pos);
+                let new_param: ParamNode = ParamNode(type=NODE_PARAM, name_tok=tid.name_tok, type_tok=tid.type_node, pass_mode=pass_mode, pos=param_pos, is_variadic=false, default_val=NodeID(0U));
 
                 params.append(new_param);
 

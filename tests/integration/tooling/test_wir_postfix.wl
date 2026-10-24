@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func postfix_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -38,13 +39,16 @@ func postfix_contains(text: String, needle: String) -> Bool {
 }
 
 func check_postfix_expression() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = postfix_position();
     let postfix: NodeID = add_postfix_node(ref source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_INC, "++"), pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="post_inc", base_name="post_inc", ret_type=TYPE_INT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="post_inc", base_name="post_inc", ret_type=TYPE_INT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -57,13 +61,16 @@ func check_postfix_expression() -> Bool {
 }
 
 func check_postfix_statement() -> Bool {
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict());
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
     let pos: Position = postfix_position();
     let postfix: NodeID = add_postfix_node(ref source.arena, PostfixOpNode(type=NODE_POSTFIX, node=postfix_access(source.arena, pos), op_tok=postfix_token(TOK_DEC, "--"), pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix_access(source.arena, pos), pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[postfix, result]));
     let args: Vector(Struct) = [TypeListNode(type=TYPE_FLOAT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="post_dec", base_name="post_dec", ret_type=TYPE_FLOAT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="post_dec", base_name="post_dec", ret_type=TYPE_FLOAT, arg_types=args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -77,8 +84,14 @@ func check_postfix_statement() -> Bool {
 
 func check_postfix_index() -> Bool {
     let vectors: Dict(Int, SymbolInfo) = Dict();
-    vectors.put(100, SymbolInfo(type=TYPE_INT));
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), vector_base_map=vectors, array_info_map=Dict(), struct_id_map=Dict());
+    vectors.put(100, SymbolInfo(type=TYPE_INT, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.vector_base_map = vectors;
+    source.array_info_map = Dict();
+    source.struct_id_map = Dict();
     let pos: Position = postfix_position();
     let target: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "values"), pos=pos));
     let index: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=postfix_token(TOK_IDENTIFIER, "index"), pos=pos));
@@ -87,7 +100,7 @@ func check_postfix_index() -> Bool {
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=postfix, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
     let args: Vector(Struct) = [TypeListNode(type=100, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let info: FuncInfo = FuncInfo(name="post_index", base_name="post_index", ret_type=TYPE_INT, arg_types=args, arg_names=["values", "index"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="post_index", base_name="post_index", ret_type=TYPE_INT, arg_types=args, arg_names=["values", "index"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);

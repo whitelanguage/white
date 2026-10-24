@@ -13,6 +13,7 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func enum_alias_token(value: String) -> Token {
     return Token(type=TOK_IDENTIFIER, value=value, line=1, col=1);
@@ -23,15 +24,22 @@ func main() -> Int {
     let visible: Dict(String, String) = Dict();
     visible.put("platform_errors", "errors.");
     let structs: Dict(Int, StructInfo) = Dict();
-    structs.put(100, StructInfo(name="errors.Kind", type_id=100, is_enum=true));
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=structs, current_file_visible_prefixes=visible, current_file_type_aliases=Dict(), global_type_aliases=Dict());
+    structs.put(100, StructInfo(name="errors.Kind", type_id=100, is_enum=true, fields=[], llvm_name="", init_body=NodeID(0U), is_class=false, vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, is_interface=false, interfaces=[], compiler_link_name="", layout_ready=false));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.struct_id_map = structs;
+    source.current_file_visible_prefixes = visible;
+    source.current_file_type_aliases = Dict();
+    source.global_type_aliases = Dict();
 
     let root: NodeID = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=enum_alias_token("platform_errors"), pos=pos));
     let owner: NodeID = add_field_access_node(ref source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=root, field_name="Kind", pos=pos));
     let member: NodeID = add_field_access_node(ref source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=owner, field_name="Interrupted", pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=member, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
-    let info: FuncInfo = FuncInfo(name="interrupt_kind", base_name="interrupt_kind", ret_type=100, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="interrupt_kind", base_name="interrupt_kind", ret_type=100, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();

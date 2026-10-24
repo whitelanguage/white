@@ -15,6 +15,7 @@ import * from "../../../src/compiler/wir/backend/llvm.wl"
 import * from "../../../src/compiler/wir/lowering/module.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func string_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -36,16 +37,22 @@ func check_string_concat() -> Bool {
     let functions: Dict(String, FuncInfo) = Dict();
     let links: Dict(String, String) = Dict();
     let args: Vector(Struct) = [TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)];
-    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="C"));
+    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     links.put("string_concat", "runtime.concat");
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict(), func_table=functions, compiler_link=links);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.struct_id_map = Dict();
+    source.func_table = functions;
+    source.compiler_link = links;
     let pos: Position = string_position();
     let left: NodeID = string_access(source.arena, "left", pos);
     let right: NodeID = string_access(source.arena, "right", pos);
     let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=left, op_tok=string_token(TOK_PLUS, "+"), right=right, pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
-    let info: FuncInfo = FuncInfo(name="join", base_name="join", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="join", base_name="join", ret_type=TYPE_STRING, arg_types=args, arg_names=["left", "right"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -62,18 +69,24 @@ func check_primitive_concat() -> Bool {
     let functions: Dict(String, FuncInfo) = Dict();
     let links: Dict(String, String) = Dict();
     let string_args: Vector(Struct) = [TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_STRING, pass_mode=PARAM_VALUE)];
-    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=string_args, arg_names=["left", "right"], is_varargs=false, abi_name="C"));
-    functions.put("runtime.format_int", FuncInfo(name="runtime.format_int", base_name="format_int", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="C"));
+    functions.put("runtime.concat", FuncInfo(name="runtime.concat", base_name="string_concat", ret_type=TYPE_STRING, arg_types=string_args, arg_names=["left", "right"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    functions.put("runtime.format_int", FuncInfo(name="runtime.format_int", base_name="format_int", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     links.put("string_concat", "runtime.concat");
     links.put("format_int", "runtime.format_int");
-    let source: Compiler = Compiler(arena=new_ast_arena(), ptr_base_map=Dict(), struct_id_map=Dict(), func_table=functions, compiler_link=links);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.ptr_base_map = Dict();
+    source.struct_id_map = Dict();
+    source.func_table = functions;
+    source.compiler_link = links;
     let pos: Position = string_position();
     let prefix: NodeID = string_literal(source.arena, "value=", pos);
     let value: NodeID = string_access(source.arena, "value", pos);
     let sum: NodeID = add_binop_node(ref source.arena, BinOpNode(type=NODE_BINOP, left=prefix, op_tok=string_token(TOK_PLUS, "+"), right=value, pos=pos));
     let result: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=sum, pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[result]));
-    let info: FuncInfo = FuncInfo(name="describe", base_name="describe", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="describe", base_name="describe", ret_type=TYPE_STRING, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
     wir_lower_function_body(ref types, ref source, ref program, info, body);
@@ -103,9 +116,20 @@ func main() -> Int {
     let named_types: Dict(Int, NamedTypeInfo) = Dict();
     let generics: Dict(String, SymbolInfo) = Dict();
     let locals: Dict(String, SymbolInfo) = Dict();
-    symbols.put("message", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=true));
-    functions.put("message_text", FuncInfo(name="message_text", base_name="message_text", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name=""));
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=locals, parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, func_table=functions, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=aliases, named_type_ids=named_types, generic_bindings=generics);
+    symbols.put("message", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=true, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    functions.put("message_text", FuncInfo(name="message_text", base_name="message_text", ret_type=TYPE_STRING, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.symbol_table = Scope(table=locals, parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = symbols;
+    source.func_table = functions;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = aliases;
+    source.global_var_aliases = aliases;
+    source.named_type_ids = named_types;
+    source.generic_bindings = generics;
     let pos: Position = string_position();
 
     let literal: NodeID = string_literal(source.arena, "White", pos);

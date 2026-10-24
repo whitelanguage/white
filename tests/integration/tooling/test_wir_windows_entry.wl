@@ -11,6 +11,8 @@ import wir_find_function from "../../../src/compiler/wir/lowering/declarations.w
 import wir_find_global from "../../../src/compiler/wir/lowering/globals.wl"
 import * from "../../../src/compiler/wir/lowering/target_runtime.wl"
 import * from "../../../src/compiler/wir/backend/llvm.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
+import NodeID from "../../../src/frontend/ast.wl"
 
 func entry_contains(text: String, needle: String) -> Bool {
     let start: Int = 0;
@@ -35,9 +37,13 @@ func main() -> Int {
 
     let functions: Dict(String, FuncInfo) = Dict();
     let links: Dict(String, String) = Dict();
-    functions.put("runtime.exit", FuncInfo(name="runtime.exit", base_name="process_exit", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["status"], is_varargs=false, abi_name=""));
+    functions.put("runtime.exit", FuncInfo(name="runtime.exit", base_name="process_exit", ret_type=TYPE_VOID, arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], arg_names=["status"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     links.put("process_exit", "runtime.exit");
-    let source: Compiler = Compiler(func_table=functions, compiler_link=links, is_shared=false);
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.func_table = functions;
+    source.compiler_link = links;
+    source.is_shared = false;
     let errors: Vector(String) = [];
     wir_emit_target_runtime(ref source, ref program, errors);
     if (errors.length() != 0) { print("FAIL: Windows entry lowering: ", errors[0]); return 1; }

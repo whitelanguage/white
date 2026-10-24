@@ -14,6 +14,7 @@ import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/globals.wl"
 import * from "../../../src/compiler/wir/lowering/functions.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
 
 func global_position() -> Position {
     return Position(idx=0, ln=1, col=1, text="", fn="memory.wl");
@@ -48,8 +49,17 @@ func global_contains(text: String, needle: String) -> Bool {
 
 func check_null_global() -> Bool {
     let symbols: Dict(String, SymbolInfo) = Dict();
-    symbols.put("buffer", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=false));
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=Dict(), parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, current_package_prefix="", current_file_global_aliases=Dict(), global_var_aliases=Dict(), generic_bindings=Dict());
+    symbols.put("buffer", SymbolInfo(reg="poison", type=TYPE_STRING, origin_type=TYPE_STRING, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return false; }
+    source.arena = new_ast_arena();
+    source.symbol_table = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = symbols;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = Dict();
+    source.global_var_aliases = Dict();
+    source.generic_bindings = Dict();
     let pos: Position = global_position();
     let value: NodeID = add_null_node(ref source.arena, NullNode(type=NODE_NULL, pos=pos));
     let declaration: VarDeclareNode = global_decl(source.arena, "buffer", "String", value, false, pos);
@@ -75,11 +85,21 @@ func main() -> Int {
     let named_types: Dict(Int, NamedTypeInfo) = Dict();
     let generics: Dict(String, SymbolInfo) = Dict();
     let locals: Dict(String, SymbolInfo) = Dict();
-    symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false));
-    symbols.put("limit", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=true));
-    symbols.put("ready", SymbolInfo(reg="poison", type=TYPE_BOOL, origin_type=TYPE_BOOL, is_const=true));
-    symbols.put("mask", SymbolInfo(reg="poison", type=TYPE_UINT32, origin_type=TYPE_UINT32, is_const=true));
-    let source: Compiler = Compiler(arena=new_ast_arena(), symbol_table=Scope(table=locals, parent=-1, gc_vars=[], depth=0), scope_stack=[], global_symbol_table=symbols, current_package_prefix="", current_file_global_aliases=aliases, global_var_aliases=imported_aliases, named_type_ids=named_types, generic_bindings=generics);
+    symbols.put("counter", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    symbols.put("limit", SymbolInfo(reg="poison", type=TYPE_INT, origin_type=TYPE_INT, is_const=true, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    symbols.put("ready", SymbolInfo(reg="poison", type=TYPE_BOOL, origin_type=TYPE_BOOL, is_const=true, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    symbols.put("mask", SymbolInfo(reg="poison", type=TYPE_UINT32, origin_type=TYPE_UINT32, is_const=true, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.arena = new_ast_arena();
+    source.symbol_table = Scope(table=locals, parent=-1, gc_vars=[], depth=0);
+    source.scope_stack = [];
+    source.global_symbol_table = symbols;
+    source.current_package_prefix = "";
+    source.current_file_global_aliases = aliases;
+    source.global_var_aliases = imported_aliases;
+    source.named_type_ids = named_types;
+    source.generic_bindings = generics;
     let pos: Position = global_position();
     let program: WirModule = new_wir_module("x86_64-pc-windows-msvc", 64);
     let types: WirTypeMap = new_wir_type_map();
@@ -98,7 +118,7 @@ func main() -> Int {
     let assignment: NodeID = add_var_assign_node(ref source.arena, VarAssignNode(type=NODE_VAR_ASSIGN, name_tok=global_token(TOK_IDENTIFIER, "counter"), value=global_int(source.arena, "7", pos), pos=pos));
     let return_value: NodeID = add_return_node(ref source.arena, ReturnNode(type=NODE_RETURN, value=global_access(source.arena, "counter", pos), pos=pos));
     let body: NodeID = add_block_node(ref source.arena, BlockNode(type=NODE_BLOCK, stmts=[assignment, return_value]));
-    let info: FuncInfo = FuncInfo(name="use_global", base_name="use_global", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="");
+    let info: FuncInfo = FuncInfo(name="use_global", base_name="use_global", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_body(ref types, ref source, ref program, info, body);
 
     if (types.errors.length() != 0) {

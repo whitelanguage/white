@@ -301,19 +301,19 @@ func wir_add_constant(ref program: WirModule, value: WirConstant) -> WirValueID 
 }
 
 func wir_const_zero(ref program: WirModule, type_id: WirTypeID) -> WirValueID {
-    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Zero, type_id=type_id, elements=[], bytes="", target=NO_WIR_VALUE, addend=0L));
+    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Zero, type_id=type_id, elements=[], bytes="", target=NO_WIR_VALUE, addend=0L, offsets=[]));
 }
 
 func wir_const_aggregate(ref program: WirModule, type_id: WirTypeID, elements: Vector(WirValueID)) -> WirValueID {
-    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Aggregate, type_id=type_id, elements=elements, bytes="", target=NO_WIR_VALUE, addend=0L));
+    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Aggregate, type_id=type_id, elements=elements, bytes="", target=NO_WIR_VALUE, addend=0L, offsets=[]));
 }
 
 func wir_const_bytes(ref program: WirModule, type_id: WirTypeID, bytes: String) -> WirValueID {
-    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Bytes, type_id=type_id, elements=[], bytes=bytes, target=NO_WIR_VALUE, addend=0L));
+    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Bytes, type_id=type_id, elements=[], bytes=bytes, target=NO_WIR_VALUE, addend=0L, offsets=[]));
 }
 
 func wir_const_address(ref program: WirModule, type_id: WirTypeID, target: WirValueID, addend: Long) -> WirValueID {
-    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Address, type_id=type_id, elements=[], bytes="", target=target, addend=addend));
+    return wir_add_constant(ref program, WirConstant(kind=WirConstKind.Address, type_id=type_id, elements=[], bytes="", target=target, addend=addend, offsets=[]));
 }
 
 func wir_const_storage(ref program: WirModule, type_id: WirTypeID, elements: Vector(WirValueID), offsets: Vector(UInt64)) -> WirValueID {

@@ -119,8 +119,8 @@ struct FuncInfo(
     variadic_param: Int,
     default_args: Vector(NodeID),
     ref_body: NodeID,
-    ref_context: GenericTemplate,
-    ref_bindings: Dict(String, SymbolInfo)
+    ref_context: Optional(GenericTemplate),
+    ref_bindings: Optional(Dict(String, SymbolInfo))
 )
 
 struct VariadicSource(
@@ -143,7 +143,8 @@ struct FieldInfo(
     type: Int,
     llvm_type: String,
     offset: Int,
-    is_const: Bool
+    is_const: Bool,
+    default_val: NodeID
 )
 struct StructInfo(
     name: String,
@@ -331,6 +332,7 @@ struct Compiler(
     generic_type_names: Dict(String, StringConstant),
     generic_instance_bindings: Dict(String, Dict(String, SymbolInfo)),
     generic_instance_templates: Dict(String, GenericTemplate),
+    struct_contexts: Dict(Int, GenericTemplate),
     generic_type_defs: String,
     generic_vtables: Vector(Struct),
     generic_worklist: Vector(Struct),
@@ -351,7 +353,8 @@ struct Compiler(
     ref_files: Dict(String, Bool),
     ref_scan: Int,
     ref_call_scan: Int,
-    ref_callees: Dict(String, Bool)
+    ref_callees: Dict(String, Bool),
+    ref_index_ready: Bool
 )
 
 struct ParsedModule(
@@ -387,37 +390,37 @@ struct LoopScope(
 )
 
 func has_symbol(info: SymbolInfo) -> Bool {
-    return info.type != 0 || info.reg is !null;
+    return info.type != 0 || info.reg.length() != 0;
 }
 func has_func(info: FuncInfo) -> Bool {
-    return info.name is !null;
+    return info.name.length() != 0;
 }
 func has_field(info: FieldInfo) -> Bool {
-    return info.name is !null;
+    return info.name.length() != 0;
 }
 func has_struct(info: StructInfo) -> Bool {
     return info.type_id != 0;
 }
 func has_template(info: GenericTemplate) -> Bool {
-    return info.name is !null;
+    return info.name.length() != 0;
 }
 func has_array_info(info: ArrayInfo) -> Bool {
-    return info.llvm_name is !null;
+    return info.llvm_name.length() != 0;
 }
 func has_named_type(info: NamedTypeInfo) -> Bool {
-    return info.name is !null;
+    return info.name.length() != 0;
 }
 func has_slice_parts(info: SliceParts) -> Bool {
-    return info.data is !null || info.owner is !null;
+    return info.data.length() != 0 || info.owner.length() != 0;
 }
 func has_bound_args(info: BoundCallArgs) -> Bool {
-    return info.ordered is !null;
+    return info.valid;
 }
 func has_string_constant(info: StringConstant) -> Bool {
     return info.value is !null;
 }
 func has_result(info: CompileResult) -> Bool {
-    return info.type != 0 || info.reg is !null;
+    return info.type != 0 || info.reg.length() != 0;
 }
 
 func scope_lookup(scope: Scope, name: String) -> Optional(SymbolInfo) {
@@ -572,11 +575,21 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         generic_method_key = "",
         generic_class_type = 0,
         erased_checks = Dict(),
-        hash_types = Dict()
+        hash_types = Dict(),
+        flow_types=[],
+        flow_exposed=[],
+        flow_skip=NodeID(0U),
+        ref_targets=Dict(),
+        ref_files=Dict(),
+        ref_scan=0,
+        ref_call_scan=0,
+        ref_callees=Dict(),
+        ref_index_ready=false,
+        struct_contexts=Dict()
     );
 
-    comp.type_drop_list.append(TypeListNode(type=TYPE_GENERIC_FUNCTION));
-    comp.type_drop_list.append(TypeListNode(type=TYPE_STRING));
+    comp.type_drop_list.append(TypeListNode(type=TYPE_GENERIC_FUNCTION, pass_mode=0));
+    comp.type_drop_list.append(TypeListNode(type=TYPE_STRING, pass_mode=0));
     return comp;
 }
 
@@ -593,7 +606,7 @@ func next_label(ref c: Compiler) -> String {
 }
 
 func void_result() -> CompileResult {
-    return CompileResult(reg="", type=TYPE_VOID);
+    return CompileResult(reg="", type=TYPE_VOID, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func module_member_name(prefix: String, path_parts: Vector(String), field_name: String) -> String {
@@ -1149,7 +1162,7 @@ func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, incl
 
         let target_name: String = orig_name;
 
-        if (curr_sym.alias_tok.value is !null) {
+        if (curr_sym.alias_tok.value.length() != 0) {
             let a_tok: WhitelangTokens.Token = curr_sym.alias_tok;
             target_name = a_tok.value;
         }
@@ -1234,7 +1247,7 @@ func export_named_imports(ref c: Compiler, node: ImportNode) -> Void {
         }
 
         let target_name: String = symbol.name_tok.value;
-        if (symbol.alias_tok.value is !null) { target_name = symbol.alias_tok.value; }
+        if (symbol.alias_tok.value.length() != 0) { target_name = symbol.alias_tok.value; }
         let export_name: String = c.current_package_prefix + target_name;
 
         let mapped_func: Optional(String) = c.current_file_func_aliases.lookup(target_name);
@@ -1480,7 +1493,7 @@ func union_map_target(ref c: Compiler, target: Int, node: NodeID, pos: Position)
 func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
 // the tag selects the live member, the payload reserves its size and alignment
     let found_union: Optional(UnionInfo) = get_union_type(ref c, type_id);
-    if (found_union is null) { return UnionLayout(); }
+    if (found_union is null) { return UnionLayout(valid=false, size=0, alignment=0, payload_offset=0, payload_type=0, payload_count=0); }
     let union: UnionInfo = found_union;
 
     let payload_size: Int = 0;
@@ -1505,7 +1518,7 @@ func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
     else if (payload_align == 16) { carrier = TYPE_UINT128; }
     else if (payload_align != 1) {
         throw_type_error(union.pos, "Unsupported union payload alignment.");
-        return UnionLayout();
+        return UnionLayout(valid=false, size=0, alignment=0, payload_offset=0, payload_type=0, payload_count=0);
     }
 
     let carrier_size: Int = get_type_size_bytes(ref c, carrier);
@@ -1514,7 +1527,7 @@ func get_union_layout(ref c: Compiler, type_id: Int) -> UnionLayout {
     let offset: Int = align_to(4, payload_align);
     if (payload_size < 0 || payload_size > 2147483647 - carrier_size - offset - alignment) {
         throw_type_error(union.pos, "Union storage exceeds the supported size.");
-        return UnionLayout();
+        return UnionLayout(valid=false, size=0, alignment=0, payload_offset=0, payload_type=0, payload_count=0);
     }
 
     let count: Int = (payload_size + carrier_size - 1) / carrier_size;
@@ -1580,7 +1593,7 @@ func get_union_type_id(ref c: Compiler, members: Vector(Int), pos: Position) -> 
     let type_id: Int = c.type_counter;
     c.type_counter++;
     c.union_types.put(type_id, UnionInfo(members=members, key=key, pos=pos));
-    c.union_cache.put(key, SymbolInfo(type=type_id));
+    c.union_cache.put(key, SymbolInfo(type=type_id, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.type_revision++;
     return type_id;
 }
@@ -1591,7 +1604,7 @@ func instantiate_alias(ref c: Compiler, template: GenericTemplate, concrete: Vec
         throw_type_error(pos, "Generic instantiation depth exceeds 64.");
         return TYPE_POISON;
     }
-    c.generic_instances.put(key, SymbolInfo(type=TYPE_POISON));
+    c.generic_instances.put(key, SymbolInfo(type=TYPE_POISON, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.generic_depth++;
     let bindings: Dict(String, SymbolInfo) = generic_bindings(template.type_params, concrete);
     if (!check_generic_constraints(ref c, template, bindings, concrete, pos)) {
@@ -1615,7 +1628,7 @@ func instantiate_alias(ref c: Compiler, template: GenericTemplate, concrete: Vec
         c.generic_instances.remove(key);
         return TYPE_POISON;
     }
-    c.generic_instances.put(key, SymbolInfo(type=target));
+    c.generic_instances.put(key, SymbolInfo(type=target, reg="", origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     return target;
 }
 
@@ -2215,8 +2228,8 @@ func get_ptr_type_id(ref c: Compiler, base_id: Int) -> Int {
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0));
-    c.ptr_base_map.put(new_id, SymbolInfo(reg="", type=base_id));
+    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    c.ptr_base_map.put(new_id, SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
 
     return new_id;
 }
@@ -2229,8 +2242,8 @@ func get_fallible_type_id(ref c: Compiler, base_id: Int) -> Int {
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    let sym: SymbolInfo = SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=[]);
-    let base_sym: SymbolInfo = SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, func_arg_types=[]);
+    let sym: SymbolInfo = SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=[], is_const_access=false, is_ref_param=false, is_reference=false, arg_names=[], variadic_param=0);
+    let base_sym: SymbolInfo = SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, func_arg_types=[], is_const_access=false, is_ref_param=false, is_reference=false, arg_names=[], variadic_param=0);
 
     c.fallible_cache.put(key, sym);
     c.fallible_base_map.put(new_id, base_sym);
@@ -2255,8 +2268,8 @@ func get_func_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id: I
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    c.func_ret_map.put(new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
-    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
+    c.func_ret_map.put(new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param, is_const_access=false, is_ref_param=false, is_reference=false));
+    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param, is_const_access=false, is_ref_param=false, is_reference=false));
     return new_id;
 }
 
@@ -2277,8 +2290,8 @@ func get_method_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id:
     let new_id: Int = c.type_counter;
     c.type_counter += 1;
 
-    c.method_ret_map.put(new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
-    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param));
+    c.method_ret_map.put(new_id, SymbolInfo(reg="", type=ret_type_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param, is_const_access=false, is_ref_param=false, is_reference=false));
+    c.ptr_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, func_arg_types=arg_types, arg_names=arg_names, variadic_param=variadic_param, is_const_access=false, is_ref_param=false, is_reference=false));
     return new_id;
 }
 
@@ -2288,11 +2301,11 @@ func get_vector_type_id(ref c: Compiler, base_id: Int) -> Int {
     if ((cached is !null)) { return cached.type; }
 
     let new_id: Int = c.type_counter;
-    c.type_drop_list.append(TypeListNode(type=new_id));
+    c.type_drop_list.append(TypeListNode(type=new_id, pass_mode=0));
     c.type_counter += 1;
 
-    c.vector_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0));
-    c.vector_base_map.put(new_id, SymbolInfo(reg="", type=base_id, origin_type=0));
+    c.vector_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    c.vector_base_map.put(new_id, SymbolInfo(reg="", type=base_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
 
     return new_id;
 }
@@ -2308,7 +2321,7 @@ func get_slice_type_id(ref c: Compiler, base_id: Int) -> Int {
     let elem_ty: String = get_llvm_type_str(ref c, base_id);
     let size_ty: String = get_size_llvm_type();
     let slice_ty: String = "{ " + size_ty + ", " + size_ty + ", i8*, " + elem_ty + "**, " + size_ty + "* }";
-    c.array_type_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false));
+    c.array_type_cache.put(key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.array_info_map.put(new_id, ArrayInfo(base_type=base_id, size=-1, llvm_name=slice_ty));
     return new_id;
 }
@@ -2878,6 +2891,9 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             if (!(s_info is !null) && c.current_package_prefix != "") {
                 s_info = c.struct_table.lookup(c.current_package_prefix + callee_name);
             }
+            if (s_info is null && generic_type_name.length() != 0) {
+                s_info = c.struct_table.lookup(generic_type_name);
+            }
             if (!(s_info is !null)) {
                 let alias_info: Optional(NamedTypeInfo) = find_named_decl(ref c, callee_name);
                 if ((alias_info is !null) && alias_info.is_alias) {
@@ -2926,6 +2942,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
                         let f_info: Optional(FuncInfo) = c.func_table.lookup(full_name);
                         if ((f_info is !null)) { return f_info.ret_type; }
+                        let constructor: Optional(StructInfo) = c.struct_table.lookup(generic_type_name);
+                        if (constructor is !null) { return constructor.type_id; }
                     }
                 }
             }
@@ -3322,7 +3340,7 @@ func generic_bindings(params: Vector(GenericParamNode), types: Vector(Struct)) -
     while (params is !null && types is !null && i < params.length() && i < types.length()) {
         let param: GenericParamNode = params[i];
         let value: TypeListNode = types[i];
-        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type));
+        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
         i += 1;
     }
     return bindings;
@@ -3345,14 +3363,15 @@ func extend_generic_bindings(found: Optional(Dict(String, SymbolInfo)), params: 
     while (params is !null && types is !null && i < params.length() && i < types.length()) {
         let param: GenericParamNode = params[i];
         let value: TypeListNode = types[i];
-        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type));
+        bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
         i++;
     }
     return bindings;
 }
 
-func use_generic_context(ref c: Compiler, template: GenericTemplate, bindings: Dict(String, SymbolInfo)) -> GenericTemplate {
-    let previous: GenericTemplate = GenericTemplate(
+func capture_type_context(ref c: Compiler) -> GenericTemplate {
+// defaults keep the declaring module's names when construction happens in another file
+    return GenericTemplate(
         name=c.current_package_prefix,
         node=NO_NODE,
         type_params=[],
@@ -3364,6 +3383,10 @@ func use_generic_context(ref c: Compiler, template: GenericTemplate, bindings: D
         funcs=c.current_file_func_aliases,
         globals=c.current_file_global_aliases
     );
+}
+
+func use_generic_context(ref c: Compiler, template: GenericTemplate, bindings: Dict(String, SymbolInfo)) -> GenericTemplate {
+    let previous = capture_type_context(ref c);
     c.current_package_prefix = template.prefix;
     c.current_dir = template.dir;
     c.current_file_visible_prefixes = template.visible;
@@ -3507,16 +3530,17 @@ func register_generic_struct(ref c: Compiler, template: GenericTemplate, types: 
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=[]
+        interfaces=[],
+        layout_ready=false
     );
-    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, ref c)));
     c.generic_instance_bindings.put("" + new_id, bindings);
     c.generic_instance_templates.put("" + new_id, template);
     c.struct_table.put(key, info);
     c.struct_id_map.put(new_id, info);
     c.type_revision++;
-    c.type_drop_list.append(TypeListNode(type=new_id));
+    c.type_drop_list.append(TypeListNode(type=new_id, pass_mode=0));
 
     let body: String = "";
     let fields: Vector(Struct) = [];
@@ -3533,10 +3557,11 @@ func register_generic_struct(ref c: Compiler, template: GenericTemplate, types: 
         let field_llvm: String = get_llvm_type_str(ref c, field_type);
         if (i > 0) { body += ", "; }
         body += field_llvm;
-        fields.append(FieldInfo(name=field.name_tok.value, type=field_type, llvm_type=field_llvm, offset=i, is_const=false));
+        fields.append(FieldInfo(name=field.name_tok.value, type=field_type, llvm_type=field_llvm, offset=i, is_const=false, default_val=field.default_val));
         i += 1;
     }
     info.fields = fields;
+    c.struct_contexts.put(new_id, template);
     store_struct(ref c, info);
     if (fields.length() == 0) { body = "i8"; }
 
@@ -3554,7 +3579,7 @@ func append_type_once(list: Vector(Struct), type_id: Int) -> Void {
         if (item.type == type_id) { return; }
         i += 1;
     }
-    list.append(TypeListNode(type=type_id));
+    list.append(TypeListNode(type=type_id, pass_mode=0));
 }
 
 func register_generic_interface(ref c: Compiler, template: GenericTemplate, types: Vector(Struct), pos: Position) -> Int {
@@ -3579,7 +3604,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
 
     let node: InterfaceDefNode = get_interface_def_node(ref c.arena, template.node);
     let bindings: Dict(String, SymbolInfo) = generic_bindings(template.type_params, types);
-    c.generic_instances.put(key, SymbolInfo(reg="", type=TYPE_POISON, origin_type=TYPE_POISON));
+    c.generic_instances.put(key, SymbolInfo(reg="", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.generic_depth++;
     if (!check_generic_constraints(ref c, template, bindings, types, pos)) {
         c.generic_instances.remove(key);
@@ -3705,14 +3730,14 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
         interfaces=interfaces,
         layout_ready=true
     );
-    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, ref c)));
     c.generic_instance_bindings.put("" + new_id, bindings);
     c.generic_instance_templates.put("" + new_id, template);
     c.struct_table.put(key, info);
     c.struct_id_map.put(new_id, info);
     c.type_revision++;
-    c.type_drop_list.append(TypeListNode(type=new_id));
+    c.type_drop_list.append(TypeListNode(type=new_id, pass_mode=0));
     restore_generic_context(ref c, previous, previous_bindings);
     c.generic_depth--;
     return new_id;
@@ -3810,7 +3835,7 @@ func interface_type_bindings(ref c: Compiler, info: StructInfo, self_type: Int) 
     let bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + info.type_id);
     let result: Dict(String, SymbolInfo) = extend_generic_bindings(bindings, [], []);
     if (self_type != 0) {
-        result.put("Self", SymbolInfo(reg="", type=self_type, origin_type=self_type));
+        result.put("Self", SymbolInfo(reg="", type=self_type, origin_type=self_type, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     }
 
     return result;
@@ -3821,7 +3846,7 @@ func interface_method_type_for(ref c: Compiler, info: StructInfo, node: NodeID, 
     let bindings: Dict(String, SymbolInfo) = interface_type_bindings(ref c, info, self_type);
 
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
-    let previous: GenericTemplate = GenericTemplate();
+    let previous: Optional(GenericTemplate) = null;
     if ((template is !null)) {
         previous = use_generic_context(ref c, template, bindings);
     } else {
@@ -3829,7 +3854,7 @@ func interface_method_type_for(ref c: Compiler, info: StructInfo, node: NodeID, 
     }
 
     let result: Int = resolve_type(ref c, node);
-    if ((template is !null)) {
+    if (previous is !null) {
         restore_generic_context(ref c, previous, previous_bindings);
     } else {
         c.generic_bindings = previous_bindings;
@@ -4052,17 +4077,18 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         is_enum=false,
         is_error=false,
         is_interface=false,
-        interfaces=[]
+        interfaces=[],
+        layout_ready=false
     );
     // publish the shell before resolving fields so recursive types find this instance
-    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id));
+    c.generic_instances.put(key, SymbolInfo(reg="", type=new_id, origin_type=new_id, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     c.generic_type_names.put("" + new_id, StringConstant(id=0, value=generic_type_name(template.name, types, ref c)));
     c.generic_instance_bindings.put("" + new_id, bindings);
     c.generic_instance_templates.put("" + new_id, template);
     c.struct_table.put(key, info);
     c.struct_id_map.put(new_id, info);
     c.type_revision++;
-    c.type_drop_list.append(TypeListNode(type=new_id));
+    c.type_drop_list.append(TypeListNode(type=new_id, pass_mode=0));
 
     let previous_bindings: Dict(String, SymbolInfo) = c.generic_bindings;
     let previous: GenericTemplate = use_generic_context(ref c, template, bindings);
@@ -4096,7 +4122,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             restore_generic_context(ref c, previous, previous_bindings);
             return TYPE_POISON;
         }
-        interfaces.append(TypeListNode(type=interface_type));
+        interfaces.append(TypeListNode(type=interface_type, pass_mode=0));
         interface_index++;
     }
     info.interfaces = interfaces;
@@ -4113,7 +4139,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             inherited_field_index++;
         }
     } else {
-        fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="i8*", offset=0, is_const=true));
+        fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="i8*", offset=0, is_const=true, default_val=NodeID(0U)));
         field_names.put("_vptr", StringConstant(id=0, value="_vptr"));
     }
 
@@ -4148,7 +4174,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         }
 
         field_names.put(field_name, StringConstant(id=0, value=field_name));
-        fields.append(FieldInfo(name=field_name, type=field_type, llvm_type=get_llvm_type_str(ref c, field_type), offset=fields.length(), is_const=field.is_const));
+        fields.append(FieldInfo(name=field_name, type=field_type, llvm_type=get_llvm_type_str(ref c, field_type), offset=fields.length(), is_const=field.is_const, default_val=NodeID(0U)));
         field_index += 1;
     }
     info.fields = fields;
@@ -4198,7 +4224,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             return TYPE_POISON;
         }
 
-        let arg_types: Vector(Struct) = [TypeListNode(type=new_id)];
+        let arg_types: Vector(Struct) = [TypeListNode(type=new_id, pass_mode=0)];
         let arg_names: Vector(String) = ["self"];
         let param_names: Dict(String, StringConstant) = Dict();
         let param_index: Int = 0;
@@ -4250,7 +4276,9 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             default_args=param_defaults(method_node.params),
             ref_body=method_node.body,
             ref_context=template,
-            ref_bindings=bindings
+            ref_bindings=bindings,
+            ann_flags=0,
+            abi_name=""
         );
         c.func_table.put(method_key, func_info);
         let class_method: GenericTemplate = GenericTemplate(
@@ -4312,7 +4340,7 @@ func queue_generic_class_method(ref c: Compiler, owner: StructInfo, name: String
 
     let bindings: Optional(Dict(String, SymbolInfo)) = c.generic_instance_bindings.lookup("" + owner.type_id);
     if (bindings is null) {
-        throw_internal_compiler_error(Position(), "Missing generic class bindings.");
+        throw_internal_compiler_error(Position(idx=0, ln=0, col=0, text="", fn=""), "Missing generic class bindings.");
         return;
     }
     c.generic_methods_queued.put(key, true);
@@ -4337,7 +4365,7 @@ func bind_inferred_type(inferred: Dict(String, SymbolInfo), name: String, actual
         throw_type_error(pos, "Conflicting types inferred for '" + name + "'.");
         return false;
     }
-    inferred.put(name, SymbolInfo(reg="", type=actual, origin_type=actual));
+    inferred.put(name, SymbolInfo(reg="", type=actual, origin_type=actual, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     return true;
 }
 
@@ -4602,7 +4630,7 @@ func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate
         while (i < explicit.length()) {
             let type_id: Int = resolve_type(ref c, explicit[i]);
             if (type_id == TYPE_POISON) { return null; }
-            result.append(TypeListNode(type=type_id));
+            result.append(TypeListNode(type=type_id, pass_mode=0));
             i += 1;
         }
         return result;
@@ -4636,7 +4664,7 @@ func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate
             throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for type '" + template.name + "'.");
             return null;
         }
-        result.append(TypeListNode(type=inferred_type.type));
+        result.append(TypeListNode(type=inferred_type.type, pass_mode=0));
         i += 1;
     }
     return result;
@@ -4654,7 +4682,7 @@ func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: 
         while (i < explicit.length()) {
             let type_id: Int = resolve_type(ref c, explicit[i]);
             if (type_id == TYPE_POISON) { return null; }
-            result.append(TypeListNode(type=type_id));
+            result.append(TypeListNode(type=type_id, pass_mode=0));
             i += 1;
         }
         return result;
@@ -4692,7 +4720,7 @@ func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: 
             return null;
         }
 
-        result.append(TypeListNode(type=inferred_type.type));
+        result.append(TypeListNode(type=inferred_type.type, pass_mode=0));
         i += 1;
     }
     return result;
@@ -4711,7 +4739,7 @@ func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, exp
         while (i < explicit.length()) {
             let type_id: Int = resolve_type(ref c, explicit[i]);
             if (type_id == TYPE_POISON) { return null; }
-            result.append(TypeListNode(type=type_id));
+            result.append(TypeListNode(type=type_id, pass_mode=0));
             i++;
         }
         return result;
@@ -4744,7 +4772,7 @@ func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, exp
             throw_type_error(pos, "Cannot infer type argument '" + type_param.name_tok.value + "' for method '" + node.name_tok.value + "'.");
             return null;
         }
-        result.append(TypeListNode(type=inferred_type.type));
+        result.append(TypeListNode(type=inferred_type.type, pass_mode=0));
         i++;
     }
     return result;
@@ -4775,7 +4803,7 @@ func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: 
     c.generic_depth++;
 
     let return_type: Int = resolve_type(ref c, node.return_type);
-    let arg_types: Vector(Struct) = [TypeListNode(type=owner.type_id)];
+    let arg_types: Vector(Struct) = [TypeListNode(type=owner.type_id, pass_mode=0)];
     let arg_names: Vector(String) = ["self"];
     let i: Int = 0;
     while (node.params is !null && i < node.params.length()) {
@@ -4955,7 +4983,7 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         while (i < args.length()) {
             let arg_type: Int = resolve_type(ref c, args[i]);
             if (arg_type == TYPE_POISON) { return TYPE_POISON; }
-            concrete.append(TypeListNode(type=arg_type));
+            concrete.append(TypeListNode(type=arg_type, pass_mode=0));
             instance_key += "$" + mangle_type(ref c, arg_type);
             i += 1;
         }
@@ -5084,7 +5112,7 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let new_id: Int = c.type_counter;
         c.type_counter += 1;
 
-        c.array_type_cache.put(cache_key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false));
+        c.array_type_cache.put(cache_key, SymbolInfo(reg="", type=new_id, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
 
         let llvm_name: String = "[" + size + " x " + get_llvm_type_str(ref c, base_id) + "]";
         c.array_info_map.put(new_id, ArrayInfo(base_type=base_id, size=size, llvm_name=llvm_name));

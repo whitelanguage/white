@@ -8,40 +8,43 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
+import NodeID from "../../../src/frontend/ast.wl"
+import Position from "../../../src/frontend/diagnostics.wl"
 
 func type_kind(program: WirModule, type_id: WirTypeID) -> WirTypeKind {
     return program.arena.types[wir_id_index(UInt32(type_id))].kind;
 }
 
 func main() -> Int {
-    let source: Compiler = Compiler(
-        ptr_base_map=Dict(),
-        vector_base_map=Dict(),
-        array_info_map=Dict(),
-        fallible_base_map=Dict(),
-        func_ret_map=Dict(),
-        method_ret_map=Dict(),
-        struct_id_map=Dict(),
-        named_type_ids=Dict()
-    );
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.ptr_base_map = Dict();
+    source.vector_base_map = Dict();
+    source.array_info_map = Dict();
+    source.fallible_base_map = Dict();
+    source.func_ret_map = Dict();
+    source.method_ret_map = Dict();
+    source.struct_id_map = Dict();
+    source.named_type_ids = Dict();
 
-    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_INT));
+    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_INT, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     source.array_info_map.put(101, ArrayInfo(base_type=TYPE_INT, size=4, llvm_name=""));
-    source.vector_base_map.put(102, SymbolInfo(reg="", type=TYPE_CHAR));
+    source.vector_base_map.put(102, SymbolInfo(reg="", type=TYPE_CHAR, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
 
     let point_fields: Vector(Struct) = [];
-    point_fields.append(FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false));
-    point_fields.append(FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false));
-    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=point_fields, is_class=false, is_enum=false, is_interface=false));
+    point_fields.append(FieldInfo(name="x", type=TYPE_INT, llvm_type="", offset=0, is_const=false, default_val=NodeID(0U)));
+    point_fields.append(FieldInfo(name="y", type=TYPE_INT, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U)));
+    source.struct_id_map.put(103, StructInfo(name="Point", type_id=103, fields=point_fields, is_class=false, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
 
     let class_fields: Vector(Struct) = [];
-    class_fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true));
-    class_fields.append(FieldInfo(name="value", type=TYPE_INT, llvm_type="", offset=1, is_const=false));
-    source.struct_id_map.put(104, StructInfo(name="Box", type_id=104, fields=class_fields, is_class=true, is_enum=false, is_interface=false));
-    source.named_type_ids.put(105, NamedTypeInfo(name="NodeID", type_id=105, underlying_type=TYPE_UINT32, is_alias=false, resolved=true));
+    class_fields.append(FieldInfo(name="_vptr", type=TYPE_VOID, llvm_type="", offset=0, is_const=true, default_val=NodeID(0U)));
+    class_fields.append(FieldInfo(name="value", type=TYPE_INT, llvm_type="", offset=1, is_const=false, default_val=NodeID(0U)));
+    source.struct_id_map.put(104, StructInfo(name="Box", type_id=104, fields=class_fields, is_class=true, is_enum=false, is_interface=false, llvm_name="", init_body=NodeID(0U), vtable_name="", parent_id=0, vtable=[], ann_flags=0, is_error=false, interfaces=[], compiler_link_name="", layout_ready=false));
+    source.named_type_ids.put(105, NamedTypeInfo(name="NodeID", type_id=105, underlying_type=TYPE_UINT32, is_alias=false, resolved=true, target_node=NodeID(0U), pos=Position(idx=0, ln=0, col=0, text="", fn=""), resolving=false));
     source.array_info_map.put(106, ArrayInfo(base_type=TYPE_BYTE, size=-1, llvm_name="slice"));
-    source.fallible_base_map.put(107, SymbolInfo(reg="", type=TYPE_INT));
-    source.func_ret_map.put(108, SymbolInfo(reg="", type=TYPE_INT, func_arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)]));
+    source.fallible_base_map.put(107, SymbolInfo(reg="", type=TYPE_INT, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    source.func_ret_map.put(108, SymbolInfo(reg="", type=TYPE_INT, func_arg_types=[TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)], origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, arg_names=[], variadic_param=0));
 
     let program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
     let types: WirTypeMap = new_wir_type_map();

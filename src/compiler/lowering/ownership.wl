@@ -329,7 +329,7 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
                 v_node.alloc_id = -1;
                 c.arena.var_decl_nodes[node_slot(node)] = v_node;
                 if (target_type_id != TYPE_POISON && target_type_id != 0 && target_type_id != TYPE_AUTO && c.hoist_scope.table is !null) {
-                    scope_put(c.hoist_scope, v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
+                    scope_put(c.hoist_scope, v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
                 }
                 return;
             }
@@ -340,7 +340,7 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
             }
 
             if (c.hoist_scope.table is !null) {
-                scope_put(c.hoist_scope, v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const));
+                scope_put(c.hoist_scope, v_node.name_tok.value, SymbolInfo(reg="", type=target_type_id, origin_type=target_type_id, is_const=v_node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
             }
 
             let var_reg: String = next_reg(ref c);
@@ -578,7 +578,7 @@ func emit_slice_parts(ref c: Compiler, slice_reg: String, slice_type: Int, pos: 
     let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(slice_type);
     if (arr_info is null) {
         throw_type_error(pos, "Expected a slice type.");
-        return SliceParts();
+        return SliceParts(start="", length="", owner="", data_slot="", size_slot="", data="");
     }
     let elem_ty: String = get_llvm_type_str(ref c, arr_info.base_type);
     let slice_ty: String = arr_info.llvm_name;
@@ -644,8 +644,8 @@ func emit_make_slice(ref c: Compiler, elem_type: Int, owner: String, data_slot: 
     let slice_type: Int = get_slice_type_id(ref c, elem_type);
     let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(slice_type);
     if (arr_info is null) {
-        throw_internal_compiler_error(Position(), "Missing slice layout.");
-        return CompileResult(reg="poison", type=TYPE_POISON);
+        throw_internal_compiler_error(Position(idx=0, ln=0, col=0, text="", fn=""), "Missing slice layout.");
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let elem_ty: String = get_llvm_type_str(ref c, elem_type);
     let slice_ty: String = arr_info.llvm_name;
@@ -680,7 +680,7 @@ func emit_make_slice(ref c: Compiler, elem_type: Int, owner: String, data_slot: 
     write_ir(ref c, c.indent + "store " + size_ty + "* " + size_slot + ", " + size_ty + "** " + size_slot_slot + "\n");
     write_ir(ref c, c.indent + "call void @__wl_retain(i8* " + owner + ")\n");
 
-    return CompileResult(reg=result, type=slice_type);
+    return CompileResult(reg=result, type=slice_type, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
 func emit_slice_copy(ref c: Compiler, elem_type: Int, source: String, start_i32: String, length_i32: String, pos: Position) -> CompileResult {
@@ -1093,7 +1093,7 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
             let method_len: Int = 0;
             if (methods is !null) { method_len = methods.length(); }
             let method_i: Int = 0;
-            let deinit: FuncInfo = FuncInfo();
+            let deinit: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
             while (method_i < method_len) {
                 let method_info: FuncInfo = methods[method_i];
                 if (method_info.base_name == "$deinit") {

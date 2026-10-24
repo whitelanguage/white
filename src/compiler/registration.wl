@@ -118,7 +118,7 @@ func resolve_interface_info(ref c: Compiler, info: StructInfo, stack: Vector(Str
 
     if (info.layout_ready) { return true; }
 
-    stack.append(TypeListNode(type=info.type_id));
+    stack.append(TypeListNode(type=info.type_id, pass_mode=0));
     info.interfaces = [];
     let node: InterfaceDefNode = get_interface_def_node(ref c.arena, info.init_body);
     let methods: Vector(Struct) = [];
@@ -257,7 +257,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_enum=false,
                 is_error=false,
                 is_interface=false,
-                interfaces=[]
+                interfaces=[],
+                layout_ready=false
             );
             c.struct_table.put(s_name, info);
             c.struct_id_map.put(new_id, info);
@@ -312,7 +313,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_enum=false,
                 is_error=false,
                 is_interface=false,
-                interfaces=[]
+                interfaces=[],
+                layout_ready=false
             );
             c.struct_table.put(c_name, info);
             c.struct_id_map.put(new_id, info);
@@ -388,7 +390,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_enum=false,
                 is_error=false,
                 is_interface=true,
-                interfaces=[]
+                interfaces=[],
+                layout_ready=false
             );
             c.struct_table.put(i_name, info);
             c.struct_id_map.put(new_id, info);
@@ -422,7 +425,8 @@ func pre_register_structs(ref c: Compiler, node: NodeID) -> Void {
                 is_enum=true,
                 is_error=e_node.is_error || sys_anns.compiler_link_name == "Error",
                 is_interface=false,
-                interfaces=[]
+                interfaces=[],
+                layout_ready=false
             );
             c.struct_table.put(e_name, info);
             c.struct_id_map.put(new_id, info);
@@ -470,7 +474,7 @@ func pre_register_globals(ref c: Compiler, node: NodeID) -> Void {
             }
             // keep the declared type visible while module imports are bound
             let declared_type: Int = resolve_type(ref c, var_decl.type_node);
-            c.global_symbol_table.put(full_var_name, SymbolInfo(reg="poison", type=declared_type, origin_type=declared_type, is_const=var_decl.is_const));
+            c.global_symbol_table.put(full_var_name, SymbolInfo(reg="poison", type=declared_type, origin_type=declared_type, is_const=var_decl.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
         }
         i += 1;
     }
@@ -613,7 +617,9 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 variadic_param=variadic_param_index(params),
                 default_args=param_defaults(params),
                 ref_body=f_node.body,
-                ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases)
+                ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases, name="", node=NodeID(0U), type_params=[]),
+                abi_name="",
+                ref_bindings=null
             );
             if ((sys_anns.ann_flags & FLAG_ANN_COMP_LINK) != 0 && f_info.variadic_param > 0) {
                 throw_type_error(f_node.pos, "CompilerLink functions cannot declare variadic parameters.");
@@ -693,7 +699,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 let arg_types: Vector(Struct) = [];
                 let arg_names: Vector(String) = ["self"];
 
-                arg_types.append(TypeListNode(type=class_type_id));
+                arg_types.append(TypeListNode(type=class_type_id, pass_mode=0));
 
                 let p_vec: Vector(ParamNode) = m_node.params;
                 if (!check_duplicate_params(p_vec, "method '" + m_raw_name + "'", m_node.pos)) { return; }
@@ -746,7 +752,11 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                     variadic_param=variadic_param_index(p_vec),
                     default_args=param_defaults(p_vec),
                     ref_body=m_node.body,
-                    ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases)
+                    ref_context=GenericTemplate(prefix=c.current_package_prefix, dir=c.current_dir, visible=c.current_file_visible_prefixes, namespaces=c.current_file_namespaces, types=c.current_file_type_aliases, funcs=c.current_file_func_aliases, globals=c.current_file_global_aliases, name="", node=NodeID(0U), type_params=[]),
+                    ann_flags=0,
+                    compiler_link_name="",
+                    abi_name="",
+                    ref_bindings=null
                 );
                 c.func_table.put(m_key, f_info);
                 m_idx += 1;

@@ -24,5 +24,5 @@ func emit_error_value(ref c: Compiler, value: CompileResult, pos: Position) -> C
     let result: String = next_reg(ref c);
     write_ir(ref c, c.indent + result + " = insertvalue { i64, i32 } " + with_domain + ", i32 " + value.reg + ", 1\n");
 
-    return CompileResult(reg=result, type=TYPE_ANY_ERROR);
+    return CompileResult(reg=result, type=TYPE_ANY_ERROR, origin_type=0, owns_ref=false, is_const_access=false);
 }

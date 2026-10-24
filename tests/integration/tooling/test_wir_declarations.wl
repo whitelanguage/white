@@ -10,32 +10,36 @@ import * from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/wir/print.wl"
 import * from "../../../src/compiler/wir/lowering/types.wl"
 import * from "../../../src/compiler/wir/lowering/declarations.wl"
+import new_fixture_compiler from "../../fixtures/tooling/compiler.wl"
+import NodeID from "../../../src/frontend/ast.wl"
 
 func main() -> Int {
-    let source: Compiler = Compiler(ptr_base_map=Dict());
-    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_BYTE));
+    let source: Compiler = new_fixture_compiler()?;
+    catch(err) { return 1; }
+    source.ptr_base_map = Dict();
+    source.ptr_base_map.put(100, SymbolInfo(reg="", type=TYPE_BYTE, origin_type=0, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     let program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
     let types: WirTypeMap = new_wir_type_map();
 
     let write_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE), TypeListNode(type=100, pass_mode=PARAM_VALUE), TypeListNode(type=TYPE_UINTSIZE, pass_mode=PARAM_VALUE)];
-    let write: FuncInfo = FuncInfo(name="write", base_name="write", ret_type=TYPE_INT, arg_types=write_args, arg_names=["fd", "data", "length"], is_varargs=false, abi_name="C");
+    let write: FuncInfo = FuncInfo(name="write", base_name="write", ret_type=TYPE_INT, arg_types=write_args, arg_names=["fd", "data", "length"], is_varargs=false, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_decl(ref types, ref source, ref program, write);
 
     let handle_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_VALUE)];
-    let handle: FuncInfo = FuncInfo(name="GetStdHandle", base_name="GetStdHandle", ret_type=TYPE_ANYPTR, arg_types=handle_args, arg_names=["kind"], is_varargs=false, abi_name="system");
+    let handle: FuncInfo = FuncInfo(name="GetStdHandle", base_name="GetStdHandle", ret_type=TYPE_ANYPTR, arg_types=handle_args, arg_names=["kind"], is_varargs=false, abi_name="system", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_decl(ref types, ref source, ref program, handle);
 
     let printf_args: Vector(Struct) = [TypeListNode(type=100, pass_mode=PARAM_VALUE)];
-    let printf: FuncInfo = FuncInfo(name="printf", base_name="printf", ret_type=TYPE_INT, arg_types=printf_args, arg_names=["format"], is_varargs=true, abi_name="C");
+    let printf: FuncInfo = FuncInfo(name="printf", base_name="printf", ret_type=TYPE_INT, arg_types=printf_args, arg_names=["format"], is_varargs=true, abi_name="C", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     wir_lower_function_decl(ref types, ref source, ref program, printf);
 
     let touch_args: Vector(Struct) = [TypeListNode(type=TYPE_INT, pass_mode=PARAM_REF)];
-    let touch: FuncInfo = FuncInfo(name="touch", base_name="touch", ret_type=TYPE_VOID, arg_types=touch_args, arg_names=["value"], is_varargs=false, abi_name="");
+    let touch: FuncInfo = FuncInfo(name="touch", base_name="touch", ret_type=TYPE_VOID, arg_types=touch_args, arg_names=["value"], is_varargs=false, abi_name="", ann_flags=0, compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let touch_id: WirFuncID = wir_lower_function_decl(ref types, ref source, ref program, touch);
     let touch_entry: WirBlockID = wir_add_block(ref program, touch_id, "entry", []);
     wir_append(ref program, touch_entry, WirOpcode.Return, program.void_type, [], [], no_wir_location());
 
-    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, ann_flags=FLAG_ANN_EXPORT, abi_name="");
+    let main_info: FuncInfo = FuncInfo(name="main", base_name="main", ret_type=TYPE_INT, arg_types=[], arg_names=[], is_varargs=false, ann_flags=FLAG_ANN_EXPORT, abi_name="", compiler_link_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let main_id: WirFuncID = wir_lower_function_decl(ref types, ref source, ref program, main_info);
     let main_entry: WirBlockID = wir_add_block(ref program, main_id, "entry", []);
     let zero: WirValueID = wir_const_int(ref program, wir_signed_int_type(ref program, 32), UInt128(0U));
