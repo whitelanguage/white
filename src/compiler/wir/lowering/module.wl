@@ -303,7 +303,7 @@ func wir_emit_interface_tables(ref types: WirTypeMap, ref source: Compiler, ref 
 
 func wir_declare_generic_classes(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (source.generic_class_worklist is !null && i < source.generic_class_worklist.length()) {
+    while (i < source.generic_class_worklist.length()) {
         let instance: GenericClassInstance = source.generic_class_worklist[i];
         let info: Optional(StructInfo) = source.struct_id_map.lookup(instance.type_id);
         if (info is null) {
@@ -323,7 +323,7 @@ func wir_declare_generic_classes(ref types: WirTypeMap, ref source: Compiler, re
 
 func wir_refresh_generic_vtables(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (source.generic_class_worklist is !null && i < source.generic_class_worklist.length()) {
+    while (i < source.generic_class_worklist.length()) {
         let instance: GenericClassInstance = source.generic_class_worklist[i];
         let info: Optional(StructInfo) = source.struct_id_map.lookup(instance.type_id);
         if (info is null) {
@@ -342,7 +342,7 @@ func wir_refresh_generic_vtables(ref types: WirTypeMap, ref source: Compiler, re
 
 func wir_lower_generic_methods(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (GLOBAL_ERROR_COUNT == 0 && source.generic_method_worklist is !null && i < source.generic_method_worklist.length()) {
+    while (GLOBAL_ERROR_COUNT == 0 && i < source.generic_method_worklist.length()) {
         let instance: GenericMethodInstance = source.generic_method_worklist[i];
         let method_node: MethodDefNode = get_method_def_node(ref source.arena, instance.template.node);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
@@ -372,7 +372,7 @@ func wir_lower_generic_methods(ref types: WirTypeMap, ref source: Compiler, ref 
 
 func wir_lower_generic_functions(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     let i: Int = 0;
-    while (GLOBAL_ERROR_COUNT == 0 && source.generic_worklist is !null && i < source.generic_worklist.length()) {
+    while (GLOBAL_ERROR_COUNT == 0 && i < source.generic_worklist.length()) {
         let instance: GenericFuncInstance = source.generic_worklist[i];
         let function_node: FunctionDefNode = get_func_def_node(ref source.arena, instance.template.node);
         let previous_bindings: Dict(String, SymbolInfo) = source.generic_bindings;
@@ -405,29 +405,15 @@ func wir_lower_generic_functions(ref types: WirTypeMap, ref source: Compiler, re
 
 func wir_lower_generic_instances(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule) -> Void {
     while (GLOBAL_ERROR_COUNT == 0) {
-        let class_count: Int = 0;
-        let function_count: Int = 0;
-        let method_count: Int = 0;
-        if (source.generic_class_worklist is !null) {
-            class_count = source.generic_class_worklist.length();
-        }
-        if (source.generic_worklist is !null) { function_count = source.generic_worklist.length(); }
-        if (source.generic_method_worklist is !null) {
-            method_count = source.generic_method_worklist.length();
-        }
+        let class_count = source.generic_class_worklist.length();
+        let function_count = source.generic_worklist.length();
+        let method_count = source.generic_method_worklist.length();
         wir_declare_generic_classes(ref types, ref source, ref program);
         wir_lower_generic_functions(ref types, ref source, ref program);
         wir_lower_generic_methods(ref types, ref source, ref program);
-        let next_class_count: Int = 0;
-        let next_function_count: Int = 0;
-        let next_method_count: Int = 0;
-        if (source.generic_class_worklist is !null) {
-            next_class_count = source.generic_class_worklist.length();
-        }
-        if (source.generic_worklist is !null) { next_function_count = source.generic_worklist.length(); }
-        if (source.generic_method_worklist is !null) {
-            next_method_count = source.generic_method_worklist.length();
-        }
+        let next_class_count = source.generic_class_worklist.length();
+        let next_function_count = source.generic_worklist.length();
+        let next_method_count = source.generic_method_worklist.length();
         if (class_count == next_class_count && function_count == next_function_count && method_count == next_method_count) {
             break;
         }

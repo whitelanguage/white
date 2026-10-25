@@ -1163,10 +1163,19 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                     return a64_lowering_error("integer comparison has an invalid WIR shape");
                 }
 
-                let left: A64Register = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
-                let right: A64Register = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
-                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let input_type: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+                let kind = program.arena.types[wir_id_index(UInt32(input_type))].kind;
+                let left = A64Register.None;
+                let right = A64Register.None;
+                if (kind == WirTypeKind.Pointer || kind == WirTypeKind.Function) {
+                    // load forwarding can expose a StackAlloc address directly, it has no saved value home.
+                    left = a64_materialize_address(ref program, instruction.operands[0], stack.storage, stack.homes, ref values, ref output);
+                    right = a64_materialize_address(ref program, instruction.operands[1], stack.storage, stack.homes, ref values, ref output);
+                } else {
+                    left = a64_materialize(ref program, instruction.operands[0], stack.homes, ref values, ref output);
+                    right = a64_materialize(ref program, instruction.operands[1], stack.homes, ref values, ref output);
+                }
+                let destination: A64Register = a64_alloc_register(ref program, stack.homes, ref values, ref output, false);
                 let width: Int = a64_scalar_width(ref program, input_type);
                 let condition: A64Condition = a64_comparison_condition(instruction.opcode);
 

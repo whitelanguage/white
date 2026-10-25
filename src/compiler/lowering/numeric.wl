@@ -1,9 +1,57 @@
 // src/compiler/lowering/numeric.wl
 import * from "../context.wl"
+import "strings"
+import get_target_triple, get_target_pointer_bits from "../target.wl"
+import * from "../wir/model.wl"
+import new_wir_module, wir_signed_int_type, wir_unsigned_int_type, wir_float_type from "../wir/builder.wl"
+import wir_int128_to_float, wir_float_to_int128 from "../wir/numeric.wl"
+import llvm_write_function from "../wir/backend/llvm.wl"
+import no_position, throw_internal_compiler_error from "../../frontend/diagnostics.wl"
 
+
+func emit_wide_numeric_cast(ref c: Compiler, value: CompileResult, target: Int) -> CompileResult {
+// both LLVM paths use the same bit-level conversion as the native backends
+    let name = "$numeric.cast." + value.type + "." + target;
+    if (!c.declared_externs.contains_key(name)) {
+        let program = new_wir_module(get_target_triple(), get_target_pointer_bits());
+        let integer = value.type;
+        let float = target;
+        let to_float = is_integer_type(integer);
+        if (!to_float) {
+            integer = target;
+            float = value.type;
+        }
+        let int_type = wir_unsigned_int_type(ref program, 128);
+        if (is_signed_integer(integer)) { int_type = wir_signed_int_type(ref program, 128); }
+        let float_type = wir_float_type(ref program, 64);
+        if (float == TYPE_FLOAT32) { float_type = wir_float_type(ref program, 32); }
+        let helper = NO_WIR_FUNC;
+        if to_float { helper = wir_int128_to_float(ref program, int_type, float_type, name); }
+        else { helper = wir_float_to_int128(ref program, float_type, int_type, name); }
+        let output = strings.Builder(4096);
+        llvm_write_function(output, program, program.arena.functions[wir_id_index(UInt32(helper))])?;
+        catch(err) {
+            throw_internal_compiler_error(no_position(), "Cannot emit numeric conversion helper.");
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+        }
+        let text = output.build()?;
+        catch(err) {
+            throw_internal_compiler_error(no_position(), "Cannot emit numeric conversion helper.");
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+        }
+        c.global_buffer += text;
+        c.declared_externs.put(name, StringConstant(id=0, value=name));
+    }
+    let result = next_reg(ref c);
+    write_ir(ref c, c.indent + result + " = call " + get_llvm_type_str(ref c, target) + " @" + name + "(" + get_llvm_type_str(ref c, value.type) + " " + value.reg + ")\n");
+    return CompileResult(reg=result, type=target, origin_type=0, owns_ref=false, is_const_access=false);
+}
 
 func promote_to_float(ref c: Compiler, res: CompileResult) -> CompileResult {
     if (res.type == TYPE_FLOAT) { return res; }
+    if (res.type == TYPE_INT128 || res.type == TYPE_UINT128) {
+        return emit_wide_numeric_cast(ref c, res, TYPE_FLOAT);
+    }
     let input_reg: String = res.reg;
 
     if (res.type == TYPE_FLOAT32) {

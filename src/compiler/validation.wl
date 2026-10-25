@@ -127,7 +127,7 @@ func stable_ref_target(ref c: Compiler, node: NodeID) -> Bool {
         let target_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.target));
         let array: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
         let vector = c.vector_base_map.lookup(target_type);
-        let checked = c.ref_targets is !null && c.ref_targets.contains_key(UInt32(node));
+        let checked = c.ref_targets.contains_key(UInt32(node));
         return (((array is !null) && (array.size >= 0 || checked)) || ((vector is !null) && checked)) &&
                stable_ref_target(ref c, access.target);
     }

@@ -105,9 +105,6 @@ func wir_find_function(program: WirModule, name: String) -> WirFuncID {
 }
 
 func wir_compiler_link_function(ref source: Compiler, name: String) -> Optional(FuncInfo) {
-    if (source.compiler_link is null) {
-        return null;
-    }
     let key: Optional(String) = source.compiler_link.lookup(name);
     if (key is null || key.length() == 0) {
         return null;

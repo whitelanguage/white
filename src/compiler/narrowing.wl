@@ -59,7 +59,7 @@ func flow_write_valid(ref c: Compiler, facts: Vector(FlowType)) -> Bool {
     while (i < facts.length()) {
         let found = false;
         let j = 0;
-        while (c.flow_types is !null && j < c.flow_types.length()) {
+        while (j < c.flow_types.length()) {
             if (facts[i].path == c.flow_types[j].path && facts[i].type == c.flow_types[j].type) {
                 found = true;
                 break;
@@ -94,7 +94,6 @@ func flow_copy(values: Vector(FlowType)) -> Vector(FlowType) {
 
 func flow_forget(ref c: Compiler, path: String, call: Bool) -> Void {
 // mutating a field may also change the same object through another local alias
-    if (c.flow_types is null) { return; }
     let result: Vector(FlowType) = [];
     let i = 0;
     while (i < c.flow_types.length()) {
@@ -109,7 +108,6 @@ func flow_forget(ref c: Compiler, path: String, call: Bool) -> Void {
 }
 
 func flow_is_exposed(ref c: Compiler, path: String) -> Bool {
-    if (c.flow_exposed is null) { return false; }
     let i = 0;
     while (i < c.flow_exposed.length()) {
         if (path == c.flow_exposed[i] || path.starts_with(c.flow_exposed[i] + ".")) { return true; }
@@ -124,7 +122,6 @@ func flow_expose(ref c: Compiler, node: NodeID) -> Void {
         c.flow_types = [];
         return;
     }
-    if (c.flow_exposed is null) { c.flow_exposed = []; }
     c.flow_exposed.append(path);
     flow_forget(ref c, path, false);
 }
@@ -142,7 +139,6 @@ func flow_record(ref c: Compiler, target: NodeID, type_id: Int, present: Bool, u
     }
     let path = format_ast_path(ref c, target);
     if (path.starts_with("<unknown_path>")) { return; }
-    if (c.flow_types is null) { c.flow_types = []; }
     let i = 0;
     while (i < c.flow_types.length()) {
         if (c.flow_types[i].path == path) {

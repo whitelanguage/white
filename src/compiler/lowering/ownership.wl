@@ -1275,12 +1275,3 @@ func emit_erased_check_helpers(ref c: Compiler) -> Void {
         slot += 1;
     }
 }
-
-func vector_capacity_limit(elem_size: Int) -> Long {
-    let limit: Long = 2147483647L;
-    if (get_target_pointer_bits() == 32) {
-        let address_limit: Long = 4294967295L / Long(elem_size);
-        if (address_limit < limit) { limit = address_limit; }
-    }
-    return limit;
-}

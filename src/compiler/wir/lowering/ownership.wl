@@ -46,12 +46,12 @@ func wir_take_owned(ref state: WirFunctionLowering, value: WirValueID) -> Bool {
 func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int) -> WirValueID {
     let repr: Int = get_repr_type(ref source, source_type);
     let info: Optional(StructInfo) = null;
-    if (source.struct_id_map is !null) { info = source.struct_id_map.lookup(repr); }
+    info = source.struct_id_map.lookup(repr);
     if ((info is !null) && info.is_interface) {
         return wir_field(ref program, state.block, value, 0, "", no_wir_location());
     }
     let array: Optional(ArrayInfo) = null;
-    if (source.array_info_map is !null) { array = source.array_info_map.lookup(repr); }
+    array = source.array_info_map.lookup(repr);
     if ((array is !null) && array.size == -1) { return value; }
     let type_id: WirTypeID = wir_value_type(ref program, value);
     if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) { return value; }
@@ -115,7 +115,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirType
         return;
     }
     let array: Optional(ArrayInfo) = null;
-    if (source.array_info_map is !null) { array = source.array_info_map.lookup(repr); }
+    array = source.array_info_map.lookup(repr);
     if ((array is !null) && array.size >= 0) {
         let meta_array: ArrayInfo = array;
         let index_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
@@ -130,7 +130,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirType
     }
 
     let struct_info: Optional(StructInfo) = null;
-    if (source.struct_id_map is !null) { struct_info = source.struct_id_map.lookup(repr); }
+    struct_info = source.struct_id_map.lookup(repr);
     if (is_value_struct(ref source, source_type) && (struct_info is !null)) {
         let meta_struct_info: StructInfo = struct_info;
         let i: Int = 0;

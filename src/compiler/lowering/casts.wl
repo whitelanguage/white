@@ -1017,7 +1017,7 @@ func integer_upper_bound(type_id: Int) -> String {
         return "9223372036854775808.0";
     }
     if (type_id == TYPE_INT128) {
-        return "170141183460469231731687303715884105728.0";
+        return "0x47E0000000000000";
     }
     if (type_id == TYPE_BYTE) {
         return "256.0";
@@ -1033,7 +1033,7 @@ func integer_upper_bound(type_id: Int) -> String {
         return "18446744073709551616.0";
     }
     if (type_id == TYPE_UINT128) {
-        return "340282366920938463463374607431768211456.0";
+        return "0x47F0000000000000";
     }
     return "";
 }
@@ -1054,7 +1054,7 @@ func integer_lower_bound(type_id: Int) -> String {
     if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return "-2147483648.0"; }
     if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return "-9223372036854775808.0"; }
     if (type_id == TYPE_INT128) {
-        return "-170141183460469231731687303715884105728.0";
+        return "0xC7E0000000000000";
     }
     return "0.0";
 }
@@ -1184,6 +1184,10 @@ func emit_float_cast_check(ref c: Compiler, value: String, source_type: Int, tar
     let upper: String = next_reg(ref c);
     let lower_bound: String = integer_lower_bound(target_type);
     let upper_bound: String = integer_upper_bound(target_type);
+    // 2^128 exceeds finite f32, all finite positive f32 values still fit UInt128.
+    if (target_type == TYPE_UINT128 && source_type == TYPE_FLOAT32) {
+        upper_bound = "0x7FF0000000000000";
+    }
     if (target_type == TYPE_CHAR) {
         lower_bound = "0.0";
         upper_bound = "1114112.0";
@@ -1414,6 +1418,9 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     }
 
     if (src_is_int && dst_is_float) {
+        if (val_res.type == TYPE_INT128 || val_res.type == TYPE_UINT128) {
+            return emit_wide_numeric_cast(ref c, val_res, target_type);
+        }
         let op: String = "sitofp";
         if (is_unsigned_integer(val_res.type) || val_res.type == TYPE_BOOL) { op = "uitofp"; }
 
@@ -1422,6 +1429,9 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         return CompileResult(reg=res_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
     if (src_is_float && dst_is_int) {
+        if (target_type == TYPE_INT128 || target_type == TYPE_UINT128) {
+            return emit_wide_numeric_cast(ref c, val_res, target_type);
+        }
         let op: String = "fptosi";
         if (is_unsigned_integer(target_type) || target_type == TYPE_BOOL) { op = "fptoui"; }
 

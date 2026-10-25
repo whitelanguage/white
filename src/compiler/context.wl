@@ -2364,16 +2364,13 @@ func get_builtin_cast_target(name: String) -> Int {
 }
 
 func find_named_decl(ref c: Compiler, name: String) -> Optional(NamedTypeInfo) {
-    if (c.named_types is null) {
-        return null;
-    }
     let info: Optional(NamedTypeInfo) = c.named_types.lookup(c.current_package_prefix + name);
     if (!(info is !null)) { info = c.named_types.lookup(name); }
-    if (!(info is !null) && c.current_file_type_aliases is !null) {
+    if (!(info is !null)) {
         let mapped: Optional(String) = c.current_file_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
-    if (!(info is !null) && c.global_type_aliases is !null) {
+    if (!(info is !null)) {
         let mapped: Optional(String) = c.global_type_aliases.lookup(name);
         if (mapped is !null) { info = c.named_types.lookup(mapped); }
     }
@@ -2472,7 +2469,7 @@ func needs_explicit_cast(ref c: Compiler, source_type: Int, target_type: Int) ->
 
 func flow_type(ref c: Compiler, node: NodeID) -> Int {
 // facts describe reads, the symbol's declared type still owns its storage and drop glue
-    if (c.flow_types is null || node == c.flow_skip || !has_node(node)) { return 0; }
+    if (node == c.flow_skip || !has_node(node)) { return 0; }
     let kind: Int = node_tag(node);
     if (kind != NODE_VAR_ACCESS && kind != NODE_FIELD_ACCESS) { return 0; }
     let path: String = format_ast_path(ref c, node);
@@ -2485,6 +2482,7 @@ func flow_type(ref c: Compiler, node: NodeID) -> Int {
 }
 
 func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
+// each node handler keeps its own temporaries, recursive inference also runs in O0 builds
     if (!has_node(node)) { return 0; }
     let base: Int = node_tag(node);
     let narrowed: Int = flow_type(ref c, node);
@@ -2516,178 +2514,23 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     if (base == NODE_IS || base == NODE_IS_NOT) { return TYPE_BOOL; }
     if (base == NODE_TYPE_LAYOUT) { return TYPE_UINTSIZE; }
     if (base == NODE_GENERIC_TYPE) {
-        let generic: GenericTypeNode = get_generic_type_node(ref c.arena, node);
-        let generic_base: Int = node_tag(generic.base_type);
-        if (generic_base == NODE_FIELD_ACCESS) {
-            let field: FieldAccessNode = get_field_access_node(ref c.arena, generic.base_type);
-
-            let owner_type: Int = get_expr_type(ref c, field.obj);
-            let owner: Optional(StructInfo) = c.struct_id_map.lookup(owner_type);
-            if (!(owner is !null) || !owner.is_class) { return TYPE_POISON; }
-            let meta_owner: StructInfo = owner;
-
-            let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_owner.name + "_" + field.field_name);
-            if (!(method_template is !null)) { return TYPE_POISON; }
-
-            let method_types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, generic.type_args, [], generic.pos);
-            if (method_types is null) { return TYPE_POISON; }
-
-            let method_info: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_owner, method_types, generic.pos);
-            if (!(method_info is !null)) { return TYPE_POISON; }
-            let signature: FuncInfo = method_info;
-
-            let args: Vector(Struct) = [];
-            let i: Int = 1;
-            while (i < signature.arg_types.length()) {
-                args.append(signature.arg_types[i]);
-                i++;
-            }
-            return get_method_type_id(ref c, args, signature.ret_type, signature.variadic_param, callable_arg_names(signature, 1));
-        }
-
-        let name: String = generic_symbol_name(ref c, generic.base_type, true);
-        let template: Optional(GenericTemplate) = c.generic_funcs.lookup(name);
-        if (!(template is !null)) { return TYPE_POISON; }
-        let meta_template: GenericTemplate = template;
-
-        let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, meta_template, generic.type_args, [], generic.pos);
-        if (types is null) { return TYPE_POISON; }
-        let instance: Optional(FuncInfo) = register_generic_func(ref c, meta_template, types, generic.pos);
-        if (!(instance is !null)) { return TYPE_POISON; }
-
-        return get_func_type_id(ref c, instance.arg_types, instance.ret_type, instance.variadic_param, callable_arg_names(instance, 0));
+        return expr_type_generic_type(ref c, node);
     }
 
     if (base == NODE_VAR_ACCESS) {
-        let v: VarAccessNode = get_var_access_node(ref c.arena, node);
-        let info: Optional(SymbolInfo) = find_symbol(ref c, v.name_tok.value);
-        if ((info is !null)) { return info.type; }
-
-        let h_curr: Scope = c.hoist_scope;
-        while (h_curr.table is !null) {
-            let h_info: Optional(SymbolInfo) = scope_lookup(h_curr, v.name_tok.value);
-            if ((h_info is !null)) { return h_info.type; }
-            if (h_curr.parent < 0 || c.hoist_scope_stack is null || h_curr.parent >= c.hoist_scope_stack.length()) { break; }
-            h_curr = c.hoist_scope_stack[h_curr.parent];
-        }
-
-        if (c.func_table is !null) {
-            let f_info: Optional(FuncInfo) = c.func_table.lookup(v.name_tok.value);
-            if (!(f_info is !null) && c.current_package_prefix != "") {
-                f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value);
-            }
-            if ((f_info is !null)) {
-                return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
-            }
-        }
-
-        return 0;
+        return expr_type_var_access(ref c, node);
     }
 
     if (base == NODE_FIELD_ACCESS) {
-        let f: FieldAccessNode = get_field_access_node(ref c.arena, node);
-        let obj_type: Int = get_expr_type(ref c, f.obj);
-        obj_type = get_repr_type(ref c, obj_type);
-        if (is_pointer_type(ref c, obj_type)) {
-            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
-            if ((base_info is !null)) { obj_type = base_info.type; }
-        }
-        if (obj_type >= 100) {
-            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
-            if ((s_info is !null)) {
-                let meta_s_info: StructInfo = s_info;
-                let field: Optional(FieldInfo) = find_field(meta_s_info, f.field_name);
-                if ((field is !null)) { return field.type; }
-                if (meta_s_info.is_class) {
-                    let vtable: Vector(Struct) = meta_s_info.vtable;
-                    let v_len: Int = 0;
-                    if (vtable is !null) { v_len = vtable.length(); }
-                    let m_idx: Int = 0;
-                    while (m_idx < v_len) {
-                        let m_info: FuncInfo = vtable[m_idx];
-                        if (m_info.base_name == f.field_name) {
-                            let bound_args: Vector(Struct) = [];
-                            let a_idx: Int = 1;
-                            while (a_idx < m_info.arg_types.length()) {
-                                bound_args.append(m_info.arg_types[a_idx]);
-                                a_idx += 1;
-                            }
-                            return get_method_type_id(ref c, bound_args, m_info.ret_type, m_info.variadic_param, callable_arg_names(m_info, 1));
-                        }
-                        m_idx += 1;
-                    }
-                }
-            }
-        }
-
-        let obj_base: Int = node_tag(f.obj);
-        if (obj_base == NODE_VAR_ACCESS && c.struct_table is !null) {
-            let v_node: VarAccessNode = get_var_access_node(ref c.arena, f.obj);
-            let target_name: String = v_node.name_tok.value;
-            if (c.current_package_prefix != "") {
-                if ((c.struct_table.lookup(c.current_package_prefix + target_name) is !null)) {
-                    target_name = c.current_package_prefix + target_name;
-                }
-            }
-            let s_info: Optional(StructInfo) = c.struct_table.lookup(target_name);
-            if ((s_info is !null) && s_info.is_enum) { return s_info.type_id; }
-        }
-        return 0;
+        return expr_type_field_access(ref c, node);
     }
 
     if (base == NODE_INDEX_ACCESS) {
-        let idx_node: IndexAccessNode = get_index_access_node(ref c.arena, node);
-        let target_type: Int = get_expr_type(ref c, idx_node.target);
-        target_type = get_repr_type(ref c, target_type);
-        if (is_pointer_type(ref c, target_type) == true) {
-            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(target_type);
-            if ((base_info is !null)) { return base_info.type; }
-        }
-        if (target_type >= 100) {
-            let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
-            if ((v_info is !null)) { return v_info.type; }
-            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
-            if ((arr_info is !null)) { return arr_info.base_type; }
-            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(target_type);
-            if ((s_info is !null) && s_info.is_class) {
-                let meta_s_info: StructInfo = s_info;
-                let method_index: Int = 0;
-                while (meta_s_info.vtable is !null && method_index < meta_s_info.vtable.length()) {
-                    let method_info: FuncInfo = meta_s_info.vtable[method_index];
-                    if (method_info.base_name == "get") { return method_info.ret_type; }
-                    method_index++;
-                }
-            }
-        }
-        if (target_type == TYPE_STRING) { return TYPE_BYTE; }
-        return 0;
+        return expr_type_index_access(ref c, node);
     }
 
     if (base == NODE_REF) {
-        let ref_node: RefNode = get_ref_node(ref c.arena, node);
-        let ref_base: Int = node_tag(ref_node.node);
-        if (ref_base == NODE_SLICE_ACCESS) {
-            let slice_node: SliceAccessNode = get_slice_access_node(ref c.arena, ref_node.node);
-            let target_type: Int = get_expr_type(ref c, slice_node.target);
-            if (target_type == TYPE_STRING) { return TYPE_STRING; }
-
-            let elem_type: Int = 0;
-            if (target_type >= 100) {
-                let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
-                if ((arr_info is !null)) { elem_type = arr_info.base_type; }
-                else {
-                    let vec_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
-                    if ((vec_info is !null)) { elem_type = vec_info.type; }
-                }
-            }
-            if (elem_type != 0) { return get_slice_type_id(ref c, elem_type); }
-            return 0;
-        }
-        let base_type: Int = get_expr_type(ref c, ref_node.node);
-        if (base_type != 0) {
-            return get_ptr_type_id(ref c, base_type);
-        }
-        return 0;
+        return expr_type_ref(ref c, node);
     }
 
     if (base == NODE_DEREF) {
@@ -2701,266 +2544,15 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     }
 
     if (base == NODE_SLICE_ACCESS) {
-        let slice_node: SliceAccessNode = get_slice_access_node(ref c.arena, node);
-        let target_type: Int = get_expr_type(ref c, slice_node.target);
-        target_type = get_repr_type(ref c, target_type);
-        if (target_type == TYPE_STRING) { return TYPE_STRING; }
-
-        let elem_type: Int = 0;
-        if (target_type >= 100) {
-            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
-            if ((arr_info is !null)) { elem_type = arr_info.base_type; }
-            else {
-                let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
-                if ((v_info is !null)) { elem_type = v_info.type; }
-            }
-        }
-
-        if (elem_type != 0) {
-            return get_slice_type_id(ref c, elem_type);
-        }
-        return 0;
+        return expr_type_slice_access(ref c, node);
     }
 
     if (base == NODE_TRY_UNWRAP) {
-        let t_node: TryUnwrapNode = get_try_unwrap_node(ref c.arena, node);
-        let base_type: Int = get_expr_type(ref c, t_node.expr);
-        // the entry-slot walk can reach this before a guard resolves the receiver.
-        if (base_type == 0 || base_type == TYPE_POISON) { return base_type; }
-        if (is_fallible_type(ref c, base_type)) {
-            return get_inner_fallible_type(ref c, base_type);
-        }
-        let expr_base: Int = node_tag(t_node.expr);
-        if (expr_base == NODE_CALL) {
-            let call: CallNode = get_call_node(ref c.arena, t_node.expr);
-            let callee_base: Int = node_tag(call.callee);
-            if (callee_base == NODE_VAR_ACCESS) {
-                let callee: VarAccessNode = get_var_access_node(ref c.arena, call.callee);
-                let target_type: Int = get_cast_target(ref c, callee.name_tok.value);
-                if (target_type != 0) {
-                    throw_invalid_syntax(t_node.pos, "conversion to " + get_type_name(ref c, target_type) + " cannot fail; remove '?'");
-                    return 0;
-                }
-            }
-        }
-        throw_invalid_syntax(t_node.pos, "Cannot use '?' on a non-fallible type.");
-        return 0;
+        return expr_type_try_unwrap(ref c, node);
     }
 
     if (base == NODE_CALL) {
-        let call_node: CallNode = get_call_node(ref c.arena, node);
-        let callee_node: NodeID = call_node.callee;
-        let callee: Int = node_tag(callee_node);
-        if (callee == NODE_GENERIC_TYPE) {
-            let generic: GenericTypeNode = get_generic_type_node(ref c.arena, callee_node);
-            callee_node = generic.base_type;
-            callee = node_tag(callee_node);
-        }
-
-        let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
-        let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
-        if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
-            let types: Optional(Vector(Struct)) = resolve_generic_constructor_args(ref c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
-            if (types is null) { return TYPE_POISON; }
-
-            let template_base: Int = node_tag(generic_type_template.node);
-            if (template_base == NODE_CLASS_DEF) {
-                return register_generic_class(ref c, generic_type_template, types, call_node.pos);
-            }
-            return register_generic_struct(ref c, generic_type_template, types, call_node.pos);
-        }
-
-        let generic_name: String = generic_symbol_name(ref c, callee_node, true);
-        let generic_template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
-        if ((generic_template is !null)) {
-            let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, generic_template, call_node.type_args, call_node.args, call_node.pos);
-            if (types is null) { return TYPE_POISON; }
-
-            let instance: Optional(FuncInfo) = register_generic_func(ref c, generic_template, types, call_node.pos);
-            if (!(instance is !null)) { return TYPE_POISON; }
-
-            if (call_node.preserve_fallible) { return instance.ret_type; }
-            if (is_fallible_type(ref c, instance.ret_type)) {
-                return get_inner_fallible_type(ref c, instance.ret_type);
-            }
-
-            return instance.ret_type;
-        }
-
-        if (callee == NODE_VAR_ACCESS) {
-            let v: VarAccessNode = get_var_access_node(ref c.arena, callee_node);
-            let callee_name: String = v.name_tok.value;
-
-            let cast_target: Int = get_cast_target(ref c, callee_name);
-            if (cast_target != 0) {
-                let args: Vector(ArgNode) = call_node.args;
-                if (args is !null && args.length() == 1) {
-                    let arg: ArgNode = args[0];
-                    let source_type: Int = get_expr_type(ref c, arg.val);
-                    let source_info: Optional(StructInfo) = c.struct_id_map.lookup(source_type);
-                    let conversion: Optional(FuncInfo) = find_class_conversion(source_info, cast_target);
-                    if ((conversion is !null)) {
-                        if (call_node.preserve_fallible) { return conversion.ret_type; }
-                        if (is_fallible_type(ref c, conversion.ret_type)) {
-                            return get_inner_fallible_type(ref c, conversion.ret_type);
-                        }
-                        return conversion.ret_type;
-                    }
-                    if (call_node.preserve_fallible && needs_explicit_cast(ref c, source_type, cast_target)) {
-                        return get_fallible_type_id(ref c, cast_target);
-                    }
-                }
-                return cast_target;
-            }
-
-            let f_info: Optional(FuncInfo) = c.func_table.lookup(callee_name);
-            if (!(f_info is !null) && c.current_package_prefix != "") {
-                f_info = c.func_table.lookup(c.current_package_prefix + callee_name);
-            }
-            if (!(f_info is !null) && c.current_file_func_aliases is !null) {
-                let mapped: Optional(String) = c.current_file_func_aliases.lookup(callee_name);
-                if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
-            }
-            if (!(f_info is !null) && c.global_func_aliases is !null) {
-                let mapped: Optional(String) = c.global_func_aliases.lookup(callee_name);
-                if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
-            }
-            if ((f_info is !null)) { return f_info.ret_type; }
-
-            let s_info: Optional(StructInfo) = c.struct_table.lookup(callee_name);
-            if (!(s_info is !null) && c.current_package_prefix != "") {
-                s_info = c.struct_table.lookup(c.current_package_prefix + callee_name);
-            }
-            if (s_info is null && generic_type_name.length() != 0) {
-                s_info = c.struct_table.lookup(generic_type_name);
-            }
-            if (!(s_info is !null)) {
-                let alias_info: Optional(NamedTypeInfo) = find_named_decl(ref c, callee_name);
-                if ((alias_info is !null) && alias_info.is_alias) {
-                    s_info = c.struct_id_map.lookup(resolve_named_type(ref c, alias_info));
-                }
-            }
-            if ((s_info is !null)) { return s_info.type_id; }
-
-            let var_info: Optional(SymbolInfo) = find_symbol(ref c, callee_name);
-            if ((var_info is !null)) {
-                let p_type: Int = var_info.type;
-                let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(p_type);
-                if ((f_ret_info is !null)) { return f_ret_info.type; }
-                let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(p_type);
-                if ((m_ret_info is !null)) { return m_ret_info.type; }
-            }
-        }
-        else if (callee == NODE_FIELD_ACCESS) {
-            let f: FieldAccessNode = get_field_access_node(ref c.arena, callee_node);
-            let obj_type: Int = get_expr_type(ref c, f.obj);
-            if (obj_type == 0) {
-                let path_parts: Vector(String) = [];
-                let curr_obj: NodeID = f.obj;
-                let curr_base: Int = node_tag(curr_obj);
-                while (curr_base == NODE_FIELD_ACCESS) {
-                    let inner_f: FieldAccessNode = get_field_access_node(ref c.arena, curr_obj);
-                    path_parts.append(inner_f.field_name);
-                    curr_obj = inner_f.obj;
-                    curr_base = node_tag(curr_obj);
-                }
-                if (curr_base == NODE_VAR_ACCESS) {
-                    let inner_v: VarAccessNode = get_var_access_node(ref c.arena, curr_obj);
-                    let root_name: String = inner_v.name_tok.value;
-                    if (!(find_symbol(ref c, root_name) is !null)) {
-                        let full_name: String = "";
-                        let module_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(root_name);
-                        if (module_prefix is !null) {
-                            full_name = module_member_name(module_prefix, path_parts, f.field_name);
-                        } else {
-                            let source_name: String = module_member_name(root_name + ".", path_parts, f.field_name);
-                            let mapped_func: Optional(String) = c.current_file_func_aliases.lookup(source_name);
-                            if (mapped_func is !null) { full_name = mapped_func; }
-                        }
-                        let g_alias_f: Optional(String) = c.global_func_aliases.lookup(full_name);
-                        if (g_alias_f is !null) { full_name = g_alias_f; }
-
-                        let f_info: Optional(FuncInfo) = c.func_table.lookup(full_name);
-                        if ((f_info is !null)) { return f_info.ret_type; }
-                        let constructor: Optional(StructInfo) = c.struct_table.lookup(generic_type_name);
-                        if (constructor is !null) { return constructor.type_id; }
-                    }
-                }
-            }
-
-            if (is_pointer_type(ref c, obj_type)) {
-                let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
-                if ((base_info is !null)) { obj_type = base_info.type; }
-            }
-
-            if (obj_type == TYPE_STRING) {
-                let str_link: Optional(String) = c.compiler_link.lookup("string_" + f.field_name);
-                if (str_link is !null) {
-                    let f_info: Optional(FuncInfo) = c.func_table.lookup(str_link);
-                    if ((f_info is !null)) { return f_info.ret_type; }
-                }
-            }
-
-            if (f.field_name == "length") { return TYPE_INT; }
-            if (f.field_name == "append") { return TYPE_VOID; }
-            if (f.field_name == "drop") {
-                if (obj_type >= 100) {
-                    let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(obj_type);
-                    if ((v_info is !null)) { return v_info.type; }
-                }
-                return 0;
-            }
-
-            if (obj_type >= 100) {
-                let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
-                if ((s_info is !null) && s_info.is_class) {
-                    let meta_s_info: StructInfo = s_info;
-                    let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_s_info.name + "_" + f.field_name);
-                    if ((method_template is !null)) {
-                        let types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, call_node.type_args, call_node.args, call_node.pos);
-                        if (types is null) { return TYPE_POISON; }
-                        let instance: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_s_info, types, call_node.pos);
-                        if (!(instance is !null)) { return TYPE_POISON; }
-                        let meta_instance: FuncInfo = instance;
-                        if (!call_node.preserve_fallible && is_fallible_type(ref c, meta_instance.ret_type)) {
-                            return get_inner_fallible_type(ref c, meta_instance.ret_type);
-                        }
-                        return meta_instance.ret_type;
-                    }
-                    let vtable: Vector(Struct) = meta_s_info.vtable;
-                    let v_len: Int = 0;
-                    if (vtable is !null) { v_len = vtable.length(); }
-                    let m_idx: Int = 0;
-                    while (m_idx < v_len) {
-                        let m_info: FuncInfo = vtable[m_idx];
-                        if (m_info.base_name == f.field_name) { return m_info.ret_type; }
-                        m_idx += 1;
-                    }
-                } else if ((s_info is !null) && s_info.is_interface) {
-                    let protocol: StructInfo = s_info;
-                    let vtable: Vector(Struct) = protocol.vtable;
-                    let v_len: Int = 0;
-                    if (vtable is !null) { v_len = vtable.length(); }
-                    let m_idx: Int = 0;
-                    while (m_idx < v_len) {
-                        let m_node: MethodDefNode = vtable[m_idx];
-                        if (m_node.name_tok.value == f.field_name) {
-                            return interface_method_type(ref c, protocol, m_node.return_type);
-                        }
-                        m_idx += 1;
-                    }
-                }
-            }
-        }
-        let ptr_type: Int = get_expr_type(ref c, callee_node);
-        if (ptr_type != 0) {
-            let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(ptr_type);
-            if ((f_ret_info is !null)) { return f_ret_info.type; }
-            let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(ptr_type);
-            if ((m_ret_info is !null)) { return m_ret_info.type; }
-        }
-
-        return 0;
+        return expr_type_call(ref c, node);
     }
 
     if (base == NODE_VECTOR_LIT) {
@@ -2983,32 +2575,12 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     }
 
     if (base == NODE_BINOP) {
-        let b: BinOpNode = get_binop_node(ref c.arena, node);
-        let op: Int = b.op_tok.type;
+        return expr_type_binop(ref c, node);
+    }
 
-        if (op == WhitelangTokens.TOK_EE || op == WhitelangTokens.TOK_NE || op == WhitelangTokens.TOK_LT ||
-            op == WhitelangTokens.TOK_GT || op == WhitelangTokens.TOK_LTE || op == WhitelangTokens.TOK_GTE ||
-            op == WhitelangTokens.TOK_AND || op == WhitelangTokens.TOK_OR || op == WhitelangTokens.TOK_IS) {
-            return TYPE_BOOL;
-        }
-
-        let left_ty: Int = get_expr_type(ref c, b.left);
-        let right_ty: Int = get_expr_type(ref c, b.right);
-
-        if (left_ty == TYPE_STRING || right_ty == TYPE_STRING) { return TYPE_STRING; }
-        if (left_ty == TYPE_CHAR && right_ty == TYPE_CHAR && op == WhitelangTokens.TOK_PLUS) { return TYPE_STRING; }
-
-        if (left_ty == TYPE_FLOAT || right_ty == TYPE_FLOAT) { return TYPE_FLOAT; }
-        if (left_ty == TYPE_FLOAT32 || right_ty == TYPE_FLOAT32) { return TYPE_FLOAT32; }
-        if (is_integer_type(left_ty) && is_integer_type(right_ty)) {
-            let left_bits: Int = get_type_bitwidth(left_ty);
-            let right_bits: Int = get_type_bitwidth(right_ty);
-            if (right_bits > left_bits) { return right_ty; }
-            if (left_bits > right_bits) { return left_ty; }
-            if (is_unsigned_integer(right_ty)) { return right_ty; }
-        }
-
-        return left_ty;
+    if (base == NODE_POSTFIX) {
+        let postfix = get_postfix_node(ref c.arena, node);
+        return get_expr_type(ref c, postfix.node);
     }
 
     if (base == NODE_UNARYOP) {
@@ -3021,6 +2593,493 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
     return 0;
 }
+
+func expr_type_generic_type(ref c: Compiler, node: NodeID) -> Int {
+    let generic: GenericTypeNode = get_generic_type_node(ref c.arena, node);
+    let generic_base: Int = node_tag(generic.base_type);
+    if (generic_base == NODE_FIELD_ACCESS) {
+        let field: FieldAccessNode = get_field_access_node(ref c.arena, generic.base_type);
+
+        let owner_type: Int = get_expr_type(ref c, field.obj);
+        let owner: Optional(StructInfo) = c.struct_id_map.lookup(owner_type);
+        if (!(owner is !null) || !owner.is_class) { return TYPE_POISON; }
+        let meta_owner: StructInfo = owner;
+
+        let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_owner.name + "_" + field.field_name);
+        if (!(method_template is !null)) { return TYPE_POISON; }
+
+        let method_types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, generic.type_args, [], generic.pos);
+        if (method_types is null) { return TYPE_POISON; }
+
+        let method_info: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_owner, method_types, generic.pos);
+        if (!(method_info is !null)) { return TYPE_POISON; }
+        let signature: FuncInfo = method_info;
+
+        let args: Vector(Struct) = [];
+        let i: Int = 1;
+        while (i < signature.arg_types.length()) {
+            args.append(signature.arg_types[i]);
+            i++;
+        }
+        return get_method_type_id(ref c, args, signature.ret_type, signature.variadic_param, callable_arg_names(signature, 1));
+    }
+
+    let name: String = generic_symbol_name(ref c, generic.base_type, true);
+    let template: Optional(GenericTemplate) = c.generic_funcs.lookup(name);
+    if (!(template is !null)) { return TYPE_POISON; }
+    let meta_template: GenericTemplate = template;
+
+    let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, meta_template, generic.type_args, [], generic.pos);
+    if (types is null) { return TYPE_POISON; }
+    let instance: Optional(FuncInfo) = register_generic_func(ref c, meta_template, types, generic.pos);
+    if (!(instance is !null)) { return TYPE_POISON; }
+
+    return get_func_type_id(ref c, instance.arg_types, instance.ret_type, instance.variadic_param, callable_arg_names(instance, 0));
+}
+
+func expr_type_var_access(ref c: Compiler, node: NodeID) -> Int {
+    let v: VarAccessNode = get_var_access_node(ref c.arena, node);
+    let info: Optional(SymbolInfo) = find_symbol(ref c, v.name_tok.value);
+    if ((info is !null)) { return info.type; }
+
+    let h_curr: Scope = c.hoist_scope;
+    while (h_curr.table is !null) {
+        let h_info: Optional(SymbolInfo) = scope_lookup(h_curr, v.name_tok.value);
+        if ((h_info is !null)) { return h_info.type; }
+        if (h_curr.parent < 0 || h_curr.parent >= c.hoist_scope_stack.length()) { break; }
+        h_curr = c.hoist_scope_stack[h_curr.parent];
+    }
+
+    let f_info: Optional(FuncInfo) = c.func_table.lookup(v.name_tok.value);
+    if (!(f_info is !null) && c.current_package_prefix != "") {
+        f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value);
+    }
+    if ((f_info is !null)) {
+        return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
+    }
+
+    return 0;
+}
+
+func expr_type_field_access(ref c: Compiler, node: NodeID) -> Int {
+    let f: FieldAccessNode = get_field_access_node(ref c.arena, node);
+    let obj_type: Int = get_expr_type(ref c, f.obj);
+    obj_type = get_repr_type(ref c, obj_type);
+    if (is_pointer_type(ref c, obj_type)) {
+        let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
+        if ((base_info is !null)) { obj_type = base_info.type; }
+    }
+    if (obj_type >= 100) {
+        let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
+        if ((s_info is !null)) {
+            let meta_s_info: StructInfo = s_info;
+            let field: Optional(FieldInfo) = find_field(meta_s_info, f.field_name);
+            if ((field is !null)) { return field.type; }
+            if (meta_s_info.is_class) {
+                let vtable: Vector(Struct) = meta_s_info.vtable;
+                let v_len: Int = 0;
+                if (vtable is !null) { v_len = vtable.length(); }
+                let m_idx: Int = 0;
+                while (m_idx < v_len) {
+                    let m_info: FuncInfo = vtable[m_idx];
+                    if (m_info.base_name == f.field_name) {
+                        let bound_args: Vector(Struct) = [];
+                        let a_idx: Int = 1;
+                        while (a_idx < m_info.arg_types.length()) {
+                            bound_args.append(m_info.arg_types[a_idx]);
+                            a_idx += 1;
+                        }
+                        return get_method_type_id(ref c, bound_args, m_info.ret_type, m_info.variadic_param, callable_arg_names(m_info, 1));
+                    }
+                    m_idx += 1;
+                }
+            }
+        }
+    }
+
+    let obj_base: Int = node_tag(f.obj);
+    if (obj_base == NODE_VAR_ACCESS) {
+        let v_node: VarAccessNode = get_var_access_node(ref c.arena, f.obj);
+        let target_name: String = v_node.name_tok.value;
+        if (c.current_package_prefix != "") {
+            if ((c.struct_table.lookup(c.current_package_prefix + target_name) is !null)) {
+                target_name = c.current_package_prefix + target_name;
+            }
+        }
+        let s_info: Optional(StructInfo) = c.struct_table.lookup(target_name);
+        if (s_info is null) {
+            let alias = c.current_file_type_aliases.lookup(v_node.name_tok.value);
+            if (alias is !null) { s_info = c.struct_table.lookup(alias); }
+        }
+        if (s_info is null) {
+            let alias = c.global_type_aliases.lookup(target_name);
+            if (alias is !null) { s_info = c.struct_table.lookup(alias); }
+        }
+        if ((s_info is !null) && s_info.is_enum) { return s_info.type_id; }
+    }
+    if (obj_type == 0) {
+        let name = generic_symbol_name(ref c, f.obj, false);
+        let owner = c.struct_table.lookup(name);
+        if (owner is null) {
+            let alias = c.global_type_aliases.lookup(name);
+            if (alias is !null) { owner = c.struct_table.lookup(alias); }
+        }
+        if (owner is !null && owner.is_enum) { return owner.type_id; }
+    }
+    return 0;
+}
+
+func expr_type_index_access(ref c: Compiler, node: NodeID) -> Int {
+    let idx_node: IndexAccessNode = get_index_access_node(ref c.arena, node);
+    let target_type: Int = get_expr_type(ref c, idx_node.target);
+    target_type = get_repr_type(ref c, target_type);
+    if (is_pointer_type(ref c, target_type) == true) {
+        let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(target_type);
+        if ((base_info is !null)) { return base_info.type; }
+    }
+    if (target_type >= 100) {
+        let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+        if ((v_info is !null)) { return v_info.type; }
+        let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+        if ((arr_info is !null)) { return arr_info.base_type; }
+        let s_info: Optional(StructInfo) = c.struct_id_map.lookup(target_type);
+        if ((s_info is !null) && s_info.is_class) {
+            let meta_s_info: StructInfo = s_info;
+            let method_index: Int = 0;
+            while (meta_s_info.vtable is !null && method_index < meta_s_info.vtable.length()) {
+                let method_info: FuncInfo = meta_s_info.vtable[method_index];
+                if (method_info.base_name == "get") { return method_info.ret_type; }
+                method_index++;
+            }
+        }
+    }
+    if (target_type == TYPE_STRING) { return TYPE_BYTE; }
+    return 0;
+}
+
+func expr_type_ref(ref c: Compiler, node: NodeID) -> Int {
+    let ref_node: RefNode = get_ref_node(ref c.arena, node);
+    let ref_base: Int = node_tag(ref_node.node);
+    if (ref_base == NODE_SLICE_ACCESS) {
+        let slice_node: SliceAccessNode = get_slice_access_node(ref c.arena, ref_node.node);
+        let target_type: Int = get_expr_type(ref c, slice_node.target);
+        if (target_type == TYPE_STRING) { return TYPE_STRING; }
+
+        let elem_type: Int = 0;
+        if (target_type >= 100) {
+            let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+            if ((arr_info is !null)) { elem_type = arr_info.base_type; }
+            else {
+                let vec_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+                if ((vec_info is !null)) { elem_type = vec_info.type; }
+            }
+        }
+        if (elem_type != 0) { return get_slice_type_id(ref c, elem_type); }
+        return 0;
+    }
+    let base_type: Int = get_expr_type(ref c, ref_node.node);
+    if (base_type != 0) {
+        return get_ptr_type_id(ref c, base_type);
+    }
+    return 0;
+}
+
+func expr_type_slice_access(ref c: Compiler, node: NodeID) -> Int {
+    let slice_node: SliceAccessNode = get_slice_access_node(ref c.arena, node);
+    let target_type: Int = get_expr_type(ref c, slice_node.target);
+    target_type = get_repr_type(ref c, target_type);
+    if (target_type == TYPE_STRING) { return TYPE_STRING; }
+
+    let elem_type: Int = 0;
+    if (target_type >= 100) {
+        let arr_info: Optional(ArrayInfo) = c.array_info_map.lookup(target_type);
+        if ((arr_info is !null)) { elem_type = arr_info.base_type; }
+        else {
+            let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(target_type);
+            if ((v_info is !null)) { elem_type = v_info.type; }
+        }
+    }
+
+    if (elem_type != 0) {
+        return get_slice_type_id(ref c, elem_type);
+    }
+    return 0;
+}
+
+func expr_type_try_unwrap(ref c: Compiler, node: NodeID) -> Int {
+    let t_node: TryUnwrapNode = get_try_unwrap_node(ref c.arena, node);
+    let base_type: Int = get_expr_type(ref c, t_node.expr);
+    // the entry-slot walk can reach this before a guard resolves the receiver.
+    if (base_type == 0 || base_type == TYPE_POISON) { return base_type; }
+    if (is_fallible_type(ref c, base_type)) {
+        return get_inner_fallible_type(ref c, base_type);
+    }
+    let expr_base: Int = node_tag(t_node.expr);
+    if (expr_base == NODE_CALL) {
+        let call: CallNode = get_call_node(ref c.arena, t_node.expr);
+        let callee_base: Int = node_tag(call.callee);
+        if (callee_base == NODE_VAR_ACCESS) {
+            let callee: VarAccessNode = get_var_access_node(ref c.arena, call.callee);
+            let target_type: Int = get_cast_target(ref c, callee.name_tok.value);
+            if (target_type != 0) {
+                throw_invalid_syntax(t_node.pos, "conversion to " + get_type_name(ref c, target_type) + " cannot fail; remove '?'");
+                return 0;
+            }
+        }
+    }
+    throw_invalid_syntax(t_node.pos, "Cannot use '?' on a non-fallible type.");
+    return 0;
+}
+
+func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
+    let call_node: CallNode = get_call_node(ref c.arena, node);
+    let callee_node: NodeID = call_node.callee;
+    let callee: Int = node_tag(callee_node);
+    if (callee == NODE_GENERIC_TYPE) {
+        let generic: GenericTypeNode = get_generic_type_node(ref c.arena, callee_node);
+        callee_node = generic.base_type;
+        callee = node_tag(callee_node);
+    }
+
+    let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
+    let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
+    if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, call_node.type_args, call_node.args, c.expected_type)) {
+        let types: Optional(Vector(Struct)) = resolve_generic_constructor_args(ref c, generic_type_template, call_node.type_args, call_node.args, c.expected_type, call_node.pos);
+        if (types is null) { return TYPE_POISON; }
+
+        let template_base: Int = node_tag(generic_type_template.node);
+        if (template_base == NODE_CLASS_DEF) {
+            return register_generic_class(ref c, generic_type_template, types, call_node.pos);
+        }
+        return register_generic_struct(ref c, generic_type_template, types, call_node.pos);
+    }
+
+    let generic_name: String = generic_symbol_name(ref c, callee_node, true);
+    let generic_template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
+    if ((generic_template is !null)) {
+        let types: Optional(Vector(Struct)) = resolve_generic_args(ref c, generic_template, call_node.type_args, call_node.args, call_node.pos);
+        if (types is null) { return TYPE_POISON; }
+
+        let instance: Optional(FuncInfo) = register_generic_func(ref c, generic_template, types, call_node.pos);
+        if (!(instance is !null)) { return TYPE_POISON; }
+
+        if (call_node.preserve_fallible) { return instance.ret_type; }
+        if (is_fallible_type(ref c, instance.ret_type)) {
+            return get_inner_fallible_type(ref c, instance.ret_type);
+        }
+
+        return instance.ret_type;
+    }
+
+    if (callee == NODE_VAR_ACCESS) {
+        let v: VarAccessNode = get_var_access_node(ref c.arena, callee_node);
+        let callee_name: String = v.name_tok.value;
+
+        let cast_target: Int = get_cast_target(ref c, callee_name);
+        if (cast_target != 0) {
+            let args: Vector(ArgNode) = call_node.args;
+            if (args is !null && args.length() == 1) {
+                let arg: ArgNode = args[0];
+                let source_type: Int = get_expr_type(ref c, arg.val);
+                let source_info: Optional(StructInfo) = c.struct_id_map.lookup(source_type);
+                let conversion: Optional(FuncInfo) = find_class_conversion(source_info, cast_target);
+                if ((conversion is !null)) {
+                    if (call_node.preserve_fallible) { return conversion.ret_type; }
+                    if (is_fallible_type(ref c, conversion.ret_type)) {
+                        return get_inner_fallible_type(ref c, conversion.ret_type);
+                    }
+                    return conversion.ret_type;
+                }
+                if (call_node.preserve_fallible && needs_explicit_cast(ref c, source_type, cast_target)) {
+                    return get_fallible_type_id(ref c, cast_target);
+                }
+            }
+            return cast_target;
+        }
+
+        let f_info: Optional(FuncInfo) = c.func_table.lookup(callee_name);
+        if (!(f_info is !null) && c.current_package_prefix != "") {
+            f_info = c.func_table.lookup(c.current_package_prefix + callee_name);
+        }
+        if (!(f_info is !null)) {
+            let mapped: Optional(String) = c.current_file_func_aliases.lookup(callee_name);
+            if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
+        }
+        if (!(f_info is !null)) {
+            let mapped: Optional(String) = c.global_func_aliases.lookup(callee_name);
+            if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
+        }
+        if ((f_info is !null)) { return f_info.ret_type; }
+
+        let s_info: Optional(StructInfo) = c.struct_table.lookup(callee_name);
+        if (!(s_info is !null) && c.current_package_prefix != "") {
+            s_info = c.struct_table.lookup(c.current_package_prefix + callee_name);
+        }
+        if (s_info is null && generic_type_name.length() != 0) {
+            s_info = c.struct_table.lookup(generic_type_name);
+        }
+        if (!(s_info is !null)) {
+            let alias_info: Optional(NamedTypeInfo) = find_named_decl(ref c, callee_name);
+            if ((alias_info is !null) && alias_info.is_alias) {
+                s_info = c.struct_id_map.lookup(resolve_named_type(ref c, alias_info));
+            }
+        }
+        if ((s_info is !null)) { return s_info.type_id; }
+
+        let var_info: Optional(SymbolInfo) = find_symbol(ref c, callee_name);
+        if ((var_info is !null)) {
+            let p_type: Int = var_info.type;
+            let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(p_type);
+            if ((f_ret_info is !null)) { return f_ret_info.type; }
+            let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(p_type);
+            if ((m_ret_info is !null)) { return m_ret_info.type; }
+        }
+    }
+    else if (callee == NODE_FIELD_ACCESS) {
+        let f: FieldAccessNode = get_field_access_node(ref c.arena, callee_node);
+        let obj_type: Int = get_expr_type(ref c, f.obj);
+        if (obj_type == 0) {
+            let path_parts: Vector(String) = [];
+            let curr_obj: NodeID = f.obj;
+            let curr_base: Int = node_tag(curr_obj);
+            while (curr_base == NODE_FIELD_ACCESS) {
+                let inner_f: FieldAccessNode = get_field_access_node(ref c.arena, curr_obj);
+                path_parts.append(inner_f.field_name);
+                curr_obj = inner_f.obj;
+                curr_base = node_tag(curr_obj);
+            }
+            if (curr_base == NODE_VAR_ACCESS) {
+                let inner_v: VarAccessNode = get_var_access_node(ref c.arena, curr_obj);
+                let root_name: String = inner_v.name_tok.value;
+                if (!(find_symbol(ref c, root_name) is !null)) {
+                    let full_name: String = "";
+                    let module_prefix: Optional(String) = c.current_file_visible_prefixes.lookup(root_name);
+                    if (module_prefix is !null) {
+                        full_name = module_member_name(module_prefix, path_parts, f.field_name);
+                    } else {
+                        let source_name: String = module_member_name(root_name + ".", path_parts, f.field_name);
+                        let mapped_func: Optional(String) = c.current_file_func_aliases.lookup(source_name);
+                        if (mapped_func is !null) { full_name = mapped_func; }
+                    }
+                    let g_alias_f: Optional(String) = c.global_func_aliases.lookup(full_name);
+                    if (g_alias_f is !null) { full_name = g_alias_f; }
+
+                    let f_info: Optional(FuncInfo) = c.func_table.lookup(full_name);
+                    if ((f_info is !null)) { return f_info.ret_type; }
+                    let constructor: Optional(StructInfo) = c.struct_table.lookup(generic_type_name);
+                    if (constructor is null) {
+                        let alias = c.global_type_aliases.lookup(generic_type_name);
+                        if (alias is !null) { constructor = c.struct_table.lookup(alias); }
+                    }
+                    if (constructor is !null) { return constructor.type_id; }
+                }
+            }
+        }
+
+        if (is_pointer_type(ref c, obj_type)) {
+            let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_type);
+            if ((base_info is !null)) { obj_type = base_info.type; }
+        }
+
+        if (obj_type == TYPE_STRING) {
+            let str_link: Optional(String) = c.compiler_link.lookup("string_" + f.field_name);
+            if (str_link is !null) {
+                let f_info: Optional(FuncInfo) = c.func_table.lookup(str_link);
+                if ((f_info is !null)) { return f_info.ret_type; }
+            }
+        }
+
+        if (f.field_name == "length") { return TYPE_INT; }
+        if (f.field_name == "append") { return TYPE_VOID; }
+        if (f.field_name == "drop") {
+            if (obj_type >= 100) {
+                let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(obj_type);
+                if ((v_info is !null)) { return v_info.type; }
+            }
+            return 0;
+        }
+
+        if (obj_type >= 100) {
+            let s_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_type);
+            if ((s_info is !null) && s_info.is_class) {
+                let meta_s_info: StructInfo = s_info;
+                let method_template: Optional(GenericTemplate) = c.generic_methods.lookup(meta_s_info.name + "_" + f.field_name);
+                if ((method_template is !null)) {
+                    let types: Optional(Vector(Struct)) = resolve_generic_method_args(ref c, method_template, call_node.type_args, call_node.args, call_node.pos);
+                    if (types is null) { return TYPE_POISON; }
+                    let instance: Optional(FuncInfo) = register_generic_method(ref c, method_template, meta_s_info, types, call_node.pos);
+                    if (!(instance is !null)) { return TYPE_POISON; }
+                    let meta_instance: FuncInfo = instance;
+                    if (!call_node.preserve_fallible && is_fallible_type(ref c, meta_instance.ret_type)) {
+                        return get_inner_fallible_type(ref c, meta_instance.ret_type);
+                    }
+                    return meta_instance.ret_type;
+                }
+                let vtable: Vector(Struct) = meta_s_info.vtable;
+                let v_len: Int = 0;
+                if (vtable is !null) { v_len = vtable.length(); }
+                let m_idx: Int = 0;
+                while (m_idx < v_len) {
+                    let m_info: FuncInfo = vtable[m_idx];
+                    if (m_info.base_name == f.field_name) { return m_info.ret_type; }
+                    m_idx += 1;
+                }
+            } else if ((s_info is !null) && s_info.is_interface) {
+                let protocol: StructInfo = s_info;
+                let vtable: Vector(Struct) = protocol.vtable;
+                let v_len: Int = 0;
+                if (vtable is !null) { v_len = vtable.length(); }
+                let m_idx: Int = 0;
+                while (m_idx < v_len) {
+                    let m_node: MethodDefNode = vtable[m_idx];
+                    if (m_node.name_tok.value == f.field_name) {
+                        return interface_method_type(ref c, protocol, m_node.return_type);
+                    }
+                    m_idx += 1;
+                }
+            }
+        }
+    }
+    let ptr_type: Int = get_expr_type(ref c, callee_node);
+    if (ptr_type != 0) {
+        let f_ret_info: Optional(SymbolInfo) = c.func_ret_map.lookup(ptr_type);
+        if ((f_ret_info is !null)) { return f_ret_info.type; }
+        let m_ret_info: Optional(SymbolInfo) = c.method_ret_map.lookup(ptr_type);
+        if ((m_ret_info is !null)) { return m_ret_info.type; }
+    }
+
+    return 0;
+}
+
+func expr_type_binop(ref c: Compiler, node: NodeID) -> Int {
+    let b: BinOpNode = get_binop_node(ref c.arena, node);
+    let op: Int = b.op_tok.type;
+
+    if (op == WhitelangTokens.TOK_EE || op == WhitelangTokens.TOK_NE || op == WhitelangTokens.TOK_LT ||
+        op == WhitelangTokens.TOK_GT || op == WhitelangTokens.TOK_LTE || op == WhitelangTokens.TOK_GTE ||
+        op == WhitelangTokens.TOK_AND || op == WhitelangTokens.TOK_OR || op == WhitelangTokens.TOK_IS) {
+        return TYPE_BOOL;
+    }
+
+    let left_ty: Int = get_expr_type(ref c, b.left);
+    let right_ty: Int = get_expr_type(ref c, b.right);
+
+    if (left_ty == TYPE_STRING || right_ty == TYPE_STRING) { return TYPE_STRING; }
+    if (left_ty == TYPE_CHAR && right_ty == TYPE_CHAR && op == WhitelangTokens.TOK_PLUS) { return TYPE_STRING; }
+
+    if (left_ty == TYPE_FLOAT || right_ty == TYPE_FLOAT) { return TYPE_FLOAT; }
+    if (left_ty == TYPE_FLOAT32 || right_ty == TYPE_FLOAT32) { return TYPE_FLOAT32; }
+    if (is_integer_type(left_ty) && is_integer_type(right_ty)) {
+        let left_bits: Int = get_type_bitwidth(left_ty);
+        let right_bits: Int = get_type_bitwidth(right_ty);
+        if (right_bits > left_bits) { return right_ty; }
+        if (left_bits > right_bits) { return left_ty; }
+        if (is_unsigned_integer(right_ty)) { return right_ty; }
+    }
+
+    return left_ty;
+}
+
 
 func get_type_bitwidth(t: Int) -> Int {
     if (t == TYPE_BOOL) { return 1; }
@@ -3355,24 +3414,20 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         let name: String = named.name_tok.value;
         let alias: Optional(String) = null;
         if is_function {
-            if (c.current_file_func_aliases is !null) {
-                alias = c.current_file_func_aliases.lookup(name);
-            }
+            alias = c.current_file_func_aliases.lookup(name);
         } else {
-            if (c.current_file_type_aliases is !null) {
-                alias = c.current_file_type_aliases.lookup(name);
-            }
+            alias = c.current_file_type_aliases.lookup(name);
         }
 
         if (alias is !null &&
-            ((is_function && c.generic_funcs is !null && (c.generic_funcs.lookup(alias) is !null)) ||
-             (!is_function && c.generic_structs is !null && (c.generic_structs.lookup(alias) is !null)))) {
+            ((is_function && (c.generic_funcs.lookup(alias) is !null)) ||
+             (!is_function && (c.generic_structs.lookup(alias) is !null)))) {
             return alias;
         }
         if (c.current_package_prefix != "") {
             let local: String = c.current_package_prefix + name;
-            if ((is_function && c.generic_funcs is !null && (c.generic_funcs.lookup(local) is !null)) ||
-                (!is_function && c.generic_structs is !null && (c.generic_structs.lookup(local) is !null))) {
+            if ((is_function && (c.generic_funcs.lookup(local) is !null)) ||
+                (!is_function && (c.generic_structs.lookup(local) is !null))) {
                 return local;
             }
         }
@@ -3399,10 +3454,7 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         }
 
         let root: VarAccessNode = get_var_access_node(ref c.arena, current);
-        let prefix: Optional(String) = null;
-        if (c.current_file_visible_prefixes is !null) {
-            prefix = c.current_file_visible_prefixes.lookup(root.name_tok.value);
-        }
+        let prefix: Optional(String) = c.current_file_visible_prefixes.lookup(root.name_tok.value);
         if (prefix is !null) {
             return module_member_name(prefix, path_parts, field.field_name);
         }
@@ -3410,13 +3462,9 @@ func generic_symbol_name(ref c: Compiler, node: NodeID, is_function: Bool) -> St
         let source: String = module_member_name(root.name_tok.value + ".", path_parts, field.field_name);
         let alias: Optional(String) = null;
         if is_function {
-            if (c.current_file_func_aliases is !null) {
-                alias = c.current_file_func_aliases.lookup(source);
-            }
+            alias = c.current_file_func_aliases.lookup(source);
         } else {
-            if (c.current_file_type_aliases is !null) {
-                alias = c.current_file_type_aliases.lookup(source);
-            }
+            alias = c.current_file_type_aliases.lookup(source);
         }
 
         if (alias is !null) { return alias; }
@@ -5248,9 +5296,9 @@ func get_method_def_sig_str(ref c: Compiler, m_node: MethodDefNode) -> String {
 }
 
 func runtime_type_name(ref c: Compiler, type_id: Int) -> String {
-    let callable: Bool = c.func_ret_map is !null && c.func_ret_map.contains_key(type_id);
+    let callable: Bool = c.func_ret_map.contains_key(type_id);
     if (!callable) {
-        callable = c.method_ret_map is !null && (c.method_ret_map.lookup(type_id) is !null);
+        callable = (c.method_ret_map.lookup(type_id) is !null);
     }
     if callable {
         // callable labels belong to source binding, not runtime type identity

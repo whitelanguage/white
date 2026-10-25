@@ -44,15 +44,11 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
     if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
         let value: Float = eval_const_float(ref source, value_node, node.pos);
         if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
-        if (source.constant_nums is !null) {
-            source.constant_nums.put(name, value);
-        }
+        source.constant_nums.put(name, value);
         return;
     }
     if (get_type_bitwidth(repr) == 128 && is_integer_type(repr)) {
-        if (source.constant_wide_integers is !null) {
-            source.constant_wide_integers.put(name, eval_const_wide(ref source, value_node, node.pos, is_unsigned_integer(repr)));
-        }
+        source.constant_wide_integers.put(name, eval_const_wide(ref source, value_node, node.pos, is_unsigned_integer(repr)));
         return;
     }
     if (is_integer_type(repr) || repr == TYPE_CHAR || repr == TYPE_BOOL) {
@@ -62,23 +58,16 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
             value = Long(string_to_int(get_char_node(ref source.arena, value_node).tok.value, node.pos));
         }
         else { value = eval_const_long(ref source, value_node, node.pos); }
-        if (source.constant_integers is !null) {
-            source.constant_integers.put(name, value);
-        }
-        if (source.constant_nums is !null) {
-            source.constant_nums.put(name, Float(value));
-        }
+        source.constant_integers.put(name, value);
+        source.constant_nums.put(name, Float(value));
     }
 }
 
 func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
-    if (source.global_symbol_table is null) {
-        return no_wir_source_global();
-    }
 
     let key: String = name;
     let info: Optional(SymbolInfo) = null;
-    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
+    if (source.current_package_prefix.length() != 0) {
         key = source.current_package_prefix + name;
         info = source.global_symbol_table.lookup(key);
     }
@@ -86,14 +75,14 @@ func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
         key = name;
         info = source.global_symbol_table.lookup(key);
     }
-    if (!(info is !null) && source.current_file_global_aliases is !null) {
+    if (!(info is !null)) {
         let mapped: Optional(String) = source.current_file_global_aliases.lookup(name);
         if (mapped is !null) {
             key = mapped;
             info = source.global_symbol_table.lookup(key);
         }
     }
-    if (!(info is !null) && source.global_var_aliases is !null) {
+    if (!(info is !null)) {
         let mapped: Optional(String) = source.global_var_aliases.lookup(name);
         if (mapped is !null) {
             key = mapped;

@@ -14,7 +14,7 @@ import elf_object from "../../src/compiler/machine/x86_64/elf.wl"
 import a64_lower_module from "../../src/compiler/machine/aarch64/module.wl"
 import A64Object from "../../src/compiler/machine/aarch64/model.wl"
 import a64_elf_object from "../../src/compiler/machine/aarch64/elf.wl"
-import machine_lower_wide_conversions from "../../src/compiler/machine/numeric.wl"
+import wir_lower_wide_conversions from "../../src/compiler/wir/numeric.wl"
 
 
 func build() -> WirModule {
@@ -25,7 +25,7 @@ func build() -> WirModule {
         let float = wir_float_type(ref program, bits);
         if (bits == 32) {
             // user symbols sharing the helper prefix must never be selected as helpers
-            wir_add_function(ref program, "$machine.convert." + UInt32(signed) + "." + UInt32(float), [], program.void_type, false, WirLinkage.External, WirABI.C);
+            wir_add_function(ref program, "$numeric.convert." + UInt32(signed) + "." + UInt32(float), [], program.void_type, false, WirLinkage.External, WirABI.C);
         }
         let inputs: Vector(WirTypeID) = [signed, unsigned, float, float];
         let outputs: Vector(WirTypeID) = [float, float, signed, unsigned];
@@ -58,7 +58,7 @@ func main() -> Int {
     let instruction = malformed.arena.instructions[0];
     instruction.operands = [NO_WIR_VALUE];
     malformed.arena.instructions[0] = instruction;
-    if (machine_lower_wide_conversions(ref malformed).length() == 0) {
+    if (wir_lower_wide_conversions(ref malformed).length() == 0) {
         print("FAIL: malformed wide conversion was accepted");
         return 1;
     }

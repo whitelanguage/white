@@ -13,7 +13,7 @@ import * from "lowering.wl"
 import * from "types.wl"
 import * from "values.wl"
 import machine_lower_remainders from "../remainder.wl"
-import machine_lower_wide_conversions from "../numeric.wl"
+import wir_lower_wide_conversions from "../../wir/numeric.wl"
 import machine_layout_valid from "../layout.wl"
 
 
@@ -75,7 +75,7 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
     x86_set_sysv_abi(is_linux);
     let rem_error = machine_lower_remainders(ref program);
     if (rem_error.length() != 0) { return x86_module_error(rem_error); }
-    let numeric_error = machine_lower_wide_conversions(ref program);
+    let numeric_error = wir_lower_wide_conversions(ref program);
     if (numeric_error.length() != 0) { return x86_module_error(numeric_error); }
     let codes: Vector(X86FunctionCode) = [];
     let layouts: Vector(WirTypeLayout) = x86_type_layouts(ref program);

@@ -6,6 +6,7 @@ import wir_value_type from "../builder.wl"
 import wir_type_layout, wir_type_layouts from "../layout.wl"
 import * from "../storage.wl"
 import * from "llvm_windows.wl"
+import wir_lower_wide_conversions from "../numeric.wl"
 
 
 struct WirLLVMResult(text: String, errors: Vector(String))
@@ -13,6 +14,21 @@ struct WirLLVMResult(text: String, errors: Vector(String))
 func llvm_value_name(value: WirValueID) -> String { return "%v" + UInt32(value); }
 func llvm_block_name(block: WirBlockID) -> String { return "b" + UInt32(block); }
 func llvm_type_name(type_id: WirTypeID) -> String { return "%wir.t" + UInt32(type_id); }
+
+func llvm_split_edges(instruction: WirInstruction) -> Bool {
+// LLVM PHIs identify their input by predecessor block, WIR identifies an edge
+    return instruction.opcode == WirOpcode.Branch && instruction.edges.length() == 2 &&
+           instruction.edges[0].target == instruction.edges[1].target && instruction.edges[0].arguments.length() != 0;
+}
+
+func llvm_edge_name(instruction_id: WirInstID, edge: Int) -> String {
+    return "edge." + UInt32(instruction_id) + "." + edge;
+}
+
+func llvm_branch_target(instruction_id: WirInstID, instruction: WirInstruction, edge: Int) -> String {
+    if (llvm_split_edges(instruction)) { return llvm_edge_name(instruction_id, edge); }
+    return llvm_block_name(instruction.edges[edge].target);
+}
 
 func llvm_write_type(output: strings.Builder, program: WirModule, type_id: WirTypeID) -> Void? {
 // WIR types are already laid out, this only spells the matching LLVM type
@@ -64,7 +80,13 @@ func llvm_write_integer(output: strings.Builder, type: WirType, value: UInt128) 
         }
     }
     if (type.kind == WirTypeKind.SignedInt && type.bits == 128) {
-        output.write(String(Int128(value)))?;
+        // integer constants hold raw bits, a checked numeric cast cannot recover their sign.
+        if ((value & (UInt128(1U) << UInt128(127))) != UInt128(0U)) {
+            output.write("-")?;
+            output.write(String((~value) + UInt128(1U)))?;
+            return;
+        }
+        output.write(String(value))?;
     }
 
     else { output.write(String(value))?; }
@@ -395,15 +417,6 @@ func llvm_callconv(program: WirModule, abi: WirABI) -> String {
 
 func llvm_function_callconv(program: WirModule, function: WirFunction) -> String {
     return llvm_callconv(program, function.abi);
-}
-
-func llvm_callee_callconv(program: WirModule, value_id: WirValueID) -> String {
-    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    let type: WirType = program.arena.types[wir_id_index(UInt32(value.type_id))];
-    if (type.kind != WirTypeKind.Function) {
-        return "";
-    }
-    return llvm_callconv(program, type.abi);
 }
 
 func llvm_memory_order(order: WirMemoryOrder) -> String? {
@@ -931,9 +944,9 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         llvm_write_value(output, program, instruction.operands[0])?;
 
         output.write(", label %")?;
-        output.write(llvm_block_name(instruction.edges[0].target))?;
+        output.write(llvm_branch_target(instruction_id, instruction, 0))?;
         output.write(", label %")?;
-        output.write(llvm_block_name(instruction.edges[1].target))?;
+        output.write(llvm_branch_target(instruction_id, instruction, 1))?;
     } else if (instruction.opcode == WirOpcode.Return) {
         output.write("ret ")?;
 
@@ -948,6 +961,15 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
     }
 
     output.write("\n")?;
+
+    if (llvm_split_edges(instruction)) {
+        let edge = 0;
+        while (edge < 2) {
+            output.write(llvm_edge_name(instruction_id, edge) + ":\n  br label %")?;
+            output.write(llvm_block_name(instruction.edges[edge].target) + "\n")?;
+            edge++;
+        }
+    }
 
     return;
 }
@@ -987,7 +1009,8 @@ func llvm_write_phis(output: strings.Builder, program: WirModule, function: WirF
             let source_id: WirBlockID = function.blocks[source_index];
             let source: WirBlock = program.arena.blocks[wir_id_index(UInt32(source_id))];
             if (source.instructions.length() != 0) {
-                let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(source.instructions[source.instructions.length() - 1]))];
+                let terminator_id = source.instructions[source.instructions.length() - 1];
+                let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(terminator_id))];
                 let edge_index: Int = 0;
                 while (edge_index < terminator.edges.length()) {
                     let edge: WirEdge = terminator.edges[edge_index];
@@ -1002,7 +1025,11 @@ func llvm_write_phis(output: strings.Builder, program: WirModule, function: WirF
                         llvm_write_value(output, program, edge.arguments[parameter_index])?;
 
                         output.write(", %")?;
-                        output.write(llvm_block_exit_name(program, source_id))?;
+                        if (llvm_split_edges(terminator)) {
+                            output.write(llvm_edge_name(terminator_id, edge_index))?;
+                        } else {
+                            output.write(llvm_block_exit_name(program, source_id))?;
+                        }
                         output.write(" ]")?;
                     }
                     edge_index++;
@@ -1327,6 +1354,8 @@ func llvm_write_arc_declarations(output: strings.Builder, program: WirModule) ->
 func emit_wir_llvm(program: WirModule) -> WirLLVMResult? {
 // this backend is a serializer, source-language decisions must be gone before this point
     let errors: Vector(String) = llvm_collect_backend_errors(program);
+    let numeric_error = wir_lower_wide_conversions(ref program);
+    if (numeric_error.length() != 0) { errors.append(numeric_error); }
     if (errors.length() != 0) {
         return WirLLVMResult(text="", errors=errors);
     }

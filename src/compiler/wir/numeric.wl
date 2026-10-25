@@ -1,17 +1,17 @@
-// src/compiler/machine/numeric.wl
-import * from "../wir/model.wl"
-import * from "../wir/builder.wl"
+// src/compiler/wir/numeric.wl
+import * from "model.wl"
+import * from "builder.wl"
 
 
-func machine_numeric_branch(ref program: WirModule, block: WirBlockID, condition: WirValueID, yes: WirBlockID, yes_args: Vector(WirValueID), no: WirBlockID, no_args: Vector(WirValueID)) -> Void {
+func wir_numeric_branch(ref program: WirModule, block: WirBlockID, condition: WirValueID, yes: WirBlockID, yes_args: Vector(WirValueID), no: WirBlockID, no_args: Vector(WirValueID)) -> Void {
     wir_append(ref program, block, WirOpcode.Branch, program.void_type, [condition], [wir_edge(yes, yes_args), wir_edge(no, no_args)], no_wir_location());
 }
 
-func machine_numeric_jump(ref program: WirModule, block: WirBlockID, next: WirBlockID, args: Vector(WirValueID)) -> Void {
+func wir_numeric_jump(ref program: WirModule, block: WirBlockID, next: WirBlockID, args: Vector(WirValueID)) -> Void {
     wir_append(ref program, block, WirOpcode.Jump, program.void_type, [], [wir_edge(next, args)], no_wir_location());
 }
 
-func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: WirTypeID, name: String) -> WirFuncID {
+func wir_int128_to_float(ref program: WirModule, input: WirTypeID, output: WirTypeID, name: String) -> WirFuncID {
 // round the integer once at the destination precision, going through f64 would
 // lose sticky bits before a later f32 conversion
     let bits = program.arena.types[wir_id_index(UInt32(output))].bits;
@@ -42,7 +42,7 @@ func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: W
     }
 
     let empty = wir_binary(ref program, entry, WirOpcode.Equal, program.bool_type, magnitude, zero, "", loc);
-    machine_numeric_branch(ref program, entry, empty, zero_block, [], scan, []);
+    wir_numeric_branch(ref program, entry, empty, zero_block, [], scan, []);
     wir_return(ref program, zero_block, wir_const_float_bits(ref program, output, 0UL), loc);
 
     // a binary search for the highest set bit takes seven tests even for u128 max
@@ -54,7 +54,7 @@ func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: W
         let high = wir_binary(ref program, current, WirOpcode.NotEqual, program.bool_type, shifted, zero, "", loc);
         let added = wir_binary(ref program, current, WirOpcode.Add, word, exponent, wir_const_int(ref program, word, UInt128(step)), "exponent", loc);
         let next = wir_add_block(ref program, fn_id, "scan." + step, [wir_param("probe", wide), wir_param("exponent", word)]);
-        machine_numeric_branch(ref program, current, high, next, [shifted, added], next, [probe, exponent]);
+        wir_numeric_branch(ref program, current, high, next, [shifted, added], next, [probe, exponent]);
         let params = program.arena.blocks[wir_id_index(UInt32(next))].parameters;
         probe = params[0];
         exponent = params[1];
@@ -67,11 +67,11 @@ func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: W
     let pack = wir_add_block(ref program, fn_id, "pack", [wir_param("significand", word), wir_param("exponent", word)]);
     let mantissa_bits = wir_const_int(ref program, word, UInt128(fraction));
     let fits = wir_binary(ref program, current, WirOpcode.UnsignedLessEqual, program.bool_type, exponent, mantissa_bits, "", loc);
-    machine_numeric_branch(ref program, current, fits, exact, [], round, []);
+    wir_numeric_branch(ref program, current, fits, exact, [], round, []);
 
     let left = wir_binary(ref program, exact, WirOpcode.Subtract, word, mantissa_bits, exponent, "", loc);
     let aligned = wir_binary(ref program, exact, WirOpcode.ShiftLeft, wide, magnitude, wir_cast(ref program, exact, left, wide, "", loc), "aligned", loc);
-    machine_numeric_jump(ref program, exact, pack, [wir_cast(ref program, exact, aligned, word, "", loc), exponent]);
+    wir_numeric_jump(ref program, exact, pack, [wir_cast(ref program, exact, aligned, word, "", loc), exponent]);
 
     let right = wir_binary(ref program, round, WirOpcode.Subtract, word, exponent, mantissa_bits, "", loc);
     let shift = wir_cast(ref program, round, right, wide, "", loc);
@@ -88,11 +88,11 @@ func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: W
     let rounded = wir_binary(ref program, round, WirOpcode.Add, wide, kept, wir_cast(ref program, round, up, wide, "", loc), "rounded", loc);
     let significand = wir_cast(ref program, round, rounded, word, "", loc);
     let overflow = wir_binary(ref program, round, WirOpcode.UnsignedGreaterEqual, program.bool_type, rounded, wir_const_int(ref program, wide, UInt128(1U) << UInt128(fraction + 1)), "", loc);
-    machine_numeric_branch(ref program, round, overflow, carry, [], pack, [significand, exponent]);
+    wir_numeric_branch(ref program, round, overflow, carry, [], pack, [significand, exponent]);
 
     let smaller = wir_binary(ref program, carry, WirOpcode.UnsignedShiftRight, word, significand, wir_const_int(ref program, word, UInt128(1U)), "", loc);
     let larger_exp = wir_binary(ref program, carry, WirOpcode.Add, word, exponent, wir_const_int(ref program, word, UInt128(1U)), "", loc);
-    machine_numeric_jump(ref program, carry, pack, [smaller, larger_exp]);
+    wir_numeric_jump(ref program, carry, pack, [smaller, larger_exp]);
 
     let params = program.arena.blocks[wir_id_index(UInt32(pack))].parameters;
     let biased = wir_binary(ref program, pack, WirOpcode.Add, word, params[1], wir_const_int(ref program, word, UInt128(bias)), "", loc);
@@ -105,7 +105,7 @@ func machine_int128_to_float(ref program: WirModule, input: WirTypeID, output: W
     return fn_id;
 }
 
-func machine_float_to_int128(ref program: WirModule, input: WirTypeID, output: WirTypeID, name: String) -> WirFuncID {
+func wir_float_to_int128(ref program: WirModule, input: WirTypeID, output: WirTypeID, name: String) -> WirFuncID {
 // decode the significand and shift it as an integer, no rounded floating
 // subtraction is needed to recover the upper and lower halves
     let bits = program.arena.types[wir_id_index(UInt32(input))].bits;
@@ -135,13 +135,13 @@ func machine_float_to_int128(ref program: WirModule, input: WirTypeID, output: W
     exp = wir_binary(ref program, entry, WirOpcode.BitAnd, word, exp, wir_const_int(ref program, word, UInt128(bias * 2 + 1)), "exponent", loc);
     let sign = wir_binary(ref program, entry, WirOpcode.UnsignedShiftRight, word, encoded, wir_const_int(ref program, word, UInt128(bits - 1)), "sign", loc);
     let small = wir_binary(ref program, entry, WirOpcode.UnsignedLess, program.bool_type, exp, wir_const_int(ref program, word, UInt128(bias)), "", loc);
-    machine_numeric_branch(ref program, entry, small, zero_block, [], check, []);
+    wir_numeric_branch(ref program, entry, small, zero_block, [], check, []);
     wir_return(ref program, zero_block, wir_const_int(ref program, output, UInt128(0U)), loc);
 
     // source casts already check range, raw WIR must not turn NaN or an excessive
     // exponent into a masked shift that happens to produce an ordinary integer
     let too_large = wir_binary(ref program, check, WirOpcode.UnsignedGreaterEqual, program.bool_type, exp, wir_const_int(ref program, word, UInt128(bias + 128)), "", loc);
-    machine_numeric_branch(ref program, check, too_large, invalid, [], decode, []);
+    wir_numeric_branch(ref program, check, too_large, invalid, [], decode, []);
     wir_trap(ref program, invalid, loc);
 
     let exponent = wir_binary(ref program, decode, WirOpcode.Subtract, word, exp, wir_const_int(ref program, word, UInt128(bias)), "", loc);
@@ -150,13 +150,13 @@ func machine_float_to_int128(ref program: WirModule, input: WirTypeID, output: W
     significand = wir_binary(ref program, decode, WirOpcode.BitOr, word, significand, wir_const_int(ref program, word, UInt128(1U) << UInt128(fraction)), "significand", loc);
     let mantissa = wir_cast(ref program, decode, significand, wide, "", loc);
     let high = wir_binary(ref program, decode, WirOpcode.UnsignedGreaterEqual, program.bool_type, exponent, fraction_bits, "", loc);
-    machine_numeric_branch(ref program, decode, high, left, [], right, []);
+    wir_numeric_branch(ref program, decode, high, left, [], right, []);
     let left_shift = wir_binary(ref program, left, WirOpcode.Subtract, word, exponent, fraction_bits, "", loc);
     let shifted_left = wir_binary(ref program, left, WirOpcode.ShiftLeft, wide, mantissa, wir_cast(ref program, left, left_shift, wide, "", loc), "", loc);
-    machine_numeric_jump(ref program, left, finish, [shifted_left]);
+    wir_numeric_jump(ref program, left, finish, [shifted_left]);
     let right_shift = wir_binary(ref program, right, WirOpcode.Subtract, word, fraction_bits, exponent, "", loc);
     let shifted_right = wir_binary(ref program, right, WirOpcode.UnsignedShiftRight, wide, mantissa, wir_cast(ref program, right, right_shift, wide, "", loc), "", loc);
-    machine_numeric_jump(ref program, right, finish, [shifted_right]);
+    wir_numeric_jump(ref program, right, finish, [shifted_right]);
 
     let magnitude = program.arena.blocks[wir_id_index(UInt32(finish))].parameters[0];
     let is_negative = wir_binary(ref program, finish, WirOpcode.NotEqual, program.bool_type, sign, wir_const_int(ref program, word, UInt128(0U)), "", loc);
@@ -168,19 +168,19 @@ func machine_float_to_int128(ref program: WirModule, input: WirTypeID, output: W
         let positive_limit = wir_binary(ref program, finish, WirOpcode.BitAnd, program.bool_type, at_limit, nonnegative, "", loc);
         let overflow = wir_binary(ref program, finish, WirOpcode.BitOr, program.bool_type, beyond, positive_limit, "", loc);
         let choose = wir_add_block(ref program, fn_id, "choose", []);
-        machine_numeric_branch(ref program, finish, overflow, invalid, [], choose, []);
-        machine_numeric_branch(ref program, choose, is_negative, negative, [], positive, []);
+        wir_numeric_branch(ref program, finish, overflow, invalid, [], choose, []);
+        wir_numeric_branch(ref program, choose, is_negative, negative, [], positive, []);
         let negated = wir_unary(ref program, negative, WirOpcode.Negate, wide, magnitude, "", loc);
         wir_return(ref program, negative, wir_cast(ref program, negative, negated, output, "", loc), loc);
     } else {
-        machine_numeric_branch(ref program, finish, is_negative, invalid, [], positive, []);
+        wir_numeric_branch(ref program, finish, is_negative, invalid, [], positive, []);
         wir_trap(ref program, negative, loc);
     }
     wir_return(ref program, positive, wir_cast(ref program, positive, magnitude, output, "", loc), loc);
     return fn_id;
 }
 
-func machine_lower_wide_conversions(ref program: WirModule) -> String {
+func wir_lower_wide_conversions(ref program: WirModule) -> String {
 // create each conversion body only when used, preserve source result IDs and locations
     let helpers: Optional(Dict(String, WirFuncID)) = null;
     let count = program.arena.instructions.length();
@@ -223,12 +223,12 @@ func machine_lower_wide_conversions(ref program: WirModule) -> String {
             catch(err) { helper = NO_WIR_FUNC; }
         }
         if (helper == NO_WIR_FUNC) {
-            let name = "$machine.convert." + key;
+            let name = "$numeric.convert." + key;
             while (program.arena.function_names.contains_key(name)) { name += "."; }
             if to_float {
-                helper = machine_int128_to_float(ref program, source, inst.type_id, name);
+                helper = wir_int128_to_float(ref program, source, inst.type_id, name);
             } else {
-                helper = machine_float_to_int128(ref program, source, inst.type_id, name);
+                helper = wir_float_to_int128(ref program, source, inst.type_id, name);
             }
             if (helpers is !null) { helpers.put(key, helper); }
         }

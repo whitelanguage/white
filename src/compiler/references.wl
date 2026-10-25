@@ -835,6 +835,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
 }
 
 func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+// callee walks can nest inside the AST walk, keep unrelated node locals out of this frame
     if (!has_node(node)) { return false; }
     if (!state.collecting && state.calls.length() > 0) {
         if (state.budget <= 0) {
@@ -846,75 +847,10 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
     let kind = node_tag(node);
     if (kind == NODE_BLOCK) { return ref_check_block(ref c, ref state, node); }
     if (kind == NODE_VAR_DECL) {
-        let declaration = get_var_decl_node(ref c.arena, node);
-        ref_check_node(ref c, ref state, declaration.value);
-        let type = resolve_type(ref c, declaration.type_node);
-        let reference = false;
-        if (has_node(declaration.value) && node_tag(declaration.value) == NODE_REF &&
-            node_tag(get_ref_node(ref c.arena, declaration.value).node) != NODE_SLICE_ACCESS &&
-            !is_pointer_type(ref c, type) && type != TYPE_ANYPTR) {
-            let target = get_ref_node(ref c.arena, declaration.value).node;
-            reference = true;
-            if (type == TYPE_AUTO) { type = get_expr_type(ref c, target); }
-            if (!state.collecting && node_tag(target) == NODE_INDEX_ACCESS) {
-                let access = get_index_access_node(ref c.arena, target);
-                let owner = get_repr_type(ref c, get_expr_type(ref c, access.target));
-                if (ref_storage(ref c, owner)) {
-                    state.active.append(RefUse(name=declaration.name_tok.value, owner=ref_owner(ref c, ref state, access.target), slot=ref_owner_slot(ref c, ref state, access.target), element=ref_element(ref c, owner)));
-                    c.ref_targets.put(UInt32(target), true);
-                }
-            }
-        } else if (type == TYPE_AUTO && has_node(declaration.value)) {
-            type = get_expr_type(ref c, declaration.value);
-            if (type == 0 && node_tag(declaration.value) == NODE_CALL) {
-                let record = ref_constructor(ref c, get_call_node(ref c.arena, declaration.value).callee);
-                if ((record is !null)) { type = record.type_id; }
-            }
-        }
-        if (!reference && state.active.length() > 0 && needs_drop(ref c, type) && !ref_plain_drop(ref c, type, 0)) {
-            ref_error(ref state, declaration.pos, "create a managed value with unverified drop effects");
-        }
-        let slot = "ref." + state.frame + "." + UInt32(node);
-        flow_forget(ref c, declaration.name_tok.value, false);
-        if (ref_storage(ref c, type)) {
-            if (reference && node_tag(get_ref_node(ref c.arena, declaration.value).node) == NODE_VAR_ACCESS) {
-                let name = get_var_access_node(ref c.arena, get_ref_node(ref c.arena, declaration.value).node).name_tok.value;
-                let source = find_symbol(ref c, name);
-                if ((source is !null)) { state.slot_refs.put(slot, ref_slot(ref state, source.reg)); }
-            }
-            ref_set_slot(ref state, slot, ref_owner(ref c, ref state, declaration.value));
-        }
-        scope_put(c.symbol_table, declaration.name_tok.value, SymbolInfo(reg=slot, type=type, is_const=declaration.is_const, is_reference=reference, origin_type=0, is_const_access=false, is_ref_param=false, func_arg_types=[], arg_names=[], variadic_param=0));
-        if ((c.func_ret_map.lookup(type) is !null) && has_node(declaration.value)) {
-            // declarations keep a known direct target, assignments clear it conservatively
-            let known = ref_call_info(ref c, declaration.value);
-            if (node_tag(declaration.value) == NODE_VAR_ACCESS) {
-                let source = find_symbol(ref c, get_var_access_node(ref c.arena, declaration.value).name_tok.value);
-                if ((source is !null)) { known = state.functions.lookup(source.reg); }
-            }
-            if ((known is !null)) { state.functions.put(slot, known); }
-        }
-        return false;
+        return ref_check_var_decl(ref c, ref state, node);
     }
     if (kind == NODE_VAR_ASSIGN) {
-        let assignment = get_var_assign_node(ref c.arena, node);
-        ref_check_node(ref c, ref state, assignment.value);
-        let symbol = find_symbol(ref c, assignment.name_tok.value);
-        if (symbol is null) { return false; }
-        let target: SymbolInfo = symbol;
-        state.functions.remove(target.reg);
-        let owner = 0;
-        if (target.reg is !null && state.slots.contains_key(ref_slot(ref state, target.reg))) {
-            let existing = state.slots.lookup(ref_slot(ref state, target.reg));
-            if (existing is !null) { owner = existing; }
-        }
-        ref_check_write(ref c, ref state, target.type, owner, assignment.pos, ref_slot(ref state, target.reg));
-        if (ref_storage(ref c, target.type)) {
-            let next = ref_owner(ref c, ref state, assignment.value);
-            if (state.collecting && state.loop_depth > 0) { ref_join(ref state, owner, next); }
-            ref_set_slot(ref state, target.reg, next);
-        }
-        return false;
+        return ref_check_var_assign(ref c, ref state, node);
     }
     if (kind == NODE_FIELD_ASSIGN) {
         let assignment = get_field_assign_node(ref c.arena, node);
@@ -931,131 +867,13 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         return false;
     }
     if (kind == NODE_INDEX_ASSIGN) {
-        let assignment = get_index_assign_node(ref c.arena, node);
-        ref_check_node(ref c, ref state, assignment.target);
-        ref_check_node(ref c, ref state, assignment.index_node);
-        ref_check_node(ref c, ref state, assignment.value);
-        let target = get_repr_type(ref c, get_expr_type(ref c, assignment.target));
-        if (is_pointer_type(ref c, target)) { return false; }
-        let array = c.array_info_map.lookup(target);
-        let vector = c.vector_base_map.lookup(target);
-        let element = 0;
-        if ((array is !null)) { element = array.base_type; }
-        if ((vector is !null)) { element = vector.type; }
-        if (state.collecting && ref_storage(ref c, element)) {
-            ref_publish(ref state, ref_owner(ref c, ref state, assignment.value));
-        }
-        ref_check_write(ref c, ref state, element, 0, assignment.pos);
-        return false;
+        return ref_check_index_assign(ref c, ref state, node);
     }
     if (kind == NODE_CALL) {
-        let call = get_call_node(ref c.arena, node);
-        ref_check_node(ref c, ref state, call.callee);
-        let active = state.active.length();
-        let info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-        let candidates = false;
-        let probe = 0;
-        while (call.args is !null && probe < call.args.length()) {
-            let arg = call.args[probe];
-            if (node_tag(arg.val) == NODE_REF && node_tag(get_ref_node(ref c.arena, arg.val).node) == NODE_INDEX_ACCESS) { candidates = true; }
-            probe++;
-        }
-        if (candidates && !state.collecting) {
-            let known = ref_known_call(ref c, ref state, call);
-            if (known is !null) { info = known; }
-        }
-        let arguments = call.args;
-        let skip = 0;
-        if (!state.collecting && (candidates || state.active.length() > 0)) {
-            if (!has_func(info)) {
-                let known = ref_known_call(ref c, ref state, call);
-                if (known is !null) { info = known; }
-            }
-            if (candidates && !has_func(info)) {
-                let record = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, node)));
-                if ((record is !null) && record.is_class) {
-                    let init = c.func_table.lookup(record.name + "_$init");
-                    if ((init is !null)) {
-                        info = init;
-                        skip = 1;
-                    }
-                }
-            }
-            if (has_func(info) && info.variadic_param == 0 && !info.is_varargs) {
-                if (ref_method_call(ref c, call, info)) { skip = 1; }
-                let ordered = bind_native_args(arguments, info, skip, call.pos);
-                if (has_bound_args(ordered)) { arguments = ordered.ordered; }
-            } else if (candidates && !has_func(info)) {
-                let signature = c.func_ret_map.lookup(get_expr_type(ref c, call.callee));
-                if (!(signature is !null)) { signature = c.method_ret_map.lookup(get_expr_type(ref c, call.callee)); }
-                if ((signature is !null)) {
-                    let ordered = bind_callable_args(arguments, signature, call.pos);
-                    if (has_bound_args(ordered)) { arguments = ordered.ordered; }
-                    info = FuncInfo(name="$dynamic", arg_types=signature.func_arg_types, arg_names=signature.arg_names, base_name="", ret_type=0, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-                }
-            }
-        }
-        // lowering loads the receiver before its arguments, keep that selected type
-        // without restoring unrelated facts which an argument call can invalidate
-        let receiver_type = 0;
-        if (has_func(info) && ref_method_call(ref c, call, info)) {
-            receiver_type = get_expr_type(ref c, get_field_access_node(ref c.arena, call.callee).obj);
-        }
-        let i = 0;
-        while (arguments is !null && i < arguments.length()) {
-            let arg = arguments[i];
-            ref_check_node(ref c, ref state, arg.val);
-            if (!state.collecting && node_tag(arg.val) == NODE_REF && has_func(info)) {
-                let param_index = i + skip;
-                if (arg.name.length() != 0) {
-                    param_index = 0;
-                    while (param_index < info.arg_names.length() && info.arg_names[param_index] != arg.name) { param_index++; }
-                }
-                if (param_index < info.arg_types.length()) {
-                    let param: TypeListNode = info.arg_types[param_index];
-                    let target = get_ref_node(ref c.arena, arg.val).node;
-                    if (param.pass_mode == PARAM_REF && node_tag(target) == NODE_INDEX_ACCESS) {
-                        let access = get_index_access_node(ref c.arena, target);
-                        let target_type: Int = get_expr_type(ref c, access.target);
-                        if (ref_storage(ref c, target_type)) {
-                            if (!ref_stable_owner(ref c, access.target)) {
-                                throw_type_error(call.pos, "Cannot pass a reference to storage that may move or be released.");
-                            } else {
-                                state.active.append(RefUse(name="argument", owner=ref_owner(ref c, ref state, access.target), slot=ref_owner_slot(ref c, ref state, access.target), element=ref_element(ref c, target_type)));
-                            }
-                        }
-                    }
-                }
-            }
-            i++;
-        }
-        ref_check_call(ref c, ref state, call, info, receiver_type);
-        while (state.active.length() > active) { state.active.drop(); }
-        return false;
+        return ref_walk_call(ref c, ref state, node);
     }
     if (kind == NODE_IF) {
-        let branch = get_if_node(ref c.arena, node);
-        ref_check_node(ref c, ref state, branch.condition);
-        let selected = fold_target_cond(ref c, branch.condition);
-        if (node_tag(branch.condition) == NODE_BOOL) { selected = get_bool_node(ref c.arena, branch.condition).value; }
-        if (selected == 1) { return ref_check_node(ref c, ref state, branch.body); }
-        if (selected == 0) { return ref_check_node(ref c, ref state, branch.else_body); }
-        let before = ref_snapshot(ref state);
-        let incoming = flow_copy(c.flow_types);
-        flow_apply_guard(ref c, branch.condition, true);
-        let left = ref_check_node(ref c, ref state, branch.body);
-        let after_left = ref_snapshot(ref state);
-        let left_facts = flow_copy(c.flow_types);
-        state.slots = before;
-        c.flow_types = flow_copy(incoming);
-        flow_apply_guard(ref c, branch.condition, false);
-        let right = ref_check_node(ref c, ref state, branch.else_body);
-        if (!left) {
-            if right { c.flow_types = left_facts; }
-            else { c.flow_types = flow_intersect(left_facts, c.flow_types); }
-        }
-        ref_merge(ref state, after_left, left, right);
-        return left && right;
+        return ref_check_if(ref c, ref state, node);
     }
     if (kind == NODE_WHILE) {
         let loop = get_while_node(ref c.arena, node);
@@ -1067,23 +885,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
         return false;
     }
     if (kind == NODE_FOR) {
-        let loop = get_for_node(ref c.arena, node);
-        let saved = c.symbol_table;
-        let parent = c.scope_stack.length();
-        c.scope_stack.append(saved);
-        c.symbol_table = Scope(table=Dict(), parent=parent, gc_vars=[], depth=saved.depth + 1);
-        let active = state.active.length();
-        ref_check_node(ref c, ref state, loop.init);
-        state.loop_depth++;
-        ref_check_node(ref c, ref state, loop.cond);
-        flow_apply_guard(ref c, loop.cond, true);
-        ref_check_node(ref c, ref state, loop.body);
-        ref_check_node(ref c, ref state, loop.step);
-        state.loop_depth--;
-        while (state.active.length() > active) { state.active.drop(); }
-        c.symbol_table = saved;
-        c.scope_stack.drop();
-        return false;
+        return ref_check_for(ref c, ref state, node);
     }
     if (kind == NODE_CATCH) {
         let caught = get_catch_node(ref c.arena, node);
@@ -1198,6 +1000,230 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
     }
     return false;
 }
+
+func ref_check_var_decl(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let declaration = get_var_decl_node(ref c.arena, node);
+    ref_check_node(ref c, ref state, declaration.value);
+    let type = resolve_type(ref c, declaration.type_node);
+    let reference = false;
+    if (has_node(declaration.value) && node_tag(declaration.value) == NODE_REF &&
+        node_tag(get_ref_node(ref c.arena, declaration.value).node) != NODE_SLICE_ACCESS &&
+        !is_pointer_type(ref c, type) && type != TYPE_ANYPTR) {
+        let target = get_ref_node(ref c.arena, declaration.value).node;
+        reference = true;
+        if (type == TYPE_AUTO) { type = get_expr_type(ref c, target); }
+        if (!state.collecting && node_tag(target) == NODE_INDEX_ACCESS) {
+            let access = get_index_access_node(ref c.arena, target);
+            let owner = get_repr_type(ref c, get_expr_type(ref c, access.target));
+            if (ref_storage(ref c, owner)) {
+                state.active.append(RefUse(name=declaration.name_tok.value, owner=ref_owner(ref c, ref state, access.target), slot=ref_owner_slot(ref c, ref state, access.target), element=ref_element(ref c, owner)));
+                c.ref_targets.put(UInt32(target), true);
+            }
+        }
+    } else if (type == TYPE_AUTO && has_node(declaration.value)) {
+        type = get_expr_type(ref c, declaration.value);
+        if (type == 0 && node_tag(declaration.value) == NODE_CALL) {
+            let record = ref_constructor(ref c, get_call_node(ref c.arena, declaration.value).callee);
+            if ((record is !null)) { type = record.type_id; }
+        }
+    }
+    if (!reference && state.active.length() > 0 && needs_drop(ref c, type) && !ref_plain_drop(ref c, type, 0)) {
+        ref_error(ref state, declaration.pos, "create a managed value with unverified drop effects");
+    }
+    let slot = "ref." + state.frame + "." + UInt32(node);
+    flow_forget(ref c, declaration.name_tok.value, false);
+    if (ref_storage(ref c, type)) {
+        if (reference && node_tag(get_ref_node(ref c.arena, declaration.value).node) == NODE_VAR_ACCESS) {
+            let name = get_var_access_node(ref c.arena, get_ref_node(ref c.arena, declaration.value).node).name_tok.value;
+            let source = find_symbol(ref c, name);
+            if ((source is !null)) { state.slot_refs.put(slot, ref_slot(ref state, source.reg)); }
+        }
+        ref_set_slot(ref state, slot, ref_owner(ref c, ref state, declaration.value));
+    }
+    scope_put(c.symbol_table, declaration.name_tok.value, SymbolInfo(reg=slot, type=type, is_const=declaration.is_const, is_reference=reference, origin_type=0, is_const_access=false, is_ref_param=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    if ((c.func_ret_map.lookup(type) is !null) && has_node(declaration.value)) {
+        // declarations keep a known direct target, assignments clear it conservatively
+        let known = ref_call_info(ref c, declaration.value);
+        if (node_tag(declaration.value) == NODE_VAR_ACCESS) {
+            let source = find_symbol(ref c, get_var_access_node(ref c.arena, declaration.value).name_tok.value);
+            if ((source is !null)) { known = state.functions.lookup(source.reg); }
+        }
+        if ((known is !null)) { state.functions.put(slot, known); }
+    }
+    return false;
+}
+
+func ref_check_var_assign(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let assignment = get_var_assign_node(ref c.arena, node);
+    ref_check_node(ref c, ref state, assignment.value);
+    let symbol = find_symbol(ref c, assignment.name_tok.value);
+    if (symbol is null) { return false; }
+    let target: SymbolInfo = symbol;
+    state.functions.remove(target.reg);
+    let owner = 0;
+    if (target.reg is !null && state.slots.contains_key(ref_slot(ref state, target.reg))) {
+        let existing = state.slots.lookup(ref_slot(ref state, target.reg));
+        if (existing is !null) { owner = existing; }
+    }
+    ref_check_write(ref c, ref state, target.type, owner, assignment.pos, ref_slot(ref state, target.reg));
+    if (ref_storage(ref c, target.type)) {
+        let next = ref_owner(ref c, ref state, assignment.value);
+        if (state.collecting && state.loop_depth > 0) { ref_join(ref state, owner, next); }
+        ref_set_slot(ref state, target.reg, next);
+    }
+    return false;
+}
+
+func ref_check_index_assign(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let assignment = get_index_assign_node(ref c.arena, node);
+    ref_check_node(ref c, ref state, assignment.target);
+    ref_check_node(ref c, ref state, assignment.index_node);
+    ref_check_node(ref c, ref state, assignment.value);
+    let target = get_repr_type(ref c, get_expr_type(ref c, assignment.target));
+    if (is_pointer_type(ref c, target)) { return false; }
+    let array = c.array_info_map.lookup(target);
+    let vector = c.vector_base_map.lookup(target);
+    let element = 0;
+    if ((array is !null)) { element = array.base_type; }
+    if ((vector is !null)) { element = vector.type; }
+    if (state.collecting && ref_storage(ref c, element)) {
+        ref_publish(ref state, ref_owner(ref c, ref state, assignment.value));
+    }
+    ref_check_write(ref c, ref state, element, 0, assignment.pos);
+    return false;
+}
+
+func ref_walk_call(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let call = get_call_node(ref c.arena, node);
+    ref_check_node(ref c, ref state, call.callee);
+    let active = state.active.length();
+    let info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+    let candidates = false;
+    let probe = 0;
+    while (call.args is !null && probe < call.args.length()) {
+        let arg = call.args[probe];
+        if (node_tag(arg.val) == NODE_REF && node_tag(get_ref_node(ref c.arena, arg.val).node) == NODE_INDEX_ACCESS) { candidates = true; }
+        probe++;
+    }
+    if (candidates && !state.collecting) {
+        let known = ref_known_call(ref c, ref state, call);
+        if (known is !null) { info = known; }
+    }
+    let arguments = call.args;
+    let skip = 0;
+    if (!state.collecting && (candidates || state.active.length() > 0)) {
+        if (!has_func(info)) {
+            let known = ref_known_call(ref c, ref state, call);
+            if (known is !null) { info = known; }
+        }
+        if (candidates && !has_func(info)) {
+            let record = c.struct_id_map.lookup(get_repr_type(ref c, get_expr_type(ref c, node)));
+            if ((record is !null) && record.is_class) {
+                let init = c.func_table.lookup(record.name + "_$init");
+                if ((init is !null)) {
+                    info = init;
+                    skip = 1;
+                }
+            }
+        }
+        if (has_func(info) && info.variadic_param == 0 && !info.is_varargs) {
+            if (ref_method_call(ref c, call, info)) { skip = 1; }
+            let ordered = bind_native_args(arguments, info, skip, call.pos);
+            if (has_bound_args(ordered)) { arguments = ordered.ordered; }
+        } else if (candidates && !has_func(info)) {
+            let signature = c.func_ret_map.lookup(get_expr_type(ref c, call.callee));
+            if (!(signature is !null)) { signature = c.method_ret_map.lookup(get_expr_type(ref c, call.callee)); }
+            if ((signature is !null)) {
+                let ordered = bind_callable_args(arguments, signature, call.pos);
+                if (has_bound_args(ordered)) { arguments = ordered.ordered; }
+                info = FuncInfo(name="$dynamic", arg_types=signature.func_arg_types, arg_names=signature.arg_names, base_name="", ret_type=0, is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
+            }
+        }
+    }
+    // lowering loads the receiver before its arguments, keep that selected type
+    // without restoring unrelated facts which an argument call can invalidate
+    let receiver_type = 0;
+    if (has_func(info) && ref_method_call(ref c, call, info)) {
+        receiver_type = get_expr_type(ref c, get_field_access_node(ref c.arena, call.callee).obj);
+    }
+    let i = 0;
+    while (arguments is !null && i < arguments.length()) {
+        let arg = arguments[i];
+        ref_check_node(ref c, ref state, arg.val);
+        if (!state.collecting && node_tag(arg.val) == NODE_REF && has_func(info)) {
+            let param_index = i + skip;
+            if (arg.name.length() != 0) {
+                param_index = 0;
+                while (param_index < info.arg_names.length() && info.arg_names[param_index] != arg.name) { param_index++; }
+            }
+            if (param_index < info.arg_types.length()) {
+                let param: TypeListNode = info.arg_types[param_index];
+                let target = get_ref_node(ref c.arena, arg.val).node;
+                if (param.pass_mode == PARAM_REF && node_tag(target) == NODE_INDEX_ACCESS) {
+                    let access = get_index_access_node(ref c.arena, target);
+                    let target_type: Int = get_expr_type(ref c, access.target);
+                    if (ref_storage(ref c, target_type)) {
+                        if (!ref_stable_owner(ref c, access.target)) {
+                            throw_type_error(call.pos, "Cannot pass a reference to storage that may move or be released.");
+                        } else {
+                            state.active.append(RefUse(name="argument", owner=ref_owner(ref c, ref state, access.target), slot=ref_owner_slot(ref c, ref state, access.target), element=ref_element(ref c, target_type)));
+                        }
+                    }
+                }
+            }
+        }
+        i++;
+    }
+    ref_check_call(ref c, ref state, call, info, receiver_type);
+    while (state.active.length() > active) { state.active.drop(); }
+    return false;
+}
+
+func ref_check_if(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let branch = get_if_node(ref c.arena, node);
+    ref_check_node(ref c, ref state, branch.condition);
+    let selected = fold_target_cond(ref c, branch.condition);
+    if (node_tag(branch.condition) == NODE_BOOL) { selected = get_bool_node(ref c.arena, branch.condition).value; }
+    if (selected == 1) { return ref_check_node(ref c, ref state, branch.body); }
+    if (selected == 0) { return ref_check_node(ref c, ref state, branch.else_body); }
+    let before = ref_snapshot(ref state);
+    let incoming = flow_copy(c.flow_types);
+    flow_apply_guard(ref c, branch.condition, true);
+    let left = ref_check_node(ref c, ref state, branch.body);
+    let after_left = ref_snapshot(ref state);
+    let left_facts = flow_copy(c.flow_types);
+    state.slots = before;
+    c.flow_types = flow_copy(incoming);
+    flow_apply_guard(ref c, branch.condition, false);
+    let right = ref_check_node(ref c, ref state, branch.else_body);
+    if (!left) {
+        if right { c.flow_types = left_facts; }
+        else { c.flow_types = flow_intersect(left_facts, c.flow_types); }
+    }
+    ref_merge(ref state, after_left, left, right);
+    return left && right;
+}
+
+func ref_check_for(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
+    let loop = get_for_node(ref c.arena, node);
+    let saved = c.symbol_table;
+    let parent = c.scope_stack.length();
+    c.scope_stack.append(saved);
+    c.symbol_table = Scope(table=Dict(), parent=parent, gc_vars=[], depth=saved.depth + 1);
+    let active = state.active.length();
+    ref_check_node(ref c, ref state, loop.init);
+    state.loop_depth++;
+    ref_check_node(ref c, ref state, loop.cond);
+    flow_apply_guard(ref c, loop.cond, true);
+    ref_check_node(ref c, ref state, loop.body);
+    ref_check_node(ref c, ref state, loop.step);
+    state.loop_depth--;
+    while (state.active.length() > active) { state.active.drop(); }
+    c.symbol_table = saved;
+    c.scope_stack.drop();
+    return false;
+}
+
 
 func ref_body_position(ref c: Compiler, node: NodeID) -> Position {
     if (node_tag(node) == NODE_BLOCK) {

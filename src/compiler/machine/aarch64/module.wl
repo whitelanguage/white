@@ -12,7 +12,7 @@ import MachineSection, MachineSymbol from "../object.wl"
 import MachineDataResult, MachineDataRelocation, machine_emit_globals from "../data.wl"
 import * from "lowering.wl"
 import machine_lower_remainders from "../remainder.wl"
-import machine_lower_wide_conversions from "../numeric.wl"
+import wir_lower_wide_conversions from "../../wir/numeric.wl"
 import machine_layout_valid from "../layout.wl"
 
 
@@ -27,7 +27,7 @@ func a64_lower_module(ref program: WirModule) -> A64ModuleResult {
     }
     let rem_error = machine_lower_remainders(ref program);
     if (rem_error.length() != 0) { return a64_module_error(rem_error); }
-    let numeric_error = machine_lower_wide_conversions(ref program);
+    let numeric_error = wir_lower_wide_conversions(ref program);
     if (numeric_error.length() != 0) { return a64_module_error(numeric_error); }
     let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
 

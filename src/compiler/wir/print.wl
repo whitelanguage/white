@@ -178,7 +178,12 @@ func wir_write_value(output: strings.Builder, program: WirModule, value_id: WirV
                 output.write(String(value.integer))?;
             }
         } else if (type.kind == WirTypeKind.SignedInt) {
-            output.write(String(Int128(value.integer)))?;
+            if ((value.integer & (UInt128(1U) << UInt128(127))) != UInt128(0U)) {
+                output.write("-")?;
+                output.write(String((~value.integer) + UInt128(1U)))?;
+            } else {
+                output.write(String(value.integer))?;
+            }
         } else {
             output.write(String(value.integer))?;
         }

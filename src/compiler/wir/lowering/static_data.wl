@@ -96,7 +96,7 @@ func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: 
 }
 
 func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
-    if (node_tag(node) != NODE_CALL || source.struct_id_map is null) { return NO_WIR_VALUE; }
+    if (node_tag(node) != NODE_CALL) { return NO_WIR_VALUE; }
     let info: Optional(StructInfo) = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
     if (!(info is !null) || info.is_class || info.is_interface ||
         info.is_enum || has_node(info.init_body)) {
@@ -258,10 +258,10 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
         return wir_const_float(ref program, type_id, value);
     }
-    if (source.array_info_map is !null && (source.array_info_map.lookup(repr) is !null)) {
+    if ((source.array_info_map.lookup(repr) is !null)) {
         return wir_static_array(ref types, ref source, ref program, node, source_type, pos);
     }
-    if (source.struct_id_map is !null && (source.struct_id_map.lookup(repr) is !null)) {
+    if ((source.struct_id_map.lookup(repr) is !null)) {
         return wir_static_struct(ref types, ref source, ref program, node, source_type, pos);
     }
     return NO_WIR_VALUE;
