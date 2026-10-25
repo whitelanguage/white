@@ -34,7 +34,7 @@ func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: 
 }
 
 func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
-    if (name is null || name.length() == 0) {
+    if (name.length() == 0) {
         return;
     }
 
@@ -173,7 +173,7 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
             if (expr_root_name(ref c, field.obj) == "self") { return true; }
         }
         let i: Int = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let arg: ArgNode = call.args[i];
             if (expr_root_name(ref c, arg.val) == "self") { return true; }
             i += 1;
@@ -186,7 +186,7 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(ref c.arena, node);
         let i: Int = 0;
-        while (block.stmts is !null && i < block.stmts.length()) {
+        while (i < block.stmts.length()) {
             if (method_mutates_self(ref c, block.stmts[i])) { return true; }
             i += 1;
         }
@@ -213,7 +213,7 @@ func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
 func check_duplicate_params(params: Vector(ParamNode), owner: String, pos: Position) -> Bool {
     let seen: Dict(String, StringConstant) = Dict();
     let i: Int = 0;
-    while (params is !null && i < params.length()) {
+    while (i < params.length()) {
         let param: ParamNode = params[i];
         let name: String = param.name_tok.value;
         if (seen.contains_key(name)) {
@@ -228,10 +228,8 @@ func check_duplicate_params(params: Vector(ParamNode), owner: String, pos: Posit
 
 func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
     if (!has_func(parent) || !has_func(child) || parent.ret_type != child.ret_type) { return false; }
-    let parent_len: Int = 0;
-    if (parent.arg_types is !null) { parent_len = parent.arg_types.length(); }
-    let child_len: Int = 0;
-    if (child.arg_types is !null) { child_len = child.arg_types.length(); }
+    let parent_len: Int = parent.arg_types.length();
+    let child_len: Int = child.arg_types.length();
     if (parent_len != child_len) { return false; }
     let i: Int = 1;
     while (i < parent_len) {
@@ -252,7 +250,7 @@ func add_interface_type(ref c: Compiler, list: Vector(Struct), type_id: Int, pos
     }
     let meta_info: StructInfo = info;
     let parent_index: Int = 0;
-    while (meta_info.interfaces is !null && parent_index < meta_info.interfaces.length()) {
+    while (parent_index < meta_info.interfaces.length()) {
         let parent: TypeListNode = meta_info.interfaces[parent_index];
         if (!add_interface_type(ref c, list, parent.type, pos)) { return false; }
         parent_index += 1;
@@ -276,7 +274,7 @@ func class_has_interface(ref c: Compiler, class_info: StructInfo, target: Struct
     while ((current is !null)) {
         let info: StructInfo = current;
         let i: Int = 0;
-        while (info.interfaces is !null && i < info.interfaces.length()) {
+        while (i < info.interfaces.length()) {
             let item: TypeListNode = info.interfaces[i];
             if (item.type == target.type_id) { return true; }
             i += 1;
@@ -299,10 +297,8 @@ func is_unsuffix_int_literal(ref c: Compiler, node: NodeID) -> Bool {
 }
 
 func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos: Position) -> Optional(Vector(ArgNode)) {
-    let expected: Int = 0;
-    if (names is !null) { expected = names.length() - skip; }
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let expected: Int = names.length() - skip;
+    let count: Int = args.length();
     if (count != expected) {
         throw_type_error(pos, "Expected " + expected + " arguments, got " + count);
         return null;
@@ -387,7 +383,7 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
     let saw_named: Bool = false;
 
     i = 0;
-    while (args is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         if (arg.name.length() == 0) {
             if saw_named {
@@ -445,7 +441,7 @@ func bind_native_args(args: Vector(ArgNode), info: FuncInfo, skip: Int, pos: Pos
         }
         if (!has_node(ordered[i].val)) {
             let default_index: Int = i;
-            if (info.default_args is !null && default_index < info.default_args.length() && has_node(info.default_args[default_index])) {
+            if (default_index < info.default_args.length() && has_node(info.default_args[default_index])) {
                 ordered[i] = ArgNode(val=info.default_args[default_index], name=names[i + skip], is_spread=false);
             } else {
                 throw_type_error(pos, "Missing argument '" + names[i + skip] + "'.");
@@ -494,8 +490,7 @@ func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> B
 
 func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Position) -> BoundCallArgs {
     let expected: Int = signature.func_arg_types.length();
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let count: Int = args.length();
     let pack_index: Int = signature.variadic_param - 1;
     let ordered: Vector(ArgNode) = [];
     let packed: Vector(ArgNode) = [];
@@ -554,7 +549,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
             let target: Int = -1;
             let name_index: Int = pack_index + 1;
             while (name_index < expected) {
-                if (signature.arg_names is !null && name_index < signature.arg_names.length() && signature.arg_names[name_index] == arg.name) {
+                if (name_index < signature.arg_names.length() && signature.arg_names[name_index] == arg.name) {
                     target = name_index;
                     break;
                 }
@@ -577,7 +572,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
     while (i < expected) {
         if (i != pack_index && !has_node(ordered[i].val)) {
             let name: String = "";
-            if (signature.arg_names is !null && i < signature.arg_names.length()) {
+            if (i < signature.arg_names.length()) {
                 name = signature.arg_names[i];
             }
             if (name.length() > 0) {
@@ -595,7 +590,7 @@ func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Posit
 
 func reject_named_args(args: Vector(ArgNode), pos: Position, target: String) -> Bool {
     let i: Int = 0;
-    while (args is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         if (arg.name.length() != 0) {
             throw_invalid_syntax(pos, "Named arguments are not available when calling " + target);
@@ -608,7 +603,7 @@ func reject_named_args(args: Vector(ArgNode), pos: Position, target: String) -> 
 
 func reject_spread_args(args: Vector(ArgNode), pos: Position, target: String) -> Bool {
     let i: Int = 0;
-    while (args is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         if (arg.is_spread) {
             throw_invalid_syntax(pos, "Argument expansion is not available when calling " + target + ".");

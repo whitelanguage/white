@@ -196,7 +196,6 @@ class Decoder {
                 self.__fail(JsonError.InvalidEscape)?;
             }
         }
-        return "";
     }
 
     func __number() -> Value? {
@@ -268,7 +267,6 @@ class Decoder {
             }
             self.__skip_space();
         }
-        return null_value();
     }
 
     func __object(depth: Int) -> Value? {
@@ -300,7 +298,6 @@ class Decoder {
             }
             self.__skip_space();
         }
-        return null_value();
     }
 
     func __value(depth: Int) -> Value? {

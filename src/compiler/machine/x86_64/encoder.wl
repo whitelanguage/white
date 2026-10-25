@@ -45,7 +45,7 @@ func x86_emit_i32(ref output: X86CodeBuffer, value: Int) -> Void {
 }
 
 func x86_patch_i32(ref output: X86CodeBuffer, offset: Int, value: Int) -> Bool {
-    if (offset < 0 || offset + 4 > output.bytes.length()) { return false; }
+    if (offset < 0 || output.bytes.length() < 4 || offset > output.bytes.length() - 4) { return false; }
 
     let encoded = Long(value);
 

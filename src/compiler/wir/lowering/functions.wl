@@ -60,7 +60,7 @@ func wir_check_fallible_call(ref source: Compiler, call: CallNode, return_type: 
     }
 
     let message: String = "fallible call requires '?'";
-    if (name is !null && name.length() > 0) {
+    if (name.length() > 0) {
         message = "call to fallible function '" + name + "' requires '?'";
     }
     throw_type_error(call.pos, message);
@@ -74,17 +74,12 @@ func wir_find_binding(ref state: WirFunctionLowering, name: String) -> WirBindin
 }
 
 func wir_name_is_value(ref state: WirFunctionLowering, ref source: Compiler, name: String) -> Bool {
-    let binding: WirBinding = wir_find_binding(ref state, name)?;
-    catch(err) {
-        return has_wir_source_global(wir_source_global(ref source, name));
-    }
-    return true;
+    if (wir_local_index(ref state, name) >= 0) { return true; }
+    return has_wir_source_global(wir_source_global(ref source, name));
 }
 
 func wir_has_local_binding(ref state: WirFunctionLowering, name: String) -> Bool {
-    let binding: WirBinding = wir_find_binding(ref state, name)?;
-    catch(err) { return false; }
-    return true;
+    return wir_local_index(ref state, name) >= 0;
 }
 
 func wir_module_symbol(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> String {
@@ -226,7 +221,7 @@ func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compi
         let definition: FunctionDefNode = get_func_def_node(ref source.arena, meta_generic.node);
         let inferred: Dict(String, SymbolInfo) = Dict();
         let i: Int = 0;
-        while (call.args is !null && definition.params is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let argument: ArgNode = call.args[i];
             let parameter_index: Int = generic_call_param(definition.params, argument, i);
             if (parameter_index >= 0) {
@@ -248,9 +243,6 @@ func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compi
             i++;
         }
     }
-    if (arguments is null) {
-        return null;
-    }
     return register_generic_func(ref source, meta_generic, arguments, call.pos);
 }
 
@@ -269,7 +261,7 @@ func wir_generic_constructor_type(ref state: WirFunctionLowering, ref source: Co
         let inferred: Dict(String, SymbolInfo) = Dict();
         let parameters: Vector(ParamNode) = generic_constructor_params(ref source, meta_generic);
         let i: Int = 0;
-        while (call.args is !null && parameters is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let argument: ArgNode = call.args[i];
             let parameter_index: Int = generic_call_param(parameters, argument, i);
             if (parameter_index >= 0) {
@@ -293,8 +285,6 @@ func wir_generic_constructor_type(ref state: WirFunctionLowering, ref source: Co
             i++;
         }
     }
-    if (arguments is null) { return TYPE_POISON; }
-
     let template_kind: Int = node_tag(meta_generic.node);
     if (template_kind == NODE_CLASS_DEF) {
         return register_generic_class(ref source, meta_generic, arguments, call.pos);
@@ -304,6 +294,17 @@ func wir_generic_constructor_type(ref state: WirFunctionLowering, ref source: Co
 
 func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> Int {
     if (!has_node(node)) { return TYPE_POISON; }
+    if (node_tag(node) == NODE_VECTOR_LIT) {
+        let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
+        let element_type: Int = TYPE_INT;
+        if (literal.elements.length() > 0) {
+            element_type = wir_argument_type(ref state, ref source, literal.elements[0].val);
+        }
+        if (element_type == 0 || element_type == TYPE_POISON || element_type == TYPE_VOID) {
+            return TYPE_POISON;
+        }
+        return get_vector_type_id(ref source, element_type);
+    }
     if (node_tag(node) == NODE_TRY_UNWRAP) {
         let wrapped: Int = wir_argument_type(ref state, ref source, get_try_unwrap_node(ref source.arena, node).expr);
         if (is_fallible_type(ref source, wrapped)) {
@@ -359,7 +360,7 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
                 let meta_owner: StructInfo = owner;
                 let target: Optional(FuncInfo) = null;
                 let method_index: Int = 0;
-                while (meta_owner.vtable is !null && method_index < meta_owner.vtable.length()) {
+                while (method_index < meta_owner.vtable.length()) {
                     let method_info: FuncInfo = meta_owner.vtable[method_index];
                     if (method_info.base_name == access.field_name) {
                         target = method_info;
@@ -1456,9 +1457,6 @@ func wir_box_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
             low = wir_unary(ref program, state.block, WirOpcode.Bitcast, payload_type, value.value, "", no_wir_location());
         } else if (is_pointer_type(ref source, value.source_type) || is_ref_type(ref source, value.source_type)) {
             let pointer: WirValueID = value.value;
-            if ((boxed_info is !null) && boxed_info.is_interface) {
-                pointer = wir_field(ref program, state.block, value.value, 0, "", no_wir_location());
-            }
             low = wir_cast(ref program, state.block, pointer, payload_type, "", no_wir_location());
             if (is_ref_type(ref source, value.source_type)) {
                 if (!wir_take_owned(ref state, value.value)) {
@@ -1782,7 +1780,7 @@ func wir_lower_function_value(ref state: WirFunctionLowering, ref types: WirType
 func wir_method_type(ref source: Compiler, info: FuncInfo) -> Int {
     let arguments: Vector(Struct) = [];
     let i: Int = 1;
-    while (info.arg_types is !null && i < info.arg_types.length()) {
+    while (i < info.arg_types.length()) {
         arguments.append(info.arg_types[i]);
         i++;
     }
@@ -1805,7 +1803,7 @@ func wir_bind_class_method(
 ) -> WirMemberCall {
     let slot: Int = 0;
     let target: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-    while (owner.vtable is !null && slot < owner.vtable.length()) {
+    while (slot < owner.vtable.length()) {
         let candidate: FuncInfo = owner.vtable[slot];
         if (candidate.base_name == access.field_name) {
             target = candidate;
@@ -1853,14 +1851,14 @@ func wir_bind_interface_method(
     owner: StructInfo
 ) -> WirMemberCall {
     let slot: Int = 0;
-    while (owner.vtable is !null && slot < owner.vtable.length()) {
+    while (slot < owner.vtable.length()) {
         let candidate: MethodDefNode = owner.vtable[slot];
         if (candidate.name_tok.value == access.field_name) {
             break;
         }
         slot++;
     }
-    if (owner.vtable is null || slot >= owner.vtable.length()) {
+    if (slot >= owner.vtable.length()) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     if (wir_lvalue_const(ref state, ref source, access.obj)) {
@@ -1871,7 +1869,7 @@ func wir_bind_interface_method(
     let method_node: MethodDefNode = owner.vtable[slot];
     let arguments: Vector(Struct) = [];
     let i: Int = 0;
-    while (method_node.params is !null && i < method_node.params.length()) {
+    while (i < method_node.params.length()) {
         let parameter: ParamNode = method_node.params[i];
         arguments.append(TypeListNode(type=interface_method_type(ref source, owner, parameter.type_tok), pass_mode=parameter.pass_mode));
         i++;
@@ -2056,7 +2054,7 @@ func wir_bind_closure_parameters(
     parameter_types: Vector(Int)
 ) -> Void {
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let source_parameter: Int = parameter_types[i];
         let parameter: WirValueID = function.parameters[i + 1];
         let parameter_node: ParamNode = node.params[i];
@@ -2124,7 +2122,7 @@ func wir_lower_closure_function(
     let parameters: Vector(WirParam) = [wir_param("environment", raw_pointer)];
     let parameter_types: Vector(Int) = [];
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let parameter: ParamNode = node.params[i];
         let source_parameter: TypeListNode = callable_param(ref source, parameter);
         let wir_type: WirTypeID = wir_lower_parameter_type(ref types, ref source, ref program, source_parameter);
@@ -2178,7 +2176,7 @@ func wir_lower_local_closure(ref state: WirFunctionLowering, ref types: WirTypeM
 
     let arguments: Vector(Struct) = [];
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         arguments.append(callable_param(ref source, node.params[i]));
         i++;
     }
@@ -2501,7 +2499,7 @@ func wir_lvalue_type(ref state: WirFunctionLowering, ref source: Compiler, node:
         if ((owner is !null) && owner.is_class) {
             let meta_owner: StructInfo = owner;
             let method_index: Int = 0;
-            while (meta_owner.vtable is !null && method_index < meta_owner.vtable.length()) {
+            while (method_index < meta_owner.vtable.length()) {
                 let method_info: FuncInfo = meta_owner.vtable[method_index];
                 if (method_info.base_name == "get") { return method_info.ret_type; }
                 method_index++;
@@ -2575,8 +2573,7 @@ func wir_enum_member(ref types: WirTypeMap, ref source: Compiler, node_id: NodeI
         if (value is !null) { return value; }
     }
 
-    let separator: Int = 0;
-    while (separator < owner.length() && owner[separator] != '.') { separator++; }
+    let separator: Int = owner_dot;
     if (separator < owner.length()) {
         let root: String = owner.slice(0, separator);
         let prefix: Optional(String) = source.current_file_visible_prefixes.lookup(root);
@@ -2800,7 +2797,7 @@ func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap,
         let meta_owner: StructInfo = owner;
         let has_get: Bool = false;
         let i: Int = 0;
-        while (meta_owner.vtable is !null && i < meta_owner.vtable.length()) {
+        while (i < meta_owner.vtable.length()) {
             let candidate: FuncInfo = meta_owner.vtable[i];
             if (candidate.base_name == "get") {
                 has_get = true;
@@ -3153,11 +3150,9 @@ func wir_lower_struct_constructor(
         }
     }
 
-    let field_count: Int = 0;
-    if (info.fields is !null) { field_count = info.fields.length(); }
+    let field_count: Int = info.fields.length();
     let arguments: Vector(ArgNode) = call.args;
-    let argument_count: Int = 0;
-    if (arguments is !null) { argument_count = arguments.length(); }
+    let argument_count: Int = arguments.length();
     if (argument_count > field_count) {
         state.errors.append("struct constructor has too many arguments in WIR lowering");
         return wir_no_expr();
@@ -3415,12 +3410,15 @@ func wir_lower_vector_literal(
 
     let vector: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE, vector_type);
     let count: WirValueID = wir_const_int(ref program, size_type, UInt128(UIntSize(literal.elements.length())));
-    wir_store(ref program, state.block, count, wir_field_address(ref program, state.block, vector, 0, "", no_wir_location()), no_wir_location());
+    let length_slot: WirValueID = wir_field_address(ref program, state.block, vector, 0, "", no_wir_location());
+    wir_store(ref program, state.block, wir_const_int(ref program, size_type, UInt128(0U)), length_slot, no_wir_location());
     wir_store(ref program, state.block, count, wir_field_address(ref program, state.block, vector, 1, "", no_wir_location()), no_wir_location());
     let data_type: WirTypeID = program.arena.types[wir_id_index(UInt32(pointer.element))].fields[2];
     let data: WirValueID = wir_cast(ref program, state.block, raw_data, data_type, "", no_wir_location());
     wir_store(ref program, state.block, data, wir_field_address(ref program, state.block, vector, 2, "", no_wir_location()), no_wir_location());
 
+    // an element can leave through ?, drop only the prefix already stored
+    wir_track_owned(ref state, vector, source_type);
     let i: Int = 0;
     while (i < literal.elements.length()) {
         let argument: ArgNode = literal.elements[i];
@@ -3440,8 +3438,8 @@ func wir_lower_vector_literal(
         let index: WirValueID = wir_const_int(ref program, size_type, UInt128(UIntSize(i)));
         wir_store(ref program, state.block, element.value, wir_index_address(ref program, state.block, data, index, "", no_wir_location()), no_wir_location());
         i++;
+        wir_store(ref program, state.block, wir_const_int(ref program, size_type, UInt128(UIntSize(i))), length_slot, no_wir_location());
     }
-    wir_track_owned(ref state, vector, source_type);
     return WirExpr(value=vector, source_type=source_type);
 }
 
@@ -3548,7 +3546,7 @@ func wir_lower_variadic_pack(
     let maximum: UInt128 = wir_integer_max(TYPE_UINTSIZE) / UInt128(element_layout.size);
     let lowered: Vector(WirVariadicSource) = [];
     let i: Int = 0;
-    while (arguments is !null && i < arguments.length()) {
+    while (i < arguments.length()) {
         let item: WirVariadicSource = wir_lower_variadic_source(ref state, ref types, ref source, ref program, arguments[i], element_type);
         if (item.value.value == NO_WIR_VALUE || item.length == NO_WIR_VALUE) {
             return wir_no_expr();
@@ -4190,7 +4188,7 @@ func wir_class_drop_function(ref types: WirTypeMap, ref source: Compiler, ref pr
 
     let deinit: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let method_index: Int = 0;
-    while (info.vtable is !null && method_index < info.vtable.length()) {
+    while (method_index < info.vtable.length()) {
         let candidate: FuncInfo = info.vtable[method_index];
         if (candidate.base_name == "$deinit") {
             deinit = candidate;
@@ -4215,7 +4213,7 @@ func wir_class_drop_function(ref types: WirTypeMap, ref source: Compiler, ref pr
     }
 
     let i: Int = 0;
-    while (info.fields is !null && i < info.fields.length()) {
+    while (i < info.fields.length()) {
         let field: FieldInfo = info.fields[i];
         if (field.name != "_vptr" && wir_value_needs_drop(ref source, field.type)) {
             let address: WirValueID = wir_field_address(ref program, state.block, object, field.offset, "", no_wir_location());
@@ -4275,7 +4273,7 @@ func wir_ensure_class_vtable(ref types: WirTypeMap, ref source: Compiler, ref pr
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let entries: Vector(WirValueID) = [];
     let i: Int = 0;
-    while (info.vtable is !null && i < info.vtable.length()) {
+    while (i < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[i];
         let instance_template: Optional(GenericTemplate) = source.generic_instance_templates.lookup("" + info.type_id);
         let required: Bool = true;
@@ -4348,7 +4346,7 @@ func wir_lower_class_constructor(ref state: WirFunctionLowering, ref types: WirT
 
     let object: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE, class_type);
     let field_index: Int = 0;
-    while (info.fields is !null && field_index < info.fields.length()) {
+    while (field_index < info.fields.length()) {
         let field: FieldInfo = info.fields[field_index];
         let address: WirValueID = wir_field_address(ref program, state.block, object, field.offset, "", no_wir_location());
         if (field.name == "_vptr") {
@@ -4366,8 +4364,7 @@ func wir_lower_class_constructor(ref state: WirFunctionLowering, ref types: WirT
 
     wir_call_class_field_initializers(ref state, ref types, ref source, ref program, info, object);
     let initializer: Optional(FuncInfo) = source.func_table.lookup(info.name + "_$init");
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
     if (!(initializer is !null)) {
         if (argument_count != 0) {
             state.errors.append("class constructor has arguments but no init method in WIR lowering");
@@ -4421,11 +4418,11 @@ func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTyp
     let meta_class_info: StructInfo = class_info;
     let protocol: StructInfo = interface_info;
     let method_index: Int = 0;
-    while (protocol.vtable is !null && method_index < protocol.vtable.length()) {
+    while (method_index < protocol.vtable.length()) {
         let method_def: MethodDefNode = protocol.vtable[method_index];
         let uses_self: Bool = type_node_contains_self(source.arena, method_def.return_type);
         let param_index: Int = 0;
-        while (!uses_self && method_def.params is !null && param_index < method_def.params.length()) {
+        while (!uses_self && param_index < method_def.params.length()) {
             uses_self = type_node_contains_self(source.arena, method_def.params[param_index].type_tok);
             param_index++;
         }
@@ -4436,14 +4433,6 @@ func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTyp
         method_index++;
     }
     if (!class_has_interface(ref source, meta_class_info, protocol)) {
-        let declared: String = "";
-        let i: Int = 0;
-        while (meta_class_info.interfaces is !null && i < meta_class_info.interfaces.length()) {
-            let item: TypeListNode = meta_class_info.interfaces[i];
-            if (declared.length() != 0) { declared += ", "; }
-            declared += "" + item.type;
-            i++;
-        }
         throw_type_error(no_position(), "Class '" + meta_class_info.name + "' does not implement interface '" + protocol.name + "'.");
         return wir_no_expr();
     }
@@ -4452,7 +4441,7 @@ func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTyp
         let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
         let entries: Vector(WirValueID) = [];
         method_index = 0;
-        while (protocol.vtable is !null && method_index < protocol.vtable.length()) {
+        while (method_index < protocol.vtable.length()) {
             let required: MethodDefNode = protocol.vtable[method_index];
             let implementation: Optional(FuncInfo) = find_interface_implementation(ref source, meta_class_info, protocol, required);
             let function_id: WirFuncID = NO_WIR_FUNC;
@@ -4515,8 +4504,7 @@ func wir_lower_length_call(
     if (access.field_name != "length") {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
     if (argument_count != 0) {
         state.errors.append("length() reached WIR lowering with arguments");
         return WirMemberCall(handled=true, value=wir_no_expr());
@@ -4583,9 +4571,8 @@ func wir_lower_string_call(
     if (!wir_check_fallible_call(ref source, call, meta_target.ret_type, access.field_name)) {
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
-    if (meta_target.arg_types is null || argument_count + 1 != meta_target.arg_types.length()) {
+    let argument_count: Int = call.args.length();
+    if (argument_count + 1 != meta_target.arg_types.length()) {
         state.errors.append("String method '" + access.field_name + "' reached WIR lowering with the wrong argument count");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
@@ -4662,8 +4649,7 @@ func wir_lower_vector_append(
     if (!(vector is !null)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
     if (argument_count != 1) {
         state.errors.append("Vector append reached WIR lowering with the wrong argument count");
         return WirMemberCall(handled=true, value=wir_no_expr());
@@ -4790,8 +4776,7 @@ func wir_lower_vector_drop(
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
 
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
     if (argument_count != 0) {
         state.errors.append("Vector drop reached WIR lowering with the wrong argument count");
         return WirMemberCall(handled=true, value=wir_no_expr());
@@ -4828,7 +4813,7 @@ func wir_lower_vector_drop(
 func wir_interface_call_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, owner: StructInfo, method_node: MethodDefNode) -> WirTypeID {
     let parameters: Vector(WirTypeID) = [wir_opaque_pointer(ref types, ref program)];
     let i: Int = 0;
-    while (method_node.params is !null && i < method_node.params.length()) {
+    while (i < method_node.params.length()) {
         let parameter: ParamNode = method_node.params[i];
         let source_type: Int = interface_method_type(ref source, owner, parameter.type_tok);
         let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
@@ -4851,19 +4836,17 @@ func wir_lower_interface_call(
     owner: StructInfo
 ) -> WirMemberCall {
     let slot: Int = 0;
-    while (owner.vtable is !null && slot < owner.vtable.length()) {
+    while (slot < owner.vtable.length()) {
         let candidate: MethodDefNode = owner.vtable[slot];
         if (candidate.name_tok.value == access.field_name) { break; }
         slot++;
     }
-    if (owner.vtable is null || slot >= owner.vtable.length()) {
+    if (slot >= owner.vtable.length()) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     let method_node: MethodDefNode = owner.vtable[slot];
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
-    let parameter_count: Int = 0;
-    if (method_node.params is !null) { parameter_count = method_node.params.length(); }
+    let argument_count: Int = call.args.length();
+    let parameter_count: Int = method_node.params.length();
     let parameter_names: Vector(String) = [];
     let name_index: Int = 0;
     while (name_index < parameter_count) {
@@ -4939,8 +4922,7 @@ func wir_lower_linked_class_call(
     target: FuncInfo
 ) -> WirMemberCall {
     let link_name: String = target.compiler_link_name;
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
 
     if (link_name == "zero_value") {
         if (argument_count != 0) {
@@ -4958,7 +4940,7 @@ func wir_lower_linked_class_call(
 
     let expected: Int = 1;
     if (link_name == "values_equal") { expected = 2; }
-    if (argument_count != expected || target.arg_types is null || target.arg_types.length() != expected + 1) {
+    if (argument_count != expected || target.arg_types.length() != expected + 1) {
         state.errors.append("Compiler-linked method '" + owner.name + "." + target.base_name + "' reached WIR lowering with the wrong argument count");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
@@ -5105,7 +5087,7 @@ func wir_lower_class_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
 
     let slot: Int = 0;
     let target: Optional(FuncInfo) = null;
-    while (meta_owner.vtable is !null && slot < meta_owner.vtable.length()) {
+    while (slot < meta_owner.vtable.length()) {
         let candidate: FuncInfo = meta_owner.vtable[slot];
         if (candidate.base_name == access.field_name) {
             target = candidate;
@@ -5121,7 +5103,7 @@ func wir_lower_class_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
     if (!wir_check_fallible_call(ref source, call, meta_target.ret_type, access.field_name)) {
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
-    if (meta_target.compiler_link_name is !null && meta_target.compiler_link_name.length() != 0) {
+    if (meta_target.compiler_link_name.length() != 0) {
         return wir_lower_linked_class_call(ref state, ref types, ref source, ref program, call, meta_owner, meta_target);
     }
     if (wir_lvalue_const(ref state, ref source, access.obj) && meta_target.mutates_self) {
@@ -5229,7 +5211,7 @@ func wir_lower_generic_method_call(ref state: WirFunctionLowering, ref types: Wi
             let definition: MethodDefNode = get_method_def_node(ref source.arena, meta_generic.node);
             let inferred: Dict(String, SymbolInfo) = Dict();
             let i: Int = 0;
-            while (call.args is !null && definition.params is !null && i < call.args.length()) {
+            while (i < call.args.length()) {
                 let argument: ArgNode = call.args[i];
                 let parameter_index: Int = generic_call_param(definition.params, argument, i);
                 if (parameter_index >= 0) {
@@ -5251,9 +5233,6 @@ func wir_lower_generic_method_call(ref state: WirFunctionLowering, ref types: Wi
                 type_arguments.append(TypeListNode(type=meta_actual.type, pass_mode=0));
                 i++;
             }
-        }
-        if (type_arguments is null) {
-            return WirMemberCall(handled=true, value=wir_no_expr());
         }
         let registered = register_generic_method(ref source, meta_generic, meta_owner, type_arguments, call.pos);
         if (registered is null) { return WirMemberCall(handled=true, value=wir_no_expr()); }
@@ -5330,7 +5309,7 @@ func wir_call_class_method_value(
 ) -> WirExpr {
     let slot: Int = 0;
     let target: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-    while (owner.vtable is !null && slot < owner.vtable.length()) {
+    while (slot < owner.vtable.length()) {
         let candidate: FuncInfo = owner.vtable[slot];
         if (candidate.base_name == name) {
             target = candidate;
@@ -5352,8 +5331,7 @@ func wir_call_class_method_value(
     }
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let expected: Int = target.arg_types.length() - 1;
-    let argument_count: Int = 0;
-    if (arguments_nodes is !null) { argument_count = arguments_nodes.length(); }
+    let argument_count: Int = arguments_nodes.length();
     if (argument_count != expected) {
         state.errors.append("Method '" + name + "' reached WIR lowering with the wrong argument count");
         return wir_no_expr();
@@ -5416,7 +5394,7 @@ func wir_call_class_method_values(
 ) -> WirExpr {
     let slot: Int = 0;
     let target: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-    while (owner.vtable is !null && slot < owner.vtable.length()) {
+    while (slot < owner.vtable.length()) {
         let candidate: FuncInfo = owner.vtable[slot];
         if (candidate.base_name == name) {
             target = candidate;
@@ -5428,9 +5406,8 @@ func wir_call_class_method_values(
         state.errors.append("Method '" + name + "' is unavailable during WIR lowering");
         return wir_no_expr();
     }
-    let count: Int = 0;
-    if (values is !null) { count = values.length(); }
-    if (target.arg_types is null || count + 1 != target.arg_types.length()) {
+    let count: Int = values.length();
+    if (count + 1 != target.arg_types.length()) {
         state.errors.append("Method '" + name + "' reached WIR lowering with the wrong argument count");
         return wir_no_expr();
     }
@@ -5568,14 +5545,13 @@ func wir_lower_builtin_protocol_call(
 
     let expected: Int = 0;
     if (name == "equals" || name == "compare") { expected = 1; }
-    let count: Int = 0;
-    if (call.args is !null) { count = call.args.length(); }
+    let count: Int = call.args.length();
     if (count != expected) {
         state.errors.append("Protocol method '" + name + "' reached WIR lowering with the wrong argument count");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
     let i: Int = 0;
-    while (call.args is !null && i < call.args.length()) {
+    while (i < call.args.length()) {
         let argument: ArgNode = call.args[i];
         if ((argument.name.length() != 0) || argument.is_spread) {
             state.errors.append("Named or spread protocol arguments must be bound before WIR lowering");
@@ -5744,7 +5720,7 @@ func wir_lower_map_literal(ref state: WirFunctionLowering, ref types: WirTypeMap
     }
 
     let i: Int = 0;
-    while (literal.pairs is !null && i < literal.pairs.length()) {
+    while (i < literal.pairs.length()) {
         let pair: MapPairNode = literal.pairs[i];
         if (!is_typed_dict(ref source, meta_dict_info)) {
             let key_type: Int = wir_argument_type(ref state, ref source, pair.key);
@@ -5766,8 +5742,7 @@ func wir_lower_map_literal(ref state: WirFunctionLowering, ref types: WirTypeMap
 func wir_lower_dict_intrinsic(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, call: CallNode, info: FuncInfo) -> WirExpr {
     let expected: Int = 1;
     if (info.compiler_link_name == "dict_keys_equal") { expected = 2; }
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let argument_count: Int = call.args.length();
     if (argument_count != expected) {
         state.errors.append("Dict intrinsic reached WIR lowering with the wrong argument count");
         return wir_no_expr();
@@ -6131,7 +6106,7 @@ func wir_print_enum(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     let value_type: WirTypeID = wir_value_type(ref program, value);
     let end: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.enum.end."), []);
     let i: Int = 0;
-    while (info.fields is !null && i < info.fields.length()) {
+    while (i < info.fields.length()) {
         let field: FieldInfo = info.fields[i];
         let matched: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.enum.value."), []);
         let next: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "print.enum.next."), []);
@@ -6305,12 +6280,12 @@ func wir_print_class_display(ref state: WirFunctionLowering, ref types: WirTypeM
 
 func wir_print_interface_display(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, info: StructInfo) -> Bool {
     let slot: Int = 0;
-    while (info.vtable is !null && slot < info.vtable.length()) {
+    while (slot < info.vtable.length()) {
         let candidate: MethodDefNode = info.vtable[slot];
         if (candidate.name_tok.value == "display") { break; }
         slot++;
     }
-    if (info.vtable is null || slot >= info.vtable.length()) {
+    if (slot >= info.vtable.length()) {
         state.errors.append("Display method is missing from interface '" + info.name + "'");
         return false;
     }
@@ -6351,7 +6326,7 @@ func wir_print_struct(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
     }
     let printed: Int = 0;
     let i: Int = 0;
-    while (info.fields is !null && i < info.fields.length()) {
+    while (i < info.fields.length()) {
         let field: FieldInfo = info.fields[i];
         if (field.name != "_vptr") {
             if (printed != 0 && !wir_print_text(ref state, ref types, ref source, ref program, ", ")) {
@@ -6532,7 +6507,7 @@ func wir_lower_print_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
     let has_separator: Bool = false;
     let has_ending: Bool = false;
     let i: Int = 0;
-    while (call.args is !null && i < call.args.length()) {
+    while (i < call.args.length()) {
         let argument: ArgNode = call.args[i];
         if (argument.name.length() != 0) {
             saw_named = true;
@@ -7041,6 +7016,15 @@ func wir_lower_raw_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, r
     if (kind == NODE_CALL) {
         return wir_expr_call(ref state, ref types, ref source, ref program, node);
     }
+    if (kind == NODE_VECTOR_LIT) {
+        let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
+        let source_type: Int = wir_argument_type(ref state, ref source, node);
+        if (source_type == TYPE_POISON) {
+            throw_type_error(literal.pos, "Cannot infer a Vector element type.");
+            return wir_no_expr();
+        }
+        return wir_lower_array_literal(ref state, ref types, ref source, ref program, node, source_type);
+    }
 
     state.errors.append("AST node kind " + kind + " is not lowered to WIR yet");
     return wir_no_expr();
@@ -7251,8 +7235,7 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     let cast_target: Int = wir_cast_target(ref source, call.callee);
     if (cast_target != 0) {
         let owned_start: Int = state.owned_values.length();
-        let argument_count: Int = 0;
-        if (call.args is !null) { argument_count = call.args.length(); }
+        let argument_count: Int = call.args.length();
         if (argument_count != 1) {
             state.errors.append("type conversion reached WIR lowering with the wrong argument count");
             return wir_no_expr();
@@ -7284,7 +7267,7 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
                 return wir_no_expr();
             }
             let receiver: WirExpr = value;
-            if (conversion.arg_types is !null && conversion.arg_types.length() != 0) {
+            if (conversion.arg_types.length() != 0) {
                 let self_parameter: TypeListNode = conversion.arg_types[0];
                 receiver = wir_cast_expr(ref state, ref types, ref source, ref program, value, self_parameter.type, true, no_position());
                 if (receiver.value == NO_WIR_VALUE) {
@@ -7345,14 +7328,12 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         }
     }
     let source_parameter_types: Vector(Int) = [];
-    let source_parameter_modes: Vector(Int) = [];
     if ((info is !null)) {
         let meta_info: FuncInfo = info;
         let parameter_index: Int = 0;
-        while (meta_info.arg_types is !null && parameter_index < meta_info.arg_types.length()) {
+        while (parameter_index < meta_info.arg_types.length()) {
             let parameter: TypeListNode = meta_info.arg_types[parameter_index];
             source_parameter_types.append(parameter.type);
-            source_parameter_modes.append(parameter.pass_mode);
             parameter_index++;
         }
     }
@@ -7434,12 +7415,10 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         indirect_call = true;
         indirect_source_type = indirect.source_type;
         source_parameter_types = [];
-        source_parameter_modes = [];
         let source_index: Int = 0;
-        while (meta_signature_info.func_arg_types is !null && source_index < meta_signature_info.func_arg_types.length()) {
+        while (source_index < meta_signature_info.func_arg_types.length()) {
             let parameter: TypeListNode = meta_signature_info.func_arg_types[source_index];
             source_parameter_types.append(parameter.type);
-            source_parameter_modes.append(parameter.pass_mode);
             source_index++;
         }
         result_type = meta_signature_info.type;
@@ -7485,7 +7464,7 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     } else {
         let parameter_count: Int = source_parameter_types.length();
         let i: Int = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let argument: ArgNode = call.args[i];
             if ((argument.name.length() != 0) || argument.is_spread) {
                 throw_invalid_syntax(call.pos, "Argument expansion is not available when calling a C variadic function.");
@@ -7550,10 +7529,8 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         let expected_named: Optional(NamedTypeInfo) = get_named_type(ref source, source_type);
         if ((expected_named is !null)) {
             let actual_type: Int = wir_argument_type(ref state, ref source, node.value);
-            let actual_named: Optional(NamedTypeInfo) = get_named_type(ref source, actual_type);
             if (actual_type != TYPE_POISON && actual_type != source_type &&
-                get_repr_type(ref source, actual_type) == get_repr_type(ref source, source_type) &&
-                ((expected_named is !null) || (actual_named is !null))) {
+                get_repr_type(ref source, actual_type) == get_repr_type(ref source, source_type)) {
                 throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(ref source, source_type) + ", got " + get_type_name(ref source, actual_type));
                 return;
             }
@@ -7633,6 +7610,11 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         return;
     }
     if (source_type == TYPE_AUTO) { source_type = value.source_type; }
+    // a method's concrete signature is available after binding its receiver
+    if ((source_type == TYPE_GENERIC_FUNCTION && (source.func_ret_map.lookup(value.source_type) is !null)) ||
+        (source_type == TYPE_GENERIC_METHOD && (source.method_ret_map.lookup(value.source_type) is !null))) {
+        source_type = value.source_type;
+    }
     let source_callable: Bool = ((source.func_ret_map.lookup(value.source_type) is !null)) ||
                                 ((source.method_ret_map.lookup(value.source_type) is !null));
     let target_callable: Bool = ((source.func_ret_map.lookup(source_type) is !null)) ||
@@ -7679,7 +7661,7 @@ func wir_loop_has_break(ref source: Compiler, node: NodeID) -> Bool {
     if (kind == NODE_BLOCK) {
         let block: BlockNode = get_block_node(ref source.arena, node);
         let i: Int = 0;
-        while (block.stmts is !null && i < block.stmts.length()) {
+        while (i < block.stmts.length()) {
             if (wir_loop_has_break(ref source, block.stmts[i])) { return true; }
             i++;
         }
@@ -7855,7 +7837,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             let meta_owner: StructInfo = owner;
             let has_put: Bool = false;
             let method_index: Int = 0;
-            while (meta_owner.vtable is !null && method_index < meta_owner.vtable.length()) {
+            while (method_index < meta_owner.vtable.length()) {
                 let candidate: FuncInfo = meta_owner.vtable[method_index];
                 if (candidate.base_name == "put") {
                     has_put = true;

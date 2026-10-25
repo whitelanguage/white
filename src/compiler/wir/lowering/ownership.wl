@@ -134,7 +134,7 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirType
     if (is_value_struct(ref source, source_type) && (struct_info is !null)) {
         let meta_struct_info: StructInfo = struct_info;
         let i: Int = 0;
-        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+        while (i < meta_struct_info.fields.length()) {
             let field: FieldInfo = meta_struct_info.fields[i];
             if (wir_value_needs_drop(ref source, field.type)) {
                 let field_value: WirValueID = wir_field(ref program, state.block, value, field.offset, "", no_wir_location());

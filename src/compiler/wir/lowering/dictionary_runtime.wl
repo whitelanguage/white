@@ -132,6 +132,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
     let check_class: WirBlockID = wir_add_block(ref program, function_id, "check.class", []);
     let string_key: WirBlockID = wir_add_block(ref program, function_id, "string", []);
     let float_key: WirBlockID = wir_add_block(ref program, function_id, "float", []);
+    let float_valid: WirBlockID = wir_add_block(ref program, function_id, "float.valid", []);
     let float_zero: WirBlockID = wir_add_block(ref program, function_id, "float.zero", []);
     let float_bits: WirBlockID = wir_add_block(ref program, function_id, "float.bits", []);
     let float_done: WirBlockID = wir_add_block(ref program, function_id, "float.done", [wir_param("low", wir_signed_int_type(ref program, 64))]);
@@ -187,9 +188,12 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
 
     let float_type: WirTypeID = wir_float_type(ref program, 64);
     let float_value: WirValueID = wir_unary(ref program, float_key, WirOpcode.Bitcast, float_type, low, "value", no_wir_location());
+    // NaN cannot be retrieved by equality, reject it before hashing the payload.
+    let is_nan: WirValueID = wir_binary(ref program, float_key, WirOpcode.NotEqual, program.bool_type, float_value, float_value, "is.nan", no_wir_location());
+    wir_append(ref program, float_key, WirOpcode.Branch, program.void_type, [is_nan], [wir_edge(invalid, []), wir_edge(float_valid, [])], no_wir_location());
     let is_zero: WirValueID = wir_binary(
         ref program,
-        float_key,
+        float_valid,
         WirOpcode.Equal,
         program.bool_type,
         float_value,
@@ -197,7 +201,7 @@ func wir_dict_variant_hash_function(ref types: WirTypeMap, ref source: Compiler,
         "is.zero",
         no_wir_location()
     );
-    wir_append(ref program, float_key, WirOpcode.Branch, program.void_type, [is_zero], [wir_edge(float_zero, []), wir_edge(float_bits, [])], no_wir_location());
+    wir_append(ref program, float_valid, WirOpcode.Branch, program.void_type, [is_zero], [wir_edge(float_zero, []), wir_edge(float_bits, [])], no_wir_location());
     let zero_payload: WirValueID = wir_const_int(ref program, wir_signed_int_type(ref program, 64), UInt128(0U));
     wir_append(ref program, float_zero, WirOpcode.Jump, program.void_type, [], [wir_edge(float_done, [zero_payload])], no_wir_location());
     wir_append(ref program, float_bits, WirOpcode.Jump, program.void_type, [], [wir_edge(float_done, [low])], no_wir_location());
@@ -674,7 +678,7 @@ func wir_dict_scalar_equal_function(ref types: WirTypeMap, ref source: Compiler,
 
 func wir_dict_class_method(info: StructInfo, name: String) -> Optional(FuncInfo) {
     let index: Int = 0;
-    while (info.vtable is !null && index < info.vtable.length()) {
+    while (index < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[index];
         if (method_info.base_name == name) { return method_info; }
         index++;
@@ -684,7 +688,7 @@ func wir_dict_class_method(info: StructInfo, name: String) -> Optional(FuncInfo)
 
 func wir_dict_class_method_index(info: StructInfo, name: String) -> Int {
     let index: Int = 0;
-    while (info.vtable is !null && index < info.vtable.length()) {
+    while (index < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[index];
         if (method_info.base_name == name) { return index; }
         index++;

@@ -40,8 +40,7 @@ func machine_text_symbols(input: MachineObject) -> Vector(Int)? {
     i = 0;
     while (i < result.length()) {
         let offset: Int = Int(input.symbols[result[i]].offset);
-        if (offset < 0 || offset >= text_length ||
-            (i > 0 && input.symbols[result[i - 1]].offset == input.symbols[result[i]].offset)) {
+        if (offset < 0 || offset >= text_length) {
             throw Error.InvalidArgument;
         }
         i++;

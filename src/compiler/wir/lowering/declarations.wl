@@ -7,7 +7,7 @@ import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
 
 func wir_function_abi(ref types: WirTypeMap, info: FuncInfo) -> WirABI {
-    if (info.abi_name is null || info.abi_name.length() == 0) {
+    if (info.abi_name.length() == 0) {
         // ExportLib is a native boundary, it cannot use an implementation ABI
         // just because scalar arguments happen to use the same registers.
         if ((info.ann_flags & FLAG_ANN_EXPORT) != 0) {
@@ -58,7 +58,7 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     if (result == NO_WIR_TYPE) { return NO_WIR_FUNC; }
     let parameters: Vector(WirParam) = [];
     let i: Int = 0;
-    while (info.arg_types is !null && i < info.arg_types.length()) {
+    while (i < info.arg_types.length()) {
         let parameter: TypeListNode = info.arg_types[i];
         if (parameter.type <= 0) {
             types.errors.append("Parameter " + i + " of function '" + info.name + "' has no resolved type during WIR lowering");
@@ -67,7 +67,7 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
         let type_id: WirTypeID = wir_lower_parameter_type(ref types, ref source, ref program, parameter);
         if (type_id == NO_WIR_TYPE) { return NO_WIR_FUNC; }
         let name: String = "arg" + i;
-        if (info.arg_names is !null && i < info.arg_names.length() && info.arg_names[i].length() != 0) {
+        if (i < info.arg_names.length() && info.arg_names[i].length() != 0) {
             name = info.arg_names[i];
         }
         parameters.append(wir_param(name, type_id));
@@ -76,7 +76,6 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
 
     let abi: WirABI = wir_function_abi(ref types, info);
     let linkage: WirLinkage = wir_function_linkage(info, abi);
-    if (linkage == WirLinkage.External && abi == WirABI.White) { return NO_WIR_FUNC; }
     let parameter_types: Vector(WirTypeID) = [];
     i = 0;
     while (i < parameters.length()) {

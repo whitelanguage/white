@@ -321,7 +321,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
 
 func class_method_index(info: StructInfo, name: String) -> Int {
     let index: Int = 0;
-    while (has_struct(info) && info.vtable is !null && index < info.vtable.length()) {
+    while (has_struct(info) && index < info.vtable.length()) {
         let entry: FuncInfo = info.vtable[index];
         if (entry.base_name == name) { return index; }
         index++;

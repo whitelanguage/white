@@ -155,7 +155,6 @@ func string_char_at(self: String, index: Int) -> Char? {
         offset += decoded.width;
     }
     throw Error.IndexOutOfBounds;
-    return '\0';
 }
 
 @CompilerLink

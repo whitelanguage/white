@@ -196,7 +196,6 @@ class Dict {
             if (current == hash && __keys_equal(self.keys[idx], key)) { return self.values[idx]; }
             idx = (idx + 1) & mask;
         }
-        throw Error.KeyNotFound;
     }
 
     func remove(key: Variant) -> Void {
@@ -234,7 +233,6 @@ class Dict {
             if (current == hash && __keys_equal(self.keys[idx], key)) { return true; }
             idx = (idx + 1) & mask;
         }
-        return false;
     }
 
     func length() -> Int {
@@ -450,7 +448,6 @@ class Dict<K: Hash, V> {
             }
             idx = (idx + 1) & mask;
         }
-        throw Error.KeyNotFound;
     }
 
     func lookup(key: K) -> Optional(V) {
@@ -472,7 +469,6 @@ class Dict<K: Hash, V> {
             }
             idx = (idx + 1) & mask;
         }
-        return null;
     }
 
     func remove(key: K) -> Bool {
@@ -496,7 +492,6 @@ class Dict<K: Hash, V> {
 
             idx = (idx + 1) & mask;
         }
-        return false;
     }
 
     func contains_key(key: K) -> Bool {
@@ -511,7 +506,6 @@ class Dict<K: Hash, V> {
             if (current == hash && self.__equal(self.keys[idx], key)) { return true; }
             idx = (idx + 1) & mask;
         }
-        return false;
     }
 
     func length() -> Int {

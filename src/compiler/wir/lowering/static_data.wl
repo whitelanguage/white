@@ -106,10 +106,8 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
     let call: CallNode = get_call_node(ref source.arena, node);
     let record: StructInfo = info;
     if (!check_struct_init(ref source, record, call)) { return NO_WIR_VALUE; }
-    let field_count: Int = 0;
-    if (record.fields is !null) { field_count = record.fields.length(); }
-    let argument_count: Int = 0;
-    if (call.args is !null) { argument_count = call.args.length(); }
+    let field_count: Int = record.fields.length();
+    let argument_count: Int = call.args.length();
     let values: Vector(WirValueID) = [];
     let assigned: Vector(Bool) = [];
     let i: Int = 0;
@@ -213,7 +211,7 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (kind == NODE_CALL) {
         let call: CallNode = get_call_node(ref source.arena, node);
         let target: Int = wir_static_cast_target(ref source, call.callee);
-        if (target != 0 && call.args is !null && call.args.length() == 1) {
+        if (target != 0 && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
             if ((argument.name.length() == 0) && !argument.is_spread &&
                 get_repr_type(ref source, target) == repr) {

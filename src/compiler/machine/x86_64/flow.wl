@@ -302,10 +302,10 @@ func x86_patch_branches(ref output: X86CodeBuffer, offsets: Vector(X86BlockOffse
         target--;
         if (target < 0) { return false; }
 
-        let displacement: Int = target - (fixups[i].offset + 4);
-        if (displacement < -2147483648 || displacement > 2147483647) { return false; }
+        let displacement: Long = Long(target) - (Long(fixups[i].offset) + 4L);
+        if (displacement < -2147483648L || displacement > 2147483647L) { return false; }
 
-        if (!x86_patch_i32(ref output, fixups[i].offset, displacement)) { return false; }
+        if (!x86_patch_i32(ref output, fixups[i].offset, Int(displacement))) { return false; }
 
         i++;
     }

@@ -119,7 +119,7 @@ func check_local_init_block(ref c: Compiler, node: NodeID, ref parent: LocalInit
     let state: Vector(String) = initialized;
     let terminates: Bool = false;
     let i: Int = 0;
-    while (block.stmts is !null && i < block.stmts.length()) {
+    while (i < block.stmts.length()) {
         let flow: InitFlow = check_local_init_node(ref c, block.stmts[i], ref scope, state);
         state = flow.initialized;
         if (flow.terminates) {
@@ -187,7 +187,7 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let condition_flow: InitFlow = check_local_init_node(ref c, branch.condition, ref scope, initialized);
         let selected: Int = fold_target_cond(ref c, branch.condition);
         let condition: Int = node_tag(branch.condition);
-        if (condition != 0 && condition == NODE_BOOL) {
+        if (condition == NODE_BOOL) {
             let boolean: BooleanNode = get_bool_node(ref c.arena, branch.condition);
             selected = boolean.value;
         }
@@ -265,7 +265,7 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let call: CallNode = get_call_node(ref c.arena, node);
         let state: Vector(String) = check_local_init_node(ref c, call.callee, ref scope, initialized).initialized;
         let i: Int = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let arg: ArgNode = call.args[i];
             state = check_local_init_node(ref c, arg.val, ref scope, state).initialized;
             i += 1;
@@ -307,7 +307,7 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let vector: VectorLitNode = get_vector_lit_node(ref c.arena, node);
         let state: Vector(String) = initialized;
         let i: Int = 0;
-        while (vector.elements is !null && i < vector.elements.length()) {
+        while (i < vector.elements.length()) {
             let element: ArgNode = vector.elements[i];
             state = check_local_init_node(ref c, element.val, ref scope, state).initialized;
             i += 1;
@@ -318,7 +318,7 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let map: MapLitNode = get_map_lit_node(ref c.arena, node);
         let state: Vector(String) = initialized;
         let i: Int = 0;
-        while (map.pairs is !null && i < map.pairs.length()) {
+        while (i < map.pairs.length()) {
             let pair: MapPairNode = map.pairs[i];
             state = check_local_init_node(ref c, pair.key, ref scope, state).initialized;
             state = check_local_init_node(ref c, pair.value, ref scope, state).initialized;
@@ -330,7 +330,7 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let function: FunctionDefNode = get_func_def_node(ref c.arena, node);
         let captures: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
         let i: Int = 0;
-        while (function.params is !null && i < function.params.length()) {
+        while (i < function.params.length()) {
             let param: ParamNode = function.params[i];
             captures.local_vars.put(param.name_tok.value, true);
             i += 1;
@@ -497,7 +497,7 @@ func class_requires_initialization(ref c: Compiler, info: Optional(StructInfo)) 
     let class_node: ClassDefNode = get_class_def_node(ref c.arena, record.init_body);
     let fields: Vector(NodeID) = class_node.fields;
     let i: Int = 0;
-    while (fields is !null && i < fields.length()) {
+    while (i < fields.length()) {
         let field: VarDeclareNode = get_var_decl_node(ref c.arena, fields[i]);
         if (!has_node(field.value)) { return true; }
         i += 1;
@@ -521,7 +521,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
         let block: BlockNode = get_block_node(ref c.arena, node);
         let state: Vector(String) = initialized;
         let i: Int = 0;
-        while (block.stmts is !null && i < block.stmts.length()) {
+        while (i < block.stmts.length()) {
             let flow: InitFlow = check_init_node(
                 ref c, class_name, block.stmts[i], required, known_fields, state, receiver
             );
@@ -540,7 +540,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
 
         let selected: Int = fold_target_cond(ref c, branch.condition);
         let condition: Int = node_tag(branch.condition);
-        if (condition != 0 && condition == NODE_BOOL) {
+        if (condition == NODE_BOOL) {
             let boolean: BooleanNode = get_bool_node(ref c.arena, branch.condition);
             selected = boolean.value;
         }
@@ -766,7 +766,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
         }
 
         let i: Int = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let arg: ArgNode = call.args[i];
             check_init_node(
                 ref c, class_name, arg.val, required, known_fields, initialized, receiver
@@ -904,7 +904,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
     if (base == NODE_VECTOR_LIT) {
         let vector: VectorLitNode = get_vector_lit_node(ref c.arena, node);
         let i: Int = 0;
-        while (vector.elements is !null && i < vector.elements.length()) {
+        while (i < vector.elements.length()) {
             let element: ArgNode = vector.elements[i];
             check_init_node(
                 ref c, class_name, element.val, required, known_fields, initialized, receiver
@@ -916,7 +916,7 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
     if (base == NODE_MAP_LIT) {
         let map: MapLitNode = get_map_lit_node(ref c.arena, node);
         let i: Int = 0;
-        while (map.pairs is !null && i < map.pairs.length()) {
+        while (i < map.pairs.length()) {
             let pair: MapPairNode = map.pairs[i];
             check_init_node(
                 ref c, class_name, pair.key, required, known_fields, initialized, receiver
@@ -949,7 +949,7 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
 
     let fields: Vector(NodeID) = node.fields;
     let i: Int = 0;
-    while (fields is !null && i < fields.length()) {
+    while (i < fields.length()) {
         let field: VarDeclareNode = get_var_decl_node(ref c.arena, fields[i]);
         let name: String = field.name_tok.value;
         known_fields.append(name);
@@ -979,7 +979,7 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
         default_state.append("$super");
     }
     i = 0;
-    while (fields is !null && i < fields.length()) {
+    while (i < fields.length()) {
         let field: VarDeclareNode = get_var_decl_node(ref c.arena, fields[i]);
         if (has_node(field.value)) {
             check_init_node(
@@ -1002,7 +1002,7 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
     let initializer_id: NodeID = NO_NODE;
     let methods: Vector(NodeID) = node.methods;
     i = 0;
-    while (methods is !null && i < methods.length()) {
+    while (i < methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(ref c.arena, methods[i]);
         if (method_node.name_tok.value == "$init") {
             initializer_id = methods[i];
@@ -1103,7 +1103,7 @@ func must_terminate(ref c: Compiler, node: NodeID) -> Bool {
 
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(ref c.arena, node);
-        if (block.stmts is null || block.stmts.length() == 0) { return false; }
+        if (block.stmts.length() == 0) { return false; }
         return must_terminate(ref c, block.stmts[block.stmts.length() - 1]);
     }
 
@@ -1129,7 +1129,7 @@ func must_terminate(ref c: Compiler, node: NodeID) -> Bool {
     if (base == NODE_WHILE) {
         let loop: WhileNode = get_while_node(ref c.arena, node);
         let condition: Int = node_tag(loop.condition);
-        if (condition != 0 && condition == NODE_BOOL) {
+        if (condition == NODE_BOOL) {
             let boolean: BooleanNode = get_bool_node(ref c.arena, loop.condition);
             return boolean.value == 1 && !has_loop_break(ref c, loop.body);
         }
@@ -1156,7 +1156,7 @@ func has_loop_break(ref c: Compiler, node: NodeID) -> Bool {
     if (base == NODE_BLOCK) {
         let block: BlockNode = get_block_node(ref c.arena, node);
         let i: Int = 0;
-        while (block.stmts is !null && i < block.stmts.length()) {
+        while (i < block.stmts.length()) {
             if (has_loop_break(ref c, block.stmts[i])) { return true; }
             i += 1;
         }

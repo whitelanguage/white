@@ -768,9 +768,6 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     if (cfg.is_asm_only) {
         clang_args.append("-S");
-        if (cfg.is_emit_llvm) {
-            clang_args.append("-emit-llvm");
-        }
         clang_args.append("-o");
         clang_args.append(cfg.output_file);
     }

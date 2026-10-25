@@ -383,26 +383,9 @@ func may_generic_postfix(ref p: Parser) -> Bool {
 
 func peek_type(ref p: Parser) -> Int {
     let lexer: WhitelangLexer.Lexer = p.lexer;
-
-    // save current lexer
-    let save_idx: Int = lexer.pos.idx;
-    let save_ln: Int = lexer.pos.ln;
-    let save_col: Int = lexer.pos.col;
-    let save_char: Char = lexer.current_char;
-    let save_width: Int = lexer.current_width;
-    let save_valid: Bool = lexer.current_valid;
-
-    let tok_type: Int = WhitelangLexer.get_next_token(ref lexer).type;
-
-    // load lexer
-    lexer.pos.idx = save_idx;
-    lexer.pos.ln  = save_ln;
-    lexer.pos.col = save_col;
-    lexer.current_char = save_char;
-    lexer.current_width = save_width;
-    lexer.current_valid = save_valid;
-
-    return tok_type;
+    // the cursor is copied, trivia storage is shared with the real lexer
+    lexer.collect_trivia = false;
+    return WhitelangLexer.get_next_token(ref lexer).type;
 }
 
 func parse_decimal_int(ref p: Parser, tok: Token) -> Int {
@@ -1269,7 +1252,6 @@ func comp_expr(ref p: Parser) -> NodeID {
         if (op_tok.type == TOK_IS) {
             parser_advance(ref p); // skip 'is'
             if (p.current_tok.type == TOK_NOT) {
-                let not_tok: Token = p.current_tok;
                 parser_advance(ref p); // skip '!'
                 op_tok = Token(type=TOK_IS, value="is !", line=op_tok.line, col=op_tok.col);
                 node_type = NODE_IS_NOT;
@@ -1548,7 +1530,7 @@ func parse_block_inner(ref p: Parser) -> NodeID {
         let stmt: NodeID = statement(ref p);
         let base: Int = node_tag(stmt);
         let is_compound: Bool = false;
-        if (base != 0 && (base == NODE_IF || base == NODE_BLOCK || base == NODE_WHILE || base == NODE_FOR || base == NODE_FUNC_DEF || base == NODE_CATCH)) {
+        if (base == NODE_IF || base == NODE_BLOCK || base == NODE_WHILE || base == NODE_FOR || base == NODE_FUNC_DEF || base == NODE_CATCH) {
             is_compound = true;
         }
 
@@ -2552,6 +2534,13 @@ func parse_class_def(ref p: Parser, anns: Vector(AnnotationNode)) -> NodeID {
         } else {
             let err_pos: Position = Position(idx=0, ln=p.current_tok.line, col=p.current_tok.col, text=p.lexer.text, fn=p.lexer.pos.fn);
             throw_invalid_syntax(err_pos, "Expected a field, method, conversion, init, or deinit declaration.");
+            // repeated diagnostics at this token are deduplicated, recovery must advance
+            while (p.current_tok.type != TOK_SEMICOLON && p.current_tok.type != TOK_RBRACE && p.current_tok.type != TOK_EOF) {
+                parser_advance(ref p);
+            }
+            if (p.current_tok.type == TOK_SEMICOLON) {
+                parser_advance(ref p);
+            }
         }
     }
 

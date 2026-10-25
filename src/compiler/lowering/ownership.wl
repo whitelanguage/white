@@ -22,8 +22,7 @@ func exit_scope(ref c: Compiler) -> Void {
     let curr_scope: Scope = c.symbol_table;
 
     let gc_vec: Vector(Struct) = curr_scope.gc_vars;
-    let gc_len: Int = 0;
-    if (gc_vec is !null) { gc_len = gc_vec.length(); }
+    let gc_len: Int = gc_vec.length();
     let gc_idx: Int = 0;
     while (gc_idx < gc_len) {
         let curr_gc: GCTracker = gc_vec[gc_idx];
@@ -38,8 +37,7 @@ func cleanup_all_scopes(ref c: Compiler) -> Void {
     let curr: Scope = c.symbol_table;
     while true {
         let gc_vec: Vector(Struct) = curr.gc_vars;
-        let gc_len: Int = 0;
-        if (gc_vec is !null) { gc_len = gc_vec.length(); }
+        let gc_len: Int = gc_vec.length();
         let gc_idx: Int = 0;
         while (gc_idx < gc_len) {
             let gc_node: GCTracker = gc_vec[gc_idx];
@@ -57,8 +55,7 @@ func cleanup_scopes_until(ref c: Compiler, target_scope: Scope) -> Void {
     let curr: Scope = c.symbol_table;
     while (curr.depth > target_scope.depth) {
         let gc_vec: Vector(Struct) = curr.gc_vars;
-        let gc_len: Int = 0;
-        if (gc_vec is !null) { gc_len = gc_vec.length(); }
+        let gc_len: Int = gc_vec.length();
         let gc_idx: Int = 0;
         while (gc_idx < gc_len) {
             let gc_node: GCTracker = gc_vec[gc_idx];
@@ -286,8 +283,7 @@ func hoist_allocas(ref c: Compiler, node: NodeID) -> Void {
         c.hoist_scope = Scope(parent=parent, table=Dict(), gc_vars=[], depth=old_scope.depth + 1);
 
         let stmts: Vector(NodeID) = block.stmts;
-        let len: Int = 0;
-        if (stmts is !null) { len = stmts.length(); }
+        let len: Int = stmts.length();
         let i: Int = 0;
         while (i < len) {
             hoist_allocas(ref c, stmts[i]);
@@ -883,7 +879,7 @@ func emit_drop_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     if (is_value_struct(ref c, type_id)) {
         let info: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
         let i: Int = 0;
-        while ((info is !null) && info.fields is !null && i < info.fields.length()) {
+        while ((info is !null) && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             if (needs_drop(ref c, field.type)) {
                 let field_ptr: String = next_reg(ref c);
@@ -957,7 +953,7 @@ func emit_retain_slot(ref c: Compiler, ptr_reg: String, type_id: Int) -> Void {
     if (is_value_struct(ref c, type_id)) {
         let info: Optional(StructInfo) = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
         let i: Int = 0;
-        while ((info is !null) && info.fields is !null && i < info.fields.length()) {
+        while ((info is !null) && i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             if (needs_drop(ref c, field.type)) {
                 let field_ptr: String = next_reg(ref c);
@@ -1090,8 +1086,7 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         let meta_s_info: StructInfo = s_info;
         if (meta_s_info.is_class) {
             let methods: Vector(Struct) = meta_s_info.vtable;
-            let method_len: Int = 0;
-            if (methods is !null) { method_len = methods.length(); }
+            let method_len: Int = methods.length();
             let method_i: Int = 0;
             let deinit: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
             while (method_i < method_len) {
@@ -1115,8 +1110,7 @@ func emit_type_drop(ref c: Compiler, type_id: Int) -> Void {
         write_ir(ref c, "  %object = bitcast i8* %ptr to " + meta_s_info.llvm_name + "*\n");
 
         let fields: Vector(Struct) = meta_s_info.fields;
-        let field_len: Int = 0;
-        if (fields is !null) { field_len = fields.length(); }
+        let field_len: Int = fields.length();
         let field_i: Int = 0;
         while (field_i < field_len) {
             let field: FieldInfo = fields[field_i];
@@ -1255,9 +1249,6 @@ func emit_erased_check_helpers(ref c: Compiler) -> Void {
                     let expected_info: Optional(StructInfo) = c.struct_id_map.lookup(expected);
                 if (!accepted && (expected_info is !null) && expected_info.is_class) {
                     accepted = is_subclass(ref c, candidate, expected);
-                }
-                if (!accepted && (expected_info is !null) && !expected_info.is_class) {
-                    accepted = erased_struct_matches(candidate, expected);
                 }
                 if accepted {
                     write_ir(ref c, "    i32 " + candidate + ", label %accept\n");

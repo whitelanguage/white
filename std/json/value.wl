@@ -222,7 +222,6 @@ class Value {
             return object.length();
         }
         throw JsonError.TypeMismatch;
-        return 0;
     }
 
     func at(index: Int) -> Value? {

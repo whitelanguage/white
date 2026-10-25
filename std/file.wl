@@ -206,19 +206,26 @@ class File {
             return buffer;
         }
 
-        if (posix.fseek(self.handle, IntSize(0), SEEK_END) != 0) {
+        // restore the current cursor after sizing, reading at EOF must stay at EOF
+        let start: IntSize = posix.ftell(self.handle);
+        if (start < IntSize(0) || posix.fseek(self.handle, IntSize(0), SEEK_END) != 0) {
             self.__last_error = __last_error();
             throw self.__last_error;
         }
-        let size: IntSize = posix.ftell(self.handle);
-        if (size < IntSize(0) || size > IntSize(2147483647)) {
-            if (size > IntSize(2147483647)) {
+        let end: IntSize = posix.ftell(self.handle);
+        if (end < IntSize(0) || end > IntSize(2147483647)) {
+            if (end > IntSize(2147483647)) {
                 throw Error.FileTooLarge;
             }
             self.__last_error = __last_error();
             throw self.__last_error;
         }
-        posix.rewind(self.handle);
+        if (posix.fseek(self.handle, start, SEEK_SET) != 0) {
+            self.__last_error = __last_error();
+            throw self.__last_error;
+        }
+        let size: IntSize = IntSize(0);
+        if (end > start) { size = end - start; }
 
         let buffer: String = runtime_string.try_alloc(Long(size))?;
         catch(err) {

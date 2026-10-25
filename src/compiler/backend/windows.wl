@@ -319,8 +319,7 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
         return;
     }
 
-    let argc: Int = 0;
-    if (main_info.arg_types is !null) { argc = main_info.arg_types.length(); }
+    let argc: Int = main_info.arg_types.length();
 
     write_ir(ref c, "define void @mainCRTStartup() {\n");
     write_ir(ref c, "entry:\n");

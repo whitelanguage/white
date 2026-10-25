@@ -28,7 +28,7 @@ func wir_capture_binding(ref state: WirFunctionLowering, name: String) -> WirBin
 func wir_closure_captures(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, node: FunctionDefNode) -> Optional(Vector(WirBinding)) {
     let scope: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let parameter: ParamNode = node.params[i];
         if (has_node(parameter.default_val)) {
             state.errors.append("Local function '" + node.name_tok.value + "' cannot declare default parameters");

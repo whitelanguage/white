@@ -85,7 +85,6 @@ func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: 
             return prefix;
         }
     }
-    return "";
 }
 
 func bind_loaded_prelude(ref c: Compiler, path: String, pos: Position) -> Void {

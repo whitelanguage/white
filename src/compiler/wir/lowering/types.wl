@@ -94,7 +94,7 @@ func wir_callable_signature(ref types: WirTypeMap, ref source: Compiler, ref pro
         parameters.append(wir_opaque_pointer(ref types, ref program));
     }
     let i: Int = 0;
-    while (signature.func_arg_types is !null && i < signature.func_arg_types.length()) {
+    while (i < signature.func_arg_types.length()) {
         let parameter: TypeListNode = signature.func_arg_types[i];
         if (parameter.type <= 0) {
             types.errors.append("Parameter " + i + " of callable type " + source_type + " has no resolved type during WIR lowering");
@@ -177,17 +177,15 @@ func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     let fields: Vector(WirTypeID) = [];
     if (info.is_interface) {
         fields.append(wir_opaque_pointer(ref types, ref program));
-        let method_count: Int = 0;
-        if (info.vtable is !null) { method_count = info.vtable.length(); }
+        let method_count: Int = info.vtable.length();
         fields.append(wir_pointer_type(ref program, wir_dispatch_table_type(ref types, ref program, method_count)));
     } else {
         let i: Int = 0;
-        while (info.fields is !null && i < info.fields.length()) {
+        while (i < info.fields.length()) {
             let field: FieldInfo = info.fields[i];
             let field_type: WirTypeID = NO_WIR_TYPE;
             if (field.name == "_vptr" && field.type == TYPE_VOID) {
-                let method_count: Int = 0;
-                if (info.vtable is !null) { method_count = info.vtable.length(); }
+                let method_count: Int = info.vtable.length();
                 field_type = wir_pointer_type(ref program, wir_dispatch_table_type(ref types, ref program, method_count));
             } else {
                 if (field.type <= 0) {
@@ -357,9 +355,6 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     let info: Optional(StructInfo) = source.struct_id_map.lookup(source_type);
     if ((info is !null)) {
         return wir_lower_struct_type(ref types, ref source, ref program, source_type, info);
-    }
-    if (source_type == TYPE_AUTO || source_type == TYPE_POISON) {
-        return wir_type_failure(ref types, source_type);
     }
     return wir_type_failure(ref types, source_type);
 }

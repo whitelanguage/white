@@ -11,10 +11,8 @@ func machine_mark_live_interval(ref before_changes: Vector(Int), ref after_chang
         return;
     }
 
-    if (start + 1 <= last) {
-        before_changes[start + 1] = before_changes[start + 1] + 1;
-        before_changes[last + 1] = before_changes[last + 1] - 1;
-    }
+    before_changes[start + 1] = before_changes[start + 1] + 1;
+    before_changes[last + 1] = before_changes[last + 1] - 1;
 
     after_changes[start] = after_changes[start] + 1;
     after_changes[last] = after_changes[last] - 1;

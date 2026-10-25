@@ -50,11 +50,13 @@ func x86_patch_calls(ref program: WirModule, ref output: X86CodeBuffer, codes: V
             let target_offset: Int = offsets[target_index];
             if (target_offset < 0) { return false; }
 
-            let patch_offset: Int = code.offset + call.offset;
-            let displacement: Int = target_offset - (patch_offset + 4);
-            if (displacement < -2147483648 || displacement > 2147483647) { return false; }
+            let patch_position: Long = Long(code.offset) + Long(call.offset);
+            if (patch_position < 0L || patch_position > Long(output.bytes.length()) - 4L) { return false; }
+            let patch_offset: Int = Int(patch_position);
+            let displacement: Long = Long(target_offset) - (patch_position + 4L);
+            if (displacement < -2147483648L || displacement > 2147483647L) { return false; }
 
-            if (!x86_patch_i32(ref output, patch_offset, displacement)) { return false; }
+            if (!x86_patch_i32(ref output, patch_offset, Int(displacement))) { return false; }
 
             call_index++;
         }

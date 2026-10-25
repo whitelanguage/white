@@ -91,7 +91,6 @@ struct X86FunctionAnalysis(
     located_values: Int,
     edge_scratch: Int,
     home_parameters: Bool,
-    has_float: Bool,
     integer_division: Bool,
     u64_cast: Bool,
     float_negate: Bool,
@@ -192,6 +191,9 @@ func x86_stack_slots_with_uses(
                 if (!layout.valid || layout.size == 0UL || layout.size > 2147483647UL) {
                     return [];
                 }
+                if (Int(layout.size) > 2147483647 - offset - (layout.alignment - 1)) {
+                    return [];
+                }
 
                 offset = x86_align_frame_offset(offset + Int(layout.size), layout.alignment);
                 slots.append(X86StackSlot(value=instruction.result, offset=offset, size=Int(layout.size)));
@@ -226,6 +228,9 @@ func x86_stack_slots_with_uses(
             } else if (instruction.result != NO_WIR_VALUE && x86_flag(cross, instruction.result)) {
                 let size: Int = x86_scalar_size(ref program, instruction.type_id);
                 if (size == 0) {
+                    return [];
+                }
+                if (size > 2147483647 - offset - (size - 1)) {
                     return [];
                 }
                 offset = x86_align_frame_offset(offset + size, size);
@@ -399,6 +404,9 @@ func x86_spill_locations(slots: Vector(X86StackSlot), scratch: Vector(Int), coun
 
     let i = 0;
     while (i < count) {
+        if (offset > 2147483647 - 15) {
+            return [];
+        }
         offset = x86_align_frame_offset(offset + 8, 8);
         offsets.append(0 - offset);
         i++;
@@ -416,6 +424,9 @@ func x86_stack_frame_size(slots: Vector(X86StackSlot), scratch: Vector(Int), spi
     }
     if (spills.length() != 0 && 0 - spills[spills.length() - 1] > size) {
         size = 0 - spills[spills.length() - 1];
+    }
+    if (size > 2147483632) {
+        return -1;
     }
     return x86_align_frame_offset(size, 16);
 }
@@ -497,21 +508,16 @@ func x86_analyze_function(ref program: WirModule, function_id: WirFuncID, functi
         located_values=0,
         edge_scratch=0,
         home_parameters=false,
-        has_float=false,
         integer_division=false,
         u64_cast=false,
         float_negate=false,
         wide_operation=false,
         call_frame=0
     );
-    let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
-    result.has_float = x86_scalar_float(ref program, signature.result);
-
     let i: Int = 0;
     while (i < function.parameters.length()) {
         let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[i]))];
         if (x86_memory_value(ref program, parameter.type_id)) { result.home_parameters = true; }
-        if (x86_scalar_float(ref program, parameter.type_id)) { result.has_float = true; }
         i++;
     }
 
@@ -559,14 +565,6 @@ func x86_analyze_function(ref program: WirModule, function_id: WirFuncID, functi
                 opcode == WirOpcode.UnsignedRemainder || opcode == WirOpcode.ShiftLeft ||
                 opcode == WirOpcode.SignedShiftRight || opcode == WirOpcode.UnsignedShiftRight) {
                 result.home_parameters = true;
-            }
-
-            if (x86_scalar_float(ref program, instruction.type_id)) { result.has_float = true; }
-            let operand_index: Int = 0;
-            while (operand_index < instruction.operands.length()) {
-                let operand: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[operand_index]))];
-                if (x86_scalar_float(ref program, operand.type_id)) { result.has_float = true; }
-                operand_index++;
             }
 
             let division: Bool = opcode == WirOpcode.SignedDivide || opcode == WirOpcode.UnsignedDivide ||

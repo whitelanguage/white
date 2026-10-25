@@ -28,7 +28,7 @@ func extern_callconv(abi_name: String) -> String {
     return "ccc ";
 }
 func func_callconv(info: FuncInfo) -> String {
-    if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) {
+    if (!has_func(info) || info.abi_name.length() == 0) {
         return "";
     }
     return extern_callconv(info.abi_name);
@@ -65,8 +65,7 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     if (!check_duplicate_params(params, "extern function '" + func_name + "'", node.pos)) {
         return void_result();
     }
-    let p_len: Int = 0;
-    if (params is !null) { p_len = params.length(); }
+    let p_len: Int = params.length();
     let p_idx: Int = 0;
     let params_str: String = "";
 
@@ -128,8 +127,7 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
 }
 func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResult {
     let funcs: Vector(NodeID) = node.funcs;
-    let len: Int = 0;
-    if (funcs is !null) { len = funcs.length(); }
+    let len: Int = funcs.length();
     let i: Int = 0;
     while (i < len) {
         let f_node: ExternFuncNode = get_extern_func_node(ref c.arena, funcs[i]);

@@ -236,7 +236,7 @@ func has_index_refs(ref c: Compiler) -> Bool {
         if (node_tag(call.callee) == NODE_VAR_ACCESS) { name = get_var_access_node(ref c.arena, call.callee).name_tok.value; }
         if (node_tag(call.callee) == NODE_FIELD_ACCESS) { name = get_field_access_node(ref c.arena, call.callee).field_name; }
         let i = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let arg = call.args[i];
             if (node_tag(arg.val) == NODE_REF && node_tag(get_ref_node(ref c.arena, arg.val).node) == NODE_INDEX_ACCESS) {
                 let key = name + "." + i;
@@ -255,7 +255,7 @@ func ref_register_params(ref c: Compiler, name: String, params: Vector(ParamNode
 // this gate only avoids body walks, the resolved call signature decides whether an argument is a reference
     c.ref_callees.put(name, true);
     let i = 0;
-    while (params is !null && i < params.length()) {
+    while (i < params.length()) {
         let param = params[i];
         if (param.pass_mode == PARAM_REF) {
             c.ref_callees.put(name + "." + i, true);
@@ -289,7 +289,7 @@ func ref_body_file(ref c: Compiler, node: NodeID) -> String {
     let kind = node_tag(node);
     if (kind == NODE_BLOCK) {
         let block = get_block_node(ref c.arena, node);
-        if (block.stmts is null || block.stmts.length() == 0) { return ""; }
+        if (block.stmts.length() == 0) { return ""; }
         return ref_body_file(ref c, block.stmts[0]);
     }
     if (kind == NODE_VAR_DECL) { return get_var_decl_node(ref c.arena, node).pos.fn; }
@@ -372,7 +372,7 @@ func ref_resolve_call(ref c: Compiler, call: CallNode) -> Optional(FuncInfo) {
             info = c.func_table.lookup(record.name + "_" + access.field_name);
             if ((info is !null)) { return info; }
             let i = 0;
-            while (record.vtable is !null && i < record.vtable.length()) {
+            while (i < record.vtable.length()) {
                 let member: FuncInfo = record.vtable[i];
                 if (member.base_name == access.field_name) { return member; }
                 i++;
@@ -400,7 +400,7 @@ func ref_known_call(ref c: Compiler, ref state: RefCheck, call: CallNode) -> Opt
 }
 
 func ref_method_call(ref c: Compiler, call: CallNode, info: FuncInfo, receiver_type: Int = 0) -> Bool {
-    if (node_tag(call.callee) != NODE_FIELD_ACCESS || info.arg_names is null ||
+    if (node_tag(call.callee) != NODE_FIELD_ACCESS ||
         info.arg_names.length() == 0 || info.arg_names[0] != "self") { return false; }
     let access = get_field_access_node(ref c.arena, call.callee);
     if (receiver_type == 0) { receiver_type = get_expr_type(ref c, access.obj); }
@@ -448,12 +448,12 @@ func ref_call_body(ref c: Compiler, ref state: RefCheck, call: CallNode, info: F
             arg_index--;
         }
         let index = 0;
-        while (call.args is !null && index < call.args.length()) {
+        while (index < call.args.length()) {
             let arg = call.args[index];
             if ((arg.name.length() == 0 && index == arg_index) || arg.name == info.arg_names[i]) { argument = arg.val; }
             index++;
         }
-        if (!has_node(argument) && arg_index >= 0 && info.default_args is !null && arg_index < info.default_args.length()) {
+        if (!has_node(argument) && arg_index >= 0 && arg_index < info.default_args.length()) {
             argument = info.default_args[arg_index];
         }
         let owner = ref_owner(ref c, ref state, argument);
@@ -537,7 +537,7 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: 
 // unknown calls may reach the same allocation through a field or a global alias
     if (state.collecting) {
         let i = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let value = call.args[i].val;
             let target = value;
             if (node_tag(value) == NODE_REF) { target = get_ref_node(ref c.arena, value).node; }
@@ -572,7 +572,7 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: 
         }
     }
 
-    if (node_tag(call.callee) == NODE_VAR_ACCESS && call.args is !null && call.args.length() == 1) {
+    if (node_tag(call.callee) == NODE_VAR_ACCESS && call.args.length() == 1) {
         let name = get_var_access_node(ref c.arena, call.callee).name_tok.value;
         let type = get_cast_target(ref c, name);
         let arg = call.args[0];
@@ -592,14 +592,14 @@ func ref_check_call(ref c: Compiler, ref state: RefCheck, call: CallNode, info: 
     if (has_func(info) && (info.ann_flags & FLAG_ANN_INTRINSIC) != 0 && info.base_name == "print") {
         let safe = true;
         let i = 0;
-        while (call.args is !null && i < call.args.length()) {
+        while (i < call.args.length()) {
             let arg = call.args[i];
             if (arg.is_spread || !ref_scalar_expr(ref c, arg.val)) { safe = false; }
             i++;
         }
         if safe { return; }
     }
-    if (has_func(info) && info.compiler_link_name is !null && info.compiler_link_name.length() != 0) {
+    if (has_func(info) && info.compiler_link_name.length() != 0) {
         let link = info.compiler_link_name;
         let scalar = true;
         let i = 0;
@@ -642,7 +642,7 @@ func ref_check_overrides(ref c: Compiler, ref state: RefCheck, call: CallNode, i
                 }
                 if (parent == record.type_id) {
                     let index = 0;
-                    while (candidate.vtable is !null && index < candidate.vtable.length()) {
+                    while (index < candidate.vtable.length()) {
                         let member: FuncInfo = candidate.vtable[index];
                         if (member.base_name == info.base_name && member.name != info.name &&
                             !ref_call_body(ref c, ref state, call, member, receiver_type)) {
@@ -743,7 +743,7 @@ func ref_drop_record(ref c: Compiler, ref state: RefCheck, record: StructInfo, p
         if (!ref_call_body(ref c, ref state, call, deinit)) { return false; }
     }
     let i = 0;
-    while (record.fields is !null && i < record.fields.length()) {
+    while (i < record.fields.length()) {
         let field: FieldInfo = record.fields[i];
         if (!ref_drop_effects(ref c, ref state, field.type, pos, depth + 1)) { return false; }
         if (ref_storage(ref c, field.type)) {
@@ -781,7 +781,7 @@ func ref_check_fields(ref c: Compiler, ref state: RefCheck, type_id: Int, pos: P
     if (!(record is !null) || record.is_enum) { return; }
     let info: StructInfo = record;
     let i = 0;
-    while (info.fields is !null && i < info.fields.length()) {
+    while (i < info.fields.length()) {
         let field: FieldInfo = info.fields[i];
         if (needs_drop(ref c, field.type)) { ref_check_fields(ref c, ref state, field.type, pos, depth + 1); }
         i++;
@@ -797,7 +797,7 @@ func ref_check_block(ref c: Compiler, ref state: RefCheck, body: NodeID) -> Bool
     let block = get_block_node(ref c.arena, body);
     let terminated = false;
     let i = 0;
-    while (block.stmts is !null && i < block.stmts.length() && !terminated) {
+    while (i < block.stmts.length() && !terminated) {
         terminated = ref_check_node(ref c, ref state, block.stmts[i]);
         i++;
     }
@@ -805,7 +805,7 @@ func ref_check_block(ref c: Compiler, ref state: RefCheck, body: NodeID) -> Bool
     while (state.active.length() > active) { state.active.drop(); }
     // a local guard uses its spelling, discard it before an outer binding becomes visible
     i = 0;
-    while (block.stmts is !null && i < block.stmts.length()) {
+    while (i < block.stmts.length()) {
         if (node_tag(block.stmts[i]) == NODE_VAR_DECL) {
             flow_forget(ref c, get_var_decl_node(ref c.arena, block.stmts[i]).name_tok.value, false);
         }
@@ -964,7 +964,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
     if (kind == NODE_VECTOR_LIT) {
         let literal = get_vector_lit_node(ref c.arena, node);
         let i = 0;
-        while (literal.elements is !null && i < literal.elements.length()) {
+        while (i < literal.elements.length()) {
             ref_check_node(ref c, ref state, literal.elements[i].val);
             if (state.collecting && ref_storage(ref c, get_expr_type(ref c, literal.elements[i].val))) {
                 ref_publish(ref state, ref_owner(ref c, ref state, literal.elements[i].val));
@@ -976,7 +976,7 @@ func ref_check_raw_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> B
     if (kind == NODE_MAP_LIT) {
         let literal = get_map_lit_node(ref c.arena, node);
         let i = 0;
-        while (literal.pairs is !null && i < literal.pairs.length()) {
+        while (i < literal.pairs.length()) {
             let pair = literal.pairs[i];
             ref_check_node(ref c, ref state, pair.key);
             ref_check_node(ref c, ref state, pair.value);
@@ -1061,7 +1061,7 @@ func ref_check_var_assign(ref c: Compiler, ref state: RefCheck, node: NodeID) ->
     let target: SymbolInfo = symbol;
     state.functions.remove(target.reg);
     let owner = 0;
-    if (target.reg is !null && state.slots.contains_key(ref_slot(ref state, target.reg))) {
+    if (state.slots.contains_key(ref_slot(ref state, target.reg))) {
         let existing = state.slots.lookup(ref_slot(ref state, target.reg));
         if (existing is !null) { owner = existing; }
     }
@@ -1100,7 +1100,7 @@ func ref_walk_call(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
     let info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
     let candidates = false;
     let probe = 0;
-    while (call.args is !null && probe < call.args.length()) {
+    while (probe < call.args.length()) {
         let arg = call.args[probe];
         if (node_tag(arg.val) == NODE_REF && node_tag(get_ref_node(ref c.arena, arg.val).node) == NODE_INDEX_ACCESS) { candidates = true; }
         probe++;
@@ -1147,7 +1147,7 @@ func ref_walk_call(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
         receiver_type = get_expr_type(ref c, get_field_access_node(ref c.arena, call.callee).obj);
     }
     let i = 0;
-    while (arguments is !null && i < arguments.length()) {
+    while (i < arguments.length()) {
         let arg = arguments[i];
         ref_check_node(ref c, ref state, arg.val);
         if (!state.collecting && node_tag(arg.val) == NODE_REF && has_func(info)) {
@@ -1228,7 +1228,7 @@ func ref_check_for(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
 func ref_body_position(ref c: Compiler, node: NodeID) -> Position {
     if (node_tag(node) == NODE_BLOCK) {
         let block = get_block_node(ref c.arena, node);
-        if (block.stmts is !null && block.stmts.length() > 0) { return ref_body_position(ref c, block.stmts[0]); }
+        if (block.stmts.length() > 0) { return ref_body_position(ref c, block.stmts[0]); }
     }
     if (node_tag(node) == NODE_CALL) { return get_call_node(ref c.arena, node).pos; }
     if (node_tag(node) == NODE_VAR_DECL) { return get_var_decl_node(ref c.arena, node).pos; }

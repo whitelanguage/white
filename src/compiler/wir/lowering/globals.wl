@@ -32,7 +32,7 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
     if (node_tag(value_node) == NODE_CALL) {
         let call: CallNode = get_call_node(ref source.arena, value_node);
         let target: Int = wir_static_cast_target(ref source, call.callee);
-        if (target != 0 && call.args is !null && call.args.length() == 1) {
+        if (target != 0 && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
             if ((argument.name.length() == 0) && !argument.is_spread &&
                 get_repr_type(ref source, target) == get_repr_type(ref source, source_type)) {
@@ -94,7 +94,7 @@ func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
     }
 
     let wir_name: String = key;
-    if (info.reg is !null && info.reg.starts_with("@")) {
+    if (info.reg.starts_with("@")) {
         wir_name = info.reg.slice(1, info.reg.length());
     }
     return WirSourceGlobal(name=wir_name, source_type=info.type, is_const=info.is_const);

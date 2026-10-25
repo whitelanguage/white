@@ -1031,7 +1031,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 let cross = A64Register.X1;
                 if (source.low == A64Register.None || source.high == A64Register.None || amount.low == A64Register.None ||
                     destination.low == A64Register.None || destination.high == A64Register.None ||
-                    count == A64Register.None || work == A64Register.None || cross == A64Register.None ||
+                    count == A64Register.None ||
                     !a64_wide_shift(ref output, instruction.opcode, destination, source, amount.low, count, work, cross) ||
                     !a64_save_pair(ref values, ref output, stack.homes, instruction.result, destination)) {
                     return a64_lowering_error("cannot encode AArch64 128-bit shift");

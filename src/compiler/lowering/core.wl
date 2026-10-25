@@ -42,8 +42,7 @@ func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
 
     let block: BlockNode = get_block_node(ref c.arena, p_mod.ast);
     let stmts: Vector(NodeID) = block.stmts;
-    let len: Int = 0;
-    if (stmts is !null) { len = stmts.length(); }
+    let len: Int = stmts.length();
 
     let i: Int = 0;
     while (i < len) {
@@ -88,7 +87,7 @@ func discard_statement_result(ref c: Compiler, node: NodeID, result: CompileResu
 func validate_fallible_call(ref c: Compiler, type_id: Int, handled: Bool, name: String, pos: Position) -> Bool {
     if (!is_fallible_type(ref c, type_id) || handled) { return true; }
     let message: String = "fallible call requires '?'";
-    if (name is !null && name.length() > 0) {
+    if (name.length() > 0) {
         message = "call to fallible function '" + name + "' requires '?'";
     }
     throw_type_error(pos, message);
@@ -104,14 +103,12 @@ func compile_block(ref c: Compiler, node: BlockNode) -> CompileResult {
     }
 
     let stmts: Vector(NodeID) = node.stmts;
-    let len: Int = 0;
-    if (stmts is !null) { len = stmts.length(); }
+    let len: Int = stmts.length();
     let i: Int = 0;
 
     let last_res: CompileResult = CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
     let terminated: Bool = false;
     while (i < len) {
-        let stmt: Int = node_tag(stmts[i]);
         last_res = compile_node(ref c, stmts[i]);
         discard_statement_result(ref c, stmts[i], last_res);
         if (must_terminate(ref c, stmts[i])) {
@@ -173,7 +170,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
             scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
             return void_result();
         }
-        if (target_type_id == TYPE_NULL || target_type_id == TYPE_NULLPTR || target_type_id == TYPE_VOID || target_type_id == TYPE_POISON) {
+        if (target_type_id == TYPE_NULL || target_type_id == TYPE_NULLPTR || target_type_id == TYPE_VOID) {
             throw_type_error(node.pos, "Cannot infer 'Auto' as null, Void");
             let curr_scope: Scope = c.symbol_table;
             scope_put(curr_scope, node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
@@ -270,7 +267,7 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
             let unwrapped_named_cast: Bool = false;
             if ((named_target is !null) && node_tag(value_node) == NODE_CALL) {
                 let cast_call: CallNode = get_call_node(ref c.arena, value_node);
-                if (node_tag(cast_call.callee) == NODE_VAR_ACCESS && cast_call.args is !null && cast_call.args.length() == 1) {
+                if (node_tag(cast_call.callee) == NODE_VAR_ACCESS && cast_call.args.length() == 1) {
                     let cast_name: VarAccessNode = get_var_access_node(ref c.arena, cast_call.callee);
                     if (get_cast_target(ref c, cast_name.name_tok.value) == target_type_id) {
                         let cast_arg: ArgNode = cast_call.args[0];
@@ -867,7 +864,7 @@ func compile_print_call(ref c: Compiler, node: CallNode) -> CompileResult {
     let ending: CompileResult = CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
     let saw_named: Bool = false;
     let i: Int = 0;
-    while (node.args is !null && i < node.args.length()) {
+    while (i < node.args.length()) {
         let arg: ArgNode = node.args[i];
         if (arg.name.length() != 0) {
             saw_named = true;
@@ -1025,7 +1022,7 @@ func compile_variadic_pack(ref c: Compiler, args: Vector(ArgNode), elem_type: In
     let total: String = "0";
     let i: Int = 0;
 
-    while (args is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         let old_expected: Int = c.expected_type;
         c.expected_type = 0;
@@ -1236,7 +1233,7 @@ func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
 }
 
 func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
-    if (node.type_params is !null && node.type_params.length() > 0 &&
+    if (node.type_params.length() > 0 &&
         c.generic_func_key.length() == 0) {
         return void_result();
     }
@@ -1265,8 +1262,7 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
 
     let params_str: String = "";
     let params: Vector(ParamNode) = node.params;
-    let p_len: Int = 0;
-    if (params is !null) { p_len = params.length(); }
+    let p_len: Int = params.length();
     let arg_idx: Int = 0;
 
     while (arg_idx < p_len) {
@@ -1407,8 +1403,7 @@ func compile_method_body(ref c: Compiler, class_name: String, node: MethodDefNod
     let params_str: String = class_ptr_llvm + " %arg0";
 
     let params: Vector(ParamNode) = node.params;
-    let p_len: Int = 0;
-    if (params is !null) { p_len = params.length(); }
+    let p_len: Int = params.length();
     let arg_idx: Int = 0;
 
     while (arg_idx < p_len) {
@@ -1524,7 +1519,7 @@ func can_access_private_method(ref c: Compiler, owner: StructInfo) -> Bool {
     }
     if (c.current_package_prefix == class_prefix) { return true; }
     let current = c.curr_func;
-    if (current is null || current.arg_types is null || current.arg_types.length() == 0) {
+    if (current is null || current.arg_types.length() == 0) {
         return false;
     }
     let receiver: TypeListNode = current.arg_types[0];
@@ -1574,8 +1569,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
     }
 
     let vtable_vec: Vector(Struct) = s_info.vtable;
-    let v_len: Int = 0;
-    if (vtable_vec is !null) { v_len = vtable_vec.length(); }
+    let v_len: Int = vtable_vec.length();
 
     let m_idx: Int = 0;
     let found: Bool = false;
@@ -1622,8 +1616,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
 
     if (!found && !s_info.is_interface) {
         let direct: Optional(FuncInfo) = c.func_table.lookup(s_info.name + "_" + method_name);
-        if ((direct is !null) && direct.compiler_link_name is !null &&
-            direct.compiler_link_name.length() > 0) {
+        if ((direct is !null) && direct.compiler_link_name.length() > 0) {
             f_info = direct;
             found = true;
         }
@@ -1642,8 +1635,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
         let expected_count: Int = 1;
         if (f_info.compiler_link_name == "values_equal") { expected_count = 2; }
 
-        let actual_count: Int = 0;
-        if (args is !null) { actual_count = args.length(); }
+        let actual_count: Int = args.length();
         if (actual_count != expected_count) {
             throw_type_error(n_call.pos, "Argument count mismatch. Expected " + expected_count + ", got " + actual_count);
             return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -1780,13 +1772,12 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
     }
 
     let args: Vector(ArgNode) = n_call.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     let owned_args: Vector(Struct) = [];
 
     let exp_len: Int = 0;
     if (s_info.is_interface) {
-        if (interface_params is !null) { exp_len = interface_params.length(); }
+        exp_len = interface_params.length();
     } else if (expected_types is !null) {
         exp_len = expected_types.length();
     }
@@ -1807,7 +1798,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
     if (s_info.is_interface) {
         let interface_names: Vector(String) = [];
         let name_index: Int = 0;
-        while (interface_params is !null && name_index < interface_params.length()) {
+        while (name_index < interface_params.length()) {
             let param: ParamNode = interface_params[name_index];
             interface_names.append(param.name_tok.value);
             name_index += 1;
@@ -1881,8 +1872,7 @@ func compile_class_method_call(ref c: Compiler, s_info: StructInfo, obj_res: Com
 
 func compile_dict_intrinsic(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResult {
     let args: Vector(ArgNode) = node.args;
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let count: Int = args.length();
     let expected: Int = 1;
     if (info.compiler_link_name == "dict_keys_equal") { expected = 2; }
     if (count != expected) {
@@ -1939,8 +1929,7 @@ func compile_dict_intrinsic(ref c: Compiler, info: FuncInfo, node: CallNode) -> 
 func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> CompileResult {
     let scope: CaptureScope = CaptureScope(local_vars=Dict(), captured_vars=Dict(), captured_list=[]);
     let params: Vector(ParamNode) = func_def.params;
-    let p_len: Int = 0;
-    if (params is !null) { p_len = params.length(); }
+    let p_len: Int = params.length();
     let local_variadic: Int = variadic_param_index(params);
     let p_i: Int = 0;
     while (p_i < p_len) {
@@ -2360,7 +2349,7 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
 }
 
 func compile_struct_def(ref c: Compiler, node: StructDefNode) -> CompileResult {
-    if (node.type_params is !null && node.type_params.length() > 0) {
+    if (node.type_params.length() > 0) {
         return void_result();
     }
 
@@ -2450,8 +2439,7 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
     }
 
     let fields_vec: Vector(Struct) = s_info.fields;
-    let f_len: Int = 0;
-    if (fields_vec is !null) { f_len = fields_vec.length(); }
+    let f_len: Int = fields_vec.length();
 
     let default_idx = 0;
     while (default_idx < f_len) {
@@ -2495,8 +2483,7 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
     }
 
     let args: Vector(ArgNode) = n_call.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     if (a_len > f_len) {
         throw_type_error(n_call.pos, "struct '" + s_info.name + "' accepts at most " + f_len + " arguments, got " + a_len);
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -2576,7 +2563,7 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
 }
 
 func zero_value(ref c: Compiler, info: FuncInfo, node: CallNode) -> CompileResult {
-    if (node.args is !null && node.args.length() != 0) {
+    if (node.args.length() != 0) {
         throw_type_error(node.pos, "Argument count mismatch. Expected 0, got " + node.args.length());
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
@@ -2611,8 +2598,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
     let obj_ptr: String = emit_alloc_obj(ref c, object_size, "" + s_info.type_id, s_info.llvm_name + "*");
 
     let fields_vec: Vector(Struct) = s_info.fields;
-    let f_len: Int = 0;
-    if (fields_vec is !null) { f_len = fields_vec.length(); }
+    let f_len: Int = fields_vec.length();
     let f_idx: Int = 0;
 
     while (f_idx < f_len) {
@@ -2662,14 +2648,12 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
         queue_generic_class_method(ref c, s_info, "$init");
         let args_str: String = s_info.llvm_name + "* " + obj_ptr;
         let args: Vector(ArgNode) = n_call.args;
-        let a_len: Int = 0;
-        if (args is !null) { a_len = args.length(); }
+        let a_len: Int = args.length();
         let arg_idx: Int = 0;
         let owned_args: Vector(Struct) = [];
         let arg_types: Vector(Struct) = meta_init_func.arg_types;
 
-        let expected_arg_count: Int = 0;
-        if (arg_types is !null) { expected_arg_count = arg_types.length() - 1; }
+        let expected_arg_count: Int = arg_types.length() - 1;
 
         let native_args: BoundCallArgs = bind_native_args(args, meta_init_func, 1, n_call.pos);
         if (!has_bound_args(native_args)) {
@@ -2712,8 +2696,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
         emit_release_owned_args(ref c, owned_args);
     } else {
         let args: Vector(ArgNode) = n_call.args;
-        let a_len: Int = 0;
-        if (args is !null) { a_len = args.length(); }
+        let a_len: Int = args.length();
         if (a_len > 0) {
             throw_type_error(n_call.pos, "Class '" + s_info.name + "' has no init method, but arguments were provided.");
             return void_result();
@@ -2724,9 +2707,7 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
 }
 
 func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
-    if (node.type_params is !null &&
-        node.type_params.length() > 0 &&
-        c.generic_class_type == 0) {
+    if (node.type_params.length() > 0 && c.generic_class_type == 0) {
         return void_result();
     }
     let raw_name: String = node.name_tok.value;
@@ -2771,7 +2752,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
         if ((parent_info is !null)) {
             let meta_parent_info: StructInfo = parent_info;
             let inherited_idx: Int = 0;
-            while (meta_parent_info.interfaces is !null && inherited_idx < meta_parent_info.interfaces.length()) {
+            while (inherited_idx < meta_parent_info.interfaces.length()) {
                 let inherited: TypeListNode = meta_parent_info.interfaces[inherited_idx];
                 if (!add_interface_type(ref c, effective_interfaces, inherited.type, node.pos)) {
                     return void_result();
@@ -2780,7 +2761,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
             }
         }
         let declared_idx: Int = 0;
-        while (node.interfaces is !null && declared_idx < node.interfaces.length()) {
+        while (declared_idx < node.interfaces.length()) {
             let declared: NodeID = node.interfaces[declared_idx];
             if (!add_interface(ref c, effective_interfaces, declared, node.pos)) {
                 return void_result();
@@ -2800,7 +2781,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
 
     if has_analyzed_metadata {
         let analyzed_index: Int = 0;
-        while (record.fields is !null && analyzed_index < record.fields.length()) {
+        while (analyzed_index < record.fields.length()) {
             let field: FieldInfo = record.fields[analyzed_index];
             if (field.name == "_vptr" && field.type == TYPE_VOID) {
                 field.llvm_type = "i8*";
@@ -2813,12 +2794,13 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
             analyzed_index++;
         }
         let analyzed_method_index: Int = 0;
-        while (record.vtable is !null && analyzed_method_index < record.vtable.length()) {
+        while (analyzed_method_index < record.vtable.length()) {
             vtable_vec.append(record.vtable[analyzed_method_index]);
             analyzed_method_index++;
         }
     } else if ((parent_info is !null)) {
-        let p_fields: Vector(Struct) = parent_info.fields;
+        let parent: StructInfo = parent_info;
+        let p_fields: Vector(Struct) = parent.fields;
         let pf_len: Int = p_fields.length();
         let pf_i: Int = 0;
         while (pf_i < pf_len) {
@@ -2830,8 +2812,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
             pf_i += 1;
         }
 
-        if (parent_info is null) { return void_result(); }
-        let p_vt: Vector(Struct) = parent_info.vtable;
+        let p_vt: Vector(Struct) = parent.vtable;
         let pvt_len: Int = p_vt.length();
         let pvt_i: Int = 0;
         while (pvt_i < pvt_len) {
@@ -2845,8 +2826,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
     }
 
     let my_fields: Vector(NodeID) = node.fields;
-    let mf_len: Int = 0;
-    if (my_fields is !null) { mf_len = my_fields.length(); }
+    let mf_len: Int = my_fields.length();
     let mf_idx: Int = 0;
     let class_field_names: Dict(String, StringConstant) = Dict();
     let inherited_field_idx: Int = 0;
@@ -2895,8 +2875,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
     c.generic_type_defs += def_str;
 
     let my_methods: Vector(NodeID) = node.methods;
-    let mm_len: Int = 0;
-    if (my_methods is !null) { mm_len = my_methods.length(); }
+    let mm_len: Int = my_methods.length();
     let mm_idx: Int = 0;
     while (!has_analyzed_metadata && mm_idx < mm_len) {
         let m_node: MethodDefNode = get_method_def_node(ref c.arena, my_methods[mm_idx]);
@@ -2907,7 +2886,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
             return void_result();
         }
 
-        if (m_node.type_params is !null && m_node.type_params.length() > 0) {
+        if (m_node.type_params.length() > 0) {
             mm_idx++;
             continue;
         }
@@ -2924,8 +2903,7 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
             method_info.mutates_self = method_mutates_self(ref c, m_node.body);
             c.func_table.put(m_name, method_info);
 
-            if (method_info.compiler_link_name is !null &&
-                method_info.compiler_link_name.length() > 0) {
+            if (method_info.compiler_link_name.length() > 0) {
                 mm_idx += 1;
                 continue;
             }
@@ -2982,65 +2960,62 @@ func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
 
     if (vt_str.length() > 0) { write_ir(ref c, vt_str); }
 
-    if (record.interfaces is !null) {
-        let i_len: Int = record.interfaces.length();
-        let i_idx: Int = 0;
-        while (i_idx < i_len) {
-            let interface_type: TypeListNode = record.interfaces[i_idx];
-            let i_info: Optional(StructInfo) = c.struct_id_map.lookup(interface_type.type);
-            let raw_i_name: String = get_type_name(ref c, interface_type.type);
-            if (!(i_info is !null) || !i_info.is_interface) {
-                throw_name_error(node.pos, "Interface '" + raw_i_name + "' is not defined or is not an interface.");
-                return void_result();
-            }
-            let meta_i_info: StructInfo = i_info;
-            let i_name: String = meta_i_info.name;
-
-            let im_methods: Vector(Struct) = meta_i_info.vtable;
-            let im_len: Int = 0;
-            if (im_methods is !null) { im_len = im_methods.length(); }
-
-            let itable_name: String = "@itable." + class_name + "." + i_name;
-
-            write_ir(ref c, "%itable_type." + class_name + "." + i_name + " = type [ " + im_len + " x i8* ]\n");
-
-            let it_str: String = itable_name + " = global %itable_type." + class_name + "." + i_name;
-
-            if (im_len == 0) {
-                it_str += " zeroinitializer\n\n";
-            } else {
-                it_str += " [ ";
-                let im_idx: Int = 0;
-                while (im_idx < im_len) {
-                    let req_m: MethodDefNode = im_methods[im_idx];
-                    let req_name: String = req_m.name_tok.value;
-                    let found_impl: Optional(FuncInfo) = find_interface_implementation(ref c, record, meta_i_info, req_m);
-                    if (!(found_impl is !null)) {
-                        throw_name_error(node.pos, "Class '" + raw_name + "' does not implement interface method '" + req_name + "'.");
-                        return void_result();
-                    }
-                    let meta_found_impl: FuncInfo = found_impl;
-
-                    let sig: String = get_func_sig_str(ref c, meta_found_impl);
-                    queue_generic_class_method(ref c, record, meta_found_impl.base_name);
-                    if (im_idx > 0) { it_str += ", "; }
-                    it_str += "i8* bitcast (" + sig + " @" + meta_found_impl.name + " to i8*)";
-                    im_idx += 1;
-                }
-                it_str += " ]\n\n";
-            }
-
-            write_ir(ref c, it_str);
-
-            i_idx += 1;
+    let i_len: Int = record.interfaces.length();
+    let i_idx: Int = 0;
+    while (i_idx < i_len) {
+        let interface_type: TypeListNode = record.interfaces[i_idx];
+        let i_info: Optional(StructInfo) = c.struct_id_map.lookup(interface_type.type);
+        let raw_i_name: String = get_type_name(ref c, interface_type.type);
+        if (!(i_info is !null) || !i_info.is_interface) {
+            throw_name_error(node.pos, "Interface '" + raw_i_name + "' is not defined or is not an interface.");
+            return void_result();
         }
+        let meta_i_info: StructInfo = i_info;
+        let i_name: String = meta_i_info.name;
+
+        let im_methods: Vector(Struct) = meta_i_info.vtable;
+        let im_len: Int = im_methods.length();
+
+        let itable_name: String = "@itable." + class_name + "." + i_name;
+
+        write_ir(ref c, "%itable_type." + class_name + "." + i_name + " = type [ " + im_len + " x i8* ]\n");
+
+        let it_str: String = itable_name + " = global %itable_type." + class_name + "." + i_name;
+
+        if (im_len == 0) {
+            it_str += " zeroinitializer\n\n";
+        } else {
+            it_str += " [ ";
+            let im_idx: Int = 0;
+            while (im_idx < im_len) {
+                let req_m: MethodDefNode = im_methods[im_idx];
+                let req_name: String = req_m.name_tok.value;
+                let found_impl: Optional(FuncInfo) = find_interface_implementation(ref c, record, meta_i_info, req_m);
+                if (!(found_impl is !null)) {
+                    throw_name_error(node.pos, "Class '" + raw_name + "' does not implement interface method '" + req_name + "'.");
+                    return void_result();
+                }
+                let meta_found_impl: FuncInfo = found_impl;
+
+                let sig: String = get_func_sig_str(ref c, meta_found_impl);
+                queue_generic_class_method(ref c, record, meta_found_impl.base_name);
+                if (im_idx > 0) { it_str += ", "; }
+                it_str += "i8* bitcast (" + sig + " @" + meta_found_impl.name + " to i8*)";
+                im_idx += 1;
+            }
+            it_str += " ]\n\n";
+        }
+
+        write_ir(ref c, it_str);
+
+        i_idx += 1;
     }
 
     if (c.generic_class_type == 0) {
         mm_idx = 0;
         while (mm_idx < mm_len) {
             let m_node: MethodDefNode = get_method_def_node(ref c.arena, my_methods[mm_idx]);
-            if (m_node.type_params is null || m_node.type_params.length() == 0) {
+            if (m_node.type_params.length() == 0) {
                 compile_method_def(ref c, class_name, m_node);
             }
             mm_idx += 1;
@@ -3321,8 +3296,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
 
     if (meta_s_info.is_interface) {
         let methods: Vector(Struct) = meta_s_info.vtable;
-        let method_count: Int = 0;
-        if (methods is !null) { method_count = methods.length(); }
+        let method_count: Int = methods.length();
         let method_index: Int = 0;
         while (method_index < method_count) {
             let candidate: MethodDefNode = methods[method_index];
@@ -3351,7 +3325,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
 
             let bound_args: Vector(Struct) = [];
             let param_index: Int = 0;
-            while (method_node.params is !null && param_index < method_node.params.length()) {
+            while (param_index < method_node.params.length()) {
                 let param: ParamNode = method_node.params[param_index];
                 bound_args.append(TypeListNode(type=resolve_type(ref c, param.type_tok), pass_mode=param.pass_mode));
                 param_index += 1;
@@ -3378,8 +3352,7 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
 
     if (meta_s_info.is_class) {
         let vtable_vec: Vector(Struct) = meta_s_info.vtable;
-        let v_len: Int = 0;
-        if (vtable_vec is !null) { v_len = vtable_vec.length(); }
+        let v_len: Int = vtable_vec.length();
         let m_idx: Int = 0;
         let target_func: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
 
@@ -3696,8 +3669,7 @@ func compile_vector_append(ref c: Compiler, vec_node: NodeID, call_node: CallNod
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let args: Vector(ArgNode) = call_node.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     if (a_len != 1) {
         throw_type_error(call_node.pos, "'append' expects exactly 1 argument.");
         return void_result();
@@ -3856,8 +3828,7 @@ func compile_vector_drop(ref c: Compiler, vec_node: NodeID, call_node: CallNode)
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let args: Vector(ArgNode) = call_node.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     if (a_len > 0) {
         throw_type_error(call_node.pos, "'drop' expects 0 arguments.");
         return void_result();
@@ -3932,8 +3903,7 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
     let count: Int = node.count;
     let elem_type_id: Int = TYPE_INT;
     let elements: Vector(ArgNode) = node.elements;
-    let e_len: Int = 0;
-    if (elements is !null) { e_len = elements.length(); }
+    let e_len: Int = elements.length();
 
     let has_expected: Bool = false;
     if (c.expected_type > 0) {
@@ -3951,9 +3921,16 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
         let first_arg: ArgNode = elements[0];
         let old_exp: Int = c.expected_type;
         c.expected_type = 0;
-        let first_res: CompileResult = compile_node(ref c, first_arg.val);
+        // infer the element type without emitting its expression twice
+        let first_type: Int = get_expr_type(ref c, first_arg.val);
         c.expected_type = old_exp;
-        elem_type_id = first_res.type;
+        if (first_type == 0 || first_type == TYPE_POISON || first_type == TYPE_VOID) {
+            if (first_type != TYPE_POISON) {
+                throw_type_error(node.pos, "Cannot infer a Vector element type.");
+            }
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+        }
+        elem_type_id = first_type;
     }
 
     let vec_type_id: Int = get_vector_type_id(ref c, elem_type_id);
@@ -3989,7 +3966,7 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
     // vector length and capacity follow the target pointer width
     let size_ptr: String = next_reg(ref c);
     write_ir(ref c, c.indent + size_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 0\n");
-    write_ir(ref c, c.indent + "store " + size_ty + " " + count + ", " + size_ty + "* " + size_ptr + "\n");
+    write_ir(ref c, c.indent + "store " + size_ty + " 0, " + size_ty + "* " + size_ptr + "\n");
 
     // capacity
     let cap_ptr: String = next_reg(ref c);
@@ -4000,6 +3977,14 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
     let data_field_ptr: String = next_reg(ref c);
     write_ir(ref c, c.indent + data_field_ptr + " = getelementptr inbounds " + struct_name + ", " + struct_name + "* " + vec_ptr + ", i32 0, i32 2\n");
     write_ir(ref c, c.indent + "store " + elem_ty_str + "* " + data_ptr + ", " + elem_ty_str + "** " + data_field_ptr + "\n");
+
+    // keep the partial vector reachable by catch and propagation cleanup
+    emit_retain_value(ref c, vec_ptr, vec_type_id);
+    let guard_slot: String = next_reg(ref c);
+    write_ir(ref c, c.indent + guard_slot + " = alloca " + struct_name + "*\n");
+    write_ir(ref c, c.indent + "store " + struct_name + "* " + vec_ptr + ", " + struct_name + "** " + guard_slot + "\n");
+    enter_scope(ref c);
+    c.symbol_table.gc_vars.append(GCTracker(reg=guard_slot, type=vec_type_id));
 
     let idx: Int = 0;
     while (idx < e_len) {
@@ -4022,15 +4007,26 @@ func compile_vector_lit(ref c: Compiler, node: VectorLitNode) -> CompileResult {
         write_ir(ref c, c.indent + "store " + elem_ty_str + " " + val_res.reg + ", " + elem_ty_str + "* " + slot_ptr + "\n");
 
         idx += 1;
+        write_ir(ref c, c.indent + "store " + size_ty + " " + idx + ", " + size_ty + "* " + size_ptr + "\n");
     }
 
-    return CompileResult(reg=vec_ptr, type=vec_type_id, origin_type=0, owns_ref=false, is_const_access=false);
+    // construction succeeded, the caller takes over the guarded reference
+    let remaining: Vector(Struct) = [];
+    let gc_idx: Int = 0;
+    while (gc_idx < c.symbol_table.gc_vars.length()) {
+        let tracked: GCTracker = c.symbol_table.gc_vars[gc_idx];
+        if (tracked.reg != guard_slot) { remaining.append(tracked); }
+        gc_idx++;
+    }
+    c.symbol_table.gc_vars = remaining;
+    exit_scope(ref c);
+
+    return CompileResult(reg=vec_ptr, type=vec_type_id, origin_type=0, owns_ref=true, is_const_access=false);
 }
 
 func compile_length_method(ref c: Compiler, obj_node: NodeID, call_node: CallNode) -> CompileResult {
     let args: Vector(ArgNode) = call_node.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     if (a_len > 0) {
         throw_type_error(call_node.pos, "Method 'length' does not accept arguments.");
         return void_result();
@@ -4109,8 +4105,7 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
     if ((s_info is !null) && s_info.is_class) {
         let meta_s_info: StructInfo = s_info;
         let has_get: Bool = false;
-        let v_len: Int = 0;
-        if (meta_s_info.vtable is !null) { v_len = meta_s_info.vtable.length(); }
+        let v_len: Int = meta_s_info.vtable.length();
         let m_idx: Int = 0;
         while (m_idx < v_len) {
             let m: FuncInfo = meta_s_info.vtable[m_idx];
@@ -4286,8 +4281,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
     if ((s_info is !null) && s_info.is_class) {
         let meta_s_info: StructInfo = s_info;
         let has_put: Bool = false;
-        let v_len: Int = 0;
-        if (meta_s_info.vtable is !null) { v_len = meta_s_info.vtable.length(); }
+        let v_len: Int = meta_s_info.vtable.length();
         let m_idx: Int = 0;
         while (m_idx < v_len) {
             let m: FuncInfo = meta_s_info.vtable[m_idx];
@@ -4635,8 +4629,7 @@ func compile_slice_access(ref c: Compiler, node: SliceAccessNode, shared: Bool) 
 
 func compile_map_lit(ref c: Compiler, node: MapLitNode) -> CompileResult {
     let pairs: Vector(MapPairNode) = node.pairs;
-    let pair_count: Int = 0;
-    if (pairs is !null) { pair_count = pairs.length(); }
+    let pair_count: Int = pairs.length();
 
     let cap: Int = pair_count * 2;
     if (cap < 8) { cap = 8; }
@@ -4675,7 +4668,10 @@ func compile_map_lit(ref c: Compiler, node: MapLitNode) -> CompileResult {
         i += 1;
     }
 
-    return CompileResult(reg=dict_res.reg, type=record.type_id, origin_type=0, owns_ref=false, is_const_access=false);
+    if (!dict_res.owns_ref) {
+        emit_retain_value(ref c, dict_res.reg, record.type_id);
+    }
+    return CompileResult(reg=dict_res.reg, type=record.type_id, origin_type=0, owns_ref=true, is_const_access=false);
 }
 
 func compile_enum_def(ref c: Compiler, node: EnumDefNode) -> CompileResult {
@@ -4692,8 +4688,7 @@ func compile_enum_def(ref c: Compiler, node: EnumDefNode) -> CompileResult {
     let llvm_ty_str: String = "i32";
 
     let fields: Vector(EnumFieldNode) = node.fields;
-    let len: Int = 0;
-    if (fields is !null) { len = fields.length(); }
+    let len: Int = fields.length();
     let i: Int = 0;
 
     let current_val: Long = 0L;
@@ -5102,8 +5097,7 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
         if (!(field is !null)) {
             if (meta_s_info.is_class) {
                 let vtable_vec: Vector(Struct) = meta_s_info.vtable;
-                let v_len: Int = 0;
-                if (vtable_vec is !null) { v_len = vtable_vec.length(); }
+                let v_len: Int = vtable_vec.length();
                 let m_idx: Int = 0;
                 let m_info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
                 while (m_idx < v_len) {
@@ -5276,7 +5270,7 @@ func compile_protocol_comparison(ref c: Compiler, left: CompileResult, right: Co
 
     let method_index: Int = 0;
     let method_info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-    while (meta_info.vtable is !null && method_index < meta_info.vtable.length()) {
+    while (method_index < meta_info.vtable.length()) {
         let candidate: FuncInfo = meta_info.vtable[method_index];
         if (candidate.base_name == method_name) {
             method_info = candidate;
@@ -5284,7 +5278,7 @@ func compile_protocol_comparison(ref c: Compiler, left: CompileResult, right: Co
         }
         method_index += 1;
     }
-    if (!has_func(method_info) || method_info.arg_types is null || method_info.arg_types.length() != 2) {
+    if (!has_func(method_info) || method_info.arg_types.length() != 2) {
         throw_internal_compiler_error(pos, "Protocol method '" + method_name + "' is missing from '" + meta_info.name + "'.");
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
@@ -6071,8 +6065,7 @@ func compile_builtin_protocol_call(ref c: Compiler, receiver: NodeID, receiver_t
         return CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
-    let count: Int = 0;
-    if (call.args is !null) { count = call.args.length(); }
+    let count: Int = call.args.length();
 
     let expected: Int = 0;
     if (name == "equals" || name == "compare") { expected = 1; }
@@ -6218,7 +6211,6 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
         let n: StringNode = get_string_node(ref c.arena, node);
         let val: String = n.tok.value;
         let id: Int = register_string_constant(ref c, val);
-        let len: Int = val.length() + 1;
         let res_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + res_reg + " = getelementptr inbounds { i32, i32, %struct.$String }, { i32, i32, %struct.$String }* @.str." + id + ", i32 0, i32 2\n");
 
@@ -6846,18 +6838,15 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             let casted_self: CompileResult = emit_implicit_cast(ref c, self_res, meta_curr_class.parent_id, n_call.pos);
             c.expected_type = 0;
 
-            let sig: String = get_func_sig_str(ref c, meta_f_info);
             let args_str: String = get_llvm_type_str(ref c, meta_curr_class.parent_id) + " " + casted_self.reg;
 
             let args: Vector(ArgNode) = n_call.args;
-            let a_len: Int = 0;
-            if (args is !null) { a_len = args.length(); }
+            let a_len: Int = args.length();
             let arg_idx: Int = 0;
             let owned_args: Vector(Struct) = [];
             let expected_types: Vector(Struct) = meta_f_info.arg_types;
 
-            let expected_arg_count: Int = 0;
-            if (expected_types is !null) { expected_arg_count = expected_types.length() - 1; }
+            let expected_arg_count: Int = expected_types.length() - 1;
 
             let native_args: BoundCallArgs = bind_native_args(args, meta_f_info, 1, n_call.pos);
             if (!has_bound_args(native_args)) {
@@ -6909,7 +6898,6 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             }
         }
 
-        let is_module_path: Bool = true;
         let path_parts: Vector(String) = [];
         let curr_obj: NodeID = f_acc.obj;
         let curr_base: Int = node_tag(curr_obj);
@@ -7041,8 +7029,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
 
         if is_cast {
             let args: Vector(ArgNode) = n_call.args;
-            let a_len: Int = 0;
-            if (args is !null) { a_len = args.length(); }
+            let a_len: Int = args.length();
             if (reject_named_args(args, n_call.pos, "a type conversion")) {
                 return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
@@ -7176,14 +7163,12 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
 
         let args_str: String = "";
         let args: Vector(ArgNode) = n_call.args;
-        let a_len: Int = 0;
-        if (args is !null) { a_len = args.length(); }
+        let a_len: Int = args.length();
         let arg_idx: Int = 0;
         let owned_args: Vector(Struct) = [];
 
         let arg_types: Vector(Struct) = meta_func_info.arg_types;
-        let type_len: Int = 0;
-        if (arg_types is !null) { type_len = arg_types.length(); }
+        let type_len: Int = arg_types.length();
         let native_args: BoundCallArgs = BoundCallArgs(valid=false, ordered=[], variadic=[]);
         if (!meta_func_info.is_varargs) {
             native_args = bind_native_args(args, meta_func_info, 0, n_call.pos);
@@ -7219,10 +7204,6 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             let arg_node_curr: ArgNode = args[arg_idx];
 
             if (arg_idx >= type_len) {
-                if (!meta_func_info.is_varargs) {
-                    throw_type_error(n_call.pos, "Too many arguments.");
-                    return void_result();
-                }
                 let arg_val: CompileResult = compile_node(ref c, arg_node_curr.val);
                 if (has_result(arg_val) && arg_val.type == TYPE_POISON) {
                     return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -7306,7 +7287,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
 
             emit_release_owned_args(ref c, owned_args);
             let returns_owned: Bool = result_owns_value(ref c, meta_func_info.ret_type) &&
-                                        (meta_func_info.abi_name is null || meta_func_info.abi_name.length() == 0);
+                                        (meta_func_info.abi_name.length() == 0);
             return CompileResult(reg=call_res_reg, type=meta_func_info.ret_type, owns_ref=returns_owned, origin_type=0, is_const_access=false);
         }
     }
@@ -7405,16 +7386,24 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             }
 
             let args: Vector(ArgNode) = n_call.args;
-            let a_len: Int = 0;
-            if (args is !null) { a_len = args.length(); }
+            let a_len: Int = args.length();
 
             let expected_args: Vector(Struct) = [];
             let signature_info: Optional(SymbolInfo) = null;
             let bound_args: BoundCallArgs = BoundCallArgs(valid=false, ordered=[], variadic=[]);
-            if (ptr_type != TYPE_GENERIC_FUNCTION && ptr_type != TYPE_GENERIC_METHOD) {
-                signature_info = c.func_ret_map.lookup(ptr_type);
+            let signature_type: Int = ptr_type;
+            if ((ptr_type == TYPE_GENERIC_FUNCTION || ptr_type == TYPE_GENERIC_METHOD) && callee == NODE_VAR_ACCESS) {
+                let access: VarAccessNode = get_var_access_node(ref c.arena, callee_node);
+                let binding: Optional(SymbolInfo) = find_symbol(ref c, access.name_tok.value);
+                if (binding is !null) { signature_type = binding.origin_type; }
+                if (reject_named_args(args, n_call.pos, "a Function or Method value")) {
+                    return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+                }
+            }
+            if (signature_type != TYPE_GENERIC_FUNCTION && signature_type != TYPE_GENERIC_METHOD) {
+                signature_info = c.func_ret_map.lookup(signature_type);
                 if (!(signature_info is !null)) {
-                    signature_info = c.method_ret_map.lookup(ptr_type);
+                    signature_info = c.method_ret_map.lookup(signature_type);
                 }
                 if ((signature_info is !null)) {
                     expected_args = signature_info.func_arg_types;
@@ -7469,7 +7458,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
                 }
                 let curr_arg: ArgNode = args[a_idx];
                 let a_res: CompileResult = CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
-                if (expected_args is !null) {
+                if (signature_info is !null) {
                     let exp_arg_node: TypeListNode = expected_args[a_idx];
                     a_res = compile_call_arg(ref c, curr_arg, exp_arg_node, n_call.pos);
                 } else {
@@ -7480,7 +7469,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
                 }
 
                 let a_ty: String = get_llvm_type_str(ref c, a_res.type);
-                if (expected_args is !null) {
+                if (signature_info is !null) {
                     a_ty = call_arg_type(ref c, expected_args[a_idx], a_res);
                 }
 
@@ -7765,8 +7754,7 @@ func compile_string_method_call(ref c: Compiler, obj_node: NodeID, method_name: 
     // White Language methods receive the string object, native adapters receive its buffer
     let args_str: String = "%struct.$String* " + obj_res.reg;
     let args: Vector(ArgNode) = call_node.args;
-    let a_len: Int = 0;
-    if (args is !null) { a_len = args.length(); }
+    let a_len: Int = args.length();
     let native_args: BoundCallArgs = bind_native_args(args, meta_f_info, 1, call_node.pos);
     if (!has_bound_args(native_args)) {
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -7916,8 +7904,7 @@ func compile_end(ref c: Compiler) -> Void {
     emit_windows_entrypoint(ref c);
 
     let str_vec: Vector(Struct) = c.string_list;
-    let s_len: Int = 0;
-    if (str_vec is !null) { s_len = str_vec.length(); }
+    let s_len: Int = str_vec.length();
     let s_idx: Int = 0;
     while (s_idx < s_len) {
         let curr: StringConstant = str_vec[s_idx];
@@ -8065,8 +8052,7 @@ func emit_generic_vtables(ref c: Compiler) -> Void {
     while (table_index < c.generic_vtables.length()) {
         let info: StructInfo = c.generic_vtables[table_index];
         let methods: Vector(Struct) = info.vtable;
-        let method_count: Int = 0;
-        if (methods is !null) { method_count = methods.length(); }
+        let method_count: Int = methods.length();
 
         let definition: String = info.vtable_name + " = global " + class_vtable_type(ref c, info);
         if (method_count == 0) {

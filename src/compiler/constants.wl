@@ -143,25 +143,23 @@ func get_const_num(ref c: Compiler, node: VarAccessNode, pos: Position) -> Float
     if (!(info is !null)) {
         return 0.0;
     }
-    if (!c.constant_nums.contains_key(info.reg)) {
+    let value = c.constant_nums.lookup(info.reg);
+    if (value is null) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not numeric.");
         return 0.0;
     }
-    let value = c.constant_nums.lookup(info.reg);
-    if (value is !null) { return value; }
-    return 0.0;
+    return value;
 }
 
 func get_const_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> Long {
     let info: Optional(SymbolInfo) = get_const_symbol(ref c, node, pos);
     if (!(info is !null)) { return 0L; }
-    if (!c.constant_integers.contains_key(info.reg)) {
+    let value = c.constant_integers.lookup(info.reg);
+    if (value is null) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");
         return 0L;
     }
-    let value = c.constant_integers.lookup(info.reg);
-    if (value is !null) { return value; }
-    return 0L;
+    return value;
 }
 
 func get_const_wide_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> UInt128 {
@@ -169,14 +167,10 @@ func get_const_wide_integer(ref c: Compiler, node: VarAccessNode, pos: Position)
     if (!(info is !null)) {
         return UInt128(0);
     }
-    if (c.constant_wide_integers.contains_key(info.reg)) {
-        let value = c.constant_wide_integers.lookup(info.reg);
-        if (value is !null) { return value; }
-    }
-    if (c.constant_integers.contains_key(info.reg)) {
-        let integer: Optional(Long) = c.constant_integers.lookup(info.reg);
-        if (integer is !null) { return UInt128(integer); }
-    }
+    let value = c.constant_wide_integers.lookup(info.reg);
+    if (value is !null) { return value; }
+    let integer: Optional(Long) = c.constant_integers.lookup(info.reg);
+    if (integer is !null) { return UInt128(integer); }
     throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");
     return UInt128(0);
 }

@@ -568,6 +568,9 @@ func wir_constant_index(ref program: WirModule, value_id: WirValueID) -> Int {
     if (value.kind != WirValueKind.Integer || !wir_is_integer_type(ref program, value.type_id)) {
         return -1;
     }
+    if (value.integer > UInt128(2147483647U)) {
+        return -1;
+    }
     return Int(value.integer);
 }
 

@@ -737,8 +737,7 @@ func find_field(found: Optional(StructInfo), name: String) -> Optional(FieldInfo
     }
     let s_info: StructInfo = found;
     let fields: Vector(Struct) = s_info.fields;
-    let len: Int = 0;
-    if (fields is !null) { len = fields.length(); }
+    let len: Int = fields.length();
     let i: Int = 0;
     while (i < len) {
         let curr: FieldInfo = fields[i];
@@ -752,8 +751,7 @@ func get_field_by_index(found: Optional(StructInfo), index: Int) -> Optional(Fie
     if (found is null) { return null; }
     let s_info: StructInfo = found;
     let fields: Vector(Struct) = s_info.fields;
-    let len: Int = 0;
-    if (fields is !null) { len = fields.length(); }
+    let len: Int = fields.length();
     if (index >= 0 && index < len) {
         let field: FieldInfo = fields[index];
         return field;
@@ -913,8 +911,7 @@ func is_direct_export(name: String) -> Bool {
 
 func bind_import_symbols(ref c: Compiler, node: ImportNode, prefix: String, include_submodules: Bool, keep_existing: Bool) -> Void {
     let symbols: Vector(ImportSymbolNode) = node.symbols;
-    let s_len: Int = 0;
-    if (symbols.length() != 0) { s_len = symbols.length(); }
+    let s_len: Int = symbols.length();
     let i: Int = 0;
 
     while (i < s_len) {
@@ -1887,7 +1884,7 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
                 while (a_idx < len) {
                     let a_node: TypeListNode = meta_f_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    if (meta_f_info.arg_names is !null && a_idx < meta_f_info.arg_names.length() && meta_f_info.arg_names[a_idx].length() > 0) {
+                    if (a_idx < meta_f_info.arg_names.length() && meta_f_info.arg_names[a_idx].length() > 0) {
                         sig += meta_f_info.arg_names[a_idx] + ": ";
                     }
                     if (a_node.pass_mode == PARAM_REF) { sig += "ref "; }
@@ -1915,7 +1912,7 @@ func get_type_name(ref c: Compiler, type_id: Int) -> String {
                 while (a_idx < len) {
                     let a_node: TypeListNode = meta_m_info.func_arg_types[a_idx];
                     if (a_idx > 0) { sig += ", "; }
-                    if (meta_m_info.arg_names is !null && a_idx < meta_m_info.arg_names.length() && meta_m_info.arg_names[a_idx].length() > 0) {
+                    if (a_idx < meta_m_info.arg_names.length() && meta_m_info.arg_names[a_idx].length() > 0) {
                         sig += meta_m_info.arg_names[a_idx] + ": ";
                     }
                     if (a_node.pass_mode == PARAM_REF) { sig += "ref "; }
@@ -2197,7 +2194,7 @@ func get_func_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id: I
     while (i < arg_types.length()) {
         let arg_node: TypeListNode = arg_types[i];
         key += "_" + arg_node.pass_mode + "_" + arg_node.type;
-        if (arg_names is !null && i < arg_names.length() && arg_names[i].length() > 0) {
+        if (i < arg_names.length() && arg_names[i].length() > 0) {
             key += "_label_" + arg_names[i].length() + "_" + arg_names[i];
         }
         i += 1;
@@ -2219,7 +2216,7 @@ func get_method_type_id(ref c: Compiler, arg_types: Vector(Struct), ret_type_id:
     while (i < arg_types.length()) {
         let arg_node: TypeListNode = arg_types[i];
         key += "_" + arg_node.pass_mode + "_" + arg_node.type;
-        if (arg_names is !null && i < arg_names.length() && arg_names[i].length() > 0) {
+        if (i < arg_names.length() && arg_names[i].length() > 0) {
             key += "_label_" + arg_names[i].length() + "_" + arg_names[i];
         }
         i += 1;
@@ -2288,7 +2285,7 @@ func param_llvm_type(ref c: Compiler, param: TypeListNode) -> String {
 
 func variadic_param_index(params: Vector(ParamNode)) -> Int {
     let i: Int = 0;
-    while (params is !null && i < params.length()) {
+    while (i < params.length()) {
         let param: ParamNode = params[i];
         if (param.is_variadic) {
             return i + 1;
@@ -2301,7 +2298,7 @@ func variadic_param_index(params: Vector(ParamNode)) -> Int {
 func param_defaults(params: Vector(ParamNode)) -> Vector(NodeID) {
     let defaults: Vector(NodeID) = [];
     let i: Int = 0;
-    while (params is !null && i < params.length()) {
+    while (i < params.length()) {
         let param: ParamNode = params[i];
         defaults.append(param.default_val);
         i += 1;
@@ -2313,7 +2310,7 @@ func callable_param_names(params: Vector(ParamNode)) -> Vector(String) {
     let names: Vector(String) = [];
     let variadic: Int = variadic_param_index(params);
     let i: Int = 0;
-    while (params is !null && i < params.length()) {
+    while (i < params.length()) {
         let name: String = "";
         if (variadic > 0 && i + 1 > variadic) {
             let param: ParamNode = params[i];
@@ -2332,7 +2329,7 @@ func callable_arg_names(info: FuncInfo, skip: Int) -> Vector(String) {
     while (i < count) {
         let name: String = "";
         if (info.variadic_param > 0 && i + 1 > info.variadic_param &&
-            info.arg_names is !null && i + skip < info.arg_names.length()) {
+            i + skip < info.arg_names.length()) {
             name = info.arg_names[i + skip];
         }
         names.append(name);
@@ -2410,7 +2407,7 @@ func method_base_name(ref c: Compiler, node: MethodDefNode) -> String {
 
 func find_method(methods: Vector(Struct), name: String) -> Optional(FuncInfo) {
     let i: Int = 0;
-    while (methods is !null && i < methods.length()) {
+    while (i < methods.length()) {
         let entry: FuncInfo = methods[i];
         if (entry.base_name == name) { return entry; }
         i += 1;
@@ -2419,7 +2416,7 @@ func find_method(methods: Vector(Struct), name: String) -> Optional(FuncInfo) {
 }
 
 func find_class_conversion(info: Optional(StructInfo), target_type: Int) -> Optional(FuncInfo) {
-    if (info is null || !info.is_class || info.vtable is null) {
+    if (info is null || !info.is_class) {
         return null;
     }
     let record: StructInfo = info;
@@ -2677,8 +2674,7 @@ func expr_type_field_access(ref c: Compiler, node: NodeID) -> Int {
             if ((field is !null)) { return field.type; }
             if (meta_s_info.is_class) {
                 let vtable: Vector(Struct) = meta_s_info.vtable;
-                let v_len: Int = 0;
-                if (vtable is !null) { v_len = vtable.length(); }
+                let v_len: Int = vtable.length();
                 let m_idx: Int = 0;
                 while (m_idx < v_len) {
                     let m_info: FuncInfo = vtable[m_idx];
@@ -2746,7 +2742,7 @@ func expr_type_index_access(ref c: Compiler, node: NodeID) -> Int {
         if ((s_info is !null) && s_info.is_class) {
             let meta_s_info: StructInfo = s_info;
             let method_index: Int = 0;
-            while (meta_s_info.vtable is !null && method_index < meta_s_info.vtable.length()) {
+            while (method_index < meta_s_info.vtable.length()) {
                 let method_info: FuncInfo = meta_s_info.vtable[method_index];
                 if (method_info.base_name == "get") { return method_info.ret_type; }
                 method_index++;
@@ -2878,7 +2874,7 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
         let cast_target: Int = get_cast_target(ref c, callee_name);
         if (cast_target != 0) {
             let args: Vector(ArgNode) = call_node.args;
-            if (args is !null && args.length() == 1) {
+            if (args.length() == 1) {
                 let arg: ArgNode = args[0];
                 let source_type: Int = get_expr_type(ref c, arg.val);
                 let source_info: Optional(StructInfo) = c.struct_id_map.lookup(source_type);
@@ -2982,6 +2978,7 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
         }
 
         if (obj_type == TYPE_STRING) {
+            if (f.field_name == "length") { return TYPE_INT; }
             let str_link: Optional(String) = c.compiler_link.lookup("string_" + f.field_name);
             if (str_link is !null) {
                 let f_info: Optional(FuncInfo) = c.func_table.lookup(str_link);
@@ -2989,14 +2986,17 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
             }
         }
 
-        if (f.field_name == "length") { return TYPE_INT; }
-        if (f.field_name == "append") { return TYPE_VOID; }
-        if (f.field_name == "drop") {
-            if (obj_type >= 100) {
-                let v_info: Optional(SymbolInfo) = c.vector_base_map.lookup(obj_type);
-                if ((v_info is !null)) { return v_info.type; }
+        // intrinsic names belong to container receivers, classes may use the same names
+        if (obj_type >= 100) {
+            let vector = c.vector_base_map.lookup(obj_type);
+            if (vector is !null) {
+                if (f.field_name == "length") { return TYPE_INT; }
+                if (f.field_name == "append") { return TYPE_VOID; }
+                if (f.field_name == "drop") { return vector.type; }
             }
-            return 0;
+            if (f.field_name == "length" && c.array_info_map.contains_key(obj_type)) {
+                return TYPE_INT;
+            }
         }
 
         if (obj_type >= 100) {
@@ -3016,8 +3016,7 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
                     return meta_instance.ret_type;
                 }
                 let vtable: Vector(Struct) = meta_s_info.vtable;
-                let v_len: Int = 0;
-                if (vtable is !null) { v_len = vtable.length(); }
+                let v_len: Int = vtable.length();
                 let m_idx: Int = 0;
                 while (m_idx < v_len) {
                     let m_info: FuncInfo = vtable[m_idx];
@@ -3027,8 +3026,7 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
             } else if ((s_info is !null) && s_info.is_interface) {
                 let protocol: StructInfo = s_info;
                 let vtable: Vector(Struct) = protocol.vtable;
-                let v_len: Int = 0;
-                if (vtable is !null) { v_len = vtable.length(); }
+                let v_len: Int = vtable.length();
                 let m_idx: Int = 0;
                 while (m_idx < v_len) {
                     let m_node: MethodDefNode = vtable[m_idx];
@@ -3140,7 +3138,7 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
         let offset: Int = 0;
         let layout_align: Int = 1;
         let i: Int = 0;
-        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+        while (i < meta_struct_info.fields.length()) {
             let field: FieldInfo = meta_struct_info.fields[i];
             let field_align: Int = get_type_align_bytes(ref c, field.type);
 
@@ -3210,7 +3208,7 @@ func value_layout_contains(ref c: Compiler, type_id: Int, target: Int, seen: Vec
     seen.append(type_id);
 
     i = 0;
-    while (meta_info.fields is !null && i < meta_info.fields.length()) {
+    while (i < meta_info.fields.length()) {
         let field: FieldInfo = meta_info.fields[i];
         if (value_layout_contains(ref c, field.type, target, seen)) { return true; }
 
@@ -3257,7 +3255,7 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
 
         let result: Int = 1;
         let i: Int = 0;
-        while (meta_struct_info.fields is !null && i < meta_struct_info.fields.length()) {
+        while (i < meta_struct_info.fields.length()) {
             let field: FieldInfo = meta_struct_info.fields[i];
             let field_align: Int = get_type_align_bytes(ref c, field.type);
             if (field_align > result) { result = field_align; }
@@ -3304,7 +3302,7 @@ func get_signed_min_literal(type_id: Int) -> String {
 func generic_instance_name(template_name: String, types: Vector(Struct), ref c: Compiler) -> String {
     let name: String = template_name;
     let i: Int = 0;
-    while (types is !null && i < types.length()) {
+    while (i < types.length()) {
         let item: TypeListNode = types[i];
         name += "$" + mangle_type(ref c, item.type);
         i += 1;
@@ -3315,7 +3313,7 @@ func generic_instance_name(template_name: String, types: Vector(Struct), ref c: 
 func generic_type_name(template_name: String, types: Vector(Struct), ref c: Compiler) -> String {
     let name: String = template_name + "(";
     let i: Int = 0;
-    while (types is !null && i < types.length()) {
+    while (i < types.length()) {
         let item: TypeListNode = types[i];
         if (i > 0) { name += ", "; }
         name += get_type_name(ref c, item.type);
@@ -3331,7 +3329,7 @@ func generic_llvm_name(prefix: String, type_id: Int) -> String {
 func generic_bindings(params: Vector(GenericParamNode), types: Vector(Struct)) -> Dict(String, SymbolInfo) {
     let bindings: Dict(String, SymbolInfo) = Dict();
     let i: Int = 0;
-    while (params is !null && types is !null && i < params.length() && i < types.length()) {
+    while (i < params.length() && i < types.length()) {
         let param: GenericParamNode = params[i];
         let value: TypeListNode = types[i];
         bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
@@ -3354,7 +3352,7 @@ func extend_generic_bindings(found: Optional(Dict(String, SymbolInfo)), params: 
     }
 
     i = 0;
-    while (params is !null && types is !null && i < params.length() && i < types.length()) {
+    while (i < params.length() && i < types.length()) {
         let param: GenericParamNode = params[i];
         let value: TypeListNode = types[i];
         bindings.put(param.name_tok.value, SymbolInfo(reg="", type=value.type, origin_type=value.type, is_const=false, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
@@ -3528,7 +3526,7 @@ func register_generic_struct(ref c: Compiler, template: GenericTemplate, types: 
     let body: String = "";
     let fields: Vector(Struct) = [];
     let i: Int = 0;
-    while (node.fields is !null && i < node.fields.length()) {
+    while (i < node.fields.length()) {
         let field: ParamNode = node.fields[i];
         let field_type: Int = resolve_type(ref c, field.type_tok);
         if (value_layout_contains(ref c, field_type, new_id, [])) {
@@ -3602,9 +3600,9 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
 
     let method_names: Dict(String, StringConstant) = Dict();
     let i: Int = 0;
-    while (node.methods is !null && i < node.methods.length()) {
+    while (i < node.methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(ref c.arena, node.methods[i]);
-        if (method_node.type_params is !null && method_node.type_params.length() > 0) {
+        if (method_node.type_params.length() > 0) {
             throw_type_error(method_node.pos, "Interface methods cannot declare type parameters.");
             c.generic_instances.remove(key);
             restore_generic_context(ref c, previous, previous_bindings);
@@ -3625,7 +3623,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
     let interfaces: Vector(Struct) = [];
     let methods: Vector(Struct) = [];
     i = 0;
-    while (node.interfaces is !null && i < node.interfaces.length()) {
+    while (i < node.interfaces.length()) {
         let parent_id: Int = resolve_type(ref c, node.interfaces[i]);
         if (parent_id == TYPE_POISON) {
             if (GLOBAL_ERROR_COUNT == 0) {
@@ -3648,7 +3646,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
         let meta_parent: StructInfo = parent;
 
         let inherited_index: Int = 0;
-        while (meta_parent.interfaces is !null && inherited_index < meta_parent.interfaces.length()) {
+        while (inherited_index < meta_parent.interfaces.length()) {
             let inherited_type: TypeListNode = meta_parent.interfaces[inherited_index];
             append_type_once(interfaces, inherited_type.type);
             inherited_index += 1;
@@ -3656,7 +3654,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
         append_type_once(interfaces, parent_id);
 
         let method_index: Int = 0;
-        while (meta_parent.vtable is !null && method_index < meta_parent.vtable.length()) {
+        while (method_index < meta_parent.vtable.length()) {
             let inherited_method: MethodDefNode = meta_parent.vtable[method_index];
             if (method_names.contains_key(inherited_method.name_tok.value)) {
                 let repeated: Bool = false;
@@ -3690,7 +3688,7 @@ func register_generic_interface(ref c: Compiler, template: GenericTemplate, type
     }
 
     i = 0;
-    while (node.methods is !null && i < node.methods.length()) {
+    while (i < node.methods.length()) {
         methods.append(get_method_def_node(ref c.arena, node.methods[i]));
         i += 1;
     }
@@ -3735,11 +3733,21 @@ func type_node_contains_self(arena: AstArena, node: NodeID) -> Bool {
         return named.name_tok.value == "Self";
     }
 
+    if (base == NODE_UNION_TYPE) {
+        let union: UnionTypeNode = get_union_type_node(ref arena, node);
+        let i: Int = 0;
+        while (i < union.members.length()) {
+            if (type_node_contains_self(arena, union.members[i])) { return true; }
+            i++;
+        }
+        return false;
+    }
+
     if (base == NODE_GENERIC_TYPE) {
         let generic: GenericTypeNode = get_generic_type_node(ref arena, node);
         if (type_node_contains_self(arena, generic.base_type)) { return true; }
         let i: Int = 0;
-        while (generic.type_args.length() != 0 && i < generic.type_args.length()) {
+        while (i < generic.type_args.length()) {
             if (type_node_contains_self(arena, generic.type_args[i])) { return true; }
             i += 1;
         }
@@ -3776,7 +3784,7 @@ func type_node_contains_self(arena: AstArena, node: NodeID) -> Bool {
         if (type_node_contains_self(arena, function_type.return_type)) { return true; }
 
         let i: Int = 0;
-        while (function_type.arg_types is !null && i < function_type.arg_types.length()) {
+        while (i < function_type.arg_types.length()) {
             if (type_node_contains_self(arena, function_type.arg_types[i])) { return true; }
             i += 1;
         }
@@ -3788,7 +3796,7 @@ func type_node_contains_self(arena: AstArena, node: NodeID) -> Bool {
         if (type_node_contains_self(arena, method_type.return_type)) { return true; }
 
         let i: Int = 0;
-        while (method_type.arg_types is !null && i < method_type.arg_types.length()) {
+        while (i < method_type.arg_types.length()) {
             if (type_node_contains_self(arena, method_type.arg_types[i])) { return true; }
             i += 1;
         }
@@ -3799,12 +3807,12 @@ func type_node_contains_self(arena: AstArena, node: NodeID) -> Bool {
 
 func interface_uses_self(ref c: Compiler, info: StructInfo) -> Bool {
     let i: Int = 0;
-    while (has_struct(info) && info.vtable is !null && i < info.vtable.length()) {
+    while (has_struct(info) && i < info.vtable.length()) {
         let method_node: MethodDefNode = info.vtable[i];
         if (type_node_contains_self(c.arena, method_node.return_type)) { return true; }
 
         let param_index: Int = 0;
-        while (method_node.params is !null && param_index < method_node.params.length()) {
+        while (param_index < method_node.params.length()) {
             let param: ParamNode = method_node.params[param_index];
             if (type_node_contains_self(c.arena, param.type_tok)) { return true; }
             param_index += 1;
@@ -3857,7 +3865,7 @@ func interface_method_sig(ref c: Compiler, info: StructInfo, node: MethodDefNode
     }
 
     let param_index: Int = 0;
-    while (node.params is !null && param_index < node.params.length()) {
+    while (param_index < node.params.length()) {
         let param: ParamNode = node.params[param_index];
         if (type_node_contains_self(c.arena, param.type_tok)) {
             throw_type_error(node.pos, "Method '" + node.name_tok.value + "' uses Self and cannot be called through an interface value.");
@@ -3981,7 +3989,7 @@ func implements_interface(ref c: Compiler, type_id: Int, interface_id: Int) -> B
     while (current is !null) {
         let info: StructInfo = current;
         let i: Int = 0;
-        while (info.interfaces is !null && i < info.interfaces.length()) {
+        while (i < info.interfaces.length()) {
             let item: TypeListNode = info.interfaces[i];
             if (item.type == interface_id) { return true; }
             i++;
@@ -4002,7 +4010,7 @@ func check_generic_constraints(ref c: Compiler, template: GenericTemplate, bindi
         let param: GenericParamNode = template.type_params[i];
         let actual: TypeListNode = types[i];
         let constraint_index: Int = 0;
-        while (param.constraints is !null && constraint_index < param.constraints.length()) {
+        while (constraint_index < param.constraints.length()) {
             let constraint_type: Int = resolve_type(ref c, param.constraints[constraint_index]);
             let constraint_info: Optional(StructInfo) = c.struct_id_map.lookup(constraint_type);
             if (!(constraint_info is !null) || !constraint_info.is_interface) {
@@ -4091,13 +4099,13 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
     let interfaces: Vector(Struct) = [];
     let inherited_interface_index: Int = 0;
-    while ((parent_info is !null) && parent_info.interfaces is !null && inherited_interface_index < parent_info.interfaces.length()) {
+    while ((parent_info is !null) && inherited_interface_index < parent_info.interfaces.length()) {
         interfaces.append(parent_info.interfaces[inherited_interface_index]);
         inherited_interface_index++;
     }
 
     let interface_index: Int = 0;
-    while (node.interfaces is !null && interface_index < node.interfaces.length()) {
+    while (interface_index < node.interfaces.length()) {
         let interface_type: Int = resolve_type(ref c, node.interfaces[interface_index]);
         let interface_info: Optional(StructInfo) = c.struct_id_map.lookup(interface_type);
         if (!(interface_info is !null) || !interface_info.is_interface) {
@@ -4115,7 +4123,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
     if ((parent_info is !null)) {
         let meta_parent_info: StructInfo = parent_info;
         let inherited_field_index: Int = 0;
-        while (meta_parent_info.fields is !null && inherited_field_index < meta_parent_info.fields.length()) {
+        while (inherited_field_index < meta_parent_info.fields.length()) {
             let inherited_field: FieldInfo = meta_parent_info.fields[inherited_field_index];
             fields.append(inherited_field);
             field_names.put(inherited_field.name, StringConstant(id=0, value=inherited_field.name));
@@ -4127,7 +4135,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
     }
 
     let field_index: Int = 0;
-    while (node.fields is !null && field_index < node.fields.length()) {
+    while (field_index < node.fields.length()) {
         let field: VarDeclareNode = get_var_decl_node(ref c.arena, node.fields[field_index]);
         let field_name: String = field.name_tok.value;
         if (field_names.contains_key(field_name)) {
@@ -4164,13 +4172,13 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
 
     let methods: Vector(Struct) = [];
     let inherited_method_index: Int = 0;
-    while ((parent_info is !null) && parent_info.vtable is !null && inherited_method_index < parent_info.vtable.length()) {
+    while ((parent_info is !null) && inherited_method_index < parent_info.vtable.length()) {
         methods.append(parent_info.vtable[inherited_method_index]);
         inherited_method_index++;
     }
 
     let method_index: Int = 0;
-    while (node.methods is !null && method_index < node.methods.length()) {
+    while (method_index < node.methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(ref c.arena, node.methods[method_index]);
         let method_name: String = method_base_name(ref c, method_node);
 
@@ -4180,7 +4188,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
             return TYPE_POISON;
         }
 
-        if (method_node.type_params is !null && method_node.type_params.length() > 0) {
+        if (method_node.type_params.length() > 0) {
             let method_key: String = key + "_" + method_name;
             if ((c.generic_methods.lookup(method_key) is !null) || (c.func_table.lookup(method_key) is !null)) {
                 throw_name_error(method_node.pos, "Method '" + method_key + "' is already defined.");
@@ -4211,7 +4219,7 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         let arg_names: Vector(String) = ["self"];
         let param_names: Dict(String, StringConstant) = Dict();
         let param_index: Int = 0;
-        while (method_node.params is !null && param_index < method_node.params.length()) {
+        while (param_index < method_node.params.length()) {
             let param: ParamNode = method_node.params[param_index];
             if (param_names.contains_key(param.name_tok.value)) {
                 throw_name_error(param.pos, "Parameter '" + param.name_tok.value + "' is already defined in method '" + method_name + "'.");
@@ -4240,11 +4248,8 @@ func register_generic_class(ref c: Compiler, template: GenericTemplate, types: V
         }
 
         let symbol: String = mangle_wl_name(ref c, key + ".", method_name, arg_types);
-        let link_name: String = "";
-        if (method_node.annotations is !null) {
-            let method_anns: SystemAnnResult = consume_annotations(ref c, method_node.annotations, method_name);
-            link_name = method_anns.compiler_link_name;
-        }
+        let method_anns: SystemAnnResult = consume_annotations(ref c, method_node.annotations, method_name);
+        let link_name: String = method_anns.compiler_link_name;
 
         let func_info: FuncInfo = FuncInfo(
             name=symbol,
@@ -4332,7 +4337,7 @@ func queue_generic_class_method(ref c: Compiler, owner: StructInfo, name: String
 
 func is_type_parameter(template: GenericTemplate, name: String) -> Bool {
     let i: Int = 0;
-    while (template.type_params is !null && i < template.type_params.length()) {
+    while (i < template.type_params.length()) {
         let param: GenericParamNode = template.type_params[i];
         if (param.name_tok.value == name) { return true; }
         i += 1;
@@ -4517,19 +4522,16 @@ func concrete_constructor_accepts(ref c: Compiler, name: String, args: Vector(Ar
     let info: Optional(StructInfo) = c.struct_table.lookup(name);
     if (!(info is !null)) { return false; }
 
-    let count: Int = 0;
-    if (args is !null) { count = args.length(); }
+    let count: Int = args.length();
     if (!info.is_class) {
-        let fields: Int = 0;
-        if (info.fields is !null) { fields = info.fields.length(); }
+        let fields: Int = info.fields.length();
         return count == fields;
     }
     let init: Optional(FuncInfo) = c.func_table.lookup(info.name + "_$init");
     if (!(init is !null)) {
         return count == 0;
     }
-    let params: Int = 0;
-    if (init.arg_types is !null) { params = init.arg_types.length() - 1; }
+    let params: Int = init.arg_types.length() - 1;
     return count == params;
 }
 
@@ -4552,7 +4554,7 @@ func generic_constructor_params(ref c: Compiler, template: GenericTemplate) -> V
     if (base == NODE_CLASS_DEF) {
         let node: ClassDefNode = get_class_def_node(ref c.arena, template.node);
         let i: Int = 0;
-        while (node.methods is !null && i < node.methods.length()) {
+        while (i < node.methods.length()) {
             let member: MethodDefNode = get_method_def_node(ref c.arena, node.methods[i]);
             if (member.name_tok.value == "$init") { return member.params; }
             i += 1;
@@ -4562,7 +4564,6 @@ func generic_constructor_params(ref c: Compiler, template: GenericTemplate) -> V
 }
 
 func generic_call_param(params: Vector(ParamNode), arg: ArgNode, index: Int) -> Int {
-    if (params is null) { return -1; }
     if (arg.name.length() == 0) {
         let variadic: Int = variadic_param_index(params);
         if (variadic > 0 && index >= variadic - 1) {
@@ -4624,7 +4625,7 @@ func resolve_generic_constructor_args(ref c: Compiler, template: GenericTemplate
 
     let params: Vector(ParamNode) = generic_constructor_params(ref c, template);
     i = 0;
-    while (args is !null && params is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         let param_index: Int = generic_call_param(params, arg, i);
         if (param_index < 0) {
@@ -4678,7 +4679,7 @@ func resolve_generic_args(ref c: Compiler, template: GenericTemplate, explicit: 
     }
 
     i = 0;
-    while (args is !null && node.params is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         let param_index: Int = generic_call_param(node.params, arg, i);
         if (param_index < 0) {
@@ -4733,7 +4734,7 @@ func resolve_generic_method_args(ref c: Compiler, template: GenericTemplate, exp
     if (!infer_type_args(ref c, template, node.return_type, c.expected_type, inferred, pos)) { return null; }
 
     i = 0;
-    while (args is !null && node.params is !null && i < args.length()) {
+    while (i < args.length()) {
         let arg: ArgNode = args[i];
         let param_index: Int = generic_call_param(node.params, arg, i);
         if (param_index >= 0) {
@@ -4789,7 +4790,7 @@ func register_generic_method(ref c: Compiler, template: GenericTemplate, owner: 
     let arg_types: Vector(Struct) = [TypeListNode(type=owner.type_id, pass_mode=0)];
     let arg_names: Vector(String) = ["self"];
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let param: ParamNode = node.params[i];
         arg_types.append(callable_param(ref c, param));
         arg_names.append(param.name_tok.value);
@@ -4853,7 +4854,7 @@ func register_generic_func(ref c: Compiler, template: GenericTemplate, types: Ve
     let arg_names: Vector(String) = [];
 
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let param: ParamNode = node.params[i];
         arg_types.append(callable_param(ref c, param));
         arg_names.append(param.name_tok.value);
@@ -4919,14 +4920,14 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
             simple_name = named.name_tok.value;
         }
         if (simple_name == "Vector") {
-            if (args is null || args.length() != 1) {
+            if (args.length() != 1) {
                 throw_type_error(generic.pos, "Vector expects 1 type argument.");
                 return TYPE_POISON;
             }
             return get_vector_type_id(ref c, resolve_type(ref c, args[0]));
         }
         if (simple_name == "Array") {
-            if (args is null || args.length() != 1) {
+            if (args.length() != 1) {
                 throw_type_error(generic.pos, "Array expects 1 type argument.");
                 return TYPE_POISON;
             }
@@ -4954,9 +4955,8 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
             return TYPE_POISON;
         }
         let meta_template: GenericTemplate = template;
-        if (args is null || args.length() != meta_template.type_params.length()) {
-            let got: Int = 0;
-            if (args is !null) { got = args.length(); }
+        if (args.length() != meta_template.type_params.length()) {
+            let got: Int = args.length();
             throw_type_error(generic.pos, "Type '" + key + "' expects " + meta_template.type_params.length() + " type arguments, got " + got + ".");
             return TYPE_POISON;
         }
@@ -4998,8 +4998,7 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let ret_id: Int = resolve_type(ref c, f_node.return_type);
         let arg_types: Vector(Struct) = [];
         let i: Int = 0;
-        let p_len: Int = 0;
-        if (f_node.arg_types is !null) { p_len = f_node.arg_types.length(); }
+        let p_len: Int = f_node.arg_types.length();
         while (i < p_len) {
             let arg_type: Int = resolve_type(ref c, f_node.arg_types[i]);
             if (f_node.variadic_param == i + 1 && arg_type != TYPE_POISON) {
@@ -5020,8 +5019,7 @@ func resolve_type(ref c: Compiler, node: NodeID) -> Int {
         let ret_id: Int = resolve_type(ref c, m_node.return_type);
         let arg_types: Vector(Struct) = [];
         let i: Int = 0;
-        let p_len: Int = 0;
-        if (m_node.arg_types is !null) { p_len = m_node.arg_types.length(); }
+        let p_len: Int = m_node.arg_types.length();
         while (i < p_len) {
             let arg_type: Int = resolve_type(ref c, m_node.arg_types[i]);
             if (m_node.variadic_param == i + 1 && arg_type != TYPE_POISON) {
@@ -5256,8 +5254,7 @@ func get_func_sig_str(ref c: Compiler, info: FuncInfo) -> String {
     let ret_str: String = get_llvm_type_str(ref c, info.ret_type);
     let args_str: String = "";
     let arg_types: Vector(Struct) = info.arg_types;
-    let len: Int = 0;
-    if (arg_types is !null) { len = arg_types.length(); }
+    let len: Int = arg_types.length();
     let i: Int = 0;
 
     while (i < len) {
@@ -5281,8 +5278,7 @@ func get_method_def_sig_str(ref c: Compiler, m_node: MethodDefNode) -> String {
     let args_str: String = "i8*"; // Self pointer is always i8* for interfaces
 
     let params: Vector(ParamNode) = m_node.params;
-    let len: Int = 0;
-    if (params is !null) { len = params.length(); }
+    let len: Int = params.length();
     let i: Int = 0;
 
     while (i < len) {
@@ -5435,8 +5431,7 @@ func mangle_type(ref c: Compiler, type_id: Int) -> String {
         let meta_func_info: SymbolInfo = func_info;
         let encoded: String = "F";
         let args: Vector(Struct) = meta_func_info.func_arg_types;
-        let len: Int = 0;
-        if (args is !null) { len = args.length(); }
+        let len: Int = args.length();
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
@@ -5453,8 +5448,7 @@ func mangle_type(ref c: Compiler, type_id: Int) -> String {
         let meta_method_info: SymbolInfo = method_info;
         let encoded: String = "M";
         let args: Vector(Struct) = meta_method_info.func_arg_types;
-        let len: Int = 0;
-        if (args is !null) { len = args.length(); }
+        let len: Int = args.length();
         let i: Int = 0;
         while (i < len) {
             let arg: TypeListNode = args[i];
@@ -5487,8 +5481,7 @@ func mangle_wl_name(ref c: Compiler, prefix: String, base_name: String, arg_type
 
     mangled += "" + base_name.length() + base_name;
 
-    let len: Int = 0;
-    if (arg_types is !null) { len = arg_types.length(); }
+    let len: Int = arg_types.length();
     if (len == 0) {
         return mangled + "v";
     }
@@ -5528,8 +5521,6 @@ func get_mangled_symbol(ref c: Compiler, link_name: String, pos: Position) -> St
 
 func consume_annotations(ref c: Compiler, anns: Vector(AnnotationNode), default_name: String) -> SystemAnnResult {
     let res: SystemAnnResult = SystemAnnResult(ann_flags=0, compiler_link_name="", intrinsic_name="");
-    if (anns is null) { return res; }
-
     let len: Int = anns.length();
     let i: Int = 0;
     while (i < len) {
@@ -5537,19 +5528,18 @@ func consume_annotations(ref c: Compiler, anns: Vector(AnnotationNode), default_
         let name: String = ann_node.name;
 
         if (name == "ExportLib") {
-            if (ann_node.args is !null && ann_node.args.length() > 0) {
+            if (ann_node.args.length() > 0) {
                 throw_invalid_syntax(ann_node.pos, "@" + name + " annotation cannot have arguments.");
             }
             res.ann_flags = res.ann_flags | FLAG_ANN_EXPORT;
         } else if (name == "CompilerIntrinsic") {
-            let arg_count: Int = 0;
-            if (ann_node.args is !null) { arg_count = ann_node.args.length(); }
+            let arg_count: Int = ann_node.args.length();
             if (arg_count > 1) {
                 throw_invalid_syntax(ann_node.pos, "@CompilerIntrinsic accepts at most one string literal argument.");
             } else if (arg_count == 1) {
                 let a_node: ArgNode = ann_node.args[0];
                 let base_val: Int = node_tag(a_node.val);
-                if (base_val == 0 || base_val != NODE_STRING) {
+                if (base_val != NODE_STRING) {
                     throw_invalid_syntax(ann_node.pos, "@CompilerIntrinsic argument must be a string literal.");
                 } else {
                     let str_node: StringNode = get_string_node(ref c.arena, a_node.val);
@@ -5559,10 +5549,10 @@ func consume_annotations(ref c: Compiler, anns: Vector(AnnotationNode), default_
             res.ann_flags = res.ann_flags | FLAG_ANN_INTRINSIC;
         } else if (name == "CompilerLink") {
             let link_name: String = default_name;
-            if (ann_node.args is !null && ann_node.args.length() > 0) {
+            if (ann_node.args.length() > 0) {
                 let a_node: ArgNode = ann_node.args[0];
                 let base_val: Int = node_tag(a_node.val);
-                if (base_val == 0 || base_val != NODE_STRING) {
+                if (base_val != NODE_STRING) {
                     throw_invalid_syntax(ann_node.pos, "@CompilerLink argument must be a string literal.");
                 } else {
                     let str_node: StringNode = get_string_node(ref c.arena, a_node.val);
@@ -6009,8 +5999,7 @@ func analyze_captures(arena: AstArena, node: NodeID, scope: CaptureScope) -> Voi
         let b: BlockNode = get_block_node(ref arena, node);
         let stmts: Vector(NodeID) = b.stmts;
         let i: Int = 0;
-        let len: Int = 0;
-        if (stmts is !null) { len = stmts.length(); }
+        let len: Int = stmts.length();
         while (i < len) {
             analyze_captures(arena, stmts[i], scope);
             i += 1;
@@ -6070,8 +6059,7 @@ func analyze_captures(arena: AstArena, node: NodeID, scope: CaptureScope) -> Voi
         analyze_captures(arena, call.callee, scope);
         let args: Vector(ArgNode) = call.args;
         let i: Int = 0;
-        let len: Int = 0;
-        if (args is !null) { len = args.length(); }
+        let len: Int = args.length();
         while (i < len) {
             let arg: ArgNode = args[i];
             analyze_captures(arena, arg.val, scope);
@@ -6106,8 +6094,7 @@ func analyze_captures(arena: AstArena, node: NodeID, scope: CaptureScope) -> Voi
         let vec: VectorLitNode = get_vector_lit_node(ref arena, node);
         let elems: Vector(ArgNode) = vec.elements;
         let i: Int = 0;
-        let len: Int = 0;
-        if (elems is !null) { len = elems.length(); }
+        let len: Int = elems.length();
         while (i < len) {
             let arg: ArgNode = elems[i];
             analyze_captures(arena, arg.val, scope);
@@ -6135,8 +6122,7 @@ func analyze_captures(arena: AstArena, node: NodeID, scope: CaptureScope) -> Voi
 
         let params: Vector(ParamNode) = func_def.params;
         let i: Int = 0;
-        let len: Int = 0;
-        if (params is !null) { len = params.length(); }
+        let len: Int = params.length();
         while (i < len) {
             let p_node: ParamNode = params[i];
             child_scope.local_vars.put(p_node.name_tok.value, true);

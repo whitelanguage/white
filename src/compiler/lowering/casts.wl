@@ -27,7 +27,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     }
 
     if (val_res.type == expected_type) { return val_res; }
-    if (has_result(val_res) && val_res.type == TYPE_POISON) {
+    if (val_res.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     if (expected_type == TYPE_POISON) {
@@ -157,12 +157,15 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             payload_low = next_reg(ref c);
             write_ir(ref c, c.indent + payload_low + " = bitcast double " + fpext_reg + " to i64\n");
         } else if (boxed_type == TYPE_INTSIZE || boxed_type == TYPE_UINTSIZE) {
-            let size_ty: String = get_size_llvm_type();
-            payload_low = next_reg(ref c);
-            if (boxed_type == TYPE_INTSIZE) {
-                write_ir(ref c, c.indent + payload_low + " = sext " + size_ty + " " + val_res.reg + " to i64\n");
-            } else {
-                write_ir(ref c, c.indent + payload_low + " = zext " + size_ty + " " + val_res.reg + " to i64\n");
+            payload_low = val_res.reg;
+            if (get_target_pointer_bits() < 64) {
+                let size_ty: String = get_size_llvm_type();
+                payload_low = next_reg(ref c);
+                if (boxed_type == TYPE_INTSIZE) {
+                    write_ir(ref c, c.indent + payload_low + " = sext " + size_ty + " " + val_res.reg + " to i64\n");
+                } else {
+                    write_ir(ref c, c.indent + payload_low + " = zext " + size_ty + " " + val_res.reg + " to i64\n");
+                }
             }
         } else if (boxed_type == TYPE_LONG || boxed_type == TYPE_UINT64) {
             payload_low = next_reg(ref c);
@@ -191,7 +194,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         return CompileResult(reg=box_ptr, type=expected_type, origin_type=val_res.type, owns_ref=false, is_const_access=false);
     }
 
-    let variant_info_check: Optional(StructInfo) = c.struct_table.lookup("$Variant");
+    let variant_info_check: Optional(StructInfo) = variant_info;
     if ((variant_info_check is !null) && val_res.type == variant_info_check.type_id) {
         let meta_variant_info_check: StructInfo = variant_info_check;
         let expected_repr: Int = get_repr_type(ref c, expected_type);
@@ -308,9 +311,12 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             unboxed_reg = next_reg(ref c);
             write_ir(ref c, c.indent + unboxed_reg + " = fptrunc double " + cast_double + " to float\n");
         } else if (expected_repr == TYPE_INTSIZE || expected_repr == TYPE_UINTSIZE) {
-            let size_ty: String = get_size_llvm_type();
-            unboxed_reg = next_reg(ref c);
-            write_ir(ref c, c.indent + unboxed_reg + " = trunc i64 " + payload_low + " to " + size_ty + "\n");
+            unboxed_reg = payload_low;
+            if (get_target_pointer_bits() < 64) {
+                let size_ty: String = get_size_llvm_type();
+                unboxed_reg = next_reg(ref c);
+                write_ir(ref c, c.indent + unboxed_reg + " = trunc i64 " + payload_low + " to " + size_ty + "\n");
+            }
         } else if (expected_repr == TYPE_LONG || expected_repr == TYPE_UINT64) {
             unboxed_reg = next_reg(ref c);
             write_ir(ref c, c.indent + unboxed_reg + " = add i64 0, " + payload_low + "\n");
@@ -461,8 +467,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
             }
             let itable_name: String = "@itable." + val_info.name + "." + ex_info.name;
-            let itable_len: Int = 0;
-            if (ex_info.vtable is !null) { itable_len = ex_info.vtable.length(); }
+            let itable_len: Int = ex_info.vtable.length();
             let obj_cast: String = next_reg(ref c);
             write_ir(ref c, c.indent + obj_cast + " = bitcast " + val_info.llvm_name + "* " + val_res.reg + " to i8*\n");
 

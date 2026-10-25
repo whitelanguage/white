@@ -2149,7 +2149,6 @@ func x86_lower_function_with_layouts(
     let register_count: Int = 3;
 
     // the smaller register bank gives a conservative mixed-class spill bound
-    if (analysis.has_float) { register_count = 3; }
     let spill_count: Int = x86_spill_capacity(ref program, order, ref uses, register_count);
 
     // fixed scratch registers may still contain live values, reserve their spills too
@@ -2158,9 +2157,15 @@ func x86_lower_function_with_layouts(
     if (analysis.float_negate) { spill_count += 3; }
     if (analysis.wide_operation) { spill_count += 3; }
     let spill_locations: Vector(Int) = x86_spill_locations(slots, scratch, spill_count);
+    if (spill_locations.length() != spill_count) {
+        return x86_lowering_error("the x86_64 lowering could not lay out spill storage");
+    }
     let spill_plan: X86SpillPlan = x86_spill_plan_for_range(spill_locations, value_range);
 
     let frame_size: Int = x86_stack_frame_size(slots, scratch, spill_locations);
+    if (frame_size < 0 || (indirect_return && frame_size > 2147483632 - 8)) {
+        return x86_lowering_error("the x86_64 stack frame is too large");
+    }
     let return_pointer = 0;
     if indirect_return {
         frame_size = x86_align_frame_offset(frame_size + 8, 16);

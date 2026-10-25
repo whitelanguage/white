@@ -377,7 +377,6 @@ func report_error(pos: Position, name: String, details: String) -> Void {
         let err_len: Int =
             range.end.unicode_column - range.start.unicode_column;
         if (err_len < 1) { err_len = 1; }
-        let line_len: Int = line_text.length();
 
         let caret_line: String = empty_prefix + "| ";
         let j: Int = 0;

@@ -42,7 +42,7 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> Optional(Fun
     let argument_types: Vector(Struct) = [];
     let argument_names: Vector(String) = [];
     let i: Int = 0;
-    while (node.params is !null && i < node.params.length()) {
+    while (i < node.params.length()) {
         let parameter: ParamNode = node.params[i];
         let parameter_type: Int = resolve_type(ref source, parameter.type_tok);
         if (parameter_type == TYPE_AUTO || parameter_type == TYPE_POISON || parameter.pass_mode == PARAM_REF) {
@@ -84,7 +84,7 @@ func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program
     }
     register_extern_library(ref source, node.link_name, node.pos);
     let param_index: Int = 0;
-    while (node.params is !null && param_index < node.params.length()) {
+    while (param_index < node.params.length()) {
         let param: ParamNode = node.params[param_index];
         if (param.pass_mode == PARAM_REF) {
             throw_extern_error(param.pos, "Extern functions cannot use reference parameters; declare a pointer parameter instead.");
@@ -122,10 +122,10 @@ func wir_register_enum(ref types: WirTypeMap, ref source: Compiler, node: EnumDe
     }
     let meta_info: StructInfo = info;
 
-    let record_fields: Bool = meta_info.fields is null || meta_info.fields.length() == 0;
+    let record_fields: Bool = meta_info.fields.length() == 0;
     let value: Long = 0L;
     let i: Int = 0;
-    while (node.fields is !null && i < node.fields.length()) {
+    while (i < node.fields.length()) {
         let field: EnumFieldNode = node.fields[i];
         if (has_node(field.value)) { value = eval_const_long(ref source, field.value, field.pos); }
         if (value < -2147483648L || value > 2147483647L) {
@@ -142,18 +142,18 @@ func wir_register_enum(ref types: WirTypeMap, ref source: Compiler, node: EnumDe
 }
 
 func wir_declare_class_methods(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ClassDefNode) -> Void {
-    if (node.type_params is !null && node.type_params.length() != 0) {
+    if (node.type_params.length() != 0) {
         return;
     }
     let class_name: String = wir_class_name(source, node);
     let i: Int = 0;
-    while (node.methods is !null && i < node.methods.length()) {
+    while (i < node.methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(ref source.arena, node.methods[i]);
-        if (method_node.type_params is null || method_node.type_params.length() == 0) {
+        if (method_node.type_params.length() == 0) {
             let info: Optional(FuncInfo) = wir_method_info(ref source, class_name, method_node);
             if (!(info is !null)) {
                 types.errors.append("Method '" + class_name + "." + method_base_name(ref source, method_node) + "' was not registered before WIR lowering");
-            } else if (info.compiler_link_name is null || info.compiler_link_name.length() == 0) {
+            } else if (info.compiler_link_name.length() == 0) {
                 wir_lower_function_decl(ref types, ref source, ref program, info);
             }
         }
@@ -162,16 +162,16 @@ func wir_declare_class_methods(ref types: WirTypeMap, ref source: Compiler, ref 
 }
 
 func wir_lower_class_methods(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ClassDefNode) -> Void {
-    if (node.type_params is !null && node.type_params.length() != 0) {
+    if (node.type_params.length() != 0) {
         return;
     }
     let class_name: String = wir_class_name(source, node);
     let i: Int = 0;
-    while (node.methods is !null && i < node.methods.length()) {
+    while (i < node.methods.length()) {
         let method_node: MethodDefNode = get_method_def_node(ref source.arena, node.methods[i]);
-        if (method_node.type_params is null || method_node.type_params.length() == 0) {
+        if (method_node.type_params.length() == 0) {
             let info: Optional(FuncInfo) = wir_method_info(ref source, class_name, method_node);
-            if ((info is !null) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0 && (info.compiler_link_name is null || info.compiler_link_name.length() == 0)) {
+            if ((info is !null) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0 && (info.compiler_link_name.length() == 0)) {
                 wir_lower_function_body(ref types, ref source, ref program, info, method_node.body);
             }
         }
@@ -181,7 +181,7 @@ func wir_lower_class_methods(ref types: WirTypeMap, ref source: Compiler, ref pr
 
 func wir_queue_method_body(ref source: Compiler, fallback: StructInfo, method_info: FuncInfo) -> Void {
     let owner: StructInfo = fallback;
-    if (method_info.arg_types is !null && method_info.arg_types.length() != 0) {
+    if (method_info.arg_types.length() != 0) {
         let receiver: TypeListNode = method_info.arg_types[0];
         let declared: Optional(StructInfo) = source.struct_id_map.lookup(get_repr_type(ref source, receiver.type));
         if ((declared is !null) && declared.is_class) { owner = declared; }
@@ -191,9 +191,9 @@ func wir_queue_method_body(ref source: Compiler, fallback: StructInfo, method_in
 
 func wir_declare_concrete_class(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: StructInfo) -> Void {
     let i: Int = 0;
-    while (info.vtable is !null && i < info.vtable.length()) {
+    while (i < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[i];
-        if ((method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
+        if ((method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
             wir_queue_method_body(ref source, info, method_info);
             wir_lower_function_decl(ref types, ref source, ref program, method_info);
         }
@@ -203,7 +203,7 @@ func wir_declare_concrete_class(ref types: WirTypeMap, ref source: Compiler, ref
     i = 0;
     while (i < special_names.length()) {
         let method_info: Optional(FuncInfo) = source.func_table.lookup(info.name + "_" + special_names[i]);
-        if ((method_info is !null) && (method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
+        if ((method_info is !null) && (method_info.compiler_link_name.length() == 0) && wir_find_function(program, method_info.name) == NO_WIR_FUNC) {
             wir_lower_function_decl(ref types, ref source, ref program, method_info);
         }
         i++;
@@ -220,7 +220,7 @@ func wir_emit_class_vtable_info(ref types: WirTypeMap, ref source: Compiler, ref
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let entries: Vector(WirValueID) = [];
     let i: Int = 0;
-    while (info.vtable is !null && i < info.vtable.length()) {
+    while (i < info.vtable.length()) {
         let method_info: FuncInfo = info.vtable[i];
         let function_id: WirFuncID = wir_find_function(program, method_info.name);
         if (function_id == NO_WIR_FUNC) {
@@ -243,7 +243,7 @@ func wir_emit_class_vtable_info(ref types: WirTypeMap, ref source: Compiler, ref
 }
 
 func wir_emit_class_vtable(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ClassDefNode) -> Void {
-    if (node.type_params is !null && node.type_params.length() != 0) {
+    if (node.type_params.length() != 0) {
         return;
     }
     let info = source.struct_table.lookup(wir_class_name(source, node));
@@ -254,7 +254,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
     if (!has_struct(info) || !info.is_class) { return; }
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let interface_index: Int = 0;
-    while (info.interfaces is !null && interface_index < info.interfaces.length()) {
+    while (interface_index < info.interfaces.length()) {
         let interface_type: TypeListNode = info.interfaces[interface_index];
         let interface_info: Optional(StructInfo) = source.struct_id_map.lookup(interface_type.type);
         if (!(interface_info is !null) || !interface_info.is_interface) {
@@ -266,7 +266,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
         if (wir_find_global(program, name) == NO_WIR_GLOBAL) {
             let entries: Vector(WirValueID) = [];
             let method_index: Int = 0;
-            while (meta_interface_info.vtable is !null && method_index < meta_interface_info.vtable.length()) {
+            while (method_index < meta_interface_info.vtable.length()) {
                 let required: MethodDefNode = meta_interface_info.vtable[method_index];
                 let implementation: Optional(FuncInfo) = find_interface_implementation(ref source, info, meta_interface_info, required);
                 if ((implementation is !null)) {
@@ -294,7 +294,7 @@ func wir_emit_interface_tables_info(ref types: WirTypeMap, ref source: Compiler,
 }
 
 func wir_emit_interface_tables(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ClassDefNode) -> Void {
-    if (node.type_params is !null && node.type_params.length() != 0) {
+    if (node.type_params.length() != 0) {
         return;
     }
     let info = source.struct_table.lookup(wir_class_name(source, node));
@@ -352,7 +352,7 @@ func wir_lower_generic_methods(ref types: WirTypeMap, ref source: Compiler, ref 
         source.generic_method_key = instance.func_key;
         source.generic_depth = instance.depth;
         let method_info: Optional(FuncInfo) = source.func_table.lookup(instance.func_key);
-        if ((method_info is !null) && (method_info.ann_flags & FLAG_ANN_INTRINSIC) == 0 && (method_info.compiler_link_name is null || method_info.compiler_link_name.length() == 0)) {
+        if ((method_info is !null) && (method_info.ann_flags & FLAG_ANN_INTRINSIC) == 0 && (method_info.compiler_link_name.length() == 0)) {
             let function_id: WirFuncID = wir_find_function(program, method_info.name);
             let has_body: Bool = false;
             if (function_id != NO_WIR_FUNC) {
@@ -429,7 +429,7 @@ func wir_declare_root_items(ref types: WirTypeMap, ref source: Compiler, ref pro
             wir_register_enum(ref types, ref source, get_enum_def_node(ref source.arena, node));
         } else if (kind == NODE_FUNC_DEF) {
             let definition: FunctionDefNode = get_func_def_node(ref source.arena, node);
-            if (definition.type_params is null || definition.type_params.length() == 0) {
+            if (definition.type_params.length() == 0) {
                 let info: Optional(FuncInfo) = wir_definition_info(ref source, definition);
                 if (!(info is !null)) {
                     types.errors.append("Function '" + definition.name_tok.value + "' was not registered before WIR lowering");
@@ -465,7 +465,7 @@ func wir_lower_root_items(ref types: WirTypeMap, ref source: Compiler, ref progr
             wir_lower_global_decl(ref types, ref source, ref program, get_var_decl_node(ref source.arena, node));
         } else if (kind == NODE_FUNC_DEF) {
             let definition: FunctionDefNode = get_func_def_node(ref source.arena, node);
-            if (definition.type_params is null || definition.type_params.length() == 0) {
+            if (definition.type_params.length() == 0) {
                 let info: Optional(FuncInfo) = wir_definition_info(ref source, definition);
                 if ((info is !null) && (info.ann_flags & FLAG_ANN_INTRINSIC) == 0) {
                     wir_lower_function_body(ref types, ref source, ref program, info, definition.body);

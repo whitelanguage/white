@@ -28,7 +28,7 @@ func class_has_named_interface(ref c: Compiler, info: StructInfo, name: String) 
     while ((current is !null)) {
         let record: StructInfo = current;
         let i: Int = 0;
-        while (record.interfaces is !null && i < record.interfaces.length()) {
+        while (i < record.interfaces.length()) {
             let item: TypeListNode = record.interfaces[i];
             let interface_info: Optional(StructInfo) = c.struct_id_map.lookup(item.type);
             if ((interface_info is !null) && interface_info.name == name) { return true; }
@@ -48,7 +48,7 @@ func interface_has_name(ref c: Compiler, info: StructInfo, name: String) -> Bool
     if (info.name == name) { return true; }
 
     let i: Int = 0;
-    while (info.interfaces is !null && i < info.interfaces.length()) {
+    while (i < info.interfaces.length()) {
         let item: TypeListNode = info.interfaces[i];
         let parent: Optional(StructInfo) = c.struct_id_map.lookup(item.type);
         if ((parent is !null) && parent.name == name) { return true; }
@@ -61,13 +61,13 @@ func compile_interface_display(ref c: Compiler, reg: String, info: StructInfo, p
     if (!interface_has_name(ref c, info, "formatting.Display")) { return false; }
 
     let method_index: Int = 0;
-    while (info.vtable is !null && method_index < info.vtable.length()) {
+    while (method_index < info.vtable.length()) {
         let candidate: MethodDefNode = info.vtable[method_index];
         if (candidate.name_tok.value == "display") { break; }
         method_index += 1;
     }
 
-    if (info.vtable is null || method_index >= info.vtable.length()) {
+    if (method_index >= info.vtable.length()) {
         throw_internal_compiler_error(pos, "Display method is missing from interface '" + info.name + "'.");
         return true;
     }
@@ -125,7 +125,7 @@ func compile_display(ref c: Compiler, reg: String, info: StructInfo, pos: Positi
 
     let method_index: Int = 0;
     let method_info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);
-    while (info.vtable is !null && method_index < info.vtable.length()) {
+    while (method_index < info.vtable.length()) {
         let candidate: FuncInfo = info.vtable[method_index];
         if (candidate.base_name == "display") {
             method_info = candidate;
@@ -427,8 +427,7 @@ func compile_print_enum_internal(ref c: Compiler, enum_reg: String, s_info: Stru
     let end_label: String = next_label(ref c);
 
     let fields: Vector(Struct) = s_info.fields;
-    let len: Int = 0;
-    if (fields is !null) { len = fields.length(); }
+    let len: Int = fields.length();
 
     write_ir(ref c, c.indent + "switch i32 " + enum_reg + ", label %" + default_label + " [\n");
 
@@ -490,8 +489,7 @@ func compile_print_struct_internal(ref c: Compiler, obj_reg: String, s_info: Str
     write_ir(ref c, c.indent + "call void @" + hook_raw_str + "(i8* " + header_ptr + ", i32 " + header.length() + ")\n");
 
     let fields_vec: Vector(Struct) = s_info.fields;
-    let f_len: Int = 0;
-    if (fields_vec is !null) { f_len = fields_vec.length(); }
+    let f_len: Int = fields_vec.length();
     let f_idx: Int = 0;
 
     while (f_idx < f_len) {

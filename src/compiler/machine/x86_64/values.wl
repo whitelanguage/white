@@ -452,13 +452,6 @@ func x86_materialize_register_except(
             return X86RegisterResult(register=X86Register.None, message="stack allocation has no addressable storage");
         }
     } else if (value.kind == WirValueKind.FunctionParameter) {
-        let saved_offset: Int = x86_stack_offset(ref state.stack, value_id);
-        if (saved_offset != 0) {
-            x86_load_scalar(ref output, choice.register, X86Register.RBP, saved_offset, size, signed);
-            x86_bind_register(ref state.registers, choice.register, value_id);
-
-            return X86RegisterResult(register=choice.register, message="");
-        }
         let index: Int = x86_parameter_index(ref function, value_id);
         let incoming: X86Register = X86Register.None;
         let incoming_offset: Int = -1;

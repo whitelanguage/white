@@ -17,7 +17,7 @@ func a64_emit_u32(ref output: A64CodeBuffer, value: UInt32) -> Void {
 }
 
 func a64_patch_u32(ref output: A64CodeBuffer, offset: Int, value: UInt32) -> Bool {
-    if (offset < 0 || offset + 4 > output.bytes.length() || offset % 4 != 0) {
+    if (offset < 0 || output.bytes.length() < 4 || offset > output.bytes.length() - 4 || offset % 4 != 0) {
         return false;
     }
 
@@ -715,14 +715,16 @@ func a64_conditional_branch(ref output: A64CodeBuffer, displacement: Int, condit
 }
 
 func a64_patch_branch(ref output: A64CodeBuffer, offset: Int, target: Int, condition: A64Condition, conditional: Bool) -> Bool {
-    if (offset < 0 || offset + 4 > output.bytes.length()) { return false; }
+    if (offset < 0 || output.bytes.length() < 4 || offset > output.bytes.length() - 4) { return false; }
+    let displacement: Long = Long(target) - Long(offset);
+    if (displacement < -2147483648L || displacement > 2147483647L) { return false; }
 
     let patched: A64CodeBuffer = a64_new_code_buffer();
     let ok: Bool = false;
     if conditional {
-        ok = a64_conditional_branch(ref patched, target - offset, condition);
+        ok = a64_conditional_branch(ref patched, Int(displacement), condition);
     } else {
-        ok = a64_branch(ref patched, target - offset, false);
+        ok = a64_branch(ref patched, Int(displacement), false);
     }
     if (!ok || patched.bytes.length() != 4) { return false; }
 
