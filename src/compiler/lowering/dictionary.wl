@@ -168,7 +168,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
     let hash_interface: Optional(StructInfo) = c.struct_table.lookup("hashing.Hash");
     let type_id: Int = 1;
     while (type_id < c.type_counter) {
-        if (type_id != TYPE_NULL && type_id != TYPE_NULLPTR && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(ref c, type_id)) {
+        if (type_id != TYPE_NULL && type_id != TYPE_GENERIC_CLASS && type_id != TYPE_GENERIC_FUNCTION && type_id != TYPE_GENERIC_METHOD && is_dict_key_type(ref c, type_id)) {
             let label: String = "%bits";
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }

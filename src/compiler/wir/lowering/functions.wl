@@ -1226,13 +1226,13 @@ func wir_unbox_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, re
     let tag_slot: WirValueID = wir_field_address(ref program, state.block, value.value, 0, "", no_wir_location());
     let tag: WirValueID = wir_load(ref program, state.block, tag_slot, "", no_wir_location());
     let tag_type: WirTypeID = wir_unsigned_int_type(ref program, 64);
-    let expected_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(type_fingerprint(ref source, target_type)));
+    let expected_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(variant_tag(ref source, target_type)));
     let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, expected_tag, "", no_wir_location());
-    // a stored null has a box with tag zero, get already distinguishes it from a missing key
-    if (is_nullable_reference_type(ref source, target_type)) {
-        let null_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(0U));
-        let stored_null: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, null_tag, "", no_wir_location());
-        matches = wir_bool_or(ref program, state.block, matches, stored_null);
+    // nullptr can initialize any raw pointer, Null must still fail that check
+    if (is_pointer_type(ref source, target_type) && target_type != TYPE_NULLPTR) {
+        let pointer_tag: WirValueID = wir_const_int(ref program, tag_type, UInt128(variant_tag(ref source, TYPE_NULLPTR)));
+        let empty_pointer: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag, pointer_tag, "", no_wir_location());
+        matches = wir_bool_or(ref program, state.block, matches, empty_pointer);
     }
     wir_guard_runtime(ref state, ref program, matches, "__wl_fail_erased_type");
 
@@ -1414,8 +1414,7 @@ func wir_box_variant(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     let object: WirValueID = wir_pointer_offset(ref program, state.block, raw, WIR_OBJECT_HEADER_SIZE, variant_wir);
     let tag_type: WirTypeID = wir_unsigned_int_type(ref program, 64);
     let payload_type: WirTypeID = wir_signed_int_type(ref program, 64);
-    let tag: UInt64 = type_fingerprint(ref source, value.source_type);
-    if (value.source_type == TYPE_NULL || value.source_type == TYPE_NULLPTR) { tag = UInt64(0); }
+    let tag: UInt64 = variant_tag(ref source, value.source_type);
     let low: WirValueID = wir_const_int(ref program, payload_type, UInt128(0U));
     let high: WirValueID = wir_const_int(ref program, payload_type, UInt128(0U));
 

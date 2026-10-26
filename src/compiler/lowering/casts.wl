@@ -78,8 +78,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         let type_ptr: String = next_reg(ref c);
         write_ir(ref c, c.indent + type_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 0\n");
 
-        let boxed_tag: UInt64 = type_fingerprint(ref c, val_res.type);
-        if (val_res.type == TYPE_NULL || val_res.type == TYPE_NULLPTR) { boxed_tag = UInt64(0); }
+        let boxed_tag: UInt64 = variant_tag(ref c, val_res.type);
 
         write_ir(ref c, c.indent + "store i64 " + boxed_tag + ", i64* " + type_ptr + "\n");
 
@@ -274,7 +273,14 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 write_ir(ref c, c.indent + is_match + " = or i1 false, " + match_acc + "\n");
             }
         } else {
-            write_ir(ref c, c.indent + is_match + " = icmp eq i64 " + type_id_reg + ", " + type_fingerprint(ref c, expected_type) + "\n");
+            write_ir(ref c, c.indent + is_match + " = icmp eq i64 " + type_id_reg + ", " + variant_tag(ref c, expected_type) + "\n");
+            if (is_pointer_type(ref c, expected_type) && expected_type != TYPE_NULLPTR) {
+                let empty_pointer: String = next_reg(ref c);
+                write_ir(ref c, c.indent + empty_pointer + " = icmp eq i64 " + type_id_reg + ", " + variant_tag(ref c, TYPE_NULLPTR) + "\n");
+                let combined: String = next_reg(ref c);
+                write_ir(ref c, c.indent + combined + " = or i1 " + is_match + ", " + empty_pointer + "\n");
+                is_match = combined;
+            }
         }
 
         write_ir(ref c, c.indent + "br i1 " + is_match + ", label %" + unbox_label + ", label %" + fail_label + "\n");

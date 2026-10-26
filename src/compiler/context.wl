@@ -2567,6 +2567,7 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
 
     if (base == NODE_MAP_LIT) {
         let s_info: Optional(StructInfo) = c.struct_table.lookup("Dict");
+        if (s_info is null) { s_info = c.struct_table.lookup("dict.Dict"); }
         if ((s_info is !null)) { return s_info.type_id; }
         return 0;
     }
@@ -5336,6 +5337,14 @@ func type_fingerprint(ref c: Compiler, type_id: Int) -> UInt64 {
         return UInt64(1);
     }
     return hash;
+}
+
+func variant_tag(ref c: Compiler, type_id: Int) -> UInt64 {
+// zero belongs to the Null value, nullptr keeps its own pointer tag
+    if (type_id == TYPE_NULL) {
+        return UInt64(0);
+    }
+    return type_fingerprint(ref c, type_id);
 }
 
 func mangle_type(ref c: Compiler, type_id: Int) -> String {
