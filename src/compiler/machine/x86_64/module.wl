@@ -21,6 +21,12 @@ func x86_module_error(message: String) -> X86ModuleResult {
     return X86ModuleResult(bytes=[], errors=[message], relocations=[], symbols=[], sections=[]);
 }
 
+func x86_export_directive(bytes: Vector(Byte), name: String, data: Bool) -> Void {
+    let text = " -export:\"" + name + "\"";
+    if data { text += ",DATA"; }
+    for (let i = 0; i < text.length(); i++) { bytes.append(text[i]); }
+}
+
 func x86_patch_calls(ref program: WirModule, ref output: X86CodeBuffer, codes: Vector(X86FunctionCode)) -> Bool {
     let offsets: Vector(Int) = [];
     let i: Int = 0;
@@ -183,6 +189,25 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
     let data_error: String = x86_emit_globals(ref program, layouts, reachable.globals, ref object);
     if (data_error.length() != 0) {
         return x86_module_error(data_error);
+    }
+    if (!x86_is_sysv_abi()) {
+        // MSVC needs explicit exports, relying on MinGW auto-export loses the DLL API
+        let directives: Vector(Byte) = [];
+        for (let i = 0; i < program.arena.functions.length(); i++) {
+            let function = program.arena.functions[i];
+            if (reachable.functions[i] && function.export_symbol && function.blocks.length() != 0) {
+                x86_export_directive(directives, function.name, false);
+            }
+        }
+        for (let j = 0; j < program.arena.globals.length(); j++) {
+            let global = program.arena.globals[j];
+            if (reachable.globals[j] && global.export_symbol && global.linkage != WirLinkage.External) {
+                x86_export_directive(directives, global.name, true);
+            }
+        }
+        if (directives.length() != 0) {
+            object.sections.append(X86CodeSection(name=".drectve", bytes=directives, alignment=1, executable=false, writable=false));
+        }
     }
     return X86ModuleResult(bytes=output.bytes, errors=[], relocations=object.relocations, symbols=object.symbols, sections=object.sections);
 }

@@ -144,10 +144,62 @@ func format_uint128_magnitude(value: UInt128, negative: Bool) -> String {
     return result;
 }
 
+func format_large_float(bits: UInt64, negative: Bool) -> String {
+// above 2^63, every finite Float is an integer, expand its binary significand
+    let digits: Byte[309] = [];
+    let count: Int = 0;
+    let mantissa: UInt64 = (bits & 4503599627370495UL) | 4503599627370496UL;
+    while (mantissa != 0UL) {
+        digits[count] = Byte(mantissa % 10UL);
+        mantissa /= 10UL;
+        count++;
+    }
+
+    let shift: Int = Int((bits >> 52UL) & 2047UL) - 1023 - 52;
+    while (shift > 0) {
+        let carry: Int = 0;
+        let i: Int = 0;
+        while (i < count) {
+            let digit: Int = Int(digits[i]) * 2 + carry;
+            digits[i] = Byte(digit % 10);
+            carry = digit / 10;
+            i++;
+        }
+        if (carry != 0) { digits[count] = Byte(carry); count++; }
+        shift--;
+    }
+
+    let sign: Int = 0;
+    if negative { sign = 1; }
+    let result: String = runtime_string.alloc(Long(count + sign + 7));
+    let ptr output: Byte = runtime_string.data(result);
+    if negative { output[0] = Byte(45); }
+    let i: Int = 0;
+    while (i < count) {
+        output[sign + i] = digits[count - i - 1] + Byte(48);
+        i++;
+    }
+    output[sign + count] = Byte(46);
+    i = 1;
+    while (i <= 6) { output[sign + count + i] = Byte(48); i++; }
+    return result;
+}
+
 @CompilerLink("format_float")
 func format_float(value: Float) -> String {
+    let ptr representation: UInt64 = AnyPtr(ref value);
+    let bits: UInt64 = deref representation;
+    if (((bits >> 52UL) & 2047UL) == 2047UL) {
+        if ((bits & 4503599627370495UL) != 0UL) { return "nan"; }
+        if ((bits >> 63UL) != 0UL) { return "-inf"; }
+        return "inf";
+    }
+
     let negative: Bool = value < 0.0;
     if negative { value = -value; }
+    if (value >= 9223372036854775808.0) {
+        return format_large_float(bits, negative);
+    }
 
     let whole_value: Long = Long(value);
     let fraction_value: Long = Long((value - Float(whole_value)) * 1000000.0 + 0.5);

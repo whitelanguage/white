@@ -6358,6 +6358,21 @@ func wir_print_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
         return false;
     }
     let source_type: Int = get_repr_type(ref source, value.source_type);
+    if (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR) {
+        let base = source.ptr_base_map.lookup(source_type);
+        let hook_name: String = "print_long";
+        let argument_type: Int = TYPE_LONG;
+        if (base is !null && base.type == TYPE_BYTE) {
+            hook_name = "print_raw_string";
+            argument_type = TYPE_ANYPTR;
+        }
+        let hook = wir_print_hook(ref state, ref types, ref source, ref program, hook_name);
+        if (hook == NO_WIR_VALUE) { return false; }
+        let target = wir_lower_source_type(ref types, ref source, ref program, argument_type);
+        let argument = wir_cast(ref program, state.block, value.value, target, "", no_wir_location());
+        wir_call(ref program, state.block, hook, [argument], "", no_wir_location());
+        return true;
+    }
     if (source_type == TYPE_STRING) {
         return wir_print_string(ref state, ref types, ref source, ref program, value.value);
     }
@@ -6618,6 +6633,7 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
 // binary trees recurse through a small frame, long logical chains otherwise keep the full expression frame on the stack
     let binary: BinOpNode = get_binop_node(ref source.arena, node);
     if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR) {
+        let left_owned_start: Int = state.owned_values.length();
         let left: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.left);
         if (left.value == NO_WIR_VALUE) {
             return wir_no_expr();
@@ -6626,6 +6642,7 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
             state.errors.append("logical operator reached WIR lowering with a non-Bool left operand");
             return wir_no_expr();
         }
+        wir_cleanup_temporaries(ref state, ref types, ref source, ref program, left_owned_start);
 
         let right_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "logic.rhs."), []);
         let merge_block: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "logic.end."), [wir_param("value", program.bool_type)]);
@@ -8020,6 +8037,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             state.errors.append("if condition reached WIR lowering with a non-Bool type");
             return;
         }
+        wir_cleanup_temporaries(ref state, ref types, ref source, ref program, condition_owned_start);
         let condition_owned: Vector(WirOwnedValue) = wir_copy_owned(state.owned_values);
         let incoming = flow_copy(source.flow_types);
 
@@ -8107,6 +8125,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
 
         state.block = condition_block;
         state.terminated = false;
+        let condition_owned_start = state.owned_values.length();
         let condition: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.condition);
         if (condition.value == NO_WIR_VALUE) {
             return;
@@ -8115,6 +8134,8 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             state.errors.append("while condition reached WIR lowering with a non-Bool type");
             return;
         }
+        // each visit to the condition owns a new set of temporaries
+        wir_cleanup_temporaries(ref state, ref types, ref source, ref program, condition_owned_start);
         let constant_true: Bool = node_tag(statement.condition) == NODE_BOOL && get_bool_node(ref source.arena, statement.condition).value == 1;
         let constant_false: Bool = node_tag(statement.condition) == NODE_BOOL && get_bool_node(ref source.arena, statement.condition).value == 0;
         if constant_true {
@@ -8172,6 +8193,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
         state.block = condition_block;
         state.terminated = false;
         if (has_node(statement.cond)) {
+            let condition_owned_start = state.owned_values.length();
             let condition: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, statement.cond);
             if (condition.value == NO_WIR_VALUE) {
                 return;
@@ -8180,6 +8202,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
                 state.errors.append("for condition reached WIR lowering with a non-Bool type");
                 return;
             }
+            wir_cleanup_temporaries(ref state, ref types, ref source, ref program, condition_owned_start);
             wir_append(ref program, state.block, WirOpcode.Branch, program.void_type, [condition.value], [wir_edge(body_block, []), wir_edge(end_block, [])], no_wir_location());
         } else {
             wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(body_block, [])], no_wir_location());

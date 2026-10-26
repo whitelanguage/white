@@ -258,6 +258,8 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
 
         if (section.executable) { flags = 1610612768U; }
         if (section.writable) { flags |= 2147483648U; }
+        // linker directives are discarded after consumption, keep them out of the image
+        if (section.name == ".drectve") { flags = 2560U; }
         if (counts[i] > 65535) { flags |= 16777216U; }
         flags |= coff_alignment_bits(section.alignment);
         coff_emit_u32(ref output, flags);

@@ -2703,7 +2703,8 @@ func compile_class_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) -
         }
     }
 
-    return CompileResult(reg=obj_ptr, type=s_info.type_id, origin_type=0, owns_ref=false, is_const_access=false);
+    emit_retain(ref c, obj_ptr, s_info.type_id);
+    return CompileResult(reg=obj_ptr, type=s_info.type_id, origin_type=0, owns_ref=true, is_const_access=false);
 }
 
 func compile_class_def(ref c: Compiler, node: ClassDefNode) -> CompileResult {
@@ -4664,7 +4665,10 @@ func compile_map_lit(ref c: Compiler, node: MapLitNode) -> CompileResult {
         put_args.append(ArgNode(val=pair.value, name="", is_spread=false));
         let fake_put_call: CallNode = CallNode(type=NODE_CALL, callee=NO_NODE, args=put_args, type_args=[], pos=node.pos, preserve_fallible=false);
 
-        compile_class_method_call(ref c, record, dict_res, "put", fake_put_call);
+        // the literal keeps its owner while each put borrows the receiver
+        let receiver = dict_res;
+        receiver.owns_ref = false;
+        compile_class_method_call(ref c, record, receiver, "put", fake_put_call);
         i += 1;
     }
 
@@ -6694,10 +6698,14 @@ func compile_raw_float(ref c: Compiler, node: NodeID) -> CompileResult {
         val_str = val_str.slice(0, val_str.length() - 1);
     }
 
-    if (c.expected_type == TYPE_FLOAT32 || (c.expected_type == 0 && is_f32)) {
+    if is_f32 {
+        // converting a rounded double again loses decimal values just above a float midpoint
+        let value: Float = parse_decimal_float_literal(val_str + "f");
+        return CompileResult(reg=llvm_float_literal(value), type=TYPE_FLOAT32, origin_type=0, owns_ref=false, is_const_access=false);
+    }
+    if (c.expected_type == TYPE_FLOAT32) {
         let tmp_reg: String = next_reg(ref c);
         write_ir(ref c, c.indent + tmp_reg + " = fptrunc double " + val_str + " to float\n");
-
         return CompileResult(reg=tmp_reg, type=TYPE_FLOAT32, origin_type=0, owns_ref=false, is_const_access=false);
     }
     return CompileResult(reg=val_str, type=TYPE_FLOAT, origin_type=0, owns_ref=false, is_const_access=false);

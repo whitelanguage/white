@@ -33,7 +33,8 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> Optional(Fun
     let key: String = source.current_package_prefix + node.name_tok.value;
     let info: Optional(FuncInfo) = source.func_table.lookup(key);
     if (!(info is !null)) { info = source.func_table.lookup(node.name_tok.value); }
-    if ((info is !null)) { return info; }
+    // an unqualified source function can shadow this extern's spelling
+    if (info is !null && info.abi_name == node.abi_name && info.name == node.name_tok.value) { return info; }
 
     let return_type: Int = resolve_type(ref source, node.ret_type_tok);
     if (return_type == TYPE_AUTO || return_type == TYPE_POISON) {
