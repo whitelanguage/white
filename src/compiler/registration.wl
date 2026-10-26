@@ -572,12 +572,17 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 let layout_intrinsic: Bool = (raw_name == "size_of" || raw_name == "align_of") && sys_anns.intrinsic_name == raw_name;
                 let print_intrinsic: Bool = raw_name == "print" &&
                                             (sys_anns.intrinsic_name == "print" || sys_anns.intrinsic_name.length() == 0);
-                if (!layout_intrinsic && !print_intrinsic) {
+                let type_intrinsic = (raw_name == "is_type" || raw_name == "is_instance") && sys_anns.intrinsic_name == raw_name;
+                if (!layout_intrinsic && !print_intrinsic && !type_intrinsic) {
                     throw_internal_compiler_error(f_node.pos, "Unknown intrinsic function '" + sys_anns.intrinsic_name + "'.");
                     return;
                 }
                 if (layout_intrinsic && (p_len != 0 || ret_type_id != TYPE_UINTSIZE)) {
                     throw_internal_compiler_error(f_node.pos, "Intrinsic '" + raw_name + "' must be declared as func " + raw_name + "() -> UIntSize.");
+                    return;
+                }
+                if (type_intrinsic && (p_len != 0 || ret_type_id != TYPE_BOOL)) {
+                    throw_internal_compiler_error(f_node.pos, "Intrinsic '" + raw_name + "' must be declared as func " + raw_name + "() -> Bool.");
                     return;
                 }
                 if (print_intrinsic && (p_len != 3 || variadic_param_index(params) != 1 || ret_type_id != TYPE_VOID)) {
