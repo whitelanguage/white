@@ -3,6 +3,15 @@
 // Focus: Shared library symbol exporting, recursive stack frame integrity, and float ABI stability.
 
 @ExportLib
+let exported_count: Optional(Int) = 42;
+
+@ExportLib
+func read_count() -> Int {
+    if (exported_count is null) { return -1; }
+    return exported_count;
+}
+
+@ExportLib
 // basic i32 addition for export validation
 func add(a: Int, b: Int) -> Int {
     return a + b;

@@ -1,5 +1,5 @@
 # Test: DLL_PYTHON_INTEROP
-# File: tests/language/integration/ffi/test_dll_host.py
+# File: tests/integration/ffi/test_dll_host.py
 # Focus: Python-to-WhiteLang FFI via ctypes, symbol resolution, and ABI validation.
 # Compile: python test_dll_host.py
 
@@ -32,6 +32,23 @@ def main():
 
         wl_lib.multiply_float.argtypes = [ctypes.c_double, ctypes.c_double]
         wl_lib.multiply_float.restype = ctypes.c_double
+
+        class OptionalInt(ctypes.Structure):
+            _fields_ = [("tag", ctypes.c_uint32), ("value", ctypes.c_int32)]
+
+        wl_lib.read_count.argtypes = []
+        wl_lib.read_count.restype = ctypes.c_int32
+        count = OptionalInt.in_dll(wl_lib, "exported_count")
+        if count.tag != 1 or count.value != 42 or wl_lib.read_count() != 42:
+            raise RuntimeError("exported union layout or initial value differs")
+
+        # mutate the public storage, the White reader must see the same tag and payload.
+        count.value = 17
+        if wl_lib.read_count() != 17:
+            raise RuntimeError("exported union storage is not shared with its reader")
+        count.tag = 0
+        if wl_lib.read_count() != -1:
+            raise RuntimeError("exported union reader ignored the Null tag")
 
         # trigger procedure calls across the binary boundary
         res_add = wl_lib.add(5, 7)

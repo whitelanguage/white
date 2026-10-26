@@ -5378,8 +5378,10 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
         apply_flow_guard(ref c, node.left, op_type == TOK_AND);
         let right_res: CompileResult = compile_node(ref c, node.right);
         c.flow_types = flow_intersect(before_rhs, c.flow_types);
+        if (right_res.type == TYPE_POISON) { return right_res; }
         if (right_res.type != logic_type) {
             throw_type_error(node.pos, "Both logic operands must have type " + get_type_name(ref c, logic_type) + ".");
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
         right_res.type = get_repr_type(ref c, right_res.type);
 
@@ -7622,6 +7624,7 @@ func compile_raw_postfix(ref c: Compiler, node: NodeID) -> CompileResult {
         }
         if (info.is_const) {
             throw_type_error(u.pos, "Cannot modify constant variable '" + var_name + "'.");
+            return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
 
         target_reg = info.reg;
@@ -7648,9 +7651,8 @@ func compile_raw_postfix(ref c: Compiler, node: NodeID) -> CompileResult {
     }
 
     let operation_type: Int = get_repr_type(ref c, target_type);
-    if (operation_type == TYPE_BOOL) {
-        throw_type_error(u.pos, "Cannot increment/decrement Bool type. ");
-        return void_result();
+    if (!check_postfix_operand(ref c, target_type, u.pos)) {
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
     let old_val_reg: String = next_reg(ref c);
@@ -7664,17 +7666,12 @@ func compile_raw_postfix(ref c: Compiler, node: NodeID) -> CompileResult {
 
         write_ir(ref c, c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1\n");
     }
-    else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
+    else {
         let op_code: String = "fadd";
         if (op_type == TOK_DEC) { op_code = "fsub"; }
 
         write_ir(ref c, c.indent + new_val_reg + " = " + op_code + " " + type_str + " " + old_val_reg + ", 1.0\n");
     }
-    else {
-        throw_type_error(u.pos, "Cannot increment/decrement type " + get_type_name(ref c, target_type));
-        return void_result();
-    }
-
     write_ir(ref c, c.indent + "store " + type_str + " " + new_val_reg + ", " + type_str + "* " + target_reg + "\n");
 
     return CompileResult(reg=old_val_reg, type=target_type, origin_type=0, owns_ref=false, is_const_access=false);
@@ -7689,6 +7686,9 @@ func compile_raw_unaryop(ref c: Compiler, node: NodeID) -> CompileResult {
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
     let operand_type: Int = operand.type;
+    if (!check_unary_operand(ref c, op_type, operand_type, u.pos)) {
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+    }
     let operation_type: Int = get_repr_type(ref c, operand_type);
     let res_reg: String = next_reg(ref c);
 
@@ -7699,38 +7699,24 @@ func compile_raw_unaryop(ref c: Compiler, node: NodeID) -> CompileResult {
             write_ir(ref c, c.indent + res_reg + " = sub " + ty_str + " 0, " + operand.reg + "\n");
 
             return CompileResult(reg=res_reg, type=operand_type, origin_type=0, owns_ref=false, is_const_access=false);
-        } else if (operation_type == TYPE_FLOAT || operation_type == TYPE_FLOAT32) {
+        } else {
             let ty_str: String = get_llvm_type_str(ref c, operand.type);
 
             write_ir(ref c, c.indent + res_reg + " = fneg " + ty_str + " " + operand.reg + "\n");
 
             return CompileResult(reg=res_reg, type=operand_type, origin_type=0, owns_ref=false, is_const_access=false);
-        } else {
-            throw_type_error(u.pos, "Cannot negate non-numeric type. ");
-            return void_result();
         }
     }
     else if (op_type == TOK_NOT) {
-        if (operation_type != TYPE_BOOL) {
-            throw_type_error(u.pos, "Operator '!' requires Bool type. ");
-            return void_result();
-        }
-
         write_ir(ref c, c.indent + res_reg + " = xor i1 " + operand.reg + ", 1\n");
 
         return CompileResult(reg=res_reg, type=operand_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
     else if (op_type == TOK_BIT_NOT) {
-        if (is_integer_type(operation_type)) {
-            let ty_str: String = get_llvm_type_str(ref c, operand.type);
+        let ty_str: String = get_llvm_type_str(ref c, operand.type);
+        write_ir(ref c, c.indent + res_reg + " = xor " + ty_str + " " + operand.reg + ", -1\n");
 
-            write_ir(ref c, c.indent + res_reg + " = xor " + ty_str + " " + operand.reg + ", -1\n");
-
-            return CompileResult(reg=res_reg, type=operand_type, origin_type=0, owns_ref=false, is_const_access=false);
-        } else {
-            throw_type_error(u.pos, "Operator '~' requires an integer type.");
-            return void_result();
-        }
+        return CompileResult(reg=res_reg, type=operand_type, origin_type=0, owns_ref=false, is_const_access=false);
     }
     else {
         return operand;

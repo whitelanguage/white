@@ -1,7 +1,8 @@
 // src/compiler/lowering/static_storage.wl
 import "strings"
+import "sys"
 import * from "../context.wl"
-import get_target_triple, get_target_pointer_bits from "../target.wl"
+import get_target_triple, get_target_pointer_bits, get_target_os from "../target.wl"
 import * from "../wir/model.wl"
 import * from "../wir/builder.wl"
 import * from "../wir/layout.wl"
@@ -68,7 +69,12 @@ func emit_static_union(ref c: Compiler, node: VarDeclareNode, target: Int) -> Vo
     output.write(", align " + layout.alignment + "\n")?;
 
     let source_type = get_llvm_type_str(ref c, target);
-    output.write("@" + symbol + " = alias " + source_type + ", " + source_type + "* bitcast (" + packed_type + "* " + backing + " to " + source_type + "*)\n")?;
+    let linkage = "";
+    if (c.is_shared && get_target_os() == sys.Os.Windows) {
+        if ((annotations.ann_flags & FLAG_ANN_EXPORT) != 0) { linkage = "dllexport "; }
+        else { linkage = "hidden "; }
+    }
+    output.write("@" + symbol + " = " + linkage + "alias " + source_type + ", " + source_type + "* bitcast (" + packed_type + "* " + backing + " to " + source_type + "*)\n")?;
     write_ir(ref c, output.build()?);
     c.global_symbol_table.put(name, SymbolInfo(reg="@" + symbol, type=target, origin_type=target, is_const=node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
     return;

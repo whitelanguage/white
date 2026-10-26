@@ -2583,7 +2583,11 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
     if (base == NODE_UNARYOP) {
         let u: UnaryOpNode = get_unary_node(ref c.arena, node);
         let op: Int = u.op_tok.type;
-        if (op == WhitelangTokens.TOK_NOT) { return TYPE_BOOL; }
+        if (op == WhitelangTokens.TOK_NOT) {
+            let operand = get_expr_type(ref c, u.node);
+            if (get_repr_type(ref c, operand) == TYPE_BOOL) { return operand; }
+            return TYPE_BOOL;
+        }
 
         return get_expr_type(ref c, u.node);
     }
@@ -3055,12 +3059,17 @@ func expr_type_binop(ref c: Compiler, node: NodeID) -> Int {
 
     if (op == WhitelangTokens.TOK_EE || op == WhitelangTokens.TOK_NE || op == WhitelangTokens.TOK_LT ||
         op == WhitelangTokens.TOK_GT || op == WhitelangTokens.TOK_LTE || op == WhitelangTokens.TOK_GTE ||
-        op == WhitelangTokens.TOK_AND || op == WhitelangTokens.TOK_OR || op == WhitelangTokens.TOK_IS) {
+        op == WhitelangTokens.TOK_IS) {
         return TYPE_BOOL;
     }
 
     let left_ty: Int = get_expr_type(ref c, b.left);
     let right_ty: Int = get_expr_type(ref c, b.right);
+
+    if (op == WhitelangTokens.TOK_AND || op == WhitelangTokens.TOK_OR) {
+        if (get_repr_type(ref c, left_ty) == TYPE_BOOL) { return left_ty; }
+        return TYPE_BOOL;
+    }
 
     if (left_ty == TYPE_STRING || right_ty == TYPE_STRING) { return TYPE_STRING; }
     if (left_ty == TYPE_CHAR && right_ty == TYPE_CHAR && op == WhitelangTokens.TOK_PLUS) { return TYPE_STRING; }

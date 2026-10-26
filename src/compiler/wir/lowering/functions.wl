@@ -18,7 +18,7 @@ import find_interface_implementation from "../../analysis.wl"
 import has_index_refs, check_body_refs from "../../references.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long, check_layout_type from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
-import check_null_return from "../../validation.wl"
+import check_null_return, check_unary_operand, check_postfix_operand from "../../validation.wl"
 import check_struct_init, struct_arg_supplied from "../../initialization.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
 import validate_explicit_literal_cast from "../../lowering/casts.wl"
@@ -314,16 +314,20 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
     }
     if (node_tag(node) == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(ref source.arena, node);
-        if (unary.op_tok.type == TOK_NOT) { return TYPE_BOOL; }
-        return wir_argument_type(ref state, ref source, unary.node);
+        let operand = wir_argument_type(ref state, ref source, unary.node);
+        if (unary.op_tok.type == TOK_NOT && get_repr_type(ref source, operand) != TYPE_BOOL) { return TYPE_BOOL; }
+        return operand;
     }
     if (node_tag(node) == NODE_BINOP) {
         let binary: BinOpNode = get_binop_node(ref source.arena, node);
         let left_type: Int = wir_argument_type(ref state, ref source, binary.left);
         let right_type: Int = wir_argument_type(ref state, ref source, binary.right);
         if (left_type == TYPE_POISON || right_type == TYPE_POISON) { return TYPE_POISON; }
-        if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR ||
-            binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE ||
+        if (binary.op_tok.type == TOK_AND || binary.op_tok.type == TOK_OR) {
+            if (get_repr_type(ref source, left_type) == TYPE_BOOL) { return left_type; }
+            return TYPE_BOOL;
+        }
+        if (binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE ||
             binary.op_tok.type == TOK_LT || binary.op_tok.type == TOK_LTE ||
             binary.op_tok.type == TOK_GT || binary.op_tok.type == TOK_GTE ||
             binary.op_tok.type == TOK_IS) {
@@ -5856,7 +5860,8 @@ func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeM
 func wir_one(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirValueID {
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
 
-    if (source_type == TYPE_FLOAT || source_type == TYPE_FLOAT32) {
+    let repr = get_repr_type(ref source, source_type);
+    if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
         return wir_const_float(ref program, type_id, 1.0);
     }
 
@@ -6638,8 +6643,8 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
         if (left.value == NO_WIR_VALUE) {
             return wir_no_expr();
         }
-        if (left.source_type != TYPE_BOOL) {
-            state.errors.append("logical operator reached WIR lowering with a non-Bool left operand");
+        if (get_repr_type(ref source, left.source_type) != TYPE_BOOL) {
+            throw_type_error(binary.pos, "Logic operators '&&' and '||' require Bool operands.");
             return wir_no_expr();
         }
         wir_cleanup_temporaries(ref state, ref types, ref source, ref program, left_owned_start);
@@ -6676,15 +6681,15 @@ func wir_lower_binary_expr(ref state: WirFunctionLowering, ref types: WirTypeMap
         let right: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, binary.right);
         source.flow_types = flow_intersect(before_rhs, source.flow_types);
         if (right.value == NO_WIR_VALUE) { return wir_no_expr(); }
-        if (right.source_type != TYPE_BOOL) {
-            state.errors.append("logical operator reached WIR lowering with a non-Bool right operand");
+        if (right.source_type != left.source_type) {
+            throw_type_error(binary.pos, "Both logic operands must have type " + get_type_name(ref source, left.source_type) + ".");
             return wir_no_expr();
         }
         wir_cleanup_temporaries(ref state, ref types, ref source, ref program, right_owned_start);
         wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(merge_block, [right.value])], no_wir_location());
         state.block = merge_block;
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(merge_block))];
-        return WirExpr(value=block.parameters[0], source_type=TYPE_BOOL);
+        return WirExpr(value=block.parameters[0], source_type=left.source_type);
     }
 
     let owned_start: Int = state.owned_values.length();
@@ -7184,26 +7189,23 @@ func wir_expr_unaryop(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
     let unary: UnaryOpNode = get_unary_node(ref source.arena, node);
     let operand: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, unary.node);
     if (operand.value == NO_WIR_VALUE) { return wir_no_expr(); }
+    if (!check_unary_operand(ref source, unary.op_tok.type, operand.source_type, unary.pos)) {
+        return wir_no_expr();
+    }
+    let repr = get_repr_type(ref source, operand.source_type);
 
     if (unary.op_tok.type == TOK_PLUS) {
-        if (!wir_source_numeric(get_repr_type(ref source, operand.source_type))) {
-            state.errors.append("unary '+' reached WIR lowering with a non-numeric operand");
-            return wir_no_expr();
-        }
         return operand;
     }
 
     let opcode: WirOpcode = WirOpcode.Invalid;
     if (unary.op_tok.type == TOK_SUB) {
-        if (is_integer_type(operand.source_type)) { opcode = WirOpcode.Negate; }
-        else if (operand.source_type == TYPE_FLOAT || operand.source_type == TYPE_FLOAT32) { opcode = WirOpcode.FloatNegate; }
-        else { state.errors.append("unary '-' reached WIR lowering with a non-numeric operand"); }
+        if (is_integer_type(repr)) { opcode = WirOpcode.Negate; }
+        else { opcode = WirOpcode.FloatNegate; }
     } else if (unary.op_tok.type == TOK_NOT) {
-        if (operand.source_type == TYPE_BOOL) { opcode = WirOpcode.Not; }
-        else { state.errors.append("operator '!' reached WIR lowering with a non-Bool operand"); }
+        opcode = WirOpcode.Not;
     } else if (unary.op_tok.type == TOK_BIT_NOT) {
-        if (is_integer_type(operand.source_type)) { opcode = WirOpcode.Not; }
-        else { state.errors.append("operator '~' reached WIR lowering with a non-integer operand"); }
+        opcode = WirOpcode.Not;
     } else {
         state.errors.append("unary operator '" + unary.op_tok.value + "' is not lowered to WIR yet");
     }
@@ -7230,8 +7232,7 @@ func wir_expr_postfix(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
     if (address.value == NO_WIR_VALUE) {
         return wir_no_expr();
     }
-    if (!wir_source_numeric(get_repr_type(ref source, address.source_type))) {
-        state.errors.append("postfix operator reached WIR lowering with a non-numeric operand");
+    if (!check_postfix_operand(ref source, address.source_type, postfix.pos)) {
         return wir_no_expr();
     }
 
@@ -8034,7 +8035,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             return;
         }
         if (condition.source_type != TYPE_BOOL) {
-            state.errors.append("if condition reached WIR lowering with a non-Bool type");
+            throw_type_error(statement.pos, "If condition must be a Bool.");
             return;
         }
         wir_cleanup_temporaries(ref state, ref types, ref source, ref program, condition_owned_start);
@@ -8131,7 +8132,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             return;
         }
         if (condition.source_type != TYPE_BOOL) {
-            state.errors.append("while condition reached WIR lowering with a non-Bool type");
+            throw_type_error(statement.pos, "While condition must be a Bool.");
             return;
         }
         // each visit to the condition owns a new set of temporaries
@@ -8199,7 +8200,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
                 return;
             }
             if (condition.source_type != TYPE_BOOL) {
-                state.errors.append("for condition reached WIR lowering with a non-Bool type");
+                throw_type_error(statement.pos, "For condition must be a Bool.");
                 return;
             }
             wir_cleanup_temporaries(ref state, ref types, ref source, ref program, condition_owned_start);

@@ -6,6 +6,47 @@ import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
 
+func check_unary_operand(ref c: Compiler, op: Int, type_id: Int, pos: Position) -> Bool {
+// validate source types before either backend chooses an instruction
+    if (type_id == TYPE_POISON) { return false; }
+    let repr = get_repr_type(ref c, type_id);
+    let numeric = is_integer_type(repr) || repr == TYPE_FLOAT || repr == TYPE_FLOAT32;
+
+    if (op == TOK_SUB && !numeric) {
+        throw_type_error(pos, "Cannot negate non-numeric type.");
+        return false;
+    }
+    if (op == TOK_PLUS && !numeric) {
+        throw_type_error(pos, "Operator '+' requires a numeric type.");
+        return false;
+    }
+    if (op == TOK_NOT && repr != TYPE_BOOL) {
+        throw_type_error(pos, "Operator '!' requires Bool type.");
+        return false;
+    }
+    if (op == TOK_BIT_NOT && !is_integer_type(repr)) {
+        throw_type_error(pos, "Operator '~' requires an integer type.");
+        return false;
+    }
+
+    return true;
+}
+
+func check_postfix_operand(ref c: Compiler, type_id: Int, pos: Position) -> Bool {
+    if (type_id == TYPE_POISON) { return false; }
+    let repr = get_repr_type(ref c, type_id);
+    if (repr == TYPE_BOOL) {
+        throw_type_error(pos, "Cannot increment/decrement Bool type.");
+        return false;
+    }
+    if (!is_integer_type(repr) && repr != TYPE_FLOAT && repr != TYPE_FLOAT32) {
+        throw_type_error(pos, "Cannot increment/decrement type " + get_type_name(ref c, type_id));
+        return false;
+    }
+
+    return true;
+}
+
 func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: Position) -> Bool {
 // a fallible return still needs a valid success value, null never stands for an error
     if (value_type == TYPE_POISON) { return false; }
