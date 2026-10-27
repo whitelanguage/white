@@ -3042,6 +3042,10 @@ func finish_field_value(ref c: Compiler, receiver: CompileResult, value: String,
 }
 
 func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResult {
+    let function = module_function(ref c, node);
+    if (function is !null) {
+        return emit_function_value(ref c, function, node.pos);
+    }
     let obj_base: Int = node_tag(node.obj);
 
     let is_module: Bool = false;
@@ -4929,29 +4933,9 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
             f_info = c.func_table.lookup(c.current_package_prefix + name);
         }
         if ((f_info is !null)) {
-            if (!validate_callable_value(f_info, 0, pos, "Function")) {
-                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
-            }
-
-            let specific_type_id: Int = get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
-            let sig: String = get_func_sig_str(ref c, f_info);
-            let func_ptr: String = "@" + f_info.name;
-            let cast_reg: String = next_reg(ref c);
-            write_ir(ref c, c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
-
-            let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
-            let clo_func_ptr: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_payload + " to i8**\n");
-            write_ir(ref c, c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
-
-            let clo_env_ptr_i8: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
-
-            let clo_env_ptr: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
-            write_ir(ref c, c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
-
-            return CompileResult(reg=clo_payload, type=specific_type_id, origin_type=0, owns_ref=false, is_const_access=false);
+            let result = emit_function_value(ref c, f_info, pos);
+            result.origin_type = 0;
+            return result;
         }
 
         throw_name_error(v.pos, "Unknown variable or function '" + name + "'.");
@@ -5947,8 +5931,9 @@ func emit_function_value(ref c: Compiler, info: FuncInfo, pos: Position) -> Comp
     }
 
     let specific_type: Int = get_func_type_id(ref c, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
+    let function_name = native_callable_name(ref c, info);
     let cast: String = next_reg(ref c);
-    write_ir(ref c, c.indent + cast + " = bitcast " + get_func_sig_str(ref c, info) + " @" + info.name + " to i8*\n");
+    write_ir(ref c, c.indent + cast + " = bitcast " + get_func_sig_str(ref c, info) + " @" + function_name + " to i8*\n");
 
     let closure: String = emit_alloc_closure(ref c, specific_type);
     let function_slot: String = next_reg(ref c);
@@ -6754,35 +6739,9 @@ func compile_raw_var_access(ref c: Compiler, node: NodeID) -> CompileResult {
             if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
         }
         if ((f_info is !null)) {
-            if ((f_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
-                throw_type_error(v.pos, "Compiler intrinsic '" + f_info.base_name + "' cannot be used as a function value.");
-                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
-            }
-            if (!validate_callable_value(f_info, 0, v.pos, "Function")) {
-                return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
-            }
-
-            let specific_type_id: Int = get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
-            let sig: String = get_func_sig_str(ref c, f_info);
-            let func_ptr: String = "@" + f_info.name;
-
-            let cast_reg: String = next_reg(ref c);
-            write_ir(ref c, c.indent + cast_reg + " = bitcast " + sig + " " + func_ptr + " to i8*\n");
-
-            let clo_payload: String = emit_alloc_closure(ref c, specific_type_id);
-            let clo_func_ptr_i8: String = clo_payload;
-            let clo_func_ptr: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_func_ptr + " = bitcast i8* " + clo_func_ptr_i8 + " to i8**\n");
-            write_ir(ref c, c.indent + "store i8* " + cast_reg + ", i8** " + clo_func_ptr + "\n");
-
-            let clo_env_ptr_i8: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_env_ptr_i8 + " = getelementptr inbounds i8, i8* " + clo_payload + ", i32 " + closure_env_offset() + "\n");
-
-            let clo_env_ptr: String = next_reg(ref c);
-            write_ir(ref c, c.indent + clo_env_ptr + " = bitcast i8* " + clo_env_ptr_i8 + " to i8**\n");
-            write_ir(ref c, c.indent + "store i8* null, i8** " + clo_env_ptr + "\n");
-
-            return CompileResult(reg=clo_payload, type=specific_type_id, origin_type=0, owns_ref=false, is_const_access=false);
+            let result = emit_function_value(ref c, f_info, v.pos);
+            result.origin_type = 0;
+            return result;
         }
 
         throw_name_error(v.pos, "Undefined variable or function '" + var_name + "'. ");
@@ -7947,6 +7906,7 @@ func compile_end(ref c: Compiler) -> Void {
     emit_erased_check_helpers(ref c);
     emit_windows_abi(ref c);
     emit_windows_entrypoint(ref c);
+    emit_native_adapters(ref c);
 
     let str_vec: Vector(Struct) = c.string_list;
     let s_len: Int = str_vec.length();

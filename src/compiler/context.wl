@@ -292,6 +292,7 @@ struct Compiler(
     func_ret_map: Dict(Int, SymbolInfo),
     method_ret_map: Dict(Int, SymbolInfo),
     declared_externs: Dict(String, StringConstant),
+    native_adapters: Dict(String, FuncInfo),
     imported_modules: Dict(String, StringConstant),
     module_prefix_owners: Dict(String, StringConstant),
     module_id: Int,
@@ -504,6 +505,7 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         func_ret_map=Dict(),
         method_ret_map=Dict(),
         declared_externs=Dict(),
+        native_adapters=Dict(),
         imported_modules=Dict(),
         module_prefix_owners=Dict(),
         module_id=0,
@@ -2705,8 +2707,52 @@ func expr_type_var_access(ref c: Compiler, node: NodeID) -> Int {
     return 0;
 }
 
+func module_function(ref c: Compiler, field: FieldAccessNode) -> Optional(FuncInfo) {
+// module paths share alias resolution with direct calls, local values still shadow them
+    let root = field.obj;
+    while (node_tag(root) == NODE_FIELD_ACCESS) {
+        root = get_field_access_node(ref c.arena, root).obj;
+    }
+    if (node_tag(root) != NODE_VAR_ACCESS || field.field_name.starts_with("__")) {
+        return null;
+    }
+    let root_name = get_var_access_node(ref c.arena, root).name_tok.value;
+    if (find_symbol(ref c, root_name) is !null) {
+        return null;
+    }
+
+    let parts: Vector(String) = [];
+    let current = field.obj;
+    while (node_tag(current) == NODE_FIELD_ACCESS) {
+        let part = get_field_access_node(ref c.arena, current);
+        parts.append(part.field_name);
+        current = part.obj;
+    }
+    let name: String = "";
+    let prefix = c.current_file_visible_prefixes.lookup(root_name);
+    if (prefix is !null) {
+        name = module_member_name(prefix, parts, field.field_name);
+    } else {
+        let mapped = c.current_file_func_aliases.lookup(module_member_name(root_name + ".", parts, field.field_name));
+        if (mapped is !null) { name = mapped; }
+    }
+    if (name.length() == 0) { return null; }
+    let alias = c.global_func_aliases.lookup(name);
+    if (alias is !null) { name = alias; }
+
+    return c.func_table.lookup(name);
+}
+
 func expr_type_field_access(ref c: Compiler, node: NodeID) -> Int {
     let f: FieldAccessNode = get_field_access_node(ref c.arena, node);
+    let function = module_function(ref c, f);
+    if (function is !null) {
+        if ((function.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+            throw_type_error(f.pos, "Compiler intrinsic '" + function.base_name + "' cannot be used as a function value.");
+            return TYPE_POISON;
+        }
+        return get_func_type_id(ref c, function.arg_types, function.ret_type, function.variadic_param, callable_arg_names(function, 0));
+    }
     let obj_type: Int = get_expr_type(ref c, f.obj);
     obj_type = get_repr_type(ref c, obj_type);
     if (is_pointer_type(ref c, obj_type)) {

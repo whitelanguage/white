@@ -6,6 +6,7 @@ import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
 import * from "../validation.wl"
+import * from "ownership.wl"
 
 
 func normalize_extern_abi(name: String, pos: Position) -> String {
@@ -140,4 +141,65 @@ func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResu
         i += 1;
     }
     return void_result();
+}
+
+func native_callable_name(ref c: Compiler, info: FuncInfo) -> String {
+// a Function value uses White's calling convention and returns an owned result
+    if (info.abi_name.length() == 0) { return info.name; }
+    let name = "$native." + info.abi_name + "." + info.name;
+    if (!c.native_adapters.contains_key(name)) {
+        c.native_adapters.put(name, info);
+    }
+    return name;
+}
+
+func emit_native_adapters(ref c: Compiler) -> Void {
+// emitting after source bodies keeps wrapper definitions out of the active function
+    let saved_reg = c.reg_count;
+    let saved_indent = c.indent;
+    c.indent = "  ";
+
+    let i = 0;
+    while (i < c.native_adapters.capacity) {
+        if (c.native_adapters.hashes[i] < 2) {
+            i++;
+            continue;
+        }
+        let name = c.native_adapters.keys[i];
+        let info: FuncInfo = c.native_adapters.values[i];
+        let params: String = "";
+        let args: String = "";
+        let arg_idx = 0;
+        while (arg_idx < info.arg_types.length()) {
+            let param: TypeListNode = info.arg_types[arg_idx];
+            let type = param_llvm_type(ref c, param);
+            if (arg_idx != 0) {
+                params += ", ";
+                args += ", ";
+            }
+            let arg = type + " %arg" + arg_idx;
+            params += arg;
+            args += arg;
+            arg_idx++;
+        }
+
+        c.reg_count = 0;
+        let result_type = get_llvm_type_str(ref c, info.ret_type);
+        write_ir(ref c, "define internal " + result_type + " @" + name + "(" + params + ") {\nentry:\n");
+        let call = "call " + func_callconv(info) + result_type + " @" + info.name + "(" + args + ")\n";
+        if (info.ret_type == TYPE_VOID) {
+            write_ir(ref c, c.indent + call);
+            write_ir(ref c, c.indent + "ret void\n}\n\n");
+        } else {
+            let result = next_reg(ref c);
+            write_ir(ref c, c.indent + result + " = " + call);
+            emit_native_ref_check(ref c, result, info.ret_type, no_position());
+            emit_retain_value(ref c, result, info.ret_type);
+            write_ir(ref c, c.indent + "ret " + result_type + " " + result + "\n}\n\n");
+        }
+        i++;
+    }
+
+    c.reg_count = saved_reg;
+    c.indent = saved_indent;
 }

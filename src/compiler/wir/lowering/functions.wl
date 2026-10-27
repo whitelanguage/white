@@ -6,6 +6,7 @@ import * from "../runtime.wl"
 import * from "state.wl"
 import * from "types.wl"
 import * from "ownership.wl"
+import wir_native_callable from "native_calls.wl"
 import * from "unions.wl"
 import * from "type_tests.wl"
 import * from "../../type_tests.wl"
@@ -1780,6 +1781,7 @@ func wir_lower_function_value(ref state: WirFunctionLowering, ref types: WirType
     if (function_id == NO_WIR_FUNC) {
         return wir_no_expr();
     }
+    function_id = wir_native_callable(ref types, ref source, ref program, info, function_id);
     let source_type: Int = get_func_type_id(ref source, info.arg_types, info.ret_type, info.variadic_param, callable_arg_names(info, 0));
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let code: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(ref program, function_id), 0L);
@@ -7141,6 +7143,11 @@ func wir_expr_type_layout(ref state: WirFunctionLowering, ref types: WirTypeMap,
 }
 
 func wir_expr_field_access(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
+    let function = wir_direct_function(ref state, ref source, node);
+    if (function is !null) {
+        let pos = get_field_access_node(ref source.arena, node).pos;
+        return wir_lower_function_value(ref state, ref types, ref source, ref program, function, pos);
+    }
     let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
     let enum_member: Optional(WirEnumValue) = wir_enum_member(ref types, ref source, node, access);
     if (enum_member is !null) {
