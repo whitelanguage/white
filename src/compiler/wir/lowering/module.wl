@@ -16,7 +16,7 @@ import select_target from "../../target.wl"
 import register_extern_library from "../../validation.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
-import GLOBAL_ERROR_COUNT, throw_overflow_error, throw_extern_error from "../../../frontend/diagnostics.wl"
+import GLOBAL_ERROR_COUNT, throw_overflow_error, throw_extern_error, throw_type_error from "../../../frontend/diagnostics.wl"
 
 
 struct WirLoweringResult(
@@ -90,6 +90,12 @@ func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program
         let param: ParamNode = node.params[param_index];
         if (param.pass_mode == PARAM_REF) {
             throw_extern_error(param.pos, "Extern functions cannot use reference parameters; declare a pointer parameter instead.");
+            return;
+        }
+        let param_type = resolve_type(ref source, param.type_tok);
+        if (param_type == TYPE_POISON) { return; }
+        if (get_repr_type(ref source, param_type) == TYPE_VOID) {
+            throw_type_error(param.pos, "Extern parameters cannot have type Void.");
             return;
         }
         param_index++;

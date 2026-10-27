@@ -473,6 +473,25 @@ func emit_pointer_null_check(ref c: Compiler, ptr_reg: String, type_id: Int, pos
     write_ir(ref c, "\n" + ok_label + ":\n");
 }
 
+func emit_native_ref_check(ref c: Compiler, value: String, type_id: Int, pos: Position) -> Void {
+// native code can return zero even when its declared White type is non-null
+    if (!is_ref_type(ref c, type_id)) { return; }
+
+    let info = c.struct_id_map.lookup(get_repr_type(ref c, type_id));
+    if (info is !null && info.is_interface) {
+        let llvm_type = get_llvm_type_str(ref c, type_id);
+        let object = next_reg(ref c);
+        let table = next_reg(ref c);
+        write_ir(ref c, c.indent + object + " = extractvalue " + llvm_type + " " + value + ", 0\n");
+        write_ir(ref c, c.indent + table + " = extractvalue " + llvm_type + " " + value + ", 1\n");
+        emit_pointer_null_check(ref c, object, TYPE_ANYPTR, pos);
+        emit_pointer_null_check(ref c, table, TYPE_ANYPTR, pos);
+        return;
+    }
+
+    emit_pointer_null_check(ref c, value, type_id, pos);
+}
+
 func emit_size_to_int(ref c: Compiler, value: String) -> String {
     let size_ty: String = get_size_llvm_type();
     if (size_ty == "i32") { return value; }

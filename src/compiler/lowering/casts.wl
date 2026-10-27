@@ -590,6 +590,8 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
     if (is_void_ptr(ref c, val_res.type) && expected_type != TYPE_NULL && expected_type != TYPE_NULLPTR && !is_void_ptr(ref c, expected_type)) {
         if (expected_type == TYPE_STRING) {
+            // a raw address carries no non-null guarantee, check it before ARC sees it.
+            emit_pointer_null_check(ref c, val_res.reg, val_res.type, pos);
             let cast_reg: String = next_reg(ref c);
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
 

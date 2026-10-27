@@ -7342,9 +7342,13 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             call_res_reg = next_reg(ref c);
             write_ir(ref c, c.indent + call_res_reg + " = call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
 
+            if (meta_func_info.abi_name.length() != 0) {
+                emit_native_ref_check(ref c, call_res_reg, meta_func_info.ret_type, n_call.pos);
+                // extern results are borrowed, an alias may point into an owned argument.
+                emit_retain_value(ref c, call_res_reg, meta_func_info.ret_type);
+            }
             emit_release_owned_args(ref c, owned_args);
-            let returns_owned: Bool = result_owns_value(ref c, meta_func_info.ret_type) &&
-                                        (meta_func_info.abi_name.length() == 0);
+            let returns_owned: Bool = result_owns_value(ref c, meta_func_info.ret_type);
             return CompileResult(reg=call_res_reg, type=meta_func_info.ret_type, owns_ref=returns_owned, origin_type=0, is_const_access=false);
         }
     }

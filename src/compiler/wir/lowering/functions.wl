@@ -2397,6 +2397,11 @@ func wir_cast_expr(
     }
     // Null and nullptr share pointer storage, check their source rules before
     // accepting equal WIR types.
+    if (source_kind == WirTypeKind.Pointer && target_kind == WirTypeKind.Pointer &&
+        is_pointer_type(ref source, value.source_type) && is_ref_type(ref source, target_type)) {
+        // opaque pointers can compare equal here even when their source guarantees differ.
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
+    }
     if (source_wir == target_wir) {
         return WirExpr(value=value.value, source_type=target_type);
     }
@@ -7617,6 +7622,11 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         result = wir_call_callable(ref state, ref types, ref source, ref program, callee_value, indirect_source_type, signature_info, arguments);
     } else {
         result = wir_call(ref program, state.block, callee_value, arguments, "", no_wir_location());
+        if (info is !null && info.abi_name.length() != 0 && result != NO_WIR_VALUE) {
+            wir_native_ref_check(ref state, ref source, ref program, result, result_type);
+            // acquire the borrowed result before argument cleanup, it can alias an argument.
+            wir_emit_ownership_value(ref state, ref types, ref source, ref program, result, result_type, true);
+        }
     }
     wir_cleanup_temporaries(ref state, ref types, ref source, ref program, owned_start);
     if (result != NO_WIR_VALUE && wir_value_needs_drop(ref source, result_type)) {

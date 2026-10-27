@@ -80,6 +80,11 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
             throw_type_error(p.pos, "Extern functions cannot use Auto parameters.");
             return void_result();
         }
+        if (p_id == TYPE_POISON) { return void_result(); }
+        if (get_repr_type(ref c, p_id) == TYPE_VOID) {
+            throw_type_error(p.pos, "Extern parameters cannot have type Void.");
+            return void_result();
+        }
 
         arg_types.append(TypeListNode(type=p_id, pass_mode=0));
         arg_names.append(p.name_tok.value);

@@ -59,6 +59,22 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
     return NO_WIR_VALUE;
 }
 
+func wir_native_ref_check(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int) -> Void {
+// check the native result before it is retained or stored in a non-null binding
+    if (!is_ref_type(ref source, source_type)) { return; }
+
+    let info = source.struct_id_map.lookup(get_repr_type(ref source, source_type));
+    if (info is !null && info.is_interface) {
+        let object = wir_field(ref program, state.block, value, 0, "", no_wir_location());
+        let table = wir_field(ref program, state.block, value, 1, "", no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [object], [], no_wir_location());
+        wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [table], [], no_wir_location());
+        return;
+    }
+
+    wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value], [], no_wir_location());
+}
+
 func wir_emit_ownership_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int, retain: Bool) -> Void {
     if (!wir_value_needs_drop(ref source, source_type)) {
         return;
