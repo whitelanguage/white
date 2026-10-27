@@ -5,6 +5,7 @@ import * from "state.wl"
 import * from "types.wl"
 import * from "ownership.wl"
 import * from "declarations.wl"
+import wir_native_value_check from "native_values.wl"
 import * from "../../context.wl"
 
 
@@ -38,7 +39,7 @@ func wir_native_callable(ref types: WirTypeMap, ref source: Compiler, ref progra
     let returns: Vector(WirValueID) = [];
     if (result != NO_WIR_VALUE) {
         if (info.abi_name.length() != 0) {
-            wir_native_ref_check(ref state, ref source, ref program, result, info.ret_type);
+            wir_native_value_check(ref state, ref types, ref source, ref program, result, info.ret_type);
             wir_emit_ownership_value(ref state, ref types, ref source, ref program, result, info.ret_type, true);
         }
         returns.append(result);

@@ -36,6 +36,7 @@ import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
 import hoist_llvm_allocas from "../backend/llvm.wl"
+import emit_native_value_check from "native_values.wl"
 
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
@@ -1308,6 +1309,19 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
 
         let target_type_id: Int = callable_param_type(ref c, p);
         let llvm_ty: String = get_llvm_type_str(ref c, target_type_id);
+        if ((meta_f_info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+            let value = "%arg" + arg_idx;
+            if (p.pass_mode == PARAM_REF) {
+                emit_pointer_null_check(ref c, value, get_ptr_type_id(ref c, target_type_id), p.pos);
+                if (needs_native_check(ref c, target_type_id)) {
+                    let loaded = next_reg(ref c);
+                    write_ir(ref c, c.indent + loaded + " = load " + llvm_ty + ", " + llvm_ty + "* " + value + "\n");
+                    emit_native_value_check(ref c, loaded, target_type_id, p.pos);
+                }
+            } else {
+                emit_native_value_check(ref c, value, target_type_id, p.pos);
+            }
+        }
         if (p.pass_mode == PARAM_REF) {
             let curr_scope: Scope = c.symbol_table;
             scope_put(curr_scope, p_name, SymbolInfo(reg="%arg" + arg_idx, type=target_type_id, origin_type=target_type_id, is_ref_param=true, is_reference=true, is_const=false, is_const_access=false, func_arg_types=[], arg_names=[], variadic_param=0));
@@ -7302,7 +7316,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             write_ir(ref c, c.indent + call_res_reg + " = call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
 
             if (meta_func_info.abi_name.length() != 0) {
-                emit_native_ref_check(ref c, call_res_reg, meta_func_info.ret_type, n_call.pos);
+                emit_native_value_check(ref c, call_res_reg, meta_func_info.ret_type, n_call.pos);
                 // extern results are borrowed, an alias may point into an owned argument.
                 emit_retain_value(ref c, call_res_reg, meta_func_info.ret_type);
             }

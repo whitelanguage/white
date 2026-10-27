@@ -7,6 +7,7 @@ import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
 import * from "../validation.wl"
 import * from "ownership.wl"
+import emit_native_value_check from "native_values.wl"
 
 
 func normalize_extern_abi(name: String, pos: Position) -> String {
@@ -193,7 +194,7 @@ func emit_native_adapters(ref c: Compiler) -> Void {
         } else {
             let result = next_reg(ref c);
             write_ir(ref c, c.indent + result + " = " + call);
-            emit_native_ref_check(ref c, result, info.ret_type, no_position());
+            emit_native_value_check(ref c, result, info.ret_type, no_position());
             emit_retain_value(ref c, result, info.ret_type);
             write_ir(ref c, c.indent + "ret " + result_type + " " + result + "\n}\n\n");
         }

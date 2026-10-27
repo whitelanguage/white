@@ -7,6 +7,7 @@ import * from "state.wl"
 import * from "types.wl"
 import * from "ownership.wl"
 import wir_native_callable from "native_calls.wl"
+import wir_native_value_check from "native_values.wl"
 import * from "unions.wl"
 import * from "type_tests.wl"
 import * from "../../type_tests.wl"
@@ -7630,7 +7631,7 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     } else {
         result = wir_call(ref program, state.block, callee_value, arguments, "", no_wir_location());
         if (info is !null && info.abi_name.length() != 0 && result != NO_WIR_VALUE) {
-            wir_native_ref_check(ref state, ref source, ref program, result, result_type);
+            wir_native_value_check(ref state, ref types, ref source, ref program, result, result_type);
             // acquire the borrowed result before argument cleanup, it can alias an argument.
             wir_emit_ownership_value(ref state, ref types, ref source, ref program, result, result_type, true);
         }
@@ -8485,6 +8486,17 @@ func wir_lower_function_impl(ref types: WirTypeMap, ref source: Compiler, ref pr
         let parameter: WirValueID = function.parameters[i];
         let source_parameter: TypeListNode = info.arg_types[i];
         let name: String = program.arena.values[wir_id_index(UInt32(parameter))].name;
+        if ((info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+            if (source_parameter.pass_mode == PARAM_REF) {
+                wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [parameter], [], no_wir_location());
+                if (needs_native_check(ref source, source_parameter.type)) {
+                    let loaded = wir_load(ref program, state.block, parameter, "", no_wir_location());
+                    wir_native_value_check(ref state, ref types, ref source, ref program, loaded, source_parameter.type);
+                }
+            } else {
+                wir_native_value_check(ref state, ref types, ref source, ref program, parameter, source_parameter.type);
+            }
+        }
         if (source_parameter.pass_mode == PARAM_REF) {
             state.bindings.append(WirBinding(name=name, source_type=source_parameter.type, address=parameter, is_const=false, owns_value=false, pending_init=false, is_reference=true, is_const_access=false));
         } else {

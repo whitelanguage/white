@@ -2072,6 +2072,30 @@ func is_ref_type(ref c: Compiler, type_id: Int) -> Bool {
            c.method_ret_map.contains_key(type_id);
 }
 
+func needs_native_check(ref c: Compiler, type_id: Int) -> Bool {
+// inline storage can carry non-null references even when its outer type is a value
+    if (is_ref_type(ref c, type_id)) { return true; }
+    let repr = get_repr_type(ref c, type_id);
+    if (is_union_type(ref c, repr)) { return true; }
+    if (is_fallible_type(ref c, repr)) {
+        return needs_native_check(ref c, get_inner_fallible_type(ref c, repr));
+    }
+    let array = c.array_info_map.lookup(repr);
+    if (array is !null && array.size >= 0) {
+        return needs_native_check(ref c, array.base_type);
+    }
+    if (is_value_struct(ref c, repr)) {
+        let info = c.struct_id_map.lookup(repr);
+        let i = 0;
+        while (info is !null && i < info.fields.length()) {
+            let field: FieldInfo = info.fields[i];
+            if (needs_native_check(ref c, field.type)) { return true; }
+            i++;
+        }
+    }
+    return false;
+}
+
 func needs_drop(ref c: Compiler, type_id: Int) -> Bool {
     if (type_id < 100) { return is_ref_type(ref c, type_id); }
     if (type_id > c.type_counter) {
