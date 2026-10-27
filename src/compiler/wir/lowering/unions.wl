@@ -4,6 +4,8 @@ import * from "../builder.wl"
 import * from "state.wl"
 import * from "types.wl"
 import * from "../../context.wl"
+import wir_cast_expr from "functions.wl"
+import no_position from "../../../frontend/diagnostics.wl"
 
 
 func wir_union_payload(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, slot: WirValueID, member: Int) -> WirValueID {
@@ -34,7 +36,9 @@ func wir_pack_union(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
 
     let found_source_union: Optional(UnionInfo) = get_union_type(ref source, value.source_type);
     if (found_source_union is null) {
-        wir_union_store_member(ref state, ref types, ref source, ref program, slot, target, value.source_type, value.value);
+        let member = union_member_target(ref source, target, value.source_type);
+        let converted = wir_cast_expr(ref state, ref types, ref source, ref program, value, member, true, no_position());
+        wir_union_store_member(ref state, ref types, ref source, ref program, slot, target, member, converted.value);
         return wir_load(ref program, state.block, slot, "", no_wir_location());
     }
     let source_union: UnionInfo = found_source_union;
@@ -50,6 +54,8 @@ func wir_pack_union(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     let i: Int = 0;
     while (i < source_union.members.length()) {
         let member: Int = source_union.members[i];
+        let selected = union_member_target(ref source, target, member);
+        if (selected == 0 || selected == TYPE_POISON) { i++; continue; }
         let copy: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "union.member."), []);
         let next: WirBlockID = wir_add_block(ref program, state.function, wir_next_block_name(ref state, "union.next."), []);
         let matches: WirValueID = wir_binary(ref program, state.block, WirOpcode.Equal, program.bool_type, tag,
@@ -62,7 +68,11 @@ func wir_pack_union(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             let address: WirValueID = wir_union_payload(ref state, ref types, ref source, ref program, source_slot, member);
             payload = wir_load(ref program, state.block, address, "", no_wir_location());
         }
-        wir_union_store_member(ref state, ref types, ref source, ref program, slot, target, member, payload);
+        if (selected != member) {
+            let converted = wir_cast_expr(ref state, ref types, ref source, ref program, WirExpr(value=payload, source_type=member), selected, true, no_position());
+            payload = converted.value;
+        }
+        wir_union_store_member(ref state, ref types, ref source, ref program, slot, target, selected, payload);
         wir_append(ref program, state.block, WirOpcode.Jump, program.void_type, [], [wir_edge(done, [])], no_wir_location());
 
         state.block = next;

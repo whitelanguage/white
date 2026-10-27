@@ -1,11 +1,13 @@
 // src/compiler/narrowing.wl
 import * from "context.wl"
+import * from "type_tests.wl"
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "../frontend/tokens.wl"
+import no_position from "../frontend/diagnostics.wl"
 
 
-struct FlowGuard(target: NodeID, present: Bool)
+struct FlowGuard(target: NodeID, present: Bool, member: Int = TYPE_NULL, instance: Bool = false, check_call: NodeID = NO_NODE)
 
 func flow_apply_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
 // resolve the declared union before recording its checked member
@@ -15,6 +17,10 @@ func flow_apply_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
     let i = 0;
     while (i < guards.length()) {
         let guard = guards[i];
+        if (has_node(guard.check_call)) {
+            guard.member = type_test_target(ref c, get_call_node(ref c.arena, guard.check_call));
+            if (guard.member == TYPE_POISON) { i++; continue; }
+        }
         let old_skip = c.flow_skip;
         c.flow_skip = guard.target;
         let original = get_expr_type(ref c, guard.target);
@@ -29,7 +35,7 @@ func flow_apply_guard(ref c: Compiler, condition: NodeID, truth: Bool) -> Void {
         if ((symbol is !null)) { unstable = unstable || symbol.reg.starts_with("@") || symbol.is_reference; }
         unstable = unstable || flow_is_exposed(ref c, path);
         if (!unstable || !flow_has_call(ref c, condition)) {
-            flow_record(ref c, guard.target, original, guard.present, unstable);
+            flow_record(ref c, guard.target, original, guard.present, unstable, guard.member, guard.instance);
         }
         i++;
     }
@@ -126,20 +132,44 @@ func flow_expose(ref c: Compiler, node: NodeID) -> Void {
     flow_forget(ref c, path, false);
 }
 
-func flow_record(ref c: Compiler, target: NodeID, type_id: Int, present: Bool, unstable: Bool) -> Void {
-    let found_union: Optional(UnionInfo) = get_union_type(ref c, get_repr_type(ref c, type_id));
-    if (found_union is null || union_member_index(ref c, type_id, TYPE_NULL) < 0) { return; }
-    let union: UnionInfo = found_union;
-    let member: Int = TYPE_NULL;
-    if present {
-        // one surviving arm has a concrete read type, larger unions stay unions.
-        if (union.members.length() != 2) { return; }
-        member = union.members[0];
-        if (member == TYPE_NULL) { member = union.members[1]; }
+func flow_record(ref c: Compiler, target: NodeID, type_id: Int, present: Bool, unstable: Bool, tested: Int, instance: Bool) -> Void {
+// successive checks intersect the surviving arms, their tags still belong to the original slot
+    let previous = flow_type(ref c, target);
+    if (previous != 0) { type_id = previous; }
+    let found_union = get_union_type(ref c, get_repr_type(ref c, type_id));
+    if (found_union is null && tested == TYPE_NULL) { return; }
+    let members: Vector(Int) = [];
+    if (found_union is !null) { members = found_union.members; }
+    else { members = [type_id]; }
+
+    let surviving: Vector(Int) = [];
+    let i = 0;
+    while (i < members.length()) {
+        let member = members[i];
+        let matches = type_test_matches(ref c, member, tested, instance);
+        let possible = matches;
+        if (type_test_class(ref c, member)) {
+            let tested_info = c.struct_id_map.lookup(tested);
+            possible = (tested_info is !null) && tested_info.is_class &&
+                (member == TYPE_GENERIC_CLASS || is_subclass(ref c, member, tested) || is_subclass(ref c, tested, member));
+            let info = c.struct_id_map.lookup(get_repr_type(ref c, member));
+            if ((info is !null) && info.is_interface && (tested_info is !null) && tested_info.is_class) { possible = true; }
+            // an exact class check can fail on a subclass even when the slot is declared as that class.
+            if (!instance) { matches = false; }
+        }
+        if (!present && possible) {
+            add_union_member(ref c, surviving, tested, no_position());
+        } else if (present && !matches) {
+            add_union_member(ref c, surviving, member, no_position());
+        }
+        i++;
     }
+    if (surviving.length() == 0) { return; }
+    let member = get_union_type_id(ref c, surviving, no_position());
+    if (member == type_id) { return; }
     let path = format_ast_path(ref c, target);
     if (path.starts_with("<unknown_path>")) { return; }
-    let i = 0;
+    i = 0;
     while (i < c.flow_types.length()) {
         if (c.flow_types[i].path == path) {
             c.flow_types[i] = FlowType(path=path, type=member, unstable=unstable || flow_is_exposed(ref c, path));
@@ -154,6 +184,10 @@ func flow_has_call(ref c: Compiler, node: NodeID) -> Bool {
 // a later operand can invalidate an earlier check in a compound condition
     if (!has_node(node)) { return false; }
     let kind = node_tag(node);
+    if (kind == NODE_CALL && type_test_kind(ref c, node) != 0) {
+        let call = get_call_node(ref c.arena, node);
+        return call.args.length() != 2 || flow_has_call(ref c, call.args[0].val);
+    }
     if (kind == NODE_CALL || kind == NODE_REF || kind == NODE_VAR_ASSIGN || kind == NODE_FIELD_ASSIGN) { return true; }
     if (kind == NODE_BINOP || kind == NODE_IS || kind == NODE_IS_NOT) {
         let bin = get_binop_node(ref c.arena, node);
@@ -167,6 +201,7 @@ func flow_has_call(ref c: Compiler, node: NodeID) -> Bool {
 func flow_has_guard(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let kind = node_tag(node);
+    if (kind == NODE_CALL && type_test_kind(ref c, node) != 0) { return true; }
     if (kind == NODE_IS || kind == NODE_IS_NOT) { return true; }
     if (kind == NODE_UNARYOP) { return flow_has_guard(ref c, get_unary_node(ref c.arena, node).node); }
     if (kind == NODE_BINOP) {
@@ -198,6 +233,13 @@ func flow_intersect(left: Vector(FlowType), right: Vector(FlowType)) -> Vector(F
 func flow_guards(ref c: Compiler, node: NodeID, truth: Bool, result: Vector(FlowGuard)) -> Void {
     if (!has_node(node)) { return; }
     let kind = node_tag(node);
+    if (kind == NODE_CALL && type_test_kind(ref c, node) != 0) {
+        let call = get_call_node(ref c.arena, node);
+        if (call.args.length() == 2) {
+            result.append(FlowGuard(target=call.args[0].val, present=!truth, instance=type_test_kind(ref c, node) == 2, check_call=node));
+        }
+        return;
+    }
     if (kind == NODE_UNARYOP) {
         let unary = get_unary_node(ref c.arena, node);
         if (unary.op_tok.type == TOK_NOT) { flow_guards(ref c, unary.node, !truth, result); }

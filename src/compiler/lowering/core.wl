@@ -20,6 +20,8 @@ import * from "numeric.wl"
 import * from "../constants.wl"
 import * from "casts.wl"
 import * from "unions.wl"
+import * from "type_tests.wl"
+import * from "../type_tests.wl"
 import * from "../narrowing.wl"
 import emit_static_union from "static_storage.wl"
 import * from "literals.wl"
@@ -3187,6 +3189,11 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
     let type_id: Int = get_repr_type(ref c, obj_res.type);
     let obj_reg: String = obj_res.reg;
 
+    if (is_union_type(ref c, type_id)) {
+        throw_type_error(node.pos, "Cannot access a field of " + get_type_name(ref c, obj_res.type) + " before narrowing.");
+        return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+    }
+
     let obj_llvm_ty: String = get_llvm_type_str(ref c, obj_res.type);
     let null_info: Optional(StructInfo) = c.struct_id_map.lookup(obj_res.type);
     if (has_reference_storage(ref c, obj_res.type)) {
@@ -4890,7 +4897,7 @@ func compile_flow_lvalue(ref c: Compiler, node: NodeID, pos: Position) -> Compil
 // field writes use the payload in place, projecting a copied value would lose the write
     let address = compile_lvalue_ptr(ref c, node, pos);
     let member = flow_type(ref c, node);
-    if (member != 0 && member != TYPE_NULL && is_union_type(ref c, get_repr_type(ref c, address.type))) {
+    if (member != 0 && member != TYPE_NULL && !is_union_type(ref c, member) && is_union_type(ref c, get_repr_type(ref c, address.type))) {
         return CompileResult(reg=emit_union_payload(ref c, address.reg, address.type, member), type=member, origin_type=member, is_const_access=address.is_const_access, owns_ref=false);
     }
     return address;
@@ -6171,14 +6178,28 @@ func compile_node(ref c: Compiler, node: NodeID) -> CompileResult {
     let member = flow_type(ref c, node);
     let result = compile_raw_node(ref c, node);
     if (member != 0 && is_union_type(ref c, get_repr_type(ref c, result.type))) {
+        let original = result;
         result = emit_union_read(ref c, result, member);
         if (needs_drop(ref c, member)) {
             // an argument can replace the checked slot after its receiver has been loaded.
             emit_retain_value(ref c, result.reg, member);
             result.owns_ref = true;
         }
+        emit_release_owned(ref c, original);
+    } else if (member != 0 && member != result.type && type_test_class(ref c, result.type) && type_test_class(ref c, member)) {
+        let owner = c.struct_id_map.lookup(get_repr_type(ref c, result.type));
+        if ((owner is !null) && owner.is_interface) {
+            let object = next_reg(ref c);
+            write_ir(ref c, c.indent + object + " = extractvalue " + get_llvm_type_str(ref c, result.type) + " " + result.reg + ", 0\n");
+            result.reg = object;
+            result.type = TYPE_GENERIC_CLASS;
+        }
+        let narrowed = next_reg(ref c);
+        write_ir(ref c, c.indent + narrowed + " = bitcast " + get_llvm_type_str(ref c, result.type) + " " + result.reg + " to " + get_llvm_type_str(ref c, member) + "\n");
+        result.reg = narrowed;
+        result.type = member;
     }
-    if (kind == NODE_CALL) { flow_forget(ref c, "", true); }
+    if (kind == NODE_CALL && type_test_kind(ref c, node) == 0) { flow_forget(ref c, "", true); }
     if (kind == NODE_VAR_ASSIGN) { flow_forget(ref c, get_var_assign_node(ref c.arena, node).name_tok.value, false); }
     if (kind == NODE_FIELD_ASSIGN) {
         let field = get_field_assign_node(ref c.arena, node);
@@ -6724,6 +6745,11 @@ func compile_raw_var_access(ref c: Compiler, node: NodeID) -> CompileResult {
             f_info = c.func_table.lookup(c.current_package_prefix + var_name);
             if ((f_info is !null)) { var_name = c.current_package_prefix + var_name; }
         }
+        if (f_info is null) {
+            let mapped = c.current_file_func_aliases.lookup(var_name);
+            if (mapped is null) { mapped = c.global_func_aliases.lookup(var_name); }
+            if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
+        }
         if ((f_info is !null)) {
             if ((f_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
                 throw_type_error(v.pos, "Compiler intrinsic '" + f_info.base_name + "' cannot be used as a function value.");
@@ -6802,6 +6828,10 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
     let func_name: String = "";
     let is_direct: Bool = false;
     let is_package_call: Bool = false;
+    let value_callee = false;
+    if (callee == NODE_VAR_ACCESS) {
+        value_callee = find_symbol(ref c, get_var_access_node(ref c.arena, callee_node).name_tok.value) is !null;
+    }
 
     if (callee == NODE_FIELD_ACCESS) {
         let f_acc: FieldAccessNode = get_field_access_node(ref c.arena, callee_node);
@@ -6980,14 +7010,14 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
         }
     }
 
-    if (callee == NODE_VAR_ACCESS) {
+    if (callee == NODE_VAR_ACCESS && !value_callee) {
         let v_node: VarAccessNode = get_var_access_node(ref c.arena, callee_node);
         func_name = v_node.name_tok.value;
     }
 
     let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
     let generic_type_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_type_name);
-    if (generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, n_call.type_args, n_call.args, c.expected_type)) {
+    if (!value_callee && generic_type_template is !null && use_generic_constructor(ref c, generic_type_name, generic_type_template, n_call.type_args, n_call.args, c.expected_type)) {
         let types: Optional(Vector(Struct)) = resolve_generic_constructor_args(ref c, generic_type_template, n_call.type_args, n_call.args, c.expected_type, n_call.pos);
         if (types is null) {
             return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -7010,7 +7040,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
         return compile_struct_init(ref c, instance, n_call);
     }
 
-    if (callee == NODE_VAR_ACCESS || callee == NODE_FIELD_ACCESS) {
+    if (!value_callee && (callee == NODE_VAR_ACCESS || callee == NODE_FIELD_ACCESS)) {
         let generic_name: String = generic_symbol_name(ref c, callee_node, true);
         let template: Optional(GenericTemplate) = c.generic_funcs.lookup(generic_name);
         if ((template is !null)) {
@@ -7163,6 +7193,20 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             return compile_dict_intrinsic(ref c, meta_func_info, n_call);
         }
         if ((meta_func_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+            if (meta_func_info.base_name == "is_type" || meta_func_info.base_name == "is_instance") {
+                let target = type_test_target(ref c, n_call);
+                if (target == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false); }
+                let value = compile_node(ref c, n_call.args[0].val);
+                if (value.type == TYPE_POISON) { return value; }
+                let instance = meta_func_info.base_name == "is_instance";
+                if (instance && !check_instance_types(ref c, value.type, target, n_call.pos)) {
+                    emit_release_owned(ref c, value);
+                    return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+                }
+                let result = emit_type_test(ref c, value, target, instance);
+                emit_release_owned(ref c, value);
+                return result;
+            }
             throw_invalid_syntax(n_call.pos, "Compiler intrinsic '" + meta_func_info.base_name + "' must be called as " + meta_func_info.base_name + "(Type).");
             return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
         }
@@ -7303,7 +7347,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
     }
 
     else {
-        if (callee == NODE_VAR_ACCESS) {
+        if (callee == NODE_VAR_ACCESS && !value_callee) {
             let v_node: VarAccessNode = get_var_access_node(ref c.arena, callee_node);
             let s_info: Optional(StructInfo) = c.struct_table.lookup(v_node.name_tok.value);
             if ((s_info is !null)) {

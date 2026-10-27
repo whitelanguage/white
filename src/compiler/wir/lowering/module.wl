@@ -6,6 +6,7 @@ import * from "types.wl"
 import * from "declarations.wl"
 import * from "globals.wl"
 import * from "functions.wl"
+import wir_finish_type_tests from "type_tests.wl"
 import * from "ownership_runtime.wl"
 import * from "target_runtime.wl"
 import * from "../../context.wl"
@@ -562,6 +563,7 @@ func wir_lower_program(ref source: Compiler, modules: Vector(ParsedModule), targ
     }
     wir_emit_required_runtime(ref types, ref source, ref program);
     wir_emit_target_runtime(ref source, ref program, types.errors);
+    wir_finish_type_tests(ref types, ref source, ref program);
     if verbose {
         print("Verifying WIR");
     }
@@ -590,6 +592,7 @@ func wir_lower_module(ref source: Compiler, root_node: NodeID, target: String, p
     }
     wir_emit_required_runtime(ref types, ref source, ref program);
     wir_emit_target_runtime(ref source, ref program, types.errors);
+    wir_finish_type_tests(ref types, ref source, ref program);
     wir_verify_lowering(ref types, program);
     return WirLoweringResult(program=program, errors=types.errors);
 }

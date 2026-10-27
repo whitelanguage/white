@@ -6,6 +6,7 @@ import * from "../frontend/diagnostics.wl"
 import * from "context.wl"
 import * from "target_eval.wl"
 import * from "narrowing.wl"
+import type_test_kind from "type_tests.wl"
 import bind_native_args, bind_callable_args from "validation.wl"
 
 
@@ -822,7 +823,7 @@ func ref_check_node(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool 
     let kind = node_tag(node);
     if (kind == NODE_WHILE || kind == NODE_FOR) { c.flow_types = []; }
     let result = ref_check_raw_node(ref c, ref state, node);
-    if (kind == NODE_CALL) { flow_forget(ref c, "", true); }
+    if (kind == NODE_CALL && type_test_kind(ref c, node) == 0) { flow_forget(ref c, "", true); }
     if (kind == NODE_REF) { flow_expose(ref c, get_ref_node(ref c.arena, node).node); }
     if (kind == NODE_VAR_ASSIGN) { flow_forget(ref c, get_var_assign_node(ref c.arena, node).name_tok.value, false); }
     if (kind == NODE_FIELD_ASSIGN) {
@@ -1095,6 +1096,9 @@ func ref_check_index_assign(ref c: Compiler, ref state: RefCheck, node: NodeID) 
 
 func ref_walk_call(ref c: Compiler, ref state: RefCheck, node: NodeID) -> Bool {
     let call = get_call_node(ref c.arena, node);
+    if (type_test_kind(ref c, node) != 0 && call.args.length() == 2) {
+        return ref_check_node(ref c, ref state, call.args[0].val);
+    }
     ref_check_node(ref c, ref state, call.callee);
     let active = state.active.length();
     let info: FuncInfo = FuncInfo(name="", base_name="", ret_type=0, arg_types=[], arg_names=[], is_varargs=false, ann_flags=0, compiler_link_name="", abi_name="", mutates_self=false, variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null);

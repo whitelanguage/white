@@ -1234,7 +1234,9 @@ func emit_erased_check_helpers(ref c: Compiler) -> Void {
             write_ir(ref c, "define internal i1 " + entry.value + "(i8* %value) {\n");
             write_ir(ref c, "entry:\n");
             write_ir(ref c, "  %is_null = icmp eq i8* %value, null\n");
-            write_ir(ref c, "  br i1 %is_null, label %accept, label %inspect\n");
+            let null_target = "accept";
+            if (entry.value.starts_with("@__wl_is_instance_")) { null_target = "reject"; }
+            write_ir(ref c, "  br i1 %is_null, label %" + null_target + ", label %inspect\n");
             write_ir(ref c, "inspect:\n");
             write_ir(ref c, "  %tag_bytes = getelementptr i8, i8* %value, i32 -4\n");
             write_ir(ref c, "  %tag_slot = bitcast i8* %tag_bytes to i32*\n");

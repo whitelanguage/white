@@ -2,6 +2,7 @@
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../narrowing.wl"
+import emit_implicit_cast from "casts.wl"
 import NodeID from "../../frontend/ast.wl"
 
 
@@ -21,6 +22,10 @@ func emit_union_payload(ref c: Compiler, slot: String, union_type: Int, member: 
 func emit_union_read(ref c: Compiler, value: CompileResult, member: Int) -> CompileResult {
 // a dominating check selected this member, no conversion or extra ownership is involved
     if (member == TYPE_NULL) { return CompileResult(reg="null", type=TYPE_NULL, origin_type=0, owns_ref=false, is_const_access=false); }
+    if (is_union_type(ref c, member)) {
+        value.owns_ref = false;
+        return emit_union_cast(ref c, value, member, no_position(), true);
+    }
     let storage = get_llvm_type_str(ref c, value.type);
     let slot = next_reg(ref c);
     write_ir(ref c, c.indent + slot + " = alloca " + storage + "\n");
@@ -53,8 +58,9 @@ func emit_union_member(ref c: Compiler, slot: String, target: Int, member: Int, 
     write_ir(ref c, c.indent + "store i32 " + union_member_index(ref c, target, member) + ", i32* " + tag_slot + "\n");
 }
 
-func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Position) -> CompileResult {
-    if (!union_accepts_type(ref c, target, value.type)) {
+func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Position, checked: Bool = false) -> CompileResult {
+    if ((!checked && !union_accepts_type(ref c, target, value.type)) ||
+        (checked && !union_accepts_type(ref c, value.type, target))) {
         throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref c, target) + ", got " + get_type_name(ref c, value.type) + ".");
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
@@ -72,7 +78,9 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
             write_ir(ref c, c.indent + loaded + " = load " + array.llvm_name + ", " + array.llvm_name + "* " + value.reg + "\n");
             value.reg = loaded;
         }
-        emit_union_member(ref c, slot, target, value.type, value.reg);
+        let member = union_member_target(ref c, target, value.type);
+        value = emit_implicit_cast(ref c, value, member, pos);
+        emit_union_member(ref c, slot, target, member, value.reg);
     } else {
         let source_union: UnionInfo = found_source_union;
         let source_ty: String = get_llvm_type_str(ref c, value.type);
@@ -86,6 +94,8 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
         let i: Int = 0;
         while (i < source_union.members.length()) {
             let member: Int = source_union.members[i];
+            let selected = union_member_target(ref c, target, member);
+            if (checked && union_member_index(ref c, target, member) < 0) { i++; continue; }
             let copy: String = next_label(ref c);
             let next: String = next_label(ref c);
             let matches: String = next_reg(ref c);
@@ -100,7 +110,11 @@ func emit_union_cast(ref c: Compiler, value: CompileResult, target: Int, pos: Po
                 payload = next_reg(ref c);
                 write_ir(ref c, c.indent + payload + " = load " + member_type + ", " + member_type + "* " + address + "\n");
             }
-            emit_union_member(ref c, slot, target, member, payload);
+            if (selected != member) {
+                let converted = emit_implicit_cast(ref c, CompileResult(reg=payload, type=member, origin_type=0, owns_ref=false, is_const_access=value.is_const_access), selected, pos);
+                payload = converted.reg;
+            }
+            emit_union_member(ref c, slot, target, selected, payload);
             write_ir(ref c, c.indent + "br label %" + done + "\n");
             write_ir(ref c, "\n" + next + ":\n");
             i++;

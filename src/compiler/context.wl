@@ -1381,19 +1381,48 @@ func union_member_index(ref c: Compiler, union_type: Int, member_type: Int) -> I
     return -1;
 }
 
+func union_member_target(ref c: Compiler, target: Int, source: Int) -> Int {
+// prefer identity, then allow one ordinary class upcast, numeric and nominal conversions stay explicit
+    if (union_member_index(ref c, target, source) >= 0) { return source; }
+    if (get_named_type(ref c, source) is !null) { return 0; }
+    let origin = c.struct_id_map.lookup(source);
+    if (origin is null || !origin.is_class) { return 0; }
+    let found = get_union_type(ref c, target);
+    if (found is null) { return 0; }
+    let union: UnionInfo = found;
+    let candidate = 0;
+    let i = 0;
+    while (i < union.members.length()) {
+        let member = union.members[i];
+        let info = c.struct_id_map.lookup(member);
+        let accepts = false;
+        if (info is !null) {
+            accepts = (info.is_class && is_subclass(ref c, source, member)) ||
+                (info.is_interface && implements_interface(ref c, source, member));
+        }
+        if accepts {
+            if (candidate != 0) { return TYPE_POISON; }
+            candidate = member;
+        }
+        i++;
+    }
+    return candidate;
+}
+
 func union_accepts_type(ref c: Compiler, target_type: Int, source_type: Int) -> Bool {
-// assignment preserves each concrete member, numeric conversions stay explicit
     if (target_type == source_type) { return true; }
     if (!is_union_type(ref c, target_type)) { return false; }
 
     let found_source: Optional(UnionInfo) = get_union_type(ref c, source_type);
     if (found_source is null) {
-        return union_member_index(ref c, target_type, source_type) >= 0;
+        let member = union_member_target(ref c, target_type, source_type);
+        return member != 0 && member != TYPE_POISON;
     }
     let source: UnionInfo = found_source;
     let i: Int = 0;
     while (i < source.members.length()) {
-        if (union_member_index(ref c, target_type, source.members[i]) < 0) {
+        let member = union_member_target(ref c, target_type, source.members[i]);
+        if (member == 0 || member == TYPE_POISON) {
             return false;
         }
         i++;
@@ -2656,7 +2685,16 @@ func expr_type_var_access(ref c: Compiler, node: NodeID) -> Int {
     if (!(f_info is !null) && c.current_package_prefix != "") {
         f_info = c.func_table.lookup(c.current_package_prefix + v.name_tok.value);
     }
+    if (f_info is null) {
+        let mapped = c.current_file_func_aliases.lookup(v.name_tok.value);
+        if (mapped is null) { mapped = c.global_func_aliases.lookup(v.name_tok.value); }
+        if (mapped is !null) { f_info = c.func_table.lookup(mapped); }
+    }
     if ((f_info is !null)) {
+        if ((f_info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
+            throw_type_error(v.pos, "Compiler intrinsic '" + f_info.base_name + "' cannot be used as a function value.");
+            return TYPE_POISON;
+        }
         return get_func_type_id(ref c, f_info.arg_types, f_info.ret_type, f_info.variadic_param, callable_arg_names(f_info, 0));
     }
 
@@ -2840,6 +2878,16 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
         let generic: GenericTypeNode = get_generic_type_node(ref c.arena, callee_node);
         callee_node = generic.base_type;
         callee = node_tag(callee_node);
+    }
+    if (callee == NODE_VAR_ACCESS) {
+        let name = get_var_access_node(ref c.arena, callee_node).name_tok.value;
+        let binding = find_symbol(ref c, name);
+        if (binding is !null) {
+            let signature = c.func_ret_map.lookup(binding.type);
+            if (signature is null) { signature = c.method_ret_map.lookup(binding.type); }
+            if (signature is !null) { return signature.type; }
+            return 0;
+        }
     }
 
     let generic_type_name: String = generic_symbol_name(ref c, callee_node, false);
