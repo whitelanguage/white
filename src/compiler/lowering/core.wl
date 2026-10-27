@@ -419,6 +419,9 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
         if (node.is_const && has_const_num) {
             c.constant_nums.put(global_name, const_num);
         }
+        if (node.is_const && has_node(node.value)) {
+            c.static_constants.put(global_name, StaticConstant(node=node.value, source_type=target_type_id, context=capture_type_context(ref c)));
+        }
         return void_result();
     }
 

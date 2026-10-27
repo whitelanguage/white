@@ -9,7 +9,7 @@ import * from "../../constants.wl"
 import check_struct_init from "../../initialization.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
-import throw_type_error from "../../../frontend/diagnostics.wl"
+import throw_type_error, throw_name_error, GLOBAL_ERROR_COUNT from "../../../frontend/diagnostics.wl"
 
 
 func wir_static_cast_target(ref source: Compiler, callee: NodeID) -> Int {
@@ -178,12 +178,117 @@ func wir_static_struct(ref types: WirTypeMap, ref source: Compiler, ref program:
     return wir_const_aggregate(ref program, type_id, values);
 }
 
+func wir_static_reference(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: SymbolInfo, constant: StaticConstant, target: Int, pos: Position) -> WirValueID {
+// rebuild in the declaring scope, cached values belong to this WIR module only
+    let origin = get_repr_type(ref source, constant.source_type);
+    let repr = get_repr_type(ref source, target);
+    if (constant.source_type != target && !union_accepts_type(ref source, repr, constant.source_type)) {
+        throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target) + ", got " + get_type_name(ref source, constant.source_type) + ".");
+        return NO_WIR_VALUE;
+    }
+
+    let value = NO_WIR_VALUE;
+    let cached = types.static_values.lookup(info.reg);
+    if (cached is !null) {
+        value = cached;
+    } else {
+        let bindings = source.generic_bindings;
+        let previous = use_generic_context(ref source, constant.context, Dict());
+        value = wir_lower_static_value(ref types, ref source, ref program, constant.node, constant.source_type, pos);
+        restore_generic_context(ref source, previous, bindings);
+        if (value != NO_WIR_VALUE) { types.static_values.put(info.reg, value); }
+    }
+    if (value == NO_WIR_VALUE || origin == repr) { return value; }
+
+    let member = constant.source_type;
+    let payload = value;
+    if (is_union_type(ref source, origin)) {
+        // a static union has one active member, its ordinal changes when the target gains arms.
+        let stored = program.arena.values[wir_id_index(UInt32(value))];
+        let storage = program.arena.constants[wir_id_index(stored.owner)];
+        let tag = Int(program.arena.values[wir_id_index(UInt32(storage.elements[0]))].integer);
+        let union = get_union_type(ref source, origin);
+        if (union is null || tag < 0 || tag >= union.members.length()) { return NO_WIR_VALUE; }
+        member = union.members[tag];
+        if (member != TYPE_NULL) { payload = storage.elements[1]; }
+    }
+
+    let member_target = union_member_target(ref source, repr, member);
+    let tag = wir_const_int(ref program, wir_unsigned_int_type(ref program, 32), UInt128(UInt32(union_member_index(ref source, repr, member_target))));
+    let elements: Vector(WirValueID) = [tag];
+    let offsets: Vector(UInt64) = [0UL];
+    if (member != TYPE_NULL) {
+        elements.append(payload);
+        offsets.append(UInt64(get_union_layout(ref source, repr).payload_offset));
+    }
+
+    return wir_const_storage(ref program, wir_lower_source_type(ref types, ref source, ref program, target), elements, offsets);
+}
+
+func wir_static_symbol(ref source: Compiler, node: NodeID, pos: Position) -> Optional(SymbolInfo) {
+// module prefixes can differ from the import name, and the global table also contains private declarations
+    let name = format_ast_path(ref source, node);
+    if (node_tag(node) == NODE_VAR_ACCESS) { return find_symbol(ref source, name); }
+
+    let field = get_field_access_node(ref source.arena, node);
+    let parts: Vector(String) = [];
+    let root = field.obj;
+    while (node_tag(root) == NODE_FIELD_ACCESS) {
+        let access = get_field_access_node(ref source.arena, root);
+        parts.append(access.field_name);
+        root = access.obj;
+    }
+    if (node_tag(root) != NODE_VAR_ACCESS) { return null; }
+    let owner = get_var_access_node(ref source.arena, root).name_tok.value;
+    if (find_symbol(ref source, owner) is !null || !is_visible_namespace(ref source, owner)) { return null; }
+
+    let full_name = name;
+    let prefix = source.current_file_visible_prefixes.lookup(owner);
+    if (prefix is !null) { full_name = module_member_name(prefix, parts, field.field_name); }
+    let private_name = field.field_name.starts_with("__");
+    let i = 0;
+    while (i < parts.length()) {
+        if (parts[i].starts_with("__")) { private_name = true; }
+        i++;
+    }
+    if private_name {
+        throw_name_error(pos, "Undefined module variable '" + full_name + "'.");
+        return null;
+    }
+
+    let info = find_symbol(ref source, full_name);
+    if (info is null) { throw_name_error(pos, "Undefined module variable '" + full_name + "'."); }
+    return info;
+}
+
 func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     if (!has_node(node)) { return NO_WIR_VALUE; }
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
     if (type_id == NO_WIR_TYPE) { return NO_WIR_VALUE; }
     let repr: Int = get_repr_type(ref source, source_type);
     let kind: Int = node_tag(node);
+    if (kind == NODE_VAR_ACCESS || kind == NODE_FIELD_ACCESS) {
+        let name = format_ast_path(ref source, node);
+        let errors = GLOBAL_ERROR_COUNT;
+        let info = wir_static_symbol(ref source, node, pos);
+        if (GLOBAL_ERROR_COUNT != errors) { return NO_WIR_VALUE; }
+        if (info is !null) {
+            if (!info.is_const) {
+                throw_type_error(pos, "Global initializer cannot use non-constant variable '" + name + "'.");
+                return NO_WIR_VALUE;
+            }
+            let constant = source.static_constants.lookup(info.reg);
+            if (constant is !null) {
+                let origin = get_repr_type(ref source, constant.source_type);
+                let numeric = (is_integer_type(origin) || origin == TYPE_FLOAT || origin == TYPE_FLOAT32) &&
+                    (is_integer_type(repr) || repr == TYPE_FLOAT || repr == TYPE_FLOAT32);
+                // numeric evaluation already handles the permitted width conversions.
+                if (origin == repr || !numeric) {
+                    return wir_static_reference(ref types, ref source, ref program, info, constant, source_type, pos);
+                }
+            }
+        }
+    }
     let union: Bool = is_union_type(ref source, repr);
     if (union) {
         let member = get_expr_type(ref source, node);
@@ -197,9 +302,12 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
         let elements: Vector(WirValueID) = [tag];
         let offsets: Vector(UInt64) = [0UL];
         if (member != TYPE_NULL) {
+            let errors = GLOBAL_ERROR_COUNT;
             let payload = wir_lower_static_value(ref types, ref source, ref program, node, member, pos);
             if (payload == NO_WIR_VALUE) {
-                throw_type_error(pos, "Global variable initialisation must be a compile-time constant expression.");
+                if (GLOBAL_ERROR_COUNT == errors) {
+                    throw_type_error(pos, "Global variable initialisation must be a compile-time constant expression.");
+                }
                 return NO_WIR_VALUE;
             }
             elements.append(payload);

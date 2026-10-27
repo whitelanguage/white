@@ -18,6 +18,7 @@ struct WirTypeMap(
     string_record: WirTypeID,
     string_object: WirTypeID,
     string_values: Dict(String, WirValueID),
+    static_values: Dict(String, WirValueID),
     string_count: Int,
     error_type: WirTypeID,
     enum_values: Dict(String, WirEnumValue)
@@ -30,7 +31,7 @@ func new_wir_type_map() -> WirTypeMap {
         cache=[], layout_states=[], layouts=[], layout_revision=-1, errors=[],
         opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE,
         string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE,
-        string_values=Dict(), string_count=0,
+        string_values=Dict(), static_values=Dict(), string_count=0,
         error_type=NO_WIR_TYPE, enum_values=Dict()
     );
 }

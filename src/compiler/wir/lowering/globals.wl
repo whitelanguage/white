@@ -177,5 +177,9 @@ func wir_lower_global_decl(ref types: WirTypeMap, ref source: Compiler, ref prog
     let symbol: SymbolInfo = SymbolInfo(reg=register_name, type=source_type, origin_type=source_type, is_const=node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0);
     update_symbol(ref source, source_name, symbol);
     wir_record_numeric_constant(ref source, node, source_type, register_name);
+    if (node.is_const && has_node(node.value)) {
+        source.static_constants.put(register_name, StaticConstant(node=node.value, source_type=source_type, context=capture_type_context(ref source)));
+        types.static_values.put(register_name, initializer);
+    }
     return global_id;
 }

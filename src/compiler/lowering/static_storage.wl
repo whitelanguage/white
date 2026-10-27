@@ -77,5 +77,8 @@ func emit_static_union(ref c: Compiler, node: VarDeclareNode, target: Int) -> Vo
     output.write("@" + symbol + " = " + linkage + "alias " + source_type + ", " + source_type + "* bitcast (" + packed_type + "* " + backing + " to " + source_type + "*)\n")?;
     write_ir(ref c, output.build()?);
     c.global_symbol_table.put(name, SymbolInfo(reg="@" + symbol, type=target, origin_type=target, is_const=node.is_const, is_const_access=false, is_ref_param=false, is_reference=false, func_arg_types=[], arg_names=[], variadic_param=0));
+    if (node.is_const) {
+        c.static_constants.put("@" + symbol, StaticConstant(node=node.value, source_type=target, context=capture_type_context(ref c)));
+    }
     return;
 }

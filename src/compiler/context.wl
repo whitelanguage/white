@@ -178,6 +178,8 @@ struct GenericTemplate(
     globals: Dict(String, String)
 )
 
+struct StaticConstant(node: NodeID, source_type: Int, context: GenericTemplate)
+
 struct GenericFuncInstance(
     template: GenericTemplate,
     bindings: Dict(String, SymbolInfo),
@@ -260,6 +262,7 @@ struct Compiler(
     constant_nums: Dict(String, Float),
     constant_integers: Dict(String, Long),
     constant_wide_integers: Dict(String, UInt128),
+    static_constants: Dict(String, StaticConstant),
     func_table: Dict(String, FuncInfo),
     struct_table: Dict(String, StructInfo),
     struct_id_map: Dict(Int, StructInfo),
@@ -476,6 +479,7 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         constant_nums = Dict(),
         constant_integers = Dict(),
         constant_wide_integers = Dict(),
+        static_constants = Dict(),
         func_table = Dict(),
         struct_table = Dict(),
         struct_id_map = Dict(),

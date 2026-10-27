@@ -2,8 +2,10 @@
 // File: tests/integration/ffi/test_lib_export.wl
 // Focus: Shared library symbol exporting, recursive stack frame integrity, and float ABI stability.
 
+const DEFAULT_COUNT: Optional(Int) = 42;
+
 @ExportLib
-let exported_count: Optional(Int) = 42;
+let exported_count: Optional(Int) = DEFAULT_COUNT;
 
 @ExportLib
 func read_count() -> Int {
