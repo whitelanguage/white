@@ -13,10 +13,10 @@ import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
 import eval_const_long from "../../constants.wl"
 import select_target from "../../target.wl"
-import register_extern_library from "../../validation.wl"
+import normalize_extern_abi from "../../externs.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
-import GLOBAL_ERROR_COUNT, throw_overflow_error, throw_extern_error, throw_type_error from "../../../frontend/diagnostics.wl"
+import GLOBAL_ERROR_COUNT, throw_overflow_error, throw_extern_error from "../../../frontend/diagnostics.wl"
 
 
 struct WirLoweringResult(
@@ -33,73 +33,15 @@ func wir_definition_info(ref source: Compiler, node: FunctionDefNode) -> Optiona
 func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> Optional(FuncInfo) {
     let key: String = source.current_package_prefix + node.name_tok.value;
     let info: Optional(FuncInfo) = source.func_table.lookup(key);
-    if (!(info is !null)) { info = source.func_table.lookup(node.name_tok.value); }
-    // an unqualified source function can shadow this extern's spelling
-    if (info is !null && info.abi_name == node.abi_name && info.name == node.name_tok.value) { return info; }
-
-    let return_type: Int = resolve_type(ref source, node.ret_type_tok);
-    if (return_type == TYPE_AUTO || return_type == TYPE_POISON) {
-        return null;
+    // declarations are registered before import maps are built, never recover
+    // an unrelated source function with the same unqualified spelling here.
+    if (info is !null && info.abi_name == normalize_extern_abi(node.abi_name, node.pos) && info.name == node.name_tok.value) {
+        return info;
     }
-    let argument_types: Vector(Struct) = [];
-    let argument_names: Vector(String) = [];
-    let i: Int = 0;
-    while (i < node.params.length()) {
-        let parameter: ParamNode = node.params[i];
-        let parameter_type: Int = resolve_type(ref source, parameter.type_tok);
-        if (parameter_type == TYPE_AUTO || parameter_type == TYPE_POISON || parameter.pass_mode == PARAM_REF) {
-            return null;
-        }
-        argument_types.append(TypeListNode(type=parameter_type, pass_mode=PARAM_VALUE));
-        argument_names.append(parameter.name_tok.value);
-        i++;
-    }
-    let created: FuncInfo = FuncInfo(
-        name=node.name_tok.value,
-        base_name=node.name_tok.value,
-        ret_type=return_type,
-        arg_types=argument_types,
-        arg_names=argument_names,
-        is_varargs=node.is_varargs,
-        abi_name=node.abi_name,
-        mutates_self=false,
-        ann_flags=0,
-        compiler_link_name="",
-        variadic_param=0,
-        default_args=[],
-        ref_body=NodeID(0U),
-        ref_context=null,
-        ref_bindings=null
-    );
-    source.func_table.put(key, created);
-    return created;
+    return null;
 }
 
 func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ExternFuncNode) -> Void {
-    if (node.abi_name != "C" && node.abi_name != "system") {
-        throw_extern_error(node.pos, "Unsupported extern ABI '" + node.abi_name + "'. Expected 'C' or 'system'.");
-        return;
-    }
-    if (node.is_varargs && node.abi_name != "C") {
-        throw_extern_error(node.pos, "Variadic extern functions require the C ABI.");
-        return;
-    }
-    register_extern_library(ref source, node.link_name, node.pos);
-    let param_index: Int = 0;
-    while (param_index < node.params.length()) {
-        let param: ParamNode = node.params[param_index];
-        if (param.pass_mode == PARAM_REF) {
-            throw_extern_error(param.pos, "Extern functions cannot use reference parameters; declare a pointer parameter instead.");
-            return;
-        }
-        let param_type = resolve_type(ref source, param.type_tok);
-        if (param_type == TYPE_POISON) { return; }
-        if (get_repr_type(ref source, param_type) == TYPE_VOID) {
-            throw_type_error(param.pos, "Extern parameters cannot have type Void.");
-            return;
-        }
-        param_index++;
-    }
     let info: Optional(FuncInfo) = wir_extern_info(ref source, node);
     if (!(info is !null)) {
         types.errors.append("Extern function '" + node.name_tok.value + "' was not registered before WIR lowering");

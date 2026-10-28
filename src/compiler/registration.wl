@@ -5,6 +5,7 @@ import * from "context.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "lowering/dictionary.wl"
 import * from "validation.wl"
+import register_extern_block from "externs.wl"
 
 
 func is_builtin_type_name(name: String) -> Bool {
@@ -631,6 +632,8 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
             if ((sys_anns.ann_flags & FLAG_ANN_COMP_LINK) != 0) {
                 c.compiler_link.put(sys_anns.compiler_link_name, func_key);
             }
+        } else if (base == NODE_EXTERN_BLOCK) {
+            register_extern_block(ref c, get_extern_block_node(ref c.arena, stmts[i]));
         } else if (base == NODE_CLASS_DEF) {
             let c_node: ClassDefNode = get_class_def_node(ref c.arena, stmts[i]);
             if (c_node.type_params.length() > 0) {
