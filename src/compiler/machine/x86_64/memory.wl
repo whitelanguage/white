@@ -210,3 +210,54 @@ func x86_store_scalar(ref output: X86CodeBuffer, source: X86Register, base: X86R
     x86_store_register_base_disp32(ref output, source, base, displacement, size);
     return true;
 }
+
+func x86_load_abi_part(ref output: X86CodeBuffer, dest: X86Register, base: X86Register, offset: Int, size: Int, scratch: X86Register) -> Bool {
+// an INTEGER eightbyte may end in 3, 5, 6 or 7 bytes, loading eight bytes
+// would reach past the object, including when its last byte borders a guard page.
+    if (size == 1 || size == 2 || size == 4 || size == 8 || x86_is_xmm(dest)) {
+        return x86_load_scalar(ref output, dest, base, offset, size, false);
+    }
+    if (size < 1 || size > 8 || scratch == dest || scratch == base || dest == base ||
+        x86_register_code(scratch) < 0 || x86_register_code(dest) < 0) {
+        return false;
+    }
+
+    let pos: Int = 0;
+    while (pos < size) {
+        let width: Int = 4;
+        while (width > size - pos) { width /= 2; }
+        let reg: X86Register = scratch;
+        if (pos == 0) { reg = dest; }
+        x86_load_register_base_disp32(ref output, reg, base, offset + pos, width, false);
+        if (pos != 0) {
+            x86_shift_register_imm8(ref output, scratch, Byte(pos * 8), 4, true);
+            x86_or_register_width(ref output, dest, scratch, true);
+        }
+        pos += width;
+    }
+    return true;
+}
+
+func x86_store_abi_part(ref output: X86CodeBuffer, src: X86Register, base: X86Register, offset: Int, size: Int, scratch: X86Register) -> Bool {
+// preserve the source register, another argument or return part may still need it.
+    if (size == 1 || size == 2 || size == 4 || size == 8 || x86_is_xmm(src)) {
+        return x86_store_scalar(ref output, src, base, offset, size);
+    }
+    if (size < 1 || size > 8 || scratch == src || scratch == base ||
+        x86_register_code(scratch) < 0 || x86_register_code(src) < 0) {
+        return false;
+    }
+
+    x86_mov_register64(ref output, scratch, src);
+    let pos: Int = 0;
+    while (pos < size) {
+        let width: Int = 4;
+        while (width > size - pos) { width /= 2; }
+        x86_store_register_base_disp32(ref output, scratch, base, offset + pos, width);
+        pos += width;
+        if (pos < size) {
+            x86_shift_register_imm8(ref output, scratch, Byte(width * 8), 5, true);
+        }
+    }
+    return true;
+}

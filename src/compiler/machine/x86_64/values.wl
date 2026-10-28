@@ -81,23 +81,32 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
             let offset: Int = x86_stack_offset(ref stack, function.parameters[parameter_index]);
             if (offset == 0 || !value_layout.valid) { return false; }
 
-            if (location.stack_offset >= 0) {
-                if (!x86_copy_memory(ref output, X86Register.RBP, offset, X86Register.RBP, 16 + location.stack_offset, Int(value_layout.size), X86Register.RAX)) {
-                    return false;
-                }
-            } else {
+            if (location.stack_offset < 0) {
                 let first_size: Int = location.size;
                 if (first_size > 8) { first_size = 8; }
                 if (location.count > 0 && (location.first == X86Register.None ||
-                    !x86_store_scalar(ref output, location.first, X86Register.RBP, offset, first_size))) {
+                    !x86_store_abi_part(ref output, location.first, X86Register.RBP, offset, first_size, X86Register.RAX))) {
                     return false;
                 }
                 if (location.count > 1) {
                     let second_size: Int = location.size - 8;
                     if (location.second == X86Register.None || second_size <= 0 ||
-                        !x86_store_scalar(ref output, location.second, X86Register.RBP, offset + 8, second_size)) {
+                        !x86_store_abi_part(ref output, location.second, X86Register.RBP, offset + 8, second_size, X86Register.RAX)) {
                         return false;
                     }
+                }
+            }
+            parameter_index++;
+        }
+        // large stack copies use RCX, save all incoming registers before starting them.
+        parameter_index = 0;
+        while (parameter_index < function.parameters.length()) {
+            let location: X86SysVValueLocation = native_layout.arguments[parameter_index];
+            if (location.stack_offset >= 0) {
+                let offset: Int = x86_stack_offset(ref stack, function.parameters[parameter_index]);
+                if (!x86_copy_memory(ref output, X86Register.RBP, offset, X86Register.RBP,
+                    16 + location.stack_offset, location.size, X86Register.RAX)) {
+                    return false;
                 }
             }
             parameter_index++;
@@ -341,7 +350,7 @@ func x86_choose_result_register_avoiding(ref program: WirModule, ref state: X86B
     return x86_choose_register_avoiding(ref program, ref state.registers, state.position, first, second);
 }
 
-func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction, ref plan: X86RegisterPlan) -> Void {
+func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction, ref plan: X86RegisterPlan, ref output: X86CodeBuffer) -> Void {
     let i: Int = 0;
     let sysv_cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
     while (i < function.parameters.length()) {
@@ -356,6 +365,11 @@ func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction
                 incoming = x86_argument_register(i, x86_scalar_float(ref program, value.type_id));
             }
             if (incoming != X86Register.None) {
+                // native callers only define the low byte or word, allocator values are canonical.
+                let size = x86_scalar_size(ref program, value.type_id);
+                if (size < 4 && !x86_scalar_float(ref program, value.type_id)) {
+                    x86_normalize_scalar(ref output, incoming, size, x86_scalar_signed(ref program, value.type_id));
+                }
                 x86_bind_register(ref plan, incoming, value_id);
             }
         }

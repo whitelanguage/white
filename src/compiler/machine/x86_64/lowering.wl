@@ -8,6 +8,7 @@ import * from "memory.wl"
 import * from "abi.wl"
 import * from "sse.wl"
 import * from "abi/sysv.wl"
+import * from "../../abi/sysv.wl"
 import x86_address_symbol, x86_emit_globals from "data.wl"
 import * from "edges.wl"
 import * from "flow.wl"
@@ -16,6 +17,7 @@ import * from "types.wl"
 import * from "values.wl"
 import * from "wide.wl"
 import machine_layout_valid from "../layout.wl"
+import machine_call_signature from "../calls.wl"
 
 
 func x86_lowering_error(message: String) -> X86LoweringResult {
@@ -1573,10 +1575,10 @@ func x86_lower_instruction(ref program: WirModule,
             return "the x86_64 call target must be a function address";
         }
 
-        let signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
-        if (signature.kind != WirTypeKind.Function || signature.variadic ||
+        let signature: WirType = machine_call_signature(ref program, instruction);
+        if (signature.kind != WirTypeKind.Function ||
             instruction.operands.length() - 1 != signature.parameters.length()) {
-            return "the x86_64 call lowering requires a fixed-arity function signature";
+            return "the x86_64 call arguments do not match the function signature";
         }
         let storage: X86CallStorage = x86_call_storage(ref program, signature, state.layouts);
         if (storage.size < 0) {
@@ -1672,6 +1674,7 @@ func x86_lower_instruction(ref program: WirModule,
 
         x86_reset_registers(ref state.registers);
         if native_sysv {
+            // copy stack arguments before loading RCX, the bulk copy loop uses it.
             argument_index = 0;
             while (argument_index < signature.parameters.length()) {
                 let location: X86SysVValueLocation = native_layout.arguments[argument_index];
@@ -1681,17 +1684,24 @@ func x86_lower_instruction(ref program: WirModule,
                         location.size, X86Register.RAX)) {
                         return "the SysV ABI could not copy a stack argument";
                     }
-                } else {
+                }
+                argument_index++;
+            }
+            argument_index = 0;
+            while (argument_index < signature.parameters.length()) {
+                let location: X86SysVValueLocation = native_layout.arguments[argument_index];
+                let source: Int = storage.arguments[argument_index];
+                if (location.stack_offset < 0) {
                     let first_size: Int = location.size;
                     if (first_size > 8) { first_size = 8; }
                     if (location.count > 0 && (location.first == X86Register.None ||
-                        !x86_load_scalar(ref output, location.first, X86Register.RSP, source, first_size, false))) {
+                        !x86_load_abi_part(ref output, location.first, X86Register.RSP, source, first_size, X86Register.RAX))) {
                         return "the SysV ABI could not load the first argument eightbyte";
                     }
                     if (location.count > 1) {
                         let second_size: Int = location.size - 8;
                         if (location.second == X86Register.None || second_size <= 0 ||
-                            !x86_load_scalar(ref output, location.second, X86Register.RSP, source + 8, second_size, false)) {
+                            !x86_load_abi_part(ref output, location.second, X86Register.RSP, source + 8, second_size, X86Register.RAX)) {
                             return "the SysV ABI could not load the second argument eightbyte";
                         }
                     }
@@ -1713,6 +1723,13 @@ func x86_lower_instruction(ref program: WirModule,
                     if (storage.arguments[argument_index] >= 0) { size = 8; }
                     if (size == 0 || !x86_load_scalar(ref output, destination, X86Register.RSP, position * 8, size, false)) {
                         return "the x86_64 ABI cannot load a staged call argument";
+                    }
+                    if (signature.variadic && !x86_is_sysv_abi() && x86_is_xmm(destination)) {
+                        // Win64 varargs duplicate floating arguments in their positional GP register.
+                        let gp = x86_argument_register(position, false);
+                        if (!x86_load_scalar(ref output, gp, X86Register.RSP, position * 8, size, false)) {
+                            return "cannot duplicate a Win64 variadic float argument";
+                        }
                     }
                 }
                 argument_index++;
@@ -1748,6 +1765,20 @@ func x86_lower_instruction(ref program: WirModule,
             x86_lea(ref output, hidden_register, X86Register.RSP, X86Register.None, 1, storage.result);
         }
 
+        if (signature.variadic && native_sysv) {
+            // SysV's AL counts vector registers, including the named arguments.
+            let count = 0;
+            let i = 0;
+            while (i < native_layout.arguments.length()) {
+                let arg = native_layout.arguments[i];
+                if (arg.stack_offset < 0) {
+                    if (arg.first_class == X86SysVClass.SSE) { count++; }
+                    if (arg.count > 1 && arg.second_class == X86SysVClass.SSE) { count++; }
+                }
+                i++;
+            }
+            x86_mov_register_imm32(ref output, X86Register.RAX, UInt32(count));
+        }
         if (callee.kind == WirValueKind.Function) {
             let target_function: WirFuncID = WirFuncID(callee.owner);
             calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target_function));
@@ -1790,7 +1821,7 @@ func x86_lower_instruction(ref program: WirModule,
                         let part_size: Int = classification.size - part * 8;
                         if (part_size > 8) { part_size = 8; }
                         if (returned == X86Register.None || part_size <= 0 ||
-                            !x86_store_scalar(ref output, returned, X86Register.RBP, home + part * 8, part_size)) {
+                            !x86_store_abi_part(ref output, returned, X86Register.RBP, home + part * 8, part_size, X86Register.R11)) {
                             return "cannot save a native aggregate call result";
                         }
                         part++;
@@ -1954,7 +1985,7 @@ func x86_lower_instruction(ref program: WirModule,
                             return "native aggregate has no return register";
                         }
                         if (home != 0) {
-                            if (!x86_load_scalar(ref output, destination, X86Register.RBP, home + part * 8, part_size, false)) {
+                            if (!x86_load_abi_part(ref output, destination, X86Register.RBP, home + part * 8, part_size, X86Register.R11)) {
                                 return "cannot load a native aggregate return value";
                             }
                         } else if zero {
@@ -2217,7 +2248,7 @@ func x86_lower_function_with_layouts(
             param_index++;
         }
         if (block_index == 0 && order.length() == 1 && !home_parameters) {
-            x86_bind_entry_parameters(ref program, ref function, ref register_plan);
+            x86_bind_entry_parameters(ref program, ref function, ref register_plan, ref output);
         }
 
         let state: X86BlockState = X86BlockState(

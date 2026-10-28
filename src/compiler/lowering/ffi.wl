@@ -9,7 +9,7 @@ import * from "../validation.wl"
 import * from "ownership.wl"
 import emit_native_value_check from "native_values.wl"
 import * from "native_abi.wl"
-import is_win64_target from "../native_abi.wl"
+import native_llvm_target from "../abi/llvm.wl"
 
 
 func extern_callconv(abi_name: String) -> String {
@@ -84,7 +84,7 @@ func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResu
 func native_callable_name(ref c: Compiler, info: FuncInfo) -> String {
 // a Function value uses White's calling convention and returns an owned result
     if (info.abi_name.length() == 0 &&
-        ((info.ann_flags & FLAG_ANN_EXPORT) == 0 || !is_win64_target(get_target_triple()))) {
+        ((info.ann_flags & FLAG_ANN_EXPORT) == 0 || !native_llvm_target(get_target_triple()))) {
         return info.name;
     }
     let name = "$native." + info.abi_name + "." + info.name;
@@ -130,7 +130,7 @@ func emit_native_adapters(ref c: Compiler) -> Void {
         while (arg_idx < info.arg_types.length()) {
             let param: TypeListNode = info.arg_types[arg_idx];
             if (arg_idx != 0) { args += ", "; }
-            args += emit_native_arg(ref c, info, param, "%arg" + arg_idx);
+            args += emit_native_arg(ref c, info, param, "%arg" + arg_idx, arg_idx);
             arg_idx++;
         }
         let result = emit_native_call(ref c, info, args, func_callconv(info));

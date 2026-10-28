@@ -7,7 +7,8 @@ import * from "../../../src/compiler/wir/builder.wl"
 import wir_type_layouts from "../../../src/compiler/wir/layout.wl"
 import X86Register from "../../../src/compiler/machine/x86_64/model.wl"
 import x86_set_sysv_abi from "../../../src/compiler/machine/x86_64/abi.wl"
-import X86SysVClass, X86SysVTypeClass, X86SysVCallLayout, x86_sysv_classify, x86_plan_sysv_call from "../../../src/compiler/machine/x86_64/abi/sysv.wl"
+import X86SysVCallLayout, x86_plan_sysv_call from "../../../src/compiler/machine/x86_64/abi/sysv.wl"
+import X86SysVClass, X86SysVTypeClass, x86_sysv_classify from "../../../src/compiler/abi/sysv.wl"
 
 
 func expect(actual: X86SysVTypeClass, first: X86SysVClass, second: X86SysVClass, count: Int, size: Int, memory: Bool) -> Bool {

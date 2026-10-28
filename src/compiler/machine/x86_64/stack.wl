@@ -8,6 +8,7 @@ import X86SysVCallLayout, x86_plan_sysv_call from "abi/sysv.wl"
 import * from "flow.wl"
 import * from "types.wl"
 import * from "../homes.wl"
+import machine_call_signature from "../calls.wl"
 
 
 struct X86StackSlot(
@@ -596,7 +597,7 @@ func x86_analyze_function(ref program: WirModule, function_id: WirFuncID, functi
 
             let required: Int = 0;
             if (opcode == WirOpcode.Call && instruction.call_type != NO_WIR_TYPE) {
-                let call_signature: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
+                let call_signature: WirType = machine_call_signature(ref program, instruction);
                 if (call_signature.kind == WirTypeKind.Function) {
                     required = x86_call_storage(ref program, call_signature, layouts).size;
                     if (required < 0) {

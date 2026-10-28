@@ -38,7 +38,7 @@ import * from "../backend/windows.wl"
 import hoist_llvm_allocas from "../backend/llvm.wl"
 import emit_native_value_check from "native_values.wl"
 import * from "native_abi.wl"
-import is_win64_target from "../native_abi.wl"
+import native_llvm_target from "../abi/llvm.wl"
 
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
@@ -1294,7 +1294,7 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
     let func_attrs: String = "";
     if ((meta_f_info.ann_flags & FLAG_ANN_COMP_LINK) != 0) { func_attrs = "noinline "; }
 
-    let native_export = (meta_f_info.ann_flags & FLAG_ANN_EXPORT) != 0 && is_win64_target(get_target_triple());
+    let native_export = (meta_f_info.ann_flags & FLAG_ANN_EXPORT) != 0 && native_llvm_target(get_target_triple());
     let body_name = meta_f_info.name;
     let body_linkage = linkage;
     if native_export {
@@ -2480,11 +2480,22 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
                 return value;
             }
             if (result_owns_value(ref c, field.type) && !value.owns_ref) {
-                emit_retain_value(ref c, value.reg, field.type);
+                let array = c.array_info_map.lookup(get_repr_type(ref c, field.type));
+                if (array is !null && array.size >= 0) {
+                    emit_retain_slot(ref c, value.reg, field.type);
+                } else {
+                    emit_retain_value(ref c, value.reg, field.type);
+                }
             }
             let slot = next_reg(ref c);
             write_ir(ref c, c.indent + slot + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + field.offset + "\n");
-            write_ir(ref c, c.indent + "store " + field.llvm_type + " " + value.reg + ", " + field.llvm_type + "* " + slot + "\n");
+            let data = value.reg;
+            let array = c.array_info_map.lookup(get_repr_type(ref c, field.type));
+            if (array is !null && array.size >= 0) {
+                data = next_reg(ref c);
+                write_ir(ref c, c.indent + data + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + value.reg + "\n");
+            }
+            write_ir(ref c, c.indent + "store " + field.llvm_type + " " + data + ", " + field.llvm_type + "* " + slot + "\n");
         }
         default_idx++;
     }
@@ -2560,7 +2571,12 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
                 write_ir(ref c, c.indent + f_ptr + " = getelementptr inbounds " + s_info.llvm_name + ", " + s_info.llvm_name + "* " + obj_ptr + ", i32 0, i32 " + target_f.offset + "\n");
 
                 if (result_owns_value(ref c, target_f.type) && !val_res.owns_ref) {
-                    emit_retain_value(ref c, val_res.reg, target_f.type);
+                    let array = c.array_info_map.lookup(get_repr_type(ref c, target_f.type));
+                    if (array is !null && array.size >= 0) {
+                        emit_retain_slot(ref c, val_res.reg, target_f.type);
+                    } else {
+                        emit_retain_value(ref c, val_res.reg, target_f.type);
+                    }
                 }
 
                 // the initializer body may already own a value in this field
@@ -4316,7 +4332,7 @@ func compile_index_assign(ref c: Compiler, node: IndexAssignNode) -> CompileResu
     let fixed_array = c.array_info_map.lookup(get_repr_type(ref c, get_expr_type(ref c, node.target)));
     if ((fixed_array is !null) && fixed_array.size >= 0) { write_facts = flow_write_facts(ref c, node.target); }
     let target_res: CompileResult = CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
-    if (write_facts.length() != 0) { target_res = compile_flow_lvalue(ref c, node.target, node.pos); }
+    if (fixed_array is !null && fixed_array.size >= 0) { target_res = compile_flow_lvalue(ref c, node.target, node.pos); }
     else { target_res = compile_node(ref c, node.target); }
     if (has_result(target_res) && target_res.type == TYPE_POISON) {
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
@@ -4978,7 +4994,13 @@ func compile_lvalue_ptr(ref c: Compiler, node: NodeID, pos: Position) -> Compile
     if (base == NODE_INDEX_ACCESS) {
         let ia: IndexAccessNode = get_index_access_node(ref c.arena, node);
         check_out_index(ref c, ia.target, ia.index_node, ia.pos);
-        let target_res: CompileResult = compile_node(ref c, ia.target);
+        let target_res: CompileResult = CompileResult(reg="", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
+        let array = c.array_info_map.lookup(get_repr_type(ref c, get_expr_type(ref c, ia.target)));
+        if (array is !null && array.size >= 0) {
+            target_res = compile_flow_lvalue(ref c, ia.target, ia.pos);
+        } else {
+            target_res = compile_node(ref c, ia.target);
+        }
 
         let s_info: Optional(StructInfo) = c.struct_id_map.lookup(target_res.type);
         if ((s_info is !null) && s_info.is_class) {
@@ -6496,9 +6518,42 @@ func compile_raw_node(ref c: Compiler, node: NodeID) -> CompileResult {
     return CompileResult(reg="", type=0, origin_type=0, owns_ref=false, is_const_access=false);
 }
 
+func compile_fixed_array_lit(ref c: Compiler, literal: VectorLitNode, type_id: Int) -> CompileResult {
+// a failing later element must release the elements already placed in this temporary.
+    let layout = get_llvm_type_str(ref c, type_id);
+    let slot = next_reg(ref c);
+    write_ir(ref c, c.indent + slot + " = alloca " + layout + "\n");
+    write_ir(ref c, c.indent + "store " + layout + " zeroinitializer, " + layout + "* " + slot + "\n");
+    let guarded = needs_drop(ref c, type_id);
+    if guarded {
+        enter_scope(ref c);
+        c.symbol_table.gc_vars.append(GCTracker(reg=slot, type=type_id));
+    }
+    compile_array_literal(ref c, literal, get_repr_type(ref c, type_id), slot);
+    if guarded {
+        let remaining: Vector(Struct) = [];
+        let i = 0;
+        while (i < c.symbol_table.gc_vars.length()) {
+            let item: GCTracker = c.symbol_table.gc_vars[i];
+            if (item.reg != slot) { remaining.append(item); }
+            i++;
+        }
+        c.symbol_table.gc_vars = remaining;
+        exit_scope(ref c);
+    }
+    return CompileResult(reg=slot, type=type_id, owns_ref=guarded, origin_type=0, is_const_access=false);
+}
+
 func compile_raw_vector_lit(ref c: Compiler, node: NodeID) -> CompileResult {
     let literal: VectorLitNode = get_vector_lit_node(ref c.arena, node);
     let expected: Int = c.expected_type;
+    let fixed = c.array_info_map.lookup(get_repr_type(ref c, expected));
+    if (fixed is !null && fixed.size >= 0) {
+        // field defaults and constructor arguments need the same element context as locals.
+        let value = compile_fixed_array_lit(ref c, literal, expected);
+        c.expected_type = expected;
+        return value;
+    }
     if (is_union_type(ref c, expected)) {
         c.expected_type = union_vector_target(ref c, expected, node, literal.pos);
         if (c.expected_type == TYPE_POISON) {
@@ -6508,11 +6563,9 @@ func compile_raw_vector_lit(ref c: Compiler, node: NodeID) -> CompileResult {
         let array = c.array_info_map.lookup(c.expected_type);
         if ((array is !null) && array.size >= 0) {
             let member = c.expected_type;
-            let slot = next_reg(ref c);
-            write_ir(ref c, c.indent + slot + " = alloca " + array.llvm_name + "\n");
-            compile_array_literal(ref c, literal, member, slot);
+            let value = compile_fixed_array_lit(ref c, literal, member);
             c.expected_type = expected;
-            return CompileResult(reg=slot, type=member, owns_ref=true, origin_type=0, is_const_access=false);
+            return value;
         }
         let result: CompileResult = compile_vector_lit(ref c, literal);
         c.expected_type = expected;
@@ -6960,8 +7013,9 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
         }
 
         let try_string_method: Bool = false;
-        let guessed_type: Int = get_repr_type(ref c, get_expr_type(ref c, f_acc.obj));
+        let guessed_type: Int = 0;
         if (!is_package_call) {
+            guessed_type = get_repr_type(ref c, get_expr_type(ref c, f_acc.obj));
             let protocol_call: CompileResult = compile_builtin_protocol_call(ref c, f_acc.obj, guessed_type, f_acc.field_name, n_call);
             if (has_result(protocol_call)) { return protocol_call; }
 
@@ -7215,6 +7269,7 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
         let owned_args: Vector(Struct) = [];
 
         let arg_types: Vector(Struct) = meta_func_info.arg_types;
+        let actual_varargs: Vector(Struct) = [];
         let type_len: Int = arg_types.length();
         let native_args: BoundCallArgs = BoundCallArgs(valid=false, ordered=[], variadic=[]);
         if (!meta_func_info.is_varargs) {
@@ -7256,21 +7311,24 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
                     return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
                 }
 
-                if (arg_val.type >= 100) {
-                    throw_type_error(n_call.pos, "Cannot pass complex types (Struct/Array/Vector) directly to C varargs functions.");
-                    return void_result();
+                let promoted = c_vararg_type(ref c, arg_val.type, n_call.pos);
+                if (promoted == TYPE_POISON) {
+                    return CompileResult(reg="poison", type=TYPE_POISON, owns_ref=false, origin_type=0, is_const_access=false);
                 }
-
-                if (arg_val.type == TYPE_BYTE) { arg_val = promote_to_int(ref c, arg_val); }
-                if (arg_val.type == TYPE_BOOL) {
-                    let zext_reg: String = next_reg(ref c);
-                    write_ir(ref c, c.indent + zext_reg + " = zext i1 " + arg_val.reg + " to i32\n");
-
-                    arg_val = CompileResult(reg=zext_reg, type=TYPE_INT, origin_type=0, owns_ref=false, is_const_access=false);
-                }
+                arg_val = compile_type_cast(ref c, arg_val, promoted, n_call.pos);
                 if (!is_first) { args_str = args_str + ", "; }
-                let ty_str: String = get_llvm_type_str(ref c, arg_val.type);
-                args_str += ty_str + " " + arg_val.reg;
+                if (actual_varargs.length() == 0) {
+                    let i = 0;
+                    while (i < arg_types.length()) {
+                        actual_varargs.append(arg_types[i]);
+                        i++;
+                    }
+                }
+                let param = TypeListNode(type=arg_val.type, pass_mode=PARAM_VALUE);
+                actual_varargs.append(param);
+                let actual_info = meta_func_info;
+                actual_info.arg_types = actual_varargs;
+                args_str += emit_native_arg(ref c, actual_info, param, arg_val.reg, arg_idx);
                 if (arg_val.owns_ref) {
                     owned_args.append(arg_val);
                 }
@@ -7286,8 +7344,8 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
 
             let ty_str: String = call_arg_type(ref c, type_node_curr, arg_val);
             if (!is_first) { args_str = args_str + ", "; }
-            if (native_llvm_arg_mode(ref c, meta_func_info, type_node_curr) != 0) {
-                args_str += emit_native_arg(ref c, meta_func_info, type_node_curr, arg_val.reg);
+            if (native_llvm_function(meta_func_info)) {
+                args_str += emit_native_arg(ref c, meta_func_info, type_node_curr, arg_val.reg, arg_idx);
             } else {
                 args_str += ty_str + " " + arg_val.reg;
             }

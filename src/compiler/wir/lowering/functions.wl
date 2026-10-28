@@ -23,6 +23,7 @@ import has_index_refs, check_body_refs from "../../references.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long, check_layout_type from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
 import check_null_return, check_unary_operand, check_postfix_operand from "../../validation.wl"
+import c_vararg_type from "../../validation.wl"
 import check_struct_init, struct_arg_supplied from "../../initialization.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
 import validate_explicit_literal_cast from "../../lowering/casts.wl"
@@ -2808,6 +2809,34 @@ func wir_lower_index_lvalue(
 }
 
 func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, access: IndexAccessNode, preserve_fallible: Bool) -> WirExpr {
+    if (!wir_addressable_node(ref source, access.target)) {
+        let target = wir_lower_expr(ref state, ref types, ref source, ref program, access.target);
+        if (target.value == NO_WIR_VALUE) { return wir_no_expr(); }
+        let array = source.array_info_map.lookup(get_repr_type(ref source, target.source_type));
+        if (array is !null && array.size >= 0) {
+            // an inline array returned by a call has no lvalue home, materialize it once.
+            let type_id = wir_lower_source_type(ref types, ref source, ref program, target.source_type);
+            let slot = wir_stack_alloc(ref program, state.entry, type_id, "index.temporary", no_wir_location());
+            wir_store(ref program, state.block, target.value, slot, no_wir_location());
+            let index = wir_lower_expr(ref state, ref types, ref source, ref program, access.index_node);
+            if (index.value == NO_WIR_VALUE) { return wir_no_expr(); }
+            let length = wir_const_int(ref program, wir_lower_source_type(ref types, ref source, ref program, TYPE_INT), UInt128(UInt32(array.size)));
+            wir_append(ref program, state.block, WirOpcode.BoundsCheck, program.void_type, [index.value, length], [], no_wir_location());
+            let address = wir_index_address(ref program, state.block, slot, index.value, "", no_wir_location());
+            return WirExpr(value=wir_load(ref program, state.block, address, "", no_wir_location()), source_type=array.base_type);
+        }
+        // reference-backed containers can use their evaluated value through an unnamed home.
+        let type_id = wir_lower_source_type(ref types, ref source, ref program, target.source_type);
+        let slot = wir_stack_alloc(ref program, state.entry, type_id, "index.owner", no_wir_location());
+        wir_store(ref program, state.block, target.value, slot, no_wir_location());
+        let name = "$index.owner." + UInt32(slot);
+        let count = state.bindings.length();
+        state.bindings.append(WirBinding(name=name, source_type=target.source_type, address=slot, is_const=false, owns_value=false, pending_init=false, is_const_access=false, is_reference=false));
+        let access_node = add_var_access_node(ref source.arena, VarAccessNode(type=NODE_VAR_ACCESS, name_tok=Token(value=name), pos=access.pos));
+        let result = wir_lower_index_expr(ref state, ref types, ref source, ref program, IndexAccessNode(type=NODE_INDEX_ACCESS, target=access_node, index_node=access.index_node, pos=access.pos), preserve_fallible);
+        wir_restore_bindings(ref state, count);
+        return result;
+    }
     let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
     let owner: Optional(StructInfo) = source.struct_id_map.lookup(target_type);
     if ((owner is !null) && owner.is_class) {
@@ -3066,12 +3095,21 @@ func wir_lower_array_literal(ref state: WirFunctionLowering, ref types: WirTypeM
             return wir_no_expr();
         }
         wir_move_or_retain(ref state, ref types, ref source, ref program, element);
+        // keep each initialized element on the error cleanup list until the array owns it.
+        if (wir_value_needs_drop(ref source, meta_info.base_type)) {
+            wir_track_owned(ref state, element.value, meta_info.base_type);
+        }
         elements.append(element.value);
         i++;
     }
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, expected_type);
     let result: WirValueID = wir_array_value(ref program, state.block, type_id, elements, "", no_wir_location());
     if (wir_value_needs_drop(ref source, expected_type)) {
+        i = 0;
+        while (i < elements.length()) {
+            wir_take_owned(ref state, elements[i]);
+            i++;
+        }
         wir_track_owned(ref state, result, expected_type);
     }
     return WirExpr(value=result, source_type=expected_type);
@@ -7616,6 +7654,11 @@ func wir_expr_call(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
                 }
             } else {
                 value = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
+                if (value.value != NO_WIR_VALUE) {
+                    let promoted = c_vararg_type(ref source, value.source_type, call.pos);
+                    if (promoted == TYPE_POISON) { return wir_no_expr(); }
+                    value = wir_cast_expr(ref state, ref types, ref source, ref program, value, promoted, false, call.pos);
+                }
             }
             if (value.value == NO_WIR_VALUE) {
                 return wir_no_expr();

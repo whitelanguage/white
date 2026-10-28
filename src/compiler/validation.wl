@@ -6,6 +6,21 @@ import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
 
+func c_vararg_type(ref c: Compiler, type_id: Int, pos: Position) -> Int {
+// C's anonymous arguments undergo default promotions, the named prefix does not.
+    let repr = get_repr_type(ref c, type_id);
+    if (repr == TYPE_POISON) { return TYPE_POISON; }
+    if (repr == TYPE_FLOAT32) { return TYPE_FLOAT; }
+    if (repr == TYPE_BOOL || (is_integer_type(repr) && get_type_bitwidth(repr) < 32)) {
+        return TYPE_INT;
+    }
+    if (repr >= 100 && !is_pointer_type(ref c, repr)) {
+        throw_type_error(pos, "Cannot pass complex types (Struct/Array/Vector) directly to C varargs functions.");
+        return TYPE_POISON;
+    }
+    return type_id;
+}
+
 func check_unary_operand(ref c: Compiler, op: Int, type_id: Int, pos: Position) -> Bool {
 // validate source types before either backend chooses an instruction
     if (type_id == TYPE_POISON) { return false; }

@@ -1,40 +1,63 @@
 // src/compiler/wir/backend/llvm_native.wl
 import "strings"
 import * from "../model.wl"
-import wir_type_layout from "../layout.wl"
-import is_win64_target, win64_register_bytes from "../../native_abi.wl"
+import wir_type_layout, wir_type_layouts from "../layout.wl"
+import * from "../../abi/llvm.wl"
 import llvm_write_type, llvm_write_value, llvm_write_typed_value, llvm_value_name, llvm_callconv, llvm_has_function from "llvm.wl"
 
 
+func llvm_native_shape(program: WirModule, abi: WirABI, type_id: WirTypeID, result: Bool) -> NativeLLVMType {
+    if (abi == WirABI.White || !native_llvm_target(program.target)) { return NativeLLVMType(); }
+    return native_llvm_classify(program, abi, type_id, wir_type_layouts(program), result);
+}
+
 func llvm_native_mode(program: WirModule, abi: WirABI, type_id: WirTypeID) -> Int {
-// C classifies POD records by storage size, a float field still uses an integer register
-    if (abi == WirABI.White || !is_win64_target(program.target)) { return 0; }
-    let type = program.arena.types[wir_id_index(UInt32(type_id))];
-    if (type.kind != WirTypeKind.Struct && type.kind != WirTypeKind.Array) { return 0; }
-    let layout = wir_type_layout(program, type_id);
-    let bytes = win64_register_bytes(layout.size);
-    if (bytes != 0) { return bytes * 8; }
-    return -1;
+    return llvm_native_shape(program, abi, type_id, true).mode;
 }
 
 func llvm_native_signature(program: WirModule, signature: WirType) -> Bool {
-    if (signature.abi == WirABI.White || !is_win64_target(program.target)) { return false; }
-    if (llvm_native_mode(program, signature.abi, signature.result) != 0) { return true; }
+    if (signature.abi == WirABI.White || !native_llvm_target(program.target)) { return false; }
+    let plan = native_llvm_plan(program, signature);
+    if (plan.result.mode != 0 || plan.result.attr.length() != 0) { return true; }
     let i = 0;
-    while (i < signature.parameters.length()) {
-        if (llvm_native_mode(program, signature.abi, signature.parameters[i]) != 0) { return true; }
+    while (i < plan.params.length()) {
+        if (plan.params[i].mode != 0 || plan.params[i].attr.length() != 0) { return true; }
         i++;
     }
     return false;
 }
 
 func llvm_native_type(output: strings.Builder, program: WirModule, abi: WirABI, type_id: WirTypeID, result: Bool) -> Void? {
-    let mode = llvm_native_mode(program, abi, type_id);
-    if (mode < 0) {
+    let shape: NativeLLVMType = llvm_native_shape(program, abi, type_id, result);
+    if (result && shape.attr.length() != 0) { output.write(shape.attr + " ")?; }
+    if (shape.mode < 0) {
         if result { output.write("void")?; }
         else { output.write("ptr")?; }
-    } else if (mode > 0) { output.write("i" + mode)?; }
+    } else if (shape.mode > 0) { output.write(shape.physical)?; }
     else { llvm_write_type(output, program, type_id)?; }
+    return;
+}
+
+func llvm_native_param(output: strings.Builder, program: WirModule, signature: WirType, index: Int, attributes: Bool = true) -> Void? {
+    if (signature.abi == WirABI.White || !native_llvm_target(program.target)) {
+        llvm_write_type(output, program, signature.parameters[index])?;
+        return;
+    }
+    let plan = native_llvm_plan(program, signature);
+    let shape: NativeLLVMType = plan.params[index];
+    let id = signature.parameters[index];
+    if (shape.mode < 0) {
+        output.write("ptr")?;
+        if (attributes && shape.mode == -2) {
+            output.write(" byval(")?;
+            llvm_write_type(output, program, id)?;
+            let alignment = wir_type_layout(program, id).alignment;
+            if (alignment < 8) { alignment = 8; }
+            output.write(") align " + alignment)?;
+        }
+    } else if (shape.mode > 0) { output.write(shape.physical)?; }
+    else { llvm_write_type(output, program, id)?; }
+    if (attributes && shape.attr.length() != 0) { output.write(" " + shape.attr)?; }
     return;
 }
 
@@ -46,9 +69,12 @@ func llvm_native_sret(output: strings.Builder, program: WirModule, type_id: WirT
 }
 
 func llvm_native_slot(output: strings.Builder, program: WirModule, name: String, type_id: WirTypeID) -> Void? {
-    output.write("  " + name + " = alloca ")?;
-    llvm_write_type(output, program, type_id)?;
-    output.write(", align 16\n")?;
+// rounded C coercions may include padding beyond the logical record's last byte
+    let bytes = Int(wir_type_layout(program, type_id).size);
+    if (bytes < 1) { bytes = 1; }
+    bytes = (bytes + 15) & -16;
+    output.write("  " + name + " = alloca [" + bytes + " x i8], align 16\n")?;
+    output.write("  store [" + bytes + " x i8] zeroinitializer, ptr " + name + "\n")?;
     return;
 }
 
@@ -80,11 +106,12 @@ func llvm_native_check(output: strings.Builder, program: WirModule, pointer: Str
 func llvm_native_entry_exit(program: WirModule, function: WirFunction) -> String {
 // entry coercion checks split the LLVM block, PHIs must use the final predecessor
     let signature = program.arena.types[wir_id_index(UInt32(function.type_id))];
+    if (signature.abi == WirABI.White || !native_llvm_target(program.target)) { return ""; }
     let name: String = "";
     if (llvm_native_mode(program, signature.abi, signature.result) < 0) { name = "abi.ok.result"; }
     let i = 0;
     while (i < signature.parameters.length()) {
-        if (llvm_native_mode(program, signature.abi, signature.parameters[i]) < 0) { name = "abi.ok.arg." + i; }
+        if (llvm_native_param_mode(program, signature, i) < 0) { name = "abi.ok.arg." + i; }
         i++;
     }
     return name;
@@ -92,14 +119,14 @@ func llvm_native_entry_exit(program: WirModule, function: WirFunction) -> String
 
 func llvm_native_storage(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
 // call scratch belongs to entry, repeated calls in a loop must not grow the stack
-    if (!is_win64_target(program.target)) { return; }
+    if (!native_llvm_target(program.target)) { return; }
     let signature = program.arena.types[wir_id_index(UInt32(function.type_id))];
     if (llvm_native_mode(program, signature.abi, signature.result) > 0) {
         llvm_native_slot(output, program, "%abi.result", signature.result)?;
     }
     let i = 0;
     while (i < signature.parameters.length()) {
-        if (llvm_native_mode(program, signature.abi, signature.parameters[i]) > 0) {
+        if (llvm_native_param_mode(program, signature, i) > 0) {
             llvm_native_slot(output, program, "%abi.arg." + i + ".slot", signature.parameters[i])?;
         }
         i++;
@@ -113,14 +140,15 @@ func llvm_native_storage(output: strings.Builder, program: WirModule, function: 
             let inst = program.arena.instructions[wir_id_index(UInt32(id))];
             if (inst.opcode == WirOpcode.Call) {
                 let call = program.arena.types[wir_id_index(UInt32(inst.call_type))];
+                let actual = native_llvm_actual_signature(program, call, inst);
                 let prefix = "%abi.call." + UInt32(id);
                 if (llvm_native_mode(program, call.abi, call.result) != 0) {
                     llvm_native_slot(output, program, prefix + ".result", call.result)?;
                 }
                 let arg = 0;
-                while (arg < call.parameters.length()) {
-                    if (llvm_native_mode(program, call.abi, call.parameters[arg]) != 0) {
-                        llvm_native_slot(output, program, prefix + ".arg." + arg, call.parameters[arg])?;
+                while (arg < actual.parameters.length()) {
+                    if (llvm_native_param_mode(program, actual, arg) != 0) {
+                        llvm_native_slot(output, program, prefix + ".arg." + arg, actual.parameters[arg])?;
                     }
                     arg++;
                 }
@@ -134,16 +162,19 @@ func llvm_native_storage(output: strings.Builder, program: WirModule, function: 
 
 func llvm_native_entry(output: strings.Builder, program: WirModule, function: WirFunction) -> Void? {
     let signature = program.arena.types[wir_id_index(UInt32(function.type_id))];
+    if (signature.abi == WirABI.White || !native_llvm_target(program.target)) { return; }
     if (llvm_native_mode(program, signature.abi, signature.result) < 0) {
         llvm_native_check(output, program, "%abi.result.addr", "result")?;
     }
     let i = 0;
     while (i < signature.parameters.length()) {
         let type_id = signature.parameters[i];
-        let mode = llvm_native_mode(program, signature.abi, type_id);
+        let plan = native_llvm_plan(program, signature);
+        let shape: NativeLLVMType = plan.params[i];
+        let mode = shape.mode;
         let name = "%abi.arg." + i;
         if (mode > 0) {
-            output.write("  store i" + mode + " " + name + ", ptr " + name + ".slot\n")?;
+            output.write("  store " + shape.physical + " " + name + ", ptr " + name + ".slot\n")?;
             llvm_native_load(output, program, type_id, name + ".slot", llvm_value_name(function.parameters[i]))?;
         } else if (mode < 0) {
             llvm_native_check(output, program, name, "arg." + i)?;
@@ -156,14 +187,17 @@ func llvm_native_entry(output: strings.Builder, program: WirModule, function: Wi
 
 func llvm_native_call(output: strings.Builder, program: WirModule, id: WirInstID, inst: WirInstruction) -> Void? {
     let signature = program.arena.types[wir_id_index(UInt32(inst.call_type))];
+    let actual = native_llvm_actual_signature(program, signature, inst);
+    let plan = native_llvm_plan(program, actual);
     let prefix = "%abi.call." + UInt32(id);
     let i = 0;
-    while (i < signature.parameters.length()) {
-        let mode = llvm_native_mode(program, signature.abi, signature.parameters[i]);
+    while (i < actual.parameters.length()) {
+        let shape: NativeLLVMType = plan.params[i];
+        let mode = shape.mode;
         if (mode != 0) {
             let slot = prefix + ".arg." + i;
             llvm_native_store(output, program, inst.operands[i + 1], slot)?;
-            if (mode > 0) { output.write("  " + slot + ".bits = load i" + mode + ", ptr " + slot + "\n")?; }
+            if (mode > 0) { output.write("  " + slot + ".bits = load " + shape.physical + ", ptr " + slot + "\n")?; }
         }
         i++;
     }
@@ -178,7 +212,7 @@ func llvm_native_call(output: strings.Builder, program: WirModule, id: WirInstID
         if (mode < 0) { output.write("ptr, ")?; }
         let param = 0;
         while (param < signature.parameters.length()) {
-            llvm_native_type(output, program, signature.abi, signature.parameters[param], false)?;
+            llvm_native_param(output, program, signature, param, false)?;
             output.write(", ")?;
             param++;
         }
@@ -197,15 +231,18 @@ func llvm_native_call(output: strings.Builder, program: WirModule, id: WirInstID
     while (i < inst.operands.length()) {
         if (!first) { output.write(", ")?; }
         first = false;
-        let arg_mode = 0;
-        if (i <= signature.parameters.length()) { arg_mode = llvm_native_mode(program, signature.abi, signature.parameters[i - 1]); }
-        if (arg_mode < 0) { output.write("ptr " + prefix + ".arg." + (i - 1))?; }
-        else if (arg_mode > 0) { output.write("i" + arg_mode + " " + prefix + ".arg." + (i - 1) + ".bits")?; }
-        else { llvm_write_typed_value(output, program, inst.operands[i])?; }
+        if (i <= actual.parameters.length()) {
+            let arg = plan.params[i - 1];
+            llvm_native_param(output, program, actual, i - 1)?;
+            output.write(" ")?;
+            if (arg.mode < 0) { output.write(prefix + ".arg." + (i - 1))?; }
+            else if (arg.mode > 0) { output.write(prefix + ".arg." + (i - 1) + ".bits")?; }
+            else { llvm_write_value(output, program, inst.operands[i])?; }
+        } else { llvm_write_typed_value(output, program, inst.operands[i])?; }
         i++;
     }
     output.write(")\n")?;
-    if (mode > 0) { output.write("  store i" + mode + " " + prefix + ".bits, ptr " + prefix + ".result\n")?; }
+    if (mode > 0) { output.write("  store " + llvm_native_shape(program, signature.abi, signature.result, true).physical + " " + prefix + ".bits, ptr " + prefix + ".result\n")?; }
     if (mode != 0) { llvm_native_load(output, program, signature.result, prefix + ".result", llvm_value_name(inst.result))?; }
     return;
 }
@@ -219,7 +256,14 @@ func llvm_native_return(output: strings.Builder, program: WirModule, function: W
     } else {
         llvm_native_store(output, program, inst.operands[0], "%abi.result")?;
         let name = "%abi.return." + UInt32(id);
-        output.write("  " + name + " = load i" + mode + ", ptr %abi.result\n  ret i" + mode + " " + name + "\n")?;
+        let physical = llvm_native_shape(program, signature.abi, signature.result, true).physical;
+        output.write("  " + name + " = load " + physical + ", ptr %abi.result\n  ret " + physical + " " + name + "\n")?;
     }
     return;
+}
+
+func llvm_native_param_mode(program: WirModule, signature: WirType, index: Int) -> Int {
+    if (signature.abi == WirABI.White || !native_llvm_target(program.target)) { return 0; }
+    let plan = native_llvm_plan(program, signature);
+    return plan.params[index].mode;
 }

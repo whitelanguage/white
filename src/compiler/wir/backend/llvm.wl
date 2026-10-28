@@ -1,5 +1,6 @@
 // src/compiler/wir/backend/llvm.wl
 import "strings"
+import native_llvm_actual_signature from "../../abi/llvm.wl"
 import * from "../model.wl"
 import * from "../verify.wl"
 import wir_value_type from "../builder.wl"
@@ -920,7 +921,17 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
         output.write(llvm_callconv(program, signature.abi))?;
 
         llvm_write_type(output, program, signature.result)?;
-
+        if (signature.variadic) {
+            // opaque callee pointers do not tell LLVM that Win64 floats need duplication.
+            output.write(" (")?;
+            let param = 0;
+            while (param < signature.parameters.length()) {
+                llvm_write_type(output, program, signature.parameters[param])?;
+                output.write(", ")?;
+                param++;
+            }
+            output.write("...)")?;
+        }
         output.write(" ")?;
 
         llvm_write_value(output, program, instruction.operands[0])?;
@@ -1120,10 +1131,10 @@ func llvm_write_function(output: strings.Builder, program: WirModule, function: 
         if (i != 0 || indirect_result) {
             output.write(", ")?;
         }
-        llvm_native_type(output, program, signature.abi, signature.parameters[i], false)?;
+        llvm_native_param(output, program, signature, i)?;
         if (function.linkage != WirLinkage.External) {
             output.write(" ")?;
-            if (llvm_native_mode(program, signature.abi, signature.parameters[i]) != 0) {
+            if (llvm_native_param_mode(program, signature, i) != 0) {
                 output.write("%abi.arg." + i)?;
             } else { output.write(llvm_value_name(function.parameters[i]))?; }
         }
@@ -1165,7 +1176,7 @@ func llvm_write_function(output: strings.Builder, program: WirModule, function: 
         while (j < block.instructions.length()) {
             let instruction_id: WirInstID = block.instructions[j];
             let inst = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
-            if (inst.opcode == WirOpcode.Call && llvm_native_signature(program, program.arena.types[wir_id_index(UInt32(inst.call_type))])) {
+            if (inst.opcode == WirOpcode.Call && llvm_native_signature(program, native_llvm_actual_signature(program, program.arena.types[wir_id_index(UInt32(inst.call_type))], inst))) {
                 llvm_native_call(output, program, instruction_id, inst)?;
             } else if (inst.opcode == WirOpcode.Return && llvm_native_mode(program, signature.abi, signature.result) != 0) {
                 llvm_native_return(output, program, function, instruction_id, inst)?;

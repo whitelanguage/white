@@ -3060,6 +3060,12 @@ func expr_type_call(ref c: Compiler, node: NodeID) -> Int {
     }
     else if (callee == NODE_FIELD_ACCESS) {
         let f: FieldAccessNode = get_field_access_node(ref c.arena, callee_node);
+        // resolve the module path before inferring its root, print may name both
+        // an imported module and the prelude function without being a receiver.
+        let function = module_function(ref c, f);
+        if (function is !null) {
+            return function.ret_type;
+        }
         let obj_type: Int = get_expr_type(ref c, f.obj);
         if (obj_type == 0) {
             let path_parts: Vector(String) = [];

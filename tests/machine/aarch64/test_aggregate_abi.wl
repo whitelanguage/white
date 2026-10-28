@@ -7,7 +7,7 @@ import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import wir_type_layouts from "../../../src/compiler/wir/layout.wl"
 import * from "../../../src/compiler/machine/aarch64/lowering.wl"
-import a64_hfa_type, A64HFA from "../../../src/compiler/machine/aarch64/abi.wl"
+import a64_hfa_type, A64HFA from "../../../src/compiler/abi/aapcs64.wl"
 import A64ModuleResult from "../../../src/compiler/machine/aarch64/model.wl"
 import a64_lower_module from "../../../src/compiler/machine/aarch64/module.wl"
 

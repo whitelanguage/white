@@ -3,9 +3,11 @@ import * from "../../wir/model.wl"
 import * from "allocator.wl"
 import A64Register from "model.wl"
 import * from "abi.wl"
+import A64HFA, a64_hfa_type from "../../abi/aapcs64.wl"
 import * from "flow.wl"
 import * from "types.wl"
 import * from "../homes.wl"
+import machine_call_signature from "../calls.wl"
 
 
 struct A64StackSlot(value: WirValueID, offset: Int, size: Int)
@@ -166,7 +168,7 @@ func a64_outgoing_stack(ref program: WirModule, ref function: WirFunction, layou
         while (j < block.instructions.length()) {
             let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
             if (instruction.opcode == WirOpcode.Call && instruction.call_type != NO_WIR_TYPE) {
-                let call_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
+                let call_type: WirType = machine_call_signature(ref program, instruction);
                 let state: A64ArgumentState = A64ArgumentState(integer=0, floating=0, stack=0);
                 let arg: Int = 0;
                 while (arg < call_type.parameters.length()) {

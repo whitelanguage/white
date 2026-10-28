@@ -718,11 +718,10 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let clang_args: Vector(String) = [];
     let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
-    // A machine ELF object may contain target-specific helpers which are not
+    // ELF objects may contain target-specific helpers which are not
     // reachable from this program. Keep section collection enabled at O0 too,
     // otherwise a cross build still asks the linker to resolve those helpers.
-    let collect_sections: Bool = size_opt ||
-        (cfg.backend == "machine" && WhitelangTarget.get_target_triple() == "aarch64-unknown-linux-gnu");
+    let collect_sections: Bool = size_opt || WhitelangTarget.get_target_os() == sys.Os.Linux;
     if (cfg.debug_info) { clang_args.append("-g"); }
     if using_mingw_linker {
         clang_args.append("--target=x86_64-w64-windows-gnu");
@@ -751,7 +750,7 @@ func main(argc: Int, ptr argv: String) -> Int {
             clang_args.append("-fno-unroll-loops");
         }
     }
-    if size_opt {
+    if (collect_sections && cfg.backend != "machine") {
         clang_args.append("-ffunction-sections");
         clang_args.append("-fdata-sections");
     }

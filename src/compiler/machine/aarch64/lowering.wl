@@ -6,6 +6,7 @@ import * from "encoder.wl"
 import * from "allocator.wl"
 import * from "memory.wl"
 import * from "abi.wl"
+import A64HFA, a64_hfa_type from "../../abi/aapcs64.wl"
 import * from "fp.wl"
 import * from "edges.wl"
 import * from "flow.wl"
@@ -14,6 +15,7 @@ import * from "types.wl"
 import * from "values.wl"
 import * from "wide.wl"
 import machine_layout_valid from "../layout.wl"
+import machine_call_signature from "../calls.wl"
 
 
 func a64_lowering_error(message: String) -> A64LoweringResult {
@@ -1307,7 +1309,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                     callee_name = program.arena.functions[function_index].name;
                 }
 
-                let call_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.call_type))];
+                let call_type: WirType = machine_call_signature(ref program, instruction);
                 if (call_type.parameters.length() != instruction.operands.length() - 1) {
                     return a64_lowering_error("AArch64 call arguments do not match the WIR function type");
                 }
@@ -1332,6 +1334,9 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                 let argument_state: A64ArgumentState = A64ArgumentState(integer=0, floating=0, stack=0);
                 let argument_index: Int = 1;
                 while (argument_index < instruction.operands.length()) {
+                    // values were flushed above, each argument can reuse the scratch bank.
+                    // ABI argument registers are outside that bank and keep the copies already made.
+                    a64_clear_bindings(ref values);
                     let argument: WirValueID = instruction.operands[argument_index];
                     let argument_type: WirTypeID = program.arena.values[wir_id_index(UInt32(argument))].type_id;
                     let width: Int = a64_integer_width(ref program, argument_type);
@@ -1442,7 +1447,7 @@ func a64_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
                         }
                     }
                     if (!assigned) {
-                        return a64_lowering_error("cannot assign an AArch64 call argument");
+                        return a64_lowering_error("cannot assign AArch64 call argument " + argument_index + " for '" + callee_name + "'");
                     }
                     argument_index++;
                 }

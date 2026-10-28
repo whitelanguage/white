@@ -3,6 +3,7 @@ import * from "model.wl"
 import * from "../../wir/model.wl"
 import * from "abi.wl"
 import * from "abi/sysv.wl"
+import * from "../../abi/sysv.wl"
 import wir_type_layouts from "../../wir/layout.wl"
 
 
