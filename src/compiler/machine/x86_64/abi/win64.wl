@@ -1,6 +1,7 @@
 // src/compiler/machine/x86_64/abi/win64.wl
 import * from "../model.wl"
 import WirTypeLayout from "../../../wir/model.wl"
+import win64_register_bytes from "../../../native_abi.wl"
 
 
 func x86_win64_aggregate_size(layout: WirTypeLayout) -> Int {
@@ -8,11 +9,7 @@ func x86_win64_aggregate_size(layout: WirTypeLayout) -> Int {
     if (!layout.valid) {
         return 0;
     }
-    if (layout.size == 1UL || layout.size == 2UL || layout.size == 4UL || layout.size == 8UL) {
-        return Int(layout.size);
-    }
-
-    return 0;
+    return win64_register_bytes(layout.size);
 }
 
 struct X86Win64ABI(

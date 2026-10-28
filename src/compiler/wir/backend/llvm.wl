@@ -7,6 +7,7 @@ import wir_type_layout, wir_type_layouts from "../layout.wl"
 import * from "../storage.wl"
 import * from "llvm_windows.wl"
 import wir_lower_wide_conversions from "../numeric.wl"
+import * from "llvm_native.wl"
 
 
 struct WirLLVMResult(text: String, errors: Vector(String))
@@ -977,6 +978,11 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
 func llvm_block_exit_name(program: WirModule, block_id: WirBlockID) -> String {
     let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
     let name: String = llvm_block_name(block_id);
+    let function = program.arena.functions[wir_id_index(UInt32(block.function))];
+    if (block_id == function.entry) {
+        let exit = llvm_native_entry_exit(program, function);
+        if (exit.length() != 0) { name = exit; }
+    }
     let i: Int = 0;
     while (i < block.instructions.length()) {
         let instruction_id: WirInstID = block.instructions[i];
@@ -1098,26 +1104,33 @@ func llvm_write_function(output: strings.Builder, program: WirModule, function: 
 
     output.write(llvm_function_callconv(program, function))?;
 
-    llvm_write_type(output, program, signature.result)?;
+    llvm_native_type(output, program, signature.abi, signature.result, true)?;
 
     output.write(" @")?;
     output.write(function.name)?;
     output.write("(")?;
 
+    let indirect_result = llvm_native_mode(program, signature.abi, signature.result) < 0;
+    if indirect_result {
+        llvm_native_sret(output, program, signature.result)?;
+        if (function.linkage != WirLinkage.External) { output.write(" %abi.result.addr")?; }
+    }
     let i: Int = 0;
     while (i < signature.parameters.length()) {
-        if (i != 0) {
+        if (i != 0 || indirect_result) {
             output.write(", ")?;
         }
-        llvm_write_type(output, program, signature.parameters[i])?;
+        llvm_native_type(output, program, signature.abi, signature.parameters[i], false)?;
         if (function.linkage != WirLinkage.External) {
             output.write(" ")?;
-            output.write(llvm_value_name(function.parameters[i]))?;
+            if (llvm_native_mode(program, signature.abi, signature.parameters[i]) != 0) {
+                output.write("%abi.arg." + i)?;
+            } else { output.write(llvm_value_name(function.parameters[i]))?; }
         }
         i++;
     }
     if (signature.variadic) {
-        if (signature.parameters.length() != 0) {
+        if (signature.parameters.length() != 0 || indirect_result) {
             output.write(", ")?;
         }
 
@@ -1144,12 +1157,19 @@ func llvm_write_function(output: strings.Builder, program: WirModule, function: 
         llvm_write_phis(output, program, function, block_id)?;
         if (block_id == function.entry) {
             llvm_write_index_storage(output, program, function)?;
+            llvm_native_storage(output, program, function)?;
+            llvm_native_entry(output, program, function)?;
         }
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
         let j: Int = 0;
         while (j < block.instructions.length()) {
             let instruction_id: WirInstID = block.instructions[j];
-            llvm_write_instruction(output, program, instruction_id, program.arena.instructions[wir_id_index(UInt32(instruction_id))])?;
+            let inst = program.arena.instructions[wir_id_index(UInt32(instruction_id))];
+            if (inst.opcode == WirOpcode.Call && llvm_native_signature(program, program.arena.types[wir_id_index(UInt32(inst.call_type))])) {
+                llvm_native_call(output, program, instruction_id, inst)?;
+            } else if (inst.opcode == WirOpcode.Return && llvm_native_mode(program, signature.abi, signature.result) != 0) {
+                llvm_native_return(output, program, function, instruction_id, inst)?;
+            } else { llvm_write_instruction(output, program, instruction_id, inst)?; }
             j++;
         }
         i++;
@@ -1308,6 +1328,14 @@ func llvm_module_uses_trap(program: WirModule) -> Bool {
     while (i < program.arena.instructions.length()) {
         let opcode: WirOpcode = program.arena.instructions[i].opcode;
         if (opcode == WirOpcode.NullCheck || opcode == WirOpcode.BoundsCheck || opcode == WirOpcode.Trap) {
+            return true;
+        }
+        i++;
+    }
+    i = 0;
+    while (i < program.arena.functions.length()) {
+        let function = program.arena.functions[i];
+        if (function.linkage != WirLinkage.External && llvm_native_entry_exit(program, function).length() != 0) {
             return true;
         }
         i++;

@@ -37,6 +37,8 @@ import * from "printing.wl"
 import * from "../backend/windows.wl"
 import hoist_llvm_allocas from "../backend/llvm.wl"
 import emit_native_value_check from "native_values.wl"
+import * from "native_abi.wl"
+import is_win64_target from "../native_abi.wl"
 
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
@@ -1292,7 +1294,14 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
     let func_attrs: String = "";
     if ((meta_f_info.ann_flags & FLAG_ANN_COMP_LINK) != 0) { func_attrs = "noinline "; }
 
-    write_ir(ref c, "define " + linkage + llvm_ret_type + " @" + meta_f_info.name + "(" + params_str + ") " + func_attrs + "{\n");
+    let native_export = (meta_f_info.ann_flags & FLAG_ANN_EXPORT) != 0 && is_win64_target(get_target_triple());
+    let body_name = meta_f_info.name;
+    let body_linkage = linkage;
+    if native_export {
+        body_name = native_export_body(meta_f_info);
+        body_linkage = "internal ";
+    }
+    write_ir(ref c, "define " + body_linkage + llvm_ret_type + " @" + body_name + "(" + params_str + ") " + func_attrs + "{\n");
     write_ir(ref c, "entry:\n");
 
     let old_sym: Scope = c.symbol_table;
@@ -1375,6 +1384,7 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
     c.scope_depth = 0;
 
     c.curr_func = null;
+    if native_export { emit_native_export(ref c, meta_f_info, linkage); }
 
     return void_result();
 }
@@ -2558,7 +2568,14 @@ func compile_struct_init(ref c: Compiler, s_info: StructInfo, n_call: CallNode) 
                     emit_drop_slot(ref c, f_ptr, target_f.type);
                 }
 
-                write_ir(ref c, c.indent + "store " + target_f.llvm_type + " " + val_res.reg + ", " + target_f.llvm_type + "* " + f_ptr + "\n");
+                let data = val_res.reg;
+                let array = c.array_info_map.lookup(get_repr_type(ref c, target_f.type));
+                if (array is !null && array.size >= 0) {
+                    // fixed arrays use an address in expressions, fields store the inline value.
+                    data = next_reg(ref c);
+                    write_ir(ref c, c.indent + data + " = load " + target_f.llvm_type + ", " + target_f.llvm_type + "* " + val_res.reg + "\n");
+                }
+                write_ir(ref c, c.indent + "store " + target_f.llvm_type + " " + data + ", " + target_f.llvm_type + "* " + f_ptr + "\n");
             }
         }
         arg_idx += 1;
@@ -7269,7 +7286,11 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
 
             let ty_str: String = call_arg_type(ref c, type_node_curr, arg_val);
             if (!is_first) { args_str = args_str + ", "; }
-            args_str += ty_str + " " + arg_val.reg;
+            if (native_llvm_arg_mode(ref c, meta_func_info, type_node_curr) != 0) {
+                args_str += emit_native_arg(ref c, meta_func_info, type_node_curr, arg_val.reg);
+            } else {
+                args_str += ty_str + " " + arg_val.reg;
+            }
             is_first = false;
             if (arg_val.owns_ref) {
                 owned_args.append(arg_val);
@@ -7282,39 +7303,11 @@ func compile_raw_call(ref c: Compiler, node: NodeID) -> CompileResult {
             throw_type_error(n_call.pos, "Too few arguments.");
         }
 
-        let ret_type_str: String = get_llvm_type_str(ref c, meta_func_info.ret_type);
-        let call_res_reg: String = "";
-
-        let abi_callconv: String = func_callconv(meta_func_info);
-        let call_prefix: String = abi_callconv + ret_type_str + " ";
-        if (meta_func_info.is_varargs) {
-            let sig_args: String = "";
-            let p_idx: Int = 0;
-            let first_p: Bool = true;
-            while (p_idx < type_len) {
-                let p_curr: TypeListNode = arg_types[p_idx];
-                if (!first_p) { sig_args = sig_args + ", "; }
-                sig_args = sig_args + param_llvm_type(ref c, p_curr);
-                first_p = false;
-                p_idx += 1;
-            }
-            if (!first_p) { sig_args = sig_args + ", ..."; }
-            else { sig_args = "..."; }
-            call_prefix = abi_callconv + ret_type_str + " (" + sig_args + ") ";
-        }
-
+        let call_res_reg = emit_native_call(ref c, meta_func_info, args_str, func_callconv(meta_func_info));
         if (meta_func_info.ret_type == TYPE_VOID) {
-            if (meta_func_info.is_varargs) {
-                write_ir(ref c, c.indent + "call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
-            } else {
-                write_ir(ref c, c.indent + "call " + abi_callconv + "void @" + meta_func_info.name + "(" + args_str + ")\n");
-            }
             emit_release_owned_args(ref c, owned_args);
             return void_result();
         } else {
-            call_res_reg = next_reg(ref c);
-            write_ir(ref c, c.indent + call_res_reg + " = call " + call_prefix + "@" + meta_func_info.name + "(" + args_str + ")\n");
-
             if (meta_func_info.abi_name.length() != 0) {
                 emit_native_value_check(ref c, call_res_reg, meta_func_info.ret_type, n_call.pos);
                 // extern results are borrowed, an alias may point into an owned argument.

@@ -8,6 +8,8 @@ import * from "../target.wl"
 import * from "../validation.wl"
 import * from "ownership.wl"
 import emit_native_value_check from "native_values.wl"
+import * from "native_abi.wl"
+import is_win64_target from "../native_abi.wl"
 
 
 func extern_callconv(abi_name: String) -> String {
@@ -45,25 +47,9 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     if (info is null) { return void_result(); }
     let meta: FuncInfo = info;
     let abi_name = meta.abi_name;
-    let arg_types: Vector(Struct) = meta.arg_types;
-    let ret_type_id = meta.ret_type;
-    let p_len = arg_types.length();
-    let p_idx: Int = 0;
-    let params_str: String = "";
-
-    while (p_idx < p_len) {
-        let p: TypeListNode = arg_types[p_idx];
-        if (p_idx > 0) { params_str += ", "; }
-        params_str += get_llvm_type_str(ref c, p.type);
-        p_idx += 1;
-    }
-
-    if (node.is_varargs) {
-        if (p_len > 0) { params_str += ", "; }
-        params_str += "...";
-    }
+    let params_str = native_llvm_params(ref c, meta);
     let callconv: String = extern_callconv(abi_name);
-    let ret_llvm: String = get_llvm_type_str(ref c, ret_type_id);
+    let ret_llvm = native_llvm_result_type(ref c, meta);
     let signature: String = callconv + ret_llvm + " (" + params_str + ")";
     let backend_signature: String = backend_symbol_signature(func_name);
     if (backend_signature.length() > 0 && signature != backend_signature) {
@@ -97,8 +83,12 @@ func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResu
 
 func native_callable_name(ref c: Compiler, info: FuncInfo) -> String {
 // a Function value uses White's calling convention and returns an owned result
-    if (info.abi_name.length() == 0) { return info.name; }
+    if (info.abi_name.length() == 0 &&
+        ((info.ann_flags & FLAG_ANN_EXPORT) == 0 || !is_win64_target(get_target_triple()))) {
+        return info.name;
+    }
     let name = "$native." + info.abi_name + "." + info.name;
+    if (info.abi_name.length() == 0) { name = "$native.export." + info.name; }
     if (!c.native_adapters.contains_key(name)) {
         c.native_adapters.put(name, info);
     }
@@ -120,33 +110,37 @@ func emit_native_adapters(ref c: Compiler) -> Void {
         let name = c.native_adapters.keys[i];
         let info: FuncInfo = c.native_adapters.values[i];
         let params: String = "";
-        let args: String = "";
         let arg_idx = 0;
         while (arg_idx < info.arg_types.length()) {
             let param: TypeListNode = info.arg_types[arg_idx];
             let type = param_llvm_type(ref c, param);
             if (arg_idx != 0) {
                 params += ", ";
-                args += ", ";
             }
             let arg = type + " %arg" + arg_idx;
             params += arg;
-            args += arg;
             arg_idx++;
         }
 
         c.reg_count = 0;
         let result_type = get_llvm_type_str(ref c, info.ret_type);
         write_ir(ref c, "define internal " + result_type + " @" + name + "(" + params + ") {\nentry:\n");
-        let call = "call " + func_callconv(info) + result_type + " @" + info.name + "(" + args + ")\n";
+        let args: String = "";
+        arg_idx = 0;
+        while (arg_idx < info.arg_types.length()) {
+            let param: TypeListNode = info.arg_types[arg_idx];
+            if (arg_idx != 0) { args += ", "; }
+            args += emit_native_arg(ref c, info, param, "%arg" + arg_idx);
+            arg_idx++;
+        }
+        let result = emit_native_call(ref c, info, args, func_callconv(info));
         if (info.ret_type == TYPE_VOID) {
-            write_ir(ref c, c.indent + call);
             write_ir(ref c, c.indent + "ret void\n}\n\n");
         } else {
-            let result = next_reg(ref c);
-            write_ir(ref c, c.indent + result + " = " + call);
-            emit_native_value_check(ref c, result, info.ret_type, no_position());
-            emit_retain_value(ref c, result, info.ret_type);
+            if (info.abi_name.length() != 0) {
+                emit_native_value_check(ref c, result, info.ret_type, no_position());
+                emit_retain_value(ref c, result, info.ret_type);
+            }
             write_ir(ref c, c.indent + "ret " + result_type + " " + result + "\n}\n\n");
         }
         i++;
