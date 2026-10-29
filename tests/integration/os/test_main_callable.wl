@@ -2,8 +2,16 @@
 // File: tests/integration/os/test_main_callable.wl
 // Focus: Calling the source main must not run the native argv conversion twice.
 
+import "process"
+
+
 func main(argc: Int, ptr argv: String) -> Int {
-    if (argc == 2 && argv[1] == "inner") { return 7; }
+    if (argc == 2 && argv[1] == "inner") {
+        let value = process.argument(argc, argv, 1);
+        if (value is null) { return 1; }
+        if (value != "inner") { return 1; }
+        return 7;
+    }
 
     let args: String[2] = ["nested", "inner"];
     let callback = main;

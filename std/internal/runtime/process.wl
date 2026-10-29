@@ -37,14 +37,6 @@ func panic_out_of_memory(owner: String) -> Void {
     panic(owner + " allocation failed: out of memory");
 }
 
-// the first bootstrap generation still enters main with the native argv table.
-// compare its table identity, never inspect a possible C string as a String header.
-let __managed_argv: AnyPtr = nullptr;
-
-func has_managed_args(argv: AnyPtr) -> Bool {
-    return argv is !nullptr && argv is __managed_argv;
-}
-
 @CompilerLink("startup_args_import")
 func import_startup_args(argc: Int, native_argv: AnyPtr) -> AnyPtr {
 // the table owns one reference per slot, copies taken by main outlive table cleanup
@@ -75,7 +67,6 @@ func import_startup_args(argc: Int, native_argv: AnyPtr) -> AnyPtr {
         args[i] = value;
         i++;
     }
-    __managed_argv = storage;
     return storage;
 }
 
@@ -89,7 +80,6 @@ func free_managed_args(argc: Int, argv: AnyPtr) -> Void {
         args[i] = "";
         i++;
     }
-    if (argv is __managed_argv) { __managed_argv = nullptr; }
     memory.mem_dealloc(argv);
 }
 

@@ -218,18 +218,9 @@ func shell(command: String) -> Int {
 }
 
 func argument(argc: Int, ptr argv: String, index: Int) -> Optional(String) {
+// argv already holds White Strings, taking a copy keeps it alive after startup cleanup
     if (argv is nullptr || index < 0 || index >= argc) { return null; }
-    let raw_argv: AnyPtr = AnyPtr(argv);
-    if (runtime.has_managed_args(raw_argv)) { return argv[index]; }
-    // old bootstrap compilers still pass the C table, remove this after the new seed.
-    let ptr native_argv: AnyPtr = raw_argv;
-    let value: String = runtime_string.from_c_string(native_argv[index])?;
-    catch(err) {
-        runtime.write_err("fatal: Could not decode process argument\n");
-        runtime.process_exit(1);
-        return null;
-    }
-    return value;
+    return argv[index];
 }
 
 func id() -> Int {
