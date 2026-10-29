@@ -36,7 +36,7 @@ import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
 import hoist_llvm_allocas from "../backend/llvm.wl"
-import emit_native_value_check from "native_values.wl"
+import emit_native_value_check, emit_raw_value_load from "native_values.wl"
 import * from "native_abi.wl"
 import native_llvm_target from "../abi/llvm.wl"
 
@@ -3208,6 +3208,8 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
         return CompileResult(reg="poison", type=TYPE_POISON, origin_type=0, owns_ref=false, is_const_access=false);
     }
 
+    let raw_struct: String = "";
+    let raw_owner = false;
     if (is_pointer_type(ref c, obj_res.type)) {
         let base_info: Optional(SymbolInfo) = c.ptr_base_map.lookup(obj_res.type);
         if ((base_info is !null)) {
@@ -3229,12 +3231,12 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
 
                 write_ir(ref c, "\n" + label_ok + ":\n");
 
-                let loaded_reg: String = next_reg(ref c);
-                let base_ty_str: String = get_llvm_type_str(ref c, base_info.type);
-
-                write_ir(ref c, c.indent + loaded_reg + " = load " + base_ty_str + ", " + base_ty_str + "* " + obj_res.reg + "\n");
-
-                obj_res.reg = loaded_reg;
+                if (!s_check.is_class && !s_check.is_interface && !s_check.is_enum) {
+                    raw_struct = obj_res.reg;
+                } else {
+                    raw_owner = true;
+                    obj_res.reg = emit_raw_value_load(ref c, obj_res.reg, base_info.type, node.pos);
+                }
                 obj_res.type = base_info.type;
             }
         }
@@ -3321,6 +3323,16 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
     let field: Optional(FieldInfo) = find_field(meta_s_info, node.field_name);
 
     if ((field is !null)) {
+        if (raw_struct.length() != 0) {
+            let address = next_reg(ref c);
+            write_ir(ref c, c.indent + address + " = getelementptr inbounds " + meta_s_info.llvm_name + ", " + meta_s_info.llvm_name + "* " + raw_struct + ", i32 0, i32 " + field.offset + "\n");
+            let value = emit_raw_value_load(ref c, address, field.type, node.pos);
+            let array = c.array_info_map.lookup(get_repr_type(ref c, field.type));
+            if (array is !null && array.size >= 0) {
+                return CompileResult(reg=address, type=field.type, is_const_access=obj_res.is_const_access, origin_type=0, owns_ref=false);
+            }
+            return finish_field_value(ref c, obj_res, value, field.type);
+        }
         if (!meta_s_info.is_class && !meta_s_info.is_interface) {
             let arr_check: Optional(ArrayInfo) = c.array_info_map.lookup(field.type);
             if ((arr_check is !null) && arr_check.size != -1) {
@@ -3350,8 +3362,13 @@ func compile_field_access(ref c: Compiler, node: FieldAccessNode) -> CompileResu
             }
         }
 
-        let val_reg: String = next_reg(ref c);
-        write_ir(ref c, c.indent + val_reg + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + f_ptr + "\n");
+        let val_reg: String = "";
+        if raw_owner {
+            val_reg = emit_raw_value_load(ref c, f_ptr, field.type, node.pos);
+        } else {
+            val_reg = next_reg(ref c);
+            write_ir(ref c, c.indent + val_reg + " = load " + field.llvm_type + ", " + field.llvm_type + "* " + f_ptr + "\n");
+        }
 
         return finish_field_value(ref c, obj_res, val_reg, field.type);
     }
@@ -4239,8 +4256,7 @@ func compile_index_access(ref c: Compiler, node: IndexAccessNode, handled: Bool)
             let addr_reg: String = next_reg(ref c);
             write_ir(ref c, c.indent + addr_reg + " = getelementptr inbounds " + elem_ty_str + ", " + elem_ty_str + "* " + target_res.reg + ", i32 " + index_res.reg + "\n");
 
-            let load_reg: String = next_reg(ref c);
-            write_ir(ref c, c.indent + load_reg + " = load " + elem_ty_str + ", " + elem_ty_str + "* " + addr_reg + "\n");
+            let load_reg = emit_raw_value_load(ref c, addr_reg, elem_type, node.pos);
 
             return CompileResult(reg=load_reg, type=elem_type, origin_type=elem_type, owns_ref=false, is_const_access=false);
         }
@@ -6665,11 +6681,7 @@ func compile_raw_deref(ref c: Compiler, node: NodeID) -> CompileResult {
             return void_result();
         }
         emit_pointer_null_check(ref c, curr_reg, curr_type, d_node.pos);
-        let ty_str: String = get_llvm_type_str(ref c, next_type);
-        let next_reg: String = next_reg(ref c);
-        write_ir(ref c, c.indent + next_reg + " = load " + ty_str + ", " + ty_str + "* " + curr_reg + "\n");
-
-        curr_reg = next_reg;
+        curr_reg = emit_raw_value_load(ref c, curr_reg, next_type, d_node.pos);
         curr_type = next_type;
         i += 1;
     }

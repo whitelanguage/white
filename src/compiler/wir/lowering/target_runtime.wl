@@ -69,6 +69,8 @@ func wir_emit_failure_runtime(ref types: WirTypeMap, ref source: Compiler, ref p
     wir_failure_function(ref program, "__wl_fail_overflow", "RuntimeError: Signed division overflow\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_erased_type", "RuntimeError: Erased value has the wrong concrete type\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_native_tag", "RuntimeError: Invalid native union tag\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_native_char", "RuntimeError: Invalid native Char value\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_native_bool", "RuntimeError: Invalid native Bool value\n", writer, exit);
 }
 
 func wir_emit_windows_abi(ref program: WirModule) -> Void {

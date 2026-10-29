@@ -7,7 +7,7 @@ import * from "state.wl"
 import * from "types.wl"
 import * from "ownership.wl"
 import wir_native_callable from "native_calls.wl"
-import wir_native_value_check from "native_values.wl"
+import wir_native_value_check, wir_raw_value_load from "native_values.wl"
 import * from "unions.wl"
 import * from "type_tests.wl"
 import * from "../../type_tests.wl"
@@ -2886,7 +2886,13 @@ func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap,
     if (address.value == NO_WIR_VALUE) {
         return wir_no_expr();
     }
-    return WirExpr(value=wir_load(ref program, state.block, address.value, "", no_wir_location()), source_type=address.source_type);
+    let value = NO_WIR_VALUE;
+    if (is_pointer_type(ref source, target_type)) {
+        value = wir_raw_value_load(ref state, ref types, ref source, ref program, address.value, address.source_type);
+    } else {
+        value = wir_load(ref program, state.block, address.value, "", no_wir_location());
+    }
+    return WirExpr(value=value, source_type=address.source_type);
 }
 
 func wir_lower_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
@@ -7267,8 +7273,18 @@ func wir_expr_field_access(ref state: WirFunctionLowering, ref types: WirTypeMap
     }
     if (meta_owner.is_class || indirect) {
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [object.value], [], no_wir_location());
+        if (meta_owner.is_class && indirect) {
+            // a pointer to a class holds an object reference, not the object's fields.
+            object.value = wir_raw_value_load(ref state, ref types, ref source, ref program, object.value, owner_type);
+        }
         let address: WirValueID = wir_field_address(ref program, state.block, object.value, field.offset, "", no_wir_location());
-        return WirExpr(value=wir_load(ref program, state.block, address, "", no_wir_location()), source_type=field.type);
+        let value = NO_WIR_VALUE;
+        if indirect {
+            value = wir_raw_value_load(ref state, ref types, ref source, ref program, address, field.type);
+        } else {
+            value = wir_load(ref program, state.block, address, "", no_wir_location());
+        }
+        return WirExpr(value=value, source_type=field.type);
     }
     return WirExpr(value=wir_field(ref program, state.block, object.value, field.offset, "", no_wir_location()), source_type=field.type);
 }
@@ -7288,7 +7304,7 @@ func wir_expr_deref(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let meta_pointer: SymbolInfo = pointer;
         wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
-        value = WirExpr(value=wir_load(ref program, state.block, value.value, "", no_wir_location()), source_type=meta_pointer.type);
+        value = WirExpr(value=wir_raw_value_load(ref state, ref types, ref source, ref program, value.value, meta_pointer.type), source_type=meta_pointer.type);
         level++;
     }
     return value;
