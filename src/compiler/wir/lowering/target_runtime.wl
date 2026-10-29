@@ -15,12 +15,12 @@ func wir_windows_target(program: WirModule) -> Bool {
 func wir_runtime_function(ref source: Compiler, program: WirModule, link_name: String, errors: Vector(String)) -> WirFuncID {
     let info: Optional(FuncInfo) = wir_compiler_link_function(ref source, link_name);
     if (!(info is !null)) {
-        errors.append("Windows entry point requires compiler link '" + link_name + "'");
+        errors.append("Program entry point requires compiler link '" + link_name + "'");
         return NO_WIR_FUNC;
     }
     let function_id: WirFuncID = wir_find_function(program, info.name);
     if (function_id == NO_WIR_FUNC) {
-        errors.append("Windows entry point cannot find WIR function '" + info.name + "'");
+        errors.append("Program entry point cannot find WIR function '" + info.name + "'");
     }
     return function_id;
 }
@@ -127,7 +127,9 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
 
     let args_id: WirFuncID = wir_runtime_function(ref source, program, "startup_args", errors);
     let free_id: WirFuncID = wir_runtime_function(ref source, program, "startup_args_free", errors);
-    if (args_id == NO_WIR_FUNC || free_id == NO_WIR_FUNC) {
+    let import_id = wir_runtime_function(ref source, program, "startup_args_import", errors);
+    let drop_id = wir_runtime_function(ref source, program, "startup_args_drop", errors);
+    if (args_id == NO_WIR_FUNC || free_id == NO_WIR_FUNC || import_id == NO_WIR_FUNC || drop_id == NO_WIR_FUNC) {
         return;
     }
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
@@ -145,15 +147,58 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
     wir_append(ref program, failed, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
 
     let argc: WirValueID = wir_load(ref program, ready, argc_slot, "argc", no_wir_location());
-    let argv: WirValueID = wir_cast(ref program, ready, raw_argv, main_type.parameters[1], "argv", no_wir_location());
-    status = wir_call(ref program, ready, wir_function_value(ref program, main_id), [argc, argv], "status", no_wir_location());
+    let managed = wir_call(ref program, ready, wir_function_value(ref program, import_id), [argc, raw_argv], "argv.managed", no_wir_location());
     wir_call(ref program, ready, wir_function_value(ref program, free_id), [argc, raw_argv], "", no_wir_location());
-    wir_call(ref program, ready, wir_function_value(ref program, exit_id), [status], "", no_wir_location());
-    wir_append(ref program, ready, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
+    let invalid = wir_binary(ref program, ready, WirOpcode.Equal, program.bool_type, managed, wir_null(ref program, raw_type), "argv.invalid", no_wir_location());
+    let run = wir_add_block(ref program, function_id, "startup.managed", []);
+    wir_append(ref program, ready, WirOpcode.Branch, program.void_type, [invalid], [wir_edge(failed, []), wir_edge(run, [])], no_wir_location());
+    let argv = wir_cast(ref program, run, managed, main_type.parameters[1], "argv", no_wir_location());
+    status = wir_call(ref program, run, wir_function_value(ref program, main_id), [argc, argv], "status", no_wir_location());
+    wir_call(ref program, run, wir_function_value(ref program, drop_id), [argc, managed], "", no_wir_location());
+    wir_call(ref program, run, wir_function_value(ref program, exit_id), [status], "", no_wir_location());
+    wir_append(ref program, run, WirOpcode.Unreachable, program.void_type, [], [], no_wir_location());
+}
+
+func wir_emit_posix_main_entry(ref source: Compiler, ref program: WirModule, errors: Vector(String)) -> Void {
+// leave the C argv table with libc, only its converted String slots reach White code
+    if (source.is_shared) { return; }
+    let found_main = source.func_table.lookup("main");
+    if (found_main is null || found_main.arg_types.length() == 0) { return; }
+    let main: FuncInfo = found_main;
+    if (main.name == "main") { return; }
+    let main_id = wir_find_function(program, main.name);
+    if (main_id == NO_WIR_FUNC) {
+        errors.append("Program entry point cannot find source main");
+        return;
+    }
+    let import_id = wir_runtime_function(ref source, program, "startup_args_import", errors);
+    let drop_id = wir_runtime_function(ref source, program, "startup_args_drop", errors);
+    if (import_id == NO_WIR_FUNC || drop_id == NO_WIR_FUNC) { return; }
+    let raw_type = wir_pointer_type(ref program, program.void_type);
+    let int_type = wir_signed_int_type(ref program, 32);
+    let function_id = wir_add_function(ref program, "main", [wir_param("argc", int_type), wir_param("argv.native", wir_pointer_type(ref program, raw_type))], int_type, false, WirLinkage.Exported, WirABI.C);
+    let entry = wir_add_block(ref program, function_id, "entry", []);
+    let params = program.arena.functions[wir_id_index(UInt32(function_id))].parameters;
+    let argc = params[0];
+    let raw_argv = wir_cast(ref program, entry, params[1], raw_type, "argv.raw", no_wir_location());
+    let managed = wir_call(ref program, entry, wir_function_value(ref program, import_id), [argc, raw_argv], "argv.managed", no_wir_location());
+    let missing = wir_binary(ref program, entry, WirOpcode.Equal, program.bool_type, managed, wir_null(ref program, raw_type), "argv.missing", no_wir_location());
+    let failed = wir_add_block(ref program, function_id, "startup.failed", []);
+    let ready = wir_add_block(ref program, function_id, "startup.ready", []);
+    wir_append(ref program, entry, WirOpcode.Branch, program.void_type, [missing], [wir_edge(failed, []), wir_edge(ready, [])], no_wir_location());
+    wir_return(ref program, failed, wir_const_int(ref program, int_type, UInt128(127U)), no_wir_location());
+
+    let main_function = program.arena.functions[wir_id_index(UInt32(main_id))];
+    let main_type = program.arena.types[wir_id_index(UInt32(main_function.type_id))];
+    let argv = wir_cast(ref program, ready, managed, main_type.parameters[1], "argv", no_wir_location());
+    let status = wir_call(ref program, ready, wir_function_value(ref program, main_id), [argc, argv], "status", no_wir_location());
+    wir_call(ref program, ready, wir_function_value(ref program, drop_id), [argc, managed], "", no_wir_location());
+    wir_return(ref program, ready, status, no_wir_location());
 }
 
 func wir_emit_target_runtime(ref source: Compiler, ref program: WirModule, errors: Vector(String)) -> Void {
     if (!wir_windows_target(program)) {
+        wir_emit_posix_main_entry(ref source, ref program, errors);
         return;
     }
     let has_runtime: Bool = source.is_shared || (wir_compiler_link_function(ref source, "process_exit") is !null);

@@ -5,6 +5,7 @@ import "sys"
 import "internal/platform/windows"
 import "internal/platform/posix"
 import "string.wl" as runtime_string
+import "memory.wl" as memory
 
 
 func write_err(message: String) -> Void {
@@ -34,6 +35,62 @@ func panic_capacity_overflow(owner: String) -> Void {
 
 func panic_out_of_memory(owner: String) -> Void {
     panic(owner + " allocation failed: out of memory");
+}
+
+// the first bootstrap generation still enters main with the native argv table.
+// compare its table identity, never inspect a possible C string as a String header.
+let __managed_argv: AnyPtr = nullptr;
+
+func has_managed_args(argv: AnyPtr) -> Bool {
+    return argv is !nullptr && argv is __managed_argv;
+}
+
+@CompilerLink("startup_args_import")
+func import_startup_args(argc: Int, native_argv: AnyPtr) -> AnyPtr {
+// the table owns one reference per slot, copies taken by main outlive table cleanup
+    if (argc < 0 || (argc > 0 && native_argv is nullptr)) { return nullptr; }
+    let limit = ~UIntSize(0);
+    let count = UIntSize(argc);
+    if (count >= limit / size_of(AnyPtr)) { return nullptr; }
+    let storage = memory.mem_alloc_zeroed((count + UIntSize(1)) * size_of(AnyPtr));
+    if (storage is nullptr) {
+        write_err("fatal: Could not allocate process arguments\n");
+        return nullptr;
+    }
+    let ptr native_args: AnyPtr = native_argv;
+    let ptr args: String = storage;
+    let i = 0;
+    while (i < argc) {
+        let value = runtime_string.from_c_string(native_args[i])?;
+        catch(err) {
+            free_managed_args(i, storage);
+            write_err("fatal: Could not decode process arguments\n");
+            return nullptr;
+        }
+        if (!runtime_string.is_native_text(value)) {
+            free_managed_args(i, storage);
+            write_err("fatal: Invalid UTF-8 process argument\n");
+            return nullptr;
+        }
+        args[i] = value;
+        i++;
+    }
+    __managed_argv = storage;
+    return storage;
+}
+
+@CompilerLink("startup_args_drop")
+func free_managed_args(argc: Int, argv: AnyPtr) -> Void {
+// release initialized slots before freeing their pointer table, the sentinel is not a String
+    if (argv is nullptr) { return; }
+    let ptr args: String = argv;
+    let i = 0;
+    while (i < argc) {
+        args[i] = "";
+        i++;
+    }
+    if (argv is __managed_argv) { __managed_argv = nullptr; }
+    memory.mem_dealloc(argv);
 }
 
 func __free_startup_args(count: Int, storage: AnyPtr) -> Void {

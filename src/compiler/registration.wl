@@ -1,4 +1,6 @@
 // src/compiler/registration.wl
+import "sys"
+import get_target_os from "target.wl"
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "context.wl"
@@ -557,7 +559,7 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                     let first_arg: TypeListNode = arg_types[0];
                     let second_arg: TypeListNode = arg_types[1];
                     let pointer_base: Optional(SymbolInfo) = c.ptr_base_map.lookup(second_arg.type);
-                    if (first_arg.type == TYPE_INT && (pointer_base is !null) &&
+                    if (first_arg.type == TYPE_INT && first_arg.pass_mode == PARAM_VALUE && second_arg.pass_mode == PARAM_VALUE && (pointer_base is !null) &&
                         pointer_base.type == TYPE_STRING) {
                         valid_main = true;
                     }
@@ -599,6 +601,9 @@ func pre_register_funcs(ref c: Compiler, node: NodeID) -> Void {
                 llvm_func_name = raw_name;
             } else {
                 llvm_func_name = mangle_wl_name(ref c, c.current_package_prefix, raw_name, arg_types);
+            }
+            if (raw_name == "main" && p_len == 2 && !c.is_shared && get_target_os() != sys.Os.Windows) {
+                llvm_func_name = "__wl_program_main";
             }
 
             if ((c.func_table.lookup(func_key) is !null) || (c.generic_funcs.lookup(func_key) is !null)) {

@@ -339,6 +339,18 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
             throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the Windows entry point.");
             return;
         }
+        let import_key = c.compiler_link.lookup("startup_args_import");
+        let drop_key = c.compiler_link.lookup("startup_args_drop");
+        if (import_key is null || drop_key is null) {
+            throw_internal_compiler_error(no_position(), "Missing managed argument hooks.");
+            return;
+        }
+        let import_info = c.func_table.lookup(import_key);
+        let drop_info = c.func_table.lookup(drop_key);
+        if (import_info is null || drop_info is null) {
+            throw_internal_compiler_error(no_position(), "Missing managed argument functions.");
+            return;
+        }
 
         write_ir(ref c, "  %argc.addr = alloca i32\n");
         write_ir(ref c, "  store i32 0, i32* %argc.addr\n");
@@ -350,9 +362,14 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
         write_ir(ref c, "  unreachable\n\n");
         write_ir(ref c, "startup.ready:\n");
         write_ir(ref c, "  %argc = load i32, i32* %argc.addr\n");
-        write_ir(ref c, "  %argv = bitcast i8* %argv.raw to %struct.$String**\n");
-        write_ir(ref c, "  %status = call i32 @main(i32 %argc, %struct.$String** %argv)\n");
+        write_ir(ref c, "  %argv.managed = call i8* @" + import_info.name + "(i32 %argc, i8* %argv.raw)\n");
         write_ir(ref c, "  call void @" + free_info.name + "(i32 %argc, i8* %argv.raw)\n");
+        write_ir(ref c, "  %argv.invalid = icmp eq i8* %argv.managed, null\n");
+        write_ir(ref c, "  br i1 %argv.invalid, label %startup.failed, label %startup.managed\n\n");
+        write_ir(ref c, "startup.managed:\n");
+        write_ir(ref c, "  %argv = bitcast i8* %argv.managed to %struct.$String**\n");
+        write_ir(ref c, "  %status = call i32 @main(i32 %argc, %struct.$String** %argv)\n");
+        write_ir(ref c, "  call void @" + drop_info.name + "(i32 %argc, i8* %argv.managed)\n");
     }
 
     write_ir(ref c, "  call void @" + exit_info.name + "(i32 %status)\n");

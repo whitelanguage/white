@@ -9,6 +9,10 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("FAIL: Program name is missing");
         return 1;
     }
+    if (argv[0].length() == 0 || process.argument(argc, argv, -1) is !null) {
+        print("FAIL: Direct argv access or negative bounds");
+        return 1;
+    }
     if (process.argument(argc, argv, argc) is !null) {
         print("FAIL: Argument bounds were not checked");
         return 1;
@@ -22,6 +26,24 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
         if (first != "hello world" || second != "你好") {
             print("FAIL: Native arguments were not decoded as UTF-8");
+            return 1;
+        }
+        if (argv[1] != first || argv[2] != second) {
+            print("FAIL: Direct argv and process.argument disagree");
+            return 1;
+        }
+    }
+    if (argc == 5) {
+        if (argv[1] != "" || argv[2] != "hello world" || argv[3] != "你好" || argv[4] != "quote\" slash\\ tail") {
+            print("FAIL: Empty, quoted or Unicode argument");
+            return 1;
+        }
+        let original = argv[2];
+        argv[2] = "changed";
+        let changed = process.argument(argc, argv, 2);
+        if (changed is null) { return 1; }
+        if (original != "hello world" || changed != "changed") {
+            print("FAIL: Argument slot ownership");
             return 1;
         }
     }

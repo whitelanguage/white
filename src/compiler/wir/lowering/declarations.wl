@@ -25,7 +25,7 @@ func wir_function_abi(ref types: WirTypeMap, info: FuncInfo) -> WirABI {
 }
 
 func wir_function_linkage(info: FuncInfo, abi: WirABI) -> WirLinkage {
-    if (info.base_name == "main" || (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+    if ((info.base_name == "main" && info.name == "main") || (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
         return WirLinkage.Exported;
     }
     if (abi != WirABI.White) { return WirLinkage.External; }

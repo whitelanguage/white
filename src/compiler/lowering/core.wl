@@ -35,6 +35,7 @@ import check_body_refs from "../references.wl"
 import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
+import emit_posix_entrypoint from "../backend/posix.wl"
 import hoist_llvm_allocas from "../backend/llvm.wl"
 import emit_native_value_check, emit_raw_value_load from "native_values.wl"
 import * from "native_abi.wl"
@@ -1289,6 +1290,7 @@ func compile_func_body(ref c: Compiler, node: FunctionDefNode) -> CompileResult 
             linkage = "dllexport ";
         }
     }
+    if (raw_name == "main" && meta_f_info.name != "main") { linkage = "internal "; }
 
     // keep compiler-link hooks out of line to avoid cloning their loops at call sites
     let func_attrs: String = "";
@@ -7983,6 +7985,7 @@ func compile_end(ref c: Compiler) -> Void {
     emit_erased_check_helpers(ref c);
     emit_windows_abi(ref c);
     emit_windows_entrypoint(ref c);
+    emit_posix_entrypoint(ref c);
     emit_native_adapters(ref c);
 
     let str_vec: Vector(Struct) = c.string_list;
