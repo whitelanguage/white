@@ -3298,6 +3298,8 @@ func get_type_size_bytes(ref c: Compiler, type_id: Int) -> Int {
     }
     if ((struct_info is !null)) {
         let meta_struct_info: StructInfo = struct_info;
+        // enum fields describe constants of this type, walking them would recurse.
+        if (meta_struct_info.is_enum) { return 4; }
         if (meta_struct_info.is_class) {
             return get_pointer_size_bytes();
         }
@@ -3415,6 +3417,7 @@ func get_type_align_bytes(ref c: Compiler, type_id: Int) -> Int {
     let struct_info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
     if ((struct_info is !null)) {
         let meta_struct_info: StructInfo = struct_info;
+        if (meta_struct_info.is_enum) { return 4; }
         if (meta_struct_info.is_class || meta_struct_info.is_interface) {
             return get_pointer_size_bytes();
         }
