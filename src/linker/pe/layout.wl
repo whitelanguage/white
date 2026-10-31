@@ -139,7 +139,7 @@ func pe_special_section(object: CoffObject, prefix: CoffSpan) -> Bool {
         coff_name_matches(object, prefix, ".gljmp") || coff_name_matches(object, prefix, ".00cfg");
 }
 
-func plan_pe(objects: Vector(CoffObject)) -> PeLayoutResult {
+func plan_pe(objects: Vector(CoffObject), import_object: Int = -1) -> PeLayoutResult {
 // assign contributions before patching, raw offsets and RVAs have different alignment
     let layout = PeLayout();
     let object_id = 0;
@@ -170,7 +170,9 @@ func plan_pe(objects: Vector(CoffObject)) -> PeLayoutResult {
             if (prefix.size < 1 || prefix.size > 8) {
                 return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "PE image section names must fit eight bytes");
             }
-            if (input.size != 0U && pe_special_section(object, prefix)) {
+            // only the writer's generated import object supplies complete .idata metadata.
+            let generated = object_id == import_object && coff_name_matches(object, prefix, ".idata");
+            if (input.size != 0U && pe_special_section(object, prefix) && !generated) {
                 return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "Input section needs unsupported PE loader metadata");
             }
             if (input.size == 0U) { section_id++; continue; }

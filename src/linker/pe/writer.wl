@@ -3,6 +3,7 @@
 import * from "model.wl"
 import * from "layout.wl"
 import * from "reloc.wl"
+import * from "imports.wl"
 import * from "../coff/model.wl"
 import * from "../coff/link_model.wl"
 import coff_name_matches from "../coff/reader.wl"
@@ -36,7 +37,7 @@ func pe_entry(objects: Vector(CoffObject), name: String) -> CoffSymbolRef {
     return CoffSymbolRef();
 }
 
-func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: UInt32, reloc_size: UInt32, fixed: Bool) -> Vector(Byte) {
+func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: UInt32, reloc_size: UInt32, fixed: Bool, import_rva: UInt32 = 0U, import_size: UInt32 = 0U, iat_rva: UInt32 = 0U, iat_size: UInt32 = 0U) -> Vector(Byte) {
 // leave timestamp, checksums and reserved fields zero so repeated links reproduce the file
     let bytes: Vector(Byte) = [];
     pe_zeros(ref bytes, Int(layout.headers_size));
@@ -90,8 +91,12 @@ func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: 
     coff_put_word(bytes, header + 88, 8, options.heap_reserve);
     coff_put_word(bytes, header + 96, 8, options.heap_commit);
     coff_put_word(bytes, header + 108, 4, 16UL);
+    coff_put_word(bytes, header + 112 + 8, 4, UInt64(import_rva));
+    coff_put_word(bytes, header + 116 + 8, 4, UInt64(import_size));
     coff_put_word(bytes, header + 112 + 5 * 8, 4, UInt64(reloc_rva));
     coff_put_word(bytes, header + 116 + 5 * 8, 4, UInt64(reloc_size));
+    coff_put_word(bytes, header + 112 + 12 * 8, 4, UInt64(iat_rva));
+    coff_put_word(bytes, header + 116 + 12 * 8, 4, UInt64(iat_size));
 
     i = 0;
     while (i < layout.sections.length()) {
@@ -119,20 +124,40 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         options.stack_reserve < options.stack_commit || options.heap_commit == 0UL || options.heap_reserve < options.heap_commit) {
         return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "Invalid PE image options");
     }
-    let symbols = coff_resolve_symbols(objects);
+    let inputs: Vector(CoffObject) = [];
+    let n = 0;
+    while (n < objects.length()) { inputs.append(objects[n]); n++; }
+    let imported = PeImports();
+    let import_id = -1;
+    if (options.imports.length() != 0) {
+        let selected = pe_select_imports(objects, options.imports);
+        if (selected.errors.length() != 0) { return PeImageResult(errors=selected.errors); }
+        imported = pe_make_imports(selected.entries, selected.direct);
+        if (imported.errors.length() != 0) { return PeImageResult(errors=imported.errors); }
+        if (imported.object is !null) {
+            let generated: CoffObject = imported.object;
+            import_id = inputs.length();
+            inputs.append(generated);
+        }
+    }
+
+    let symbols = coff_resolve_symbols(inputs);
     if (symbols.errors.length() != 0) { return PeImageResult(errors=symbols.errors); }
-    let planned = plan_pe(objects);
+    let planned = plan_pe(inputs, import_id);
     if (planned.layout is null) { return PeImageResult(errors=planned.errors); }
     let layout: PeLayout = planned.layout;
     if (Int128(UInt128(options.image_base)) + Int128(layout.image_size) > Int128(UInt128(18446744073709551615UL))) {
         return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "PE image address range exceeds 64-bit addressing");
     }
-    let entry = pe_entry(objects, options.entry);
+    let entry = pe_entry(inputs, options.entry);
     if (entry.object < 0) {
         return pe_image_error(CoffLinkStatus.UndefinedSymbol, -1, -1, "PE entry symbol '" + options.entry + "' is not defined");
     }
-    let definition = objects[entry.object].symbols[entry.symbol];
-    let input = objects[entry.object].sections[definition.section - 1];
+    if (entry.object == import_id) {
+        return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "PE entry must be defined by an input object, not a DLL import");
+    }
+    let definition = inputs[entry.object].symbols[entry.symbol];
+    let input = inputs[entry.object].sections[definition.section - 1];
     let place = layout.placements[entry.object][definition.section - 1];
     if (place.section == 0 || definition.value >= input.size || (input.flags & 0x20000000U) == 0U || input.data.size == 0) {
         return pe_image_error(CoffLinkStatus.InvalidLayout, entry.object, definition.section - 1, "PE entry must point into initialized executable storage");
@@ -150,7 +175,7 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         let j = 0;
         while (j < section.parts.length()) {
             let part = section.parts[j];
-            let patched = coff_apply_section(objects, symbols, layout.placements, options.image_base, part.object, part.section);
+            let patched = coff_apply_section(inputs, symbols, layout.placements, options.image_base, part.object, part.section);
             if (patched.patch is null) {
                 if (patched.diagnostic is !null) { return PeImageResult(errors=[patched.diagnostic]); }
                 return pe_image_error(CoffLinkStatus.InvalidObject, part.object, part.section, "Relocation application produced no section");
@@ -201,7 +226,14 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         layout.image_size = UInt32(image_size);
     }
 
-    let bytes = pe_headers(layout, options, entry_rva, reloc_rva, reloc_size, fixed);
+    let import_rva = 0U;
+    let iat_rva = 0U;
+    if (import_id >= 0) {
+        import_rva = layout.placements[import_id][0].rva;
+        iat_rva = import_rva + imported.iat_offset;
+    }
+    let bytes = pe_headers(layout, options, entry_rva, reloc_rva, reloc_size, fixed,
+        import_rva, imported.directory_size, iat_rva, imported.iat_size);
     i = 0;
     while (i < layout.sections.length()) {
         let section = layout.sections[i];

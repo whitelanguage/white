@@ -2,13 +2,23 @@
 import CoffPlacement, CoffLinkError from "../coff/link_model.wl"
 
 
+struct PeImport(
+    dll: String,
+    name: String = "",
+    symbol: String = "",
+    ordinal: Optional(UInt32) = null,
+    hint: UInt32 = 0U,
+    is_data: Bool = false
+)
+
 struct PeOptions(
     entry: String = "mainCRTStartup",
     image_base: UInt64 = 5368709120UL,
     stack_reserve: UInt64 = 1048576UL,
     stack_commit: UInt64 = 4096UL,
     heap_reserve: UInt64 = 1048576UL,
-    heap_commit: UInt64 = 4096UL
+    heap_commit: UInt64 = 4096UL,
+    imports: Vector(PeImport) = []
 )
 
 struct PeInput(object: Int, section: Int)
