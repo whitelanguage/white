@@ -139,8 +139,11 @@ func pe_special_section(object: CoffObject, prefix: CoffSpan) -> Bool {
         coff_name_matches(object, prefix, ".gljmp") || coff_name_matches(object, prefix, ".00cfg");
 }
 
-func plan_pe(objects: Vector(CoffObject), import_object: Int = -1) -> PeLayoutResult {
+func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_sections: Int = 1) -> PeLayoutResult {
 // assign contributions before patching, raw offsets and RVAs have different alignment
+    if (spare_sections < 0 || spare_sections > 96) {
+        return pe_layout_error(CoffLinkStatus.InvalidLayout, -1, -1, "Invalid reserved PE section count");
+    }
     let layout = PeLayout();
     let object_id = 0;
     while (object_id < objects.length()) {
@@ -182,9 +185,9 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1) -> PeLayoutRe
 
             let group = 0;
             while (group < layout.sections.length() && !pe_name_equal(object, prefix, layout.sections[group].name)) { group++; }
-            // Windows limits an image to 96 sections, reserve one slot for generated .reloc.
+            // generated loader tables need headers too, reserve them before assigning RVAs.
             if (group == layout.sections.length()) {
-                if (group >= 95) {
+                if (group >= 96 - spare_sections) {
                     return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "PE section count exceeds the supported image limit");
                 }
                 let name: Vector(Byte) = [];
@@ -216,7 +219,7 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1) -> PeLayoutRe
         return pe_layout_error(CoffLinkStatus.InvalidLayout, -1, -1, "PE image has no loadable sections");
     }
 
-    // at most 95 names participate here, contribution sorting has no such small bound.
+    // Windows bounds the section count, contribution sorting has no such small bound.
     let i = 1;
     while (i < layout.sections.length()) {
         let section = layout.sections[i];
@@ -231,8 +234,8 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1) -> PeLayoutRe
         i++;
     }
 
-    // the spare header permits adding .reloc without moving any existing RVA.
-    layout.headers_size = UInt32(pe_align(64L + 24L + 240L + Long(layout.sections.length() + 1) * 40L, 512));
+    // adding loader tables later must not move an existing RVA or file offset.
+    layout.headers_size = UInt32(pe_align(64L + 24L + 240L + Long(layout.sections.length() + spare_sections) * 40L, 512));
     let rva = pe_align(Long(layout.headers_size), 4096);
     let raw = Long(layout.headers_size);
     i = 0;

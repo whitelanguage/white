@@ -11,6 +11,8 @@ struct PeImport(
     is_data: Bool = false
 )
 
+struct PeExport(name: String = "", symbol: String = "", ordinal: Optional(UInt32) = null)
+
 struct PeOptions(
     entry: String = "mainCRTStartup",
     image_base: UInt64 = 5368709120UL,
@@ -18,7 +20,10 @@ struct PeOptions(
     stack_commit: UInt64 = 4096UL,
     heap_reserve: UInt64 = 1048576UL,
     heap_commit: UInt64 = 4096UL,
-    imports: Vector(PeImport) = []
+    imports: Vector(PeImport) = [],
+    exports: Vector(PeExport) = [],
+    image_name: String = "white.exe",
+    is_dll: Bool = false
 )
 
 struct PeInput(object: Int, section: Int)
