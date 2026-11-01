@@ -74,7 +74,7 @@ func x86_patch_calls(ref program: WirModule, ref output: X86CodeBuffer, codes: V
     return true;
 }
 
-func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86ModuleResult {
+func x86_lower_module(ref program: WirModule, verbose: Bool = false, native_link: Bool = false) -> X86ModuleResult {
 // required legalization runs here before functions share the final type layouts
     let is_windows: Bool = program.target == "x86_64-pc-windows-msvc";
     let is_linux: Bool = program.target == "x86_64-unknown-linux-gnu";
@@ -198,7 +198,7 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
     if (data_error.length() != 0) {
         return x86_module_error(data_error);
     }
-    if (!x86_is_sysv_abi()) {
+    if (!x86_is_sysv_abi() && !native_link) {
         // MSVC needs explicit exports, relying on MinGW auto-export loses the DLL API
         let directives: Vector(Byte) = [];
         for (let i = 0; i < program.arena.functions.length(); i++) {

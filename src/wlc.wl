@@ -14,6 +14,8 @@ import "compiler/context.wl" as WhitelangUtils
 import "compiler/target.wl" as WhitelangTarget
 import "compiler/wir/pipeline.wl" as WhitelangWIR
 import "compiler/machine/pipeline.wl" as WhitelangMachine
+import PeImport, PeExport from "linker/pe/model.wl"
+import link_windows from "linker/driver.wl"
 
 
 const VERSION      : String = "devel";
@@ -38,6 +40,7 @@ struct CompilerConfig(
     keep_temps      : Bool,
     is_shared       : Bool,
     backend         : String,
+    linker          : String,
     target_triple   : String,
     sysroot         : String
 )
@@ -67,6 +70,8 @@ func print_usage() -> Void {
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
     print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
+    print("  --linker <name>        Select clang (default) or white (Windows x64 machine)");
+    print("                        White accepts COFF objects, DLLs do not produce an import library yet");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -243,6 +248,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         keep_temps      = false,
         is_shared       = false,
         backend         = "llvm",
+        linker          = "clang",
         target_triple   = "native",
         sysroot         = ""
     );
@@ -292,6 +298,17 @@ func main(argc: Int, ptr argv: String) -> Int {
                 return 1;
             }
             cfg.backend = arg.slice(10, arg.length());
+        }
+        else if (arg == "--linker") {
+            i++;
+            if (i >= argc) {
+                print("Error: --linker requires an argument");
+                return 1;
+            }
+            cfg.linker = read_argument(argc, argv, i);
+        }
+        else if (arg.starts_with("--linker=")) {
+            cfg.linker = arg.slice(9, arg.length());
         }
         else if (arg == "-g") {
             cfg.debug_info = true;
@@ -401,6 +418,10 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm', 'wir', or 'machine'.");
         return 1;
     }
+    if (cfg.linker != "clang" && cfg.linker != "white") {
+        print("Error: Unsupported linker '" + cfg.linker + "'. Expected 'clang' or 'white'.");
+        return 1;
+    }
     if (cfg.is_emit_wir && (cfg.is_emit_llvm || cfg.is_asm_only || cfg.is_compile_only || cfg.is_shared || cfg.dump_ir)) {
         print("Error: --emit-wir cannot be combined with -S, -c, --shared, --emit-llvm, or --dump-ir.");
         return 1;
@@ -421,6 +442,29 @@ func main(argc: Int, ptr argv: String) -> Int {
         if (cfg.is_emit_llvm || cfg.is_asm_only || cfg.dump_ir || cfg.debug_info) {
             print("Error: The machine backend does not support -S, --emit-llvm, --dump-ir, or -g yet.");
             return 1;
+        }
+    }
+
+    let native_link = cfg.linker == "white";
+    if native_link {
+        if (cfg.backend != "machine" || WhitelangTarget.get_target_triple() != "x86_64-pc-windows-msvc") {
+            print("Error: --linker=white requires the Windows x64 machine backend.");
+            return 1;
+        }
+        if (cfg.extra_ldflags.length() != 0 || cfg.library_paths.length() != 0 || cfg.sysroot.length() != 0) {
+            print("Error: --linker=white does not support --ldflags, library search paths, or --sysroot yet.");
+            return 1;
+        }
+        if (cfg.is_emit_wir) {
+            print("Error: --linker=white cannot be combined with --emit-wir.");
+            return 1;
+        }
+        for (let extra = 0; extra < cfg.extra_files.length(); extra++) {
+            let path = cfg.extra_files[extra];
+            if (!path.ends_with(".obj") && !path.ends_with(".o") && !path.ends_with(".OBJ") && !path.ends_with(".O")) {
+                print("Error: --linker=white only accepts additional COFF object files, unsupported input '" + path + "'.");
+                return 1;
+            }
         }
     }
 
@@ -543,6 +587,9 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
+    let machine_bytes: Vector(Byte) = [];
+    let machine_imports: Vector(PeImport) = [];
+    let machine_exports: Vector(PeExport) = [];
     if (cfg.is_emit_wir) {
         WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
@@ -623,7 +670,8 @@ func main(argc: Int, ptr argv: String) -> Int {
             WhitelangTarget.get_target_triple(),
             WhitelangTarget.get_target_pointer_bits(),
             cfg.verbose,
-            cfg.opt_level
+            cfg.opt_level,
+            native_link && !cfg.is_compile_only
         )?;
         catch(err) {
             print("Build Failed: Machine backend ran out of memory while producing the object file.");
@@ -638,18 +686,23 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             return 1;
         }
-        let object_file: file.File = file.create(machine_file)?;
-        catch(err) {
-            print("Build Failed: Could not create machine object file " + machine_file + ".");
-            return 1;
-        }
-        object_file.write_bytes(result.bytes)?;
-        catch(err) {
+        machine_bytes = result.bytes;
+        machine_imports = result.imports;
+        machine_exports = result.exports;
+        if (!native_link || cfg.keep_temps || cfg.is_compile_only) {
+            let object_file: file.File = file.create(machine_file)?;
+            catch(err) {
+                print("Build Failed: Could not create machine object file " + machine_file + ".");
+                return 1;
+            }
+            object_file.write_bytes(result.bytes)?;
+            catch(err) {
+                object_file.close();
+                print("Build Failed: Could not write machine object file " + machine_file + ".");
+                return 1;
+            }
             object_file.close();
-            print("Build Failed: Could not write machine object file " + machine_file + ".");
-            return 1;
         }
-        object_file.close();
     } else {
         WhitelangCompiler.compile(ref compiler, ast);
     }
@@ -665,6 +718,14 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
 
     if (cfg.backend == "machine" && cfg.is_compile_only) {
+        print("Build success: " + cfg.output_file);
+        return 0;
+    }
+    if native_link {
+        log_stage(cfg, "Backend/Linker");
+        if (!link_windows(machine_bytes, cfg.extra_files, machine_imports, machine_exports, cfg.output_file, cfg.is_shared, cfg.verbose)) {
+            return 1;
+        }
         print("Build success: " + cfg.output_file);
         return 0;
     }

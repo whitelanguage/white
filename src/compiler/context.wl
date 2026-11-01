@@ -123,6 +123,8 @@ struct FuncInfo(
     ref_bindings: Optional(Dict(String, SymbolInfo))
 )
 
+struct ExternLibrary(symbol: String, library: String)
+
 struct VariadicSource(
     value: CompileResult,
     spread: Bool,
@@ -292,6 +294,7 @@ struct Compiler(
     func_ret_map: Dict(Int, SymbolInfo),
     method_ret_map: Dict(Int, SymbolInfo),
     declared_externs: Dict(String, StringConstant),
+    extern_libraries: Vector(ExternLibrary),
     native_adapters: Dict(String, FuncInfo),
     imported_modules: Dict(String, StringConstant),
     module_prefix_owners: Dict(String, StringConstant),
@@ -505,6 +508,7 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         func_ret_map=Dict(),
         method_ret_map=Dict(),
         declared_externs=Dict(),
+        extern_libraries=[],
         native_adapters=Dict(),
         imported_modules=Dict(),
         module_prefix_owners=Dict(),

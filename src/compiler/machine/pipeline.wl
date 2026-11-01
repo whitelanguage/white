@@ -13,9 +13,11 @@ import A64Object, A64ModuleResult from "aarch64/model.wl"
 import a64_lower_module from "aarch64/module.wl"
 import a64_elf_object from "aarch64/elf.wl"
 import GLOBAL_ERROR_COUNT from "../../frontend/diagnostics.wl"
+import PeImport, PeExport from "../../linker/pe/model.wl"
+import machine_pe_imports, machine_pe_exports from "link.wl"
 
 
-struct MachinePipelineResult(bytes: Vector(Byte), errors: Vector(String))
+struct MachinePipelineResult(bytes: Vector(Byte), errors: Vector(String), imports: Vector(PeImport) = [], exports: Vector(PeExport) = [])
 
 func lower_program_to_machine(
     ref source: Compiler,
@@ -23,7 +25,8 @@ func lower_program_to_machine(
     target: String,
     pointer_bits: Int,
     verbose: Bool = false,
-    opt_level: String = "-O2"
+    opt_level: String = "-O2",
+    native_link: Bool = false
 ) -> MachinePipelineResult? {
     if verbose {
         print("Lowering source to WIR");
@@ -38,6 +41,9 @@ func lower_program_to_machine(
          target != "x86_64-unknown-linux-gnu" &&
          target != "aarch64-unknown-linux-gnu") || pointer_bits != 64) {
         return MachinePipelineResult(bytes=[], errors=["The machine backend does not support target '" + target + "'."]);
+    }
+    if (native_link && target != "x86_64-pc-windows-msvc") {
+        return MachinePipelineResult(bytes=[], errors=["White PE linking requires the Windows x64 target."]);
     }
 
     if verbose {
@@ -92,7 +98,7 @@ func lower_program_to_machine(
         print("Lowering WIR to x86-64");
     }
 
-    let machine: X86ModuleResult = x86_lower_module(ref lowered.program, verbose);
+    let machine: X86ModuleResult = x86_lower_module(ref lowered.program, verbose, native_link);
     if (machine.errors.length() != 0) {
         return MachinePipelineResult(bytes=[], errors=machine.errors);
     }
@@ -112,5 +118,11 @@ func lower_program_to_machine(
         return MachinePipelineResult(bytes=[], errors=["Could not encode the machine object file."]);
     }
 
-    return MachinePipelineResult(bytes=object, errors=[]);
+    let imports: Vector(PeImport) = [];
+    let exports: Vector(PeExport) = [];
+    if native_link {
+        imports = machine_pe_imports(source);
+        exports = machine_pe_exports(lowered.program);
+    }
+    return MachinePipelineResult(bytes=object, errors=[], imports=imports, exports=exports);
 }

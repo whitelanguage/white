@@ -65,6 +65,9 @@ func register_extern(ref c: Compiler, node: ExternFuncNode) -> Void {
         abi_name=abi, mutates_self=false, ann_flags=0, compiler_link_name="",
         variadic_param=0, default_args=[], ref_body=NodeID(0U), ref_context=null, ref_bindings=null));
     register_extern_library(ref c, node.link_name, node.pos);
+    if (node.link_name.length() != 0) {
+        c.extern_libraries.append(ExternLibrary(symbol=node.name_tok.value, library=node.link_name));
+    }
 }
 
 func register_extern_block(ref c: Compiler, node: ExternBlockNode) -> Void {

@@ -10,11 +10,10 @@ func startup_info_size() -> Int {
     return Int(size_of(AnyPtr) * UIntSize(9) + UIntSize(32));
 }
 
-extern "system" {
+extern "system" in "kernel32" {
     func GetProcessHeap() -> AnyPtr;
     func GetCurrentProcessId() -> Int;
     func GetCommandLineW() -> AnyPtr;
-    func CommandLineToArgvW(lpCmdLine: AnyPtr, pNumArgs: AnyPtr) -> AnyPtr;
     func LocalFree(hMem: AnyPtr) -> AnyPtr;
     func HeapAlloc(hHeap: AnyPtr, dwFlags: Int, dwBytes: UIntSize) -> AnyPtr;
     func HeapReAlloc(hHeap: AnyPtr, dwFlags: Int, lpMem: AnyPtr, dwBytes: UIntSize) -> AnyPtr;
@@ -69,6 +68,10 @@ extern "system" {
         lpDefaultChar: AnyPtr,
         lpUsedDefaultChar: AnyPtr
     ) -> Int;
+}
+
+extern "system" in "shell32" {
+    func CommandLineToArgvW(lpCmdLine: AnyPtr, pNumArgs: AnyPtr) -> AnyPtr;
 }
 
 const STD_INPUT_HANDLE: Int = -10;
