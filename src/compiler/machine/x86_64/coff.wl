@@ -171,7 +171,7 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
 
         if (relocation.kind == X86RelocationKind.Abs64) {
             width = 8UL;
-        } else if (relocation.kind != X86RelocationKind.Rel32 && relocation.kind != X86RelocationKind.Call32) {
+        } else if (relocation.kind != X86RelocationKind.Rel32 && relocation.kind != X86RelocationKind.Call32 && relocation.kind != X86RelocationKind.Addr32NB) {
             throw Error.InvalidArgument;
         }
 
@@ -185,6 +185,9 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
 
         if ((relocation.kind == X86RelocationKind.Rel32 || relocation.kind == X86RelocationKind.Call32) &&
             (relocation.addend < -2147483648L || relocation.addend > 2147483647L)) {
+            throw Error.InvalidArgument;
+        }
+        if (relocation.kind == X86RelocationKind.Addr32NB && (relocation.addend < 0L || relocation.addend > 4294967295L)) {
             throw Error.InvalidArgument;
         }
         counts[section] = counts[section] + 1;
@@ -295,6 +298,8 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
                 if (relocation.kind == X86RelocationKind.Abs64) {
                     width = 8;
                     kind = 1U;
+                } else if (relocation.kind == X86RelocationKind.Addr32NB) {
+                    kind = 3U;
                 }
 
                 let k: Int = 0;

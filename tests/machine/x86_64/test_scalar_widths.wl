@@ -5,7 +5,7 @@
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
-import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import X86ModuleResult, X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
 
@@ -105,12 +105,12 @@ func main() -> Int {
         print("FAIL: x86_64 scalar lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 6) {
+    if (lowered.symbols.length() != 8) {
         print("FAIL: x86_64 scalar module has the wrong symbol count");
         return 1;
     }
 
-    let object: Vector(Byte) = coff_object_for_text_symbols(lowered.bytes, lowered.symbols, lowered.relocations)?;
+    let object: Vector(Byte) = coff_object(X86Object(sections=lowered.sections, symbols=lowered.symbols, relocations=lowered.relocations))?;
     catch(err) {
         print("FAIL: could not write scalar test object");
         return 1;

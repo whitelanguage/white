@@ -3,6 +3,7 @@ import * from "model.wl"
 import * from "../allocator.wl"
 import * from "../../wir/model.wl"
 import * from "encoder.wl"
+import x86_win64_frame from "unwind.wl"
 import * from "allocator.wl"
 import * from "memory.wl"
 import * from "abi.wl"
@@ -2212,8 +2213,14 @@ func x86_lower_function_with_layouts(
     let fixups: Vector(X86BranchFixup) = [];
     let calls: Vector(X86CallFixup) = [];
     let position: Int = 0;
+    let unwind: Vector(Byte) = [];
     if (frame_size > 0) {
-        x86_frame_enter(ref output, frame_size);
+        if (program.target == "x86_64-pc-windows-msvc") {
+            unwind = x86_win64_frame(ref output, frame_size);
+            if (unwind.length() == 0) { return x86_lowering_error("cannot describe the Windows stack frame"); }
+        } else {
+            x86_frame_enter(ref output, frame_size);
+        }
     }
     if indirect_return {
         // The hidden destination follows the normal integer argument bank,
@@ -2316,5 +2323,5 @@ func x86_lower_function_with_layouts(
         return x86_lowering_error("the x86_64 lowering could not resolve a branch target");
     }
 
-    return X86LoweringResult(bytes=output.bytes, errors=[], calls=calls, relocations=output.relocations);
+    return X86LoweringResult(bytes=output.bytes, errors=[], calls=calls, relocations=output.relocations, unwind=unwind);
 }

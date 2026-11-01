@@ -85,7 +85,9 @@ func main() -> Int {
         print("FAIL: global lowering: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.sections.length() != 3) {
+    if (lowered.sections.length() != 5 || lowered.sections[0].name != ".text" ||
+        lowered.sections[1].name != ".pdata" || lowered.sections[2].name != ".xdata" ||
+        lowered.sections[3].name != ".rdata" || lowered.sections[4].name != ".data") {
         print("FAIL: globals did not produce separate code, readonly data, and writable data");
         return 1;
     }

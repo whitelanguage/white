@@ -939,7 +939,11 @@ func x86_frame_enter(ref output: X86CodeBuffer, size: Int) -> Void {
 }
 
 func x86_frame_leave(ref output: X86CodeBuffer) -> Void {
-    x86_mov_rsp_rbp(ref output);
+    // Windows recognizes LEA followed by pops and RET as an epilogue, MOV is not accepted.
+    x86_emit_byte(ref output, Byte(0x48));
+    x86_emit_byte(ref output, Byte(0x8D));
+    x86_emit_byte(ref output, Byte(0x65));
+    x86_emit_byte(ref output, Byte(0));
     x86_pop_rbp(ref output);
 }
 

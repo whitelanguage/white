@@ -27,7 +27,7 @@ func main() -> Int {
         print("FAIL: x86_64 stack lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.bytes.length() != 33 || lowered.bytes[0] != Byte(85) || lowered.bytes[32] != Byte(195)) {
+    if (lowered.bytes.length() != 34 || lowered.bytes[0] != Byte(85) || lowered.bytes[33] != Byte(195)) {
         print("FAIL: unexpected stack frame encoding");
         return 1;
     }

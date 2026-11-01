@@ -6,7 +6,7 @@ import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
-import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import X86ModuleResult, X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
 
@@ -94,7 +94,7 @@ func main() -> Int {
         print("FAIL: address lowering: ", lowered.errors[0]);
         return 1;
     }
-    let object: Vector(Byte) = coff_object_for_text_symbols(lowered.bytes, lowered.symbols, lowered.relocations)?;
+    let object: Vector(Byte) = coff_object(X86Object(sections=lowered.sections, symbols=lowered.symbols, relocations=lowered.relocations))?;
     catch(err) {
         print("FAIL: address COFF output");
         return 1;

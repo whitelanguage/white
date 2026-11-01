@@ -28,7 +28,7 @@ func main() -> Int {
     wir_return(ref program, caller_entry, caller_sum, no_wir_location());
 
     let lowered: X86ModuleResult = x86_lower_module(ref program);
-    if (lowered.errors.length() != 0 || lowered.relocations.length() != 2 || lowered.symbols.length() != 3) {
+    if (lowered.errors.length() != 0 || lowered.relocations.length() != 8 || lowered.symbols.length() != 5) {
         print("FAIL: external call relocation was not produced");
         return 1;
     }
@@ -38,7 +38,7 @@ func main() -> Int {
         print("FAIL: module symbols were not collected");
         return 1;
     }
-    let object: Vector(Byte) = coff_object_for_text_symbols(lowered.bytes, lowered.symbols, lowered.relocations)?;
+    let object: Vector(Byte) = coff_object(X86Object(sections=lowered.sections, symbols=lowered.symbols, relocations=lowered.relocations))?;
     catch(err) {
         print("FAIL: could not write external call object");
         return 1;

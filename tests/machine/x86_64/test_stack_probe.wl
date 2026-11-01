@@ -25,15 +25,16 @@ func main() -> Int {
     let probes: Int = 0;
     let i: Int = 0;
     while (i + 3 < lowered.bytes.length()) {
-        if (lowered.bytes[i] == Byte(246) && lowered.bytes[i + 1] == Byte(4) && lowered.bytes[i + 2] == Byte(36) && lowered.bytes[i + 3] == Byte(0)) {
+        if (lowered.bytes[i] == Byte(65) && lowered.bytes[i + 1] == Byte(246) &&
+            (lowered.bytes[i + 2] == Byte(2) || lowered.bytes[i + 2] == Byte(3)) && lowered.bytes[i + 3] == Byte(0)) {
             probes++;
             i += 4;
         } else {
             i++;
         }
     }
-    if (probes != 3) {
-        print("FAIL: expected 3 stack probes, got ", probes);
+    if (probes != 2 || lowered.unwind.length() == 0 || Int(lowered.unwind[1]) > 80) {
+        print("FAIL: expected a bounded page loop and final-page probe, got ", probes);
         return 1;
     }
     print("PASS: x86_64 large stack probing");

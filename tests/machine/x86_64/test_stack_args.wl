@@ -5,7 +5,7 @@
 import * from "../../../src/compiler/wir/model.wl"
 import * from "../../../src/compiler/wir/builder.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
-import X86ModuleResult from "../../../src/compiler/machine/x86_64/model.wl"
+import X86ModuleResult, X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import x86_lower_module from "../../../src/compiler/machine/x86_64/module.wl"
 import * from "../../../src/compiler/machine/x86_64/coff.wl"
 
@@ -59,12 +59,12 @@ func main() -> Int {
         print("FAIL: stack argument lowering failed: ", lowered.errors[0]);
         return 1;
     }
-    if (lowered.symbols.length() != 4 || lowered.symbols[0].name != "sum_six" || lowered.symbols[1].name != "difference" || lowered.symbols[2].name != "relay" || lowered.symbols[3].name != "main") {
+    if (lowered.symbols.length() != 6 || lowered.symbols[0].name != "sum_six" || lowered.symbols[1].name != "difference" || lowered.symbols[2].name != "relay" || lowered.symbols[3].name != "main") {
         print("FAIL: stack argument symbols are incomplete");
         return 1;
     }
     let object: Vector(Byte) = [];
-    object = coff_object_for_text_symbols(lowered.bytes, lowered.symbols, lowered.relocations)?;
+    object = coff_object(X86Object(sections=lowered.sections, symbols=lowered.symbols, relocations=lowered.relocations))?;
     catch(err) {
         print("FAIL: stack argument object could not be written");
         return 1;

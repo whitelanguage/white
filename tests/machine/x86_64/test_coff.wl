@@ -37,6 +37,26 @@ func main() -> Int {
         return 1;
     }
     let data: Vector(Byte) = [];
+    let rva = X86Relocation(section=".text", offset=0U, kind=X86RelocationKind.Addr32NB, symbol="main", addend=-1L);
+    let rva_code = X86CodeSection(name=".text", bytes=[Byte(0), Byte(0), Byte(0), Byte(0)], alignment=4, executable=true, writable=false);
+    if (!rejected(X86Object(sections=[rva_code], symbols=[symbol], relocations=[rva]))) {
+        print("FAIL: negative image-relative addend was accepted");
+        return 1;
+    }
+    rva.addend = 4294967296L;
+    if (!rejected(X86Object(sections=[rva_code], symbols=[symbol], relocations=[rva]))) {
+        print("FAIL: overflowing image-relative addend was accepted");
+        return 1;
+    }
+    rva.addend = 4294967295L;
+    let rva_object = coff_object(X86Object(sections=[rva_code], symbols=[symbol], relocations=[rva]))?;
+    catch(err) { print("FAIL: maximum image-relative addend was rejected"); return 1; }
+    let rva_raw = Int(read_u32(rva_object, 40));
+    let rva_reloc = Int(read_u32(rva_object, 44));
+    if (read_u32(rva_object, rva_raw) != 4294967295U || rva_object[rva_reloc + 8] != Byte(3)) {
+        print("FAIL: image-relative addend or relocation type");
+        return 1;
+    }
     let call_code = X86CodeSection(name=".text", bytes=[Byte(232), Byte(0), Byte(0), Byte(0), Byte(0), Byte(195)], alignment=16, executable=true, writable=false);
     coff_object(X86Object(sections=[call_code], symbols=[symbol], relocations=[
         X86Relocation(section=".text", offset=1U, kind=X86RelocationKind.Call32, symbol="main", addend=0L)

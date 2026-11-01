@@ -89,7 +89,8 @@ enum X86RelocationKind {
     None,
     Rel32,
     Abs64,
-    Call32
+    Call32,
+    Addr32NB
 }
 
 // these records are encoder input, not another IR. WIR should not know which
@@ -158,7 +159,14 @@ struct X86LoweringResult(
     bytes: Vector(Byte),
     errors: Vector(String),
     calls: Vector(X86CallFixup),
-    relocations: Vector(X86Relocation)
+    relocations: Vector(X86Relocation),
+    unwind: Vector(Byte) = []
+)
+
+struct X86UnwindRecord(
+    begin: Int,
+    end: Int,
+    bytes: Vector(Byte)
 )
 
 struct X86FunctionCode(

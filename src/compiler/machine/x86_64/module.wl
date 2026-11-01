@@ -10,6 +10,7 @@ import * from "abi/sysv.wl"
 import x86_address_symbol, x86_emit_globals from "data.wl"
 import WirReachability, wir_reachable_symbols from "../../wir/deadcode.wl"
 import * from "lowering.wl"
+import x86_emit_unwind from "unwind.wl"
 import * from "types.wl"
 import * from "values.wl"
 import machine_lower_remainders from "../remainder.wl"
@@ -86,6 +87,7 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
     let numeric_error = wir_lower_wide_conversions(ref program);
     if (numeric_error.length() != 0) { return x86_module_error(numeric_error); }
     let codes: Vector(X86FunctionCode) = [];
+    let unwind: Vector(X86UnwindRecord) = [];
     let layouts: Vector(WirTypeLayout) = x86_type_layouts(ref program);
     let relocations: Vector(X86Relocation) = [];
     let symbols: Vector(X86Symbol) = [];
@@ -117,6 +119,9 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
             }
 
             codes.append(X86FunctionCode(function=function_id, offset=offset, bytes=lowered.bytes, calls=lowered.calls));
+            if (is_windows && lowered.unwind.length() != 0) {
+                unwind.append(X86UnwindRecord(begin=offset, end=output.bytes.length(), bytes=lowered.unwind));
+            }
             symbols.append(X86Symbol(name=function.name, section=".text", offset=UInt32(offset), external=function.linkage == WirLinkage.Exported));
             i = 0;
             while (i < lowered.relocations.length()) {
@@ -183,6 +188,9 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
         return x86_module_error("the x86_64 lowering could not resolve a direct call target");
     }
     let object: X86Object = X86Object(sections=[X86CodeSection(name=".text", bytes=output.bytes, alignment=16, executable=true, writable=false)], symbols=symbols, relocations=relocations);
+    if (is_windows && !x86_emit_unwind(ref object, unwind)) {
+        return x86_module_error("cannot emit Windows unwind tables");
+    }
     if verbose {
         print("Emitting global data");
     }
