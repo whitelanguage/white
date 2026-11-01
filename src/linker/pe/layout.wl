@@ -132,7 +132,7 @@ func pe_sort_parts(objects: Vector(CoffObject), parts: Vector(PeInput)) -> Vecto
 func pe_special_section(object: CoffObject, prefix: CoffSpan) -> Bool {
 // these names require loader directories or linker policy before their bytes can be used
     return coff_name_matches(object, prefix, ".idata") || coff_name_matches(object, prefix, ".edata") ||
-        coff_name_matches(object, prefix, ".pdata") || coff_name_matches(object, prefix, ".tls") ||
+        coff_name_matches(object, prefix, ".tls") ||
         coff_name_matches(object, prefix, ".rsrc") || coff_name_matches(object, prefix, ".reloc") ||
         coff_name_matches(object, prefix, ".CRT") || coff_name_matches(object, prefix, ".sxdata") ||
         coff_name_matches(object, prefix, ".gfids") || coff_name_matches(object, prefix, ".giats") ||

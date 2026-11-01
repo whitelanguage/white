@@ -84,7 +84,7 @@ func main() -> Int {
         print("FAIL: oversized BSS image accepted");
         return 1;
     }
-    let reserved: Vector(String) = [".drectve", ".idata$2", ".edata", ".pdata", ".tls$A", ".rsrc", ".reloc", ".CRT$XCU", ".gfids$y"];
+    let reserved: Vector(String) = [".drectve", ".idata$2", ".edata", ".sxdata", ".tls$A", ".rsrc", ".reloc", ".CRT$XCU", ".gfids$y"];
     i = 0;
     while (i < reserved.length()) {
         let input = CoffObject();

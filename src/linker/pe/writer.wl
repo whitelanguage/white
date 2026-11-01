@@ -5,6 +5,7 @@ import * from "layout.wl"
 import * from "reloc.wl"
 import * from "imports.wl"
 import pe_export_table from "exports.wl"
+import pe_exception_table from "unwind.wl"
 import * from "../coff/model.wl"
 import * from "../coff/link_model.wl"
 import coff_name_matches from "../coff/reader.wl"
@@ -38,7 +39,7 @@ func pe_entry(objects: Vector(CoffObject), name: String) -> CoffSymbolRef {
     return CoffSymbolRef();
 }
 
-func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: UInt32, reloc_size: UInt32, fixed: Bool, import_rva: UInt32 = 0U, import_size: UInt32 = 0U, iat_rva: UInt32 = 0U, iat_size: UInt32 = 0U, export_rva: UInt32 = 0U, export_size: UInt32 = 0U) -> Vector(Byte) {
+func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: UInt32, reloc_size: UInt32, fixed: Bool, import_rva: UInt32 = 0U, import_size: UInt32 = 0U, iat_rva: UInt32 = 0U, iat_size: UInt32 = 0U, export_rva: UInt32 = 0U, export_size: UInt32 = 0U, exception_rva: UInt32 = 0U, exception_size: UInt32 = 0U) -> Vector(Byte) {
 // leave timestamp, checksums and reserved fields zero so repeated links reproduce the file
     let bytes: Vector(Byte) = [];
     pe_zeros(ref bytes, Int(layout.headers_size));
@@ -97,6 +98,8 @@ func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: 
     coff_put_word(bytes, header + 116, 4, UInt64(export_size));
     coff_put_word(bytes, header + 112 + 8, 4, UInt64(import_rva));
     coff_put_word(bytes, header + 116 + 8, 4, UInt64(import_size));
+    coff_put_word(bytes, header + 112 + 3 * 8, 4, UInt64(exception_rva));
+    coff_put_word(bytes, header + 116 + 3 * 8, 4, UInt64(exception_size));
     coff_put_word(bytes, header + 112 + 5 * 8, 4, UInt64(reloc_rva));
     coff_put_word(bytes, header + 116 + 5 * 8, 4, UInt64(reloc_size));
     coff_put_word(bytes, header + 112 + 12 * 8, 4, UInt64(iat_rva));
@@ -212,6 +215,9 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         i++;
     }
 
+    let exceptions = pe_exception_table(inputs, layout, data);
+    if (exceptions.errors.length() != 0) { return PeImageResult(errors=exceptions.errors); }
+
     let export_rva = 0U;
     let export_size = 0U;
     if (options.exports.length() != 0) {
@@ -262,7 +268,7 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         iat_rva = import_rva + imported.iat_offset;
     }
     let bytes = pe_headers(layout, options, entry_rva, reloc_rva, reloc_size, fixed,
-        import_rva, imported.directory_size, iat_rva, imported.iat_size, export_rva, export_size);
+        import_rva, imported.directory_size, iat_rva, imported.iat_size, export_rva, export_size, exceptions.rva, exceptions.size);
     i = 0;
     while (i < layout.sections.length()) {
         let section = layout.sections[i];
