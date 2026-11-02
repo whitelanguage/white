@@ -3,6 +3,7 @@ import Compiler from "../context.wl"
 import WirModule, WirLinkage from "../wir/model.wl"
 import PeImport, PeExport from "../../linker/pe/model.wl"
 import pe_import_dll from "../../linker/pe/imports.wl"
+import is_archive_name from "../../linker/inputs.wl"
 
 
 func machine_pe_imports(source: Compiler) -> Vector(PeImport) {
@@ -10,8 +11,10 @@ func machine_pe_imports(source: Compiler) -> Vector(PeImport) {
     let result: Vector(PeImport) = [];
     for (let i = 0; i < source.extern_libraries.length(); i++) {
         let declaration = source.extern_libraries[i];
+        // archive members supply their own DLL names, a .lib name cannot go in the PE import table.
+        if (is_archive_name(declaration.library)) { continue; }
         let dll = pe_import_dll(declaration.library);
-        if (dll.length() != 0 && !dll.ends_with(".dll") && !dll.ends_with(".lib") && !dll.ends_with(".a")) {
+        if (dll.length() != 0 && !dll.ends_with(".dll")) {
             dll += ".dll";
         }
         result.append(PeImport(dll=dll, name=declaration.symbol));

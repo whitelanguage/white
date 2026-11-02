@@ -16,6 +16,7 @@ import "compiler/wir/pipeline.wl" as WhitelangWIR
 import "compiler/machine/pipeline.wl" as WhitelangMachine
 import PeImport, PeExport from "linker/pe/model.wl"
 import link_windows, windows_implib_path from "linker/driver.wl"
+import is_archive_name from "linker/inputs.wl"
 
 
 const VERSION      : String = "devel";
@@ -73,6 +74,7 @@ func print_usage() -> Void {
     print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --linker <name>        Select clang (default) or white (Windows x64 machine)");
     print("                        White accepts COFF objects, static archives and AMD64 short-format DLL import libraries");
+    print("                        extern .lib/.a names use -L directories, then the current directory");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -444,8 +446,8 @@ func main(argc: Int, ptr argv: String) -> Int {
             print("Error: --linker=white requires the Windows x64 machine backend.");
             return 1;
         }
-        if (cfg.extra_ldflags.length() != 0 || cfg.library_paths.length() != 0 || cfg.sysroot.length() != 0) {
-            print("Error: --linker=white does not support --ldflags, library search paths, or --sysroot yet.");
+        if (cfg.extra_ldflags.length() != 0 || cfg.sysroot.length() != 0) {
+            print("Error: --linker=white does not support --ldflags or --sysroot yet.");
             return 1;
         }
         if (cfg.is_emit_wir) {
@@ -455,7 +457,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         for (let extra = 0; extra < cfg.extra_files.length(); extra++) {
             let path = cfg.extra_files[extra];
             if (!path.ends_with(".obj") && !path.ends_with(".o") && !path.ends_with(".OBJ") && !path.ends_with(".O") &&
-                !path.ends_with(".lib") && !path.ends_with(".LIB") && !path.ends_with(".a") && !path.ends_with(".A")) {
+                !is_archive_name(path)) {
                 print("Error: --linker=white only accepts additional COFF objects or static archives, unsupported input '" + path + "'.");
                 return 1;
             }
@@ -717,7 +719,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     if native_link {
         log_stage(cfg, "Backend/Linker");
-        if (!link_windows(machine_bytes, cfg.extra_files, machine_imports, machine_exports, cfg.output_file, cfg.is_shared, cfg.verbose)) {
+        if (!link_windows(machine_bytes, cfg.extra_files, machine_imports, machine_exports, cfg.output_file, cfg.is_shared, cfg.verbose, cfg.library_paths, compiler.extra_libs)) {
             return 1;
         }
         print("Build success: " + cfg.output_file);

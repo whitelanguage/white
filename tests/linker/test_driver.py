@@ -81,13 +81,13 @@ def check_driver(compiler):
         text = build(fixture, success=False)
         assert "LinkError:" in text and "InternalCompilerError" not in text
         assert output.read_bytes() == before
-        assert "Archive declaration" in build(repo / "tests/fixtures/linker/driver_archive.wl", success=False)
+        assert "Could not find library 'example.lib'" in build(repo / "tests/fixtures/linker/driver_archive.wl", success=False)
         assert output.read_bytes() == before
         broken = root / "broken.obj"
         broken.write_bytes(b"broken")
         assert "LinkError:" in build(fixture, broken, success=False)
         assert output.read_bytes() == before
-        for flags in (("unused.c",), ("-L", root), ("--sysroot", root),
+        for flags in (("unused.c",), ("--sysroot", root),
                       ("--ldflags", "-lkernel32"), ("--emit-wir",),
                       ("--backend=llvm",), ("--target=x86_64-unknown-linux-gnu",)):
             assert "Error:" in build(args_source, *flags, success=False)

@@ -8,6 +8,7 @@ import extract_archives from "coff/extract.wl"
 import PeImport, PeExport, PeOptions, PeImage from "pe/model.wl"
 import write_pe from "pe/writer.wl"
 import write_import_library from "pe/library.wl"
+import LinkInput, is_archive_name, read_link_input, find_link_library from "inputs.wl"
 
 
 func windows_implib_path(output: String) -> String {
@@ -40,15 +41,8 @@ func write_link_output(path: String, bytes: Vector(Byte)) -> Bool {
     return true;
 }
 
-func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vector(PeImport), exports: Vector(PeExport), output: String, shared: Bool, verbose: Bool) -> Bool {
+func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vector(PeImport), exports: Vector(PeExport), output: String, shared: Bool, verbose: Bool, library_paths: Vector(String), libraries: Vector(String)) -> Bool {
 // decode every input before opening the output, malformed objects must leave an existing image untouched
-    for (let request = 0; request < imports.length(); request++) {
-        let dll = imports[request].dll;
-        if (dll.ends_with(".lib") || dll.ends_with(".a")) {
-            print("LinkError: Archive declaration '" + dll + "' is not supported by --linker=white, declare a DLL or use --linker=clang.");
-            return false;
-        }
-    }
     let objects: Vector(CoffObject) = [];
     let archives: Vector(CoffArchive) = [];
     let archive_paths: Vector(String) = [];
@@ -60,25 +54,39 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
     let primary: CoffObject = generated.object;
     objects.append(primary);
 
-    for (let i = 0; i < extra_files.length(); i++) {
-        let path = extra_files[i];
-        let input = file.open(path)?;
-        catch(err) {
-            print("LinkError: Could not open '" + path + "'.");
+    let inputs: Vector(LinkInput) = [];
+    let supplied: Dict(String, Bool) = Dict();
+    for (let extra = 0; extra < extra_files.length(); extra++) {
+        let input = read_link_input(extra_files[extra]);
+        if (input.missing || input.message.length() != 0) {
+            let message = input.message;
+            if (input.missing) { message = "Could not open '" + input.path + "'."; }
+            print("LinkError: " + message);
             return false;
         }
-        let content = input.read_all()?;
-        catch(err) {
-            input.close();
-            print("LinkError: Could not read '" + path + "'.");
+        inputs.append(input);
+        supplied.put(input.path, true);
+    }
+    let requested: Dict(String, Bool) = Dict();
+    for (let lib = 0; lib < libraries.length(); lib++) {
+        let name = libraries[lib];
+        if (!is_archive_name(name) || requested.contains_key(name)) { continue; }
+        requested.put(name, true);
+        let input = find_link_library(name, library_paths);
+        if (input.message.length() != 0) {
+            print("LinkError: " + input.message);
             return false;
         }
-        input.close();
+        if (supplied.contains_key(input.path)) { continue; }
+        if verbose { print("Found library: " + input.path); }
+        inputs.append(input);
+        supplied.put(input.path, true);
+    }
 
-        // file buffers carry a byte length, COFF bytes are never decoded as UTF-8 here
-        let data: Vector(Byte) = [];
-        for (let b = 0; b < content.length(); b++) { data.append(content[b]); }
-        if (path.ends_with(".lib") || path.ends_with(".LIB") || path.ends_with(".a") || path.ends_with(".A")) {
+    for (let i = 0; i < inputs.length(); i++) {
+        let path = inputs[i].path;
+        let data = inputs[i].bytes;
+        if (is_archive_name(path)) {
             let decoded = read_archive(data);
             if (decoded.archive is null) {
                 print("LinkError: '" + path + "': " + decoded.message + " at byte " + decoded.offset);
