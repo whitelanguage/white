@@ -99,7 +99,7 @@ func read_coff(bytes: Vector(Byte)) -> CoffResult {
     if (size < 20) { return coff_invalid(0, "Truncated COFF header"); }
     if (coff_u16(bytes, 0) == 23117U) { return coff_unsupported(0, "Expected a COFF object, found a PE image"); }
     if (coff_u16(bytes, 0) == 0U && coff_u16(bytes, 2) == 65535U) {
-        return coff_unsupported(0, "COFF import objects and bigobj are not supported yet");
+        return coff_unsupported(0, "Expected an ordinary COFF object, found an import or bigobj header");
     }
     if (coff_u16(bytes, 0) != 34404U) { return coff_unsupported(0, "Expected an AMD64 COFF object"); }
     if (coff_u16(bytes, 16) != 0U || (coff_u16(bytes, 18) & 2U) != 0U) {

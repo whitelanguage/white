@@ -65,7 +65,7 @@ func pe_import_name(name: String, ascii: Bool) -> Bool {
 }
 
 func pe_same_import(left: PeImport, right: PeImport) -> Bool {
-    if (left.dll != right.dll || left.name != right.name || left.is_data != right.is_data) { return false; }
+    if (left.dll != right.dll || left.name != right.name || left.is_data != right.is_data || left.is_const != right.is_const) { return false; }
     if (left.ordinal is null) { return right.ordinal is null; }
     if (right.ordinal is null) { return false; }
     let a: UInt32 = left.ordinal;
@@ -92,7 +92,8 @@ func pe_select_imports(objects: Vector(CoffObject), requests: Vector(PeImport)) 
         let item = requests[i];
         item.dll = pe_import_dll(item.dll);
         if (item.symbol.length() == 0) { item.symbol = item.name; }
-        if (item.dll.length() == 0 || !pe_import_name(item.symbol, false) || item.symbol.starts_with("__imp_") || item.hint > 65535U) {
+        if (item.dll.length() == 0 || !pe_import_name(item.symbol, false) || item.symbol.starts_with("__imp_") || item.hint > 65535U ||
+            (item.is_const && !item.is_data)) {
             return PeImportSelection(errors=[pe_import_error("Invalid DLL import name, symbol or hint")]);
         }
         if (item.ordinal is !null) {
@@ -104,7 +105,7 @@ func pe_select_imports(objects: Vector(CoffObject), requests: Vector(PeImport)) 
             return PeImportSelection(errors=[pe_import_error("Named imports require a nonempty ASCII export name")]);
         }
         normalized.append(item);
-        if (!item.is_data) {
+        if (!item.is_data || item.is_const) {
             pe_import_symbol(ref query, item.symbol, 0, 0U, true);
             normalized_ids.append(i);
         }
@@ -298,7 +299,9 @@ func pe_make_imports(entries: Vector(PeImport), direct: Vector(Bool)) -> PeImpor
         let slot_id = bindings[i];
         let slot = slots[slot_id];
         let address = pe_import_symbol(ref object, "__imp_" + item.symbol, 1, UInt32(slot.iat), true);
-        if (direct[i]) {
+        // IMPORT_CONST's public symbol also names the slot, callers load through it twice.
+        if (item.is_const && direct[i]) { pe_import_symbol(ref object, item.symbol, 1, UInt32(slot.iat), true); }
+        if (direct[i] && !item.is_data) {
             if (slot.thunk < 0) {
                 slot.thunk = code.length();
                 code.append(Byte(255));

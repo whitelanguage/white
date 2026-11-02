@@ -8,7 +8,8 @@ struct PeImport(
     symbol: String = "",
     ordinal: Optional(UInt32) = null,
     hint: UInt32 = 0U,
-    is_data: Bool = false
+    is_data: Bool = false,
+    is_const: Bool = false
 )
 
 struct PeExport(name: String = "", symbol: String = "", ordinal: Optional(UInt32) = null)

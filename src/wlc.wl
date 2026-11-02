@@ -71,7 +71,7 @@ func print_usage() -> Void {
     print("  --shared               Build a shared library (dll, so, dylib)");
     print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --linker <name>        Select clang (default) or white (Windows x64 machine)");
-    print("                        White accepts COFF objects and static archives, DLL import libraries remain unsupported");
+    print("                        White accepts COFF objects, static archives and AMD64 short-format DLL import libraries");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");

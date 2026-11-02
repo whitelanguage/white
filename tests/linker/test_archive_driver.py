@@ -138,10 +138,9 @@ def check_archives(compiler, librarian=None):
             False, "does not define")
         run([save("bad-member.lib", archive_bytes([("bad.obj", b"bad", ["answer"])]))],
             False, "Selected archive member")
-        # Short import objects are deliberately a separate follow-up batch.
-        short_import = struct.pack("<HHHHIIHH", 0, 65535, 0, 0x8664, 0, 18, 0, 4) + b"answer\0sample.dll\0"
+        short_import = struct.pack("<HHHHIIHH", 0, 65535, 0, 0x14c, 0, 18, 0, 4) + b"answer\0sample.dll\0"
         run([save("import.lib", archive_bytes([("import.obj", short_import, ["answer"])]))],
-            False, "import objects")
+            False, "machine must be AMD64")
         run([save("thin.a", b"!<thin>\n")], False, "thin archives")
         run([save("no-index.a", b"!<arch>\n" + member("answer.obj/", leaf))], False, "no symbol directory")
         run([save("overflow.lib", b"!<arch>\n" + b"/".ljust(16) + b" " * 32 + b"9999999999`\n")],

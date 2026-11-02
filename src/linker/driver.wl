@@ -79,6 +79,9 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         return false;
     }
     objects = selected.objects;
+    let requests: Vector(PeImport) = [];
+    for (let src = 0; src < imports.length(); src++) { requests.append(imports[src]); }
+    for (let imp = 0; imp < selected.imports.length(); imp++) { requests.append(selected.imports[imp]); }
 
     let entry = "mainCRTStartup";
     if shared { entry = "DllMainCRTStartup"; }
@@ -90,7 +93,7 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         }
     }
     if verbose { print("Linking PE image with White"); }
-    let linked = write_pe(objects, PeOptions(entry=entry, imports=imports, exports=exports, image_name=image_name, is_dll=shared));
+    let linked = write_pe(objects, PeOptions(entry=entry, imports=requests, exports=exports, image_name=image_name, is_dll=shared));
     if (linked.errors.length() != 0) {
         for (let e = 0; e < linked.errors.length(); e++) {
             let diagnostic = linked.errors[e];
