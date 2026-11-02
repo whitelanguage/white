@@ -4,7 +4,7 @@ import * from "link_model.wl"
 import coff_range from "reader.wl"
 
 
-struct CoffNameEntry(name: CoffSymbolRef, definition: CoffSymbolRef = CoffSymbolRef(), next: Int = -1)
+struct CoffNameEntry(name: CoffSymbolRef, definition: CoffSymbolRef = CoffSymbolRef(), next: Int = -1, fallback: CoffSymbolRef = CoffSymbolRef())
 struct CoffNameIndex(buckets: Dict(UInt64, Int) = Dict(), entries: Vector(CoffNameEntry) = [])
 
 func coff_address_symbol(symbol: CoffSymbol) -> Bool {
@@ -54,6 +54,96 @@ func coff_name_slot(objects: Vector(CoffObject), ref index: CoffNameIndex, name:
     return slot;
 }
 
+func coff_register_object_aliases(objects: Vector(CoffObject), id: Int, ref names: CoffNameIndex) -> Vector(CoffLinkError) {
+// register after strong definitions, a real definition does not need its weak fallback
+    let errors: Vector(CoffLinkError) = [];
+    let object = objects[id];
+    for (let s = 0; s < object.symbols.length(); s++) {
+        let symbol = object.symbols[s];
+        if ((symbol.storage != Byte(2) && symbol.storage != Byte(105)) || symbol.section != 0) { continue; }
+        let slot = coff_name_slot(objects, ref names, CoffSymbolRef(id, s));
+        if (symbol.storage != Byte(105)) { continue; }
+        let target = CoffSymbolRef(id, symbol.weak_target);
+        coff_name_slot(objects, ref names, target);
+        if (names.entries[slot].definition.object >= 0) { continue; }
+        let previous = names.entries[slot].fallback;
+        if (previous.object >= 0 && !coff_same_name(objects, previous, target)) {
+            errors.append(CoffLinkError(status=CoffLinkStatus.DuplicateSymbol, object=id, symbol=s, other=previous,
+                message="Conflicting weak external fallbacks"));
+        } else {
+            names.entries[slot].fallback = target;
+        }
+    }
+    return errors;
+}
+
+func coff_register_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) -> Vector(CoffLinkError) {
+    let errors: Vector(CoffLinkError) = [];
+    for (let obj = 0; obj < objects.length(); obj++) {
+        let added = coff_register_object_aliases(objects, obj, ref names);
+        for (let e = 0; e < added.length(); e++) { errors.append(added[e]); }
+    }
+    return errors;
+}
+
+func coff_bind_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) -> CoffSymbolResult {
+// walk each alias edge once, compress completed chains and never recurse on object input
+    let has_alias = false;
+    for (let name = 0; name < names.entries.length(); name++) {
+        if (names.entries[name].fallback.object >= 0) { has_alias = true; break; }
+    }
+    if (!has_alias) { return CoffSymbolResult(); }
+
+    let next: Vector(Int) = [];
+    let state: Vector(Byte) = [];
+    for (let slot = 0; slot < names.entries.length(); slot++) {
+        let fallback = names.entries[slot].fallback;
+        let edge = -1;
+        if (fallback.object >= 0) { edge = coff_name_slot(objects, ref names, fallback); }
+        next.append(edge);
+        state.append(Byte(0));
+    }
+
+    for (let start = 0; start < next.length(); start++) {
+        if (state[start] == Byte(2)) { continue; }
+        if (names.entries[start].definition.object >= 0) { state[start] = Byte(2); continue; }
+        let path: Vector(Int) = [];
+        let current = start;
+        let definition = CoffSymbolRef();
+        let missing = CoffSymbolRef();
+        while true {
+            let entry = names.entries[current];
+            if (state[current] == Byte(2)) {
+                definition = entry.definition;
+                missing = entry.fallback;
+                break;
+            }
+            if (state[current] == Byte(1)) {
+                return CoffSymbolResult(errors=[CoffLinkError(status=CoffLinkStatus.InvalidObject,
+                    object=entry.name.object, symbol=entry.name.symbol, message="Weak external alias cycle")]);
+            }
+            state[current] = Byte(1);
+            path.append(current);
+            if (entry.definition.object >= 0) {
+                definition = entry.definition;
+                break;
+            }
+            if (next[current] < 0) {
+                missing = entry.name;
+                break;
+            }
+            current = next[current];
+        }
+        for (let p = 0; p < path.length(); p++) {
+            let slot = path[p];
+            names.entries[slot].definition = definition;
+            names.entries[slot].fallback = missing;
+            state[slot] = Byte(2);
+        }
+    }
+    return CoffSymbolResult();
+}
+
 func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
 // build definitions before binding references, input order cannot hide a definition
     let result: CoffSymbolResult = CoffSymbolResult();
@@ -81,7 +171,15 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
                 continue;
             }
             if (symbol.storage == Byte(105)) {
-                result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, symbol=symbol_id, message="Weak external symbols are not implemented yet"));
+                if (symbol.section != 0 || symbol.value != 0U || symbol.aux.size != 18 ||
+                    !coff_range(object.bytes.length(), Long(symbol.aux.offset), 18L, 1) ||
+                    symbol.weak_target < 0 || symbol.weak_target >= object.symbols.length()) {
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Invalid COFF weak external record"));
+                } else if (symbol.weak_search != 1U && symbol.weak_search != 3U) {
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, symbol=symbol_id, message="Unsupported COFF weak external search mode"));
+                } else if (object.symbols[symbol.weak_target].storage != Byte(2) && object.symbols[symbol.weak_target].storage != Byte(105)) {
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Weak external fallback must be external"));
+                }
             }
             if (symbol.storage == Byte(2) && symbol.section == 0 && symbol.value != 0U) {
                 result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, symbol=symbol_id, message="Common symbol allocation is not implemented yet"));
@@ -110,13 +208,18 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
     }
     if (result.errors.length() > 0) { return result; }
 
+    let aliases = coff_register_aliases(objects, ref names);
+    if (aliases.length() != 0) { return CoffSymbolResult(errors=aliases); }
+    let bound = coff_bind_aliases(objects, ref names);
+    if (bound.errors.length() != 0) { return bound; }
+
     object_id = 0;
     while (object_id < objects.length()) {
         let object: CoffObject = objects[object_id];
         let symbol_id: Int = 0;
         while (symbol_id < object.symbols.length()) {
             let symbol: CoffSymbol = object.symbols[symbol_id];
-            if (symbol.storage == Byte(2) && symbol.section == 0) {
+            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && symbol.section == 0) {
                 let slot: Int = coff_name_slot(objects, ref names, CoffSymbolRef(object_id, symbol_id));
                 result.targets[object_id][symbol_id] = names.entries[slot].definition;
             }
@@ -136,7 +239,13 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
                 if (reloc.symbol < 0 || reloc.symbol >= object.symbols.length()) {
                     result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, section=section_id, offset=reloc.offset, message="Invalid relocation symbol index"));
                 } else if (result.targets[object_id][reloc.symbol].object < 0 && !reported[reloc.symbol]) {
-                    result.errors.append(CoffLinkError(status=CoffLinkStatus.UndefinedSymbol, object=object_id, section=section_id, symbol=reloc.symbol, offset=reloc.offset, message="Relocation references an undefined or non-address symbol"));
+                    let missing = CoffSymbolRef();
+                    let reference = object.symbols[reloc.symbol];
+                    if (reference.storage == Byte(2) || reference.storage == Byte(105)) {
+                        let slot = coff_name_slot(objects, ref names, CoffSymbolRef(object_id, reloc.symbol));
+                        missing = names.entries[slot].fallback;
+                    }
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.UndefinedSymbol, object=object_id, section=section_id, symbol=reloc.symbol, offset=reloc.offset, other=missing, message="Relocation references an undefined or non-address symbol"));
                     reported[reloc.symbol] = true;
                 }
                 i++;

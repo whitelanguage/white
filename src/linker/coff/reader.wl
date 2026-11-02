@@ -169,6 +169,33 @@ func read_coff(bytes: Vector(Byte)) -> CoffResult {
         index += aux_count + 1;
     }
 
+    // TagIndex uses the original table, an auxiliary entry cannot be a fallback.
+    index = 0;
+    while (index < object.symbols.length()) {
+        let symbol = object.symbols[index];
+        if (symbol.storage == Byte(105)) {
+            if (symbol.section != 0 || symbol.value != 0U || symbol.aux.size != 18) {
+                return coff_invalid(symbol.aux.offset, "Invalid COFF weak external record");
+            }
+            let tag = Long(coff_u32(bytes, symbol.aux.offset));
+            if (tag >= Long(object.symbol_map.length()) || object.symbol_map[Int(tag)] < 0) {
+                return coff_invalid(symbol.aux.offset, "Weak external fallback does not name a primary symbol");
+            }
+            let target = object.symbol_map[Int(tag)];
+            if (object.symbols[target].storage != Byte(2) && object.symbols[target].storage != Byte(105)) {
+                return coff_invalid(symbol.aux.offset, "Weak external fallback must be external");
+            }
+            let search = coff_u32(bytes, symbol.aux.offset + 4);
+            if (search != 1U && search != 3U) {
+                return coff_unsupported(symbol.aux.offset + 4, "Unsupported COFF weak external search mode");
+            }
+            symbol.weak_target = target;
+            symbol.weak_search = search;
+            object.symbols[index] = symbol;
+        }
+        index++;
+    }
+
     index = 0;
     while (index < section_count) {
         let header: Int = 20 + index * 40;

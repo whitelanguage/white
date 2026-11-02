@@ -194,7 +194,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         i = 0;
         while (i < object.symbols.length()) {
             let symbol = object.symbols[i];
-            if (symbol.storage == Byte(2) && symbol.section > 0) {
+            if (symbol.storage == Byte(2) && (symbol.section > 0 || symbol.section == -1)) {
                 let slot = coff_name_slot(inputs, ref index, CoffSymbolRef(object_id, i));
                 let entry = index.entries[slot];
                 entry.definition = CoffSymbolRef(object_id, i);
@@ -204,6 +204,10 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         }
         object_id++;
     }
+    let aliases = coff_register_aliases(inputs, ref index);
+    if (aliases.length() != 0) { return PeExportTable(errors=aliases); }
+    let bound = coff_bind_aliases(inputs, ref index);
+    if (bound.errors.length() != 0) { return PeExportTable(errors=bound.errors); }
 
     let bytes: Vector(Byte) = [];
     while (bytes.length() < strings) { bytes.append(Byte(0)); }
@@ -232,6 +236,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         }
         if (target.object == import_object) { return pe_export_error("PE export must be defined by an input object, not a DLL import"); }
         let symbol = objects[target.object].symbols[target.symbol];
+        if (symbol.section <= 0) { return pe_export_error("PE export must point into loadable storage"); }
         let section = objects[target.object].sections[symbol.section - 1];
         let place = layout.placements[target.object][symbol.section - 1];
         if (place.section == 0 || symbol.value >= section.size) { return pe_export_error("PE export must point into loadable storage"); }

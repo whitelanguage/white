@@ -78,7 +78,7 @@ func main() -> Int {
     changed.symbols[0].value = 0U;
     changed.symbols[0].storage = Byte(105);
     result = coff_resolve_symbols([changed]);
-    if (result.errors.length() != 1 || result.errors[0].status != CoffLinkStatus.Unsupported) { print("FAIL: weak external"); return 1; }
+    if (result.errors.length() != 1 || result.errors[0].status != CoffLinkStatus.InvalidObject) { print("FAIL: malformed weak external"); return 1; }
     changed.symbols[0].storage = Byte(2);
     changed.symbols[0].section = 1;
     changed.sections[0].flags |= 4096U;

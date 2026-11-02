@@ -2,7 +2,7 @@
 import * from "model.wl"
 import * from "archive_model.wl"
 import CoffSymbolRef, CoffLinkError, CoffLinkStatus from "link_model.wl"
-import CoffNameIndex, coff_name_slot, coff_resolve_symbols from "symbols.wl"
+import CoffNameIndex, coff_name_slot, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases from "symbols.wl"
 import archive_find from "archive.wl"
 import read_coff from "reader.wl"
 import coff_is_import, read_coff_import from "import_object.wl"
@@ -11,8 +11,9 @@ import pe_import_symbol from "../pe/imports.wl"
 
 
 struct ArchiveSelection(objects: Vector(CoffObject) = [], imports: Vector(PeImport) = [], errors: Vector(CoffLinkError) = [], library: Int = -1)
+struct ArchiveDemand(symbol: CoffSymbolRef, required: Bool = true)
 
-func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNameIndex, work: Vector(CoffSymbolRef)) -> Void {
+func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNameIndex, work: Vector(ArchiveDemand)) -> Void {
 // definitions are registered before the work queue advances, cycles do not reload members
     let object = objects[id];
     for (let s = 0; s < object.symbols.length(); s++) {
@@ -21,14 +22,18 @@ func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNa
             let slot = coff_name_slot(objects, ref names, CoffSymbolRef(id, s));
             if (names.entries[slot].definition.object < 0) { names.entries[slot].definition = CoffSymbolRef(id, s); }
         }
+        if (symbol.storage == Byte(105)) {
+            // a newly loaded alias can satisfy an earlier demand which found no archive member.
+            work.append(ArchiveDemand(CoffSymbolRef(id, s), false));
+        }
     }
     for (let sec = 0; sec < object.sections.length(); sec++) {
         let relocs = object.sections[sec].relocs;
         for (let r = 0; r < relocs.length(); r++) {
             let s = relocs[r].symbol;
             let symbol = object.symbols[s];
-            if (symbol.storage == Byte(2) && symbol.section == 0 && symbol.value == 0U) {
-                work.append(CoffSymbolRef(id, s));
+            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && symbol.section == 0 && symbol.value == 0U) {
+                work.append(ArchiveDemand(CoffSymbolRef(id, s)));
             }
         }
     }
@@ -43,9 +48,11 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
     }
     let objects: Vector(CoffObject) = [];
     let names = CoffNameIndex();
-    let work: Vector(CoffSymbolRef) = [];
+    let work: Vector(ArchiveDemand) = [];
     for (let i = 0; i < inputs.length(); i++) { objects.append(inputs[i]); }
     for (let obj = 0; obj < objects.length(); obj++) { archive_add_symbols(objects, obj, ref names, work); }
+    let aliases = coff_register_aliases(objects, ref names);
+    if (aliases.length() != 0) { return ArchiveSelection(errors=aliases); }
     // this name-only object lives in the extraction index, it must never reach relocation or PE layout.
     let import_names = CoffObject();
     let import_id = objects.length();
@@ -58,12 +65,27 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
         loaded.append(flags);
     }
     let queried: Dict(Int, Bool) = Dict();
+    let demanded: Dict(Int, Bool) = Dict();
+    let followed: Dict(Int, Bool) = Dict();
     let cursor = 0;
     while (cursor < work.length()) {
-        let demand = work[cursor];
+        let request = work[cursor];
+        let demand = request.symbol;
         cursor++;
         let slot = coff_name_slot(objects, ref names, demand);
-        if (names.entries[slot].definition.object >= 0 || queried.contains_key(slot)) { continue; }
+        if (!request.required && !demanded.contains_key(slot)) { continue; }
+        demanded.put(slot, true);
+        if (names.entries[slot].definition.object >= 0) { continue; }
+        let fallback = names.entries[slot].fallback;
+        if (fallback.object >= 0) {
+            // NOLIBRARY and ALIAS do not pull a same-named provider from a library.
+            if (!followed.contains_key(slot)) {
+                followed.put(slot, true);
+                work.append(ArchiveDemand(fallback));
+            }
+            continue;
+        }
+        if (queried.contains_key(slot)) { continue; }
         queried.put(slot, true);
 
         for (let lib = 0; lib < archives.length(); lib++) {
@@ -110,8 +132,10 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
                 let id = objects.length();
                 objects.append(member);
                 archive_add_symbols(objects, id, ref names, work);
+                let added_aliases = coff_register_object_aliases(objects, id, ref names);
+                if (added_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=added_aliases); }
             }
-            if (names.entries[slot].definition.object < 0) {
+            if (names.entries[slot].definition.object < 0 && names.entries[slot].fallback.object < 0) {
                 return ArchiveSelection(library=lib, errors=[CoffLinkError(status=CoffLinkStatus.InvalidObject, object=lib,
                     offset=UInt32(archive.members[member_id].header), message="Archive directory names a symbol which its selected member does not define")]);
             }

@@ -22,7 +22,9 @@ struct CoffSymbol(
     type: UInt32,
     storage: Byte,
     table_index: Int,
-    aux: CoffSpan
+    aux: CoffSpan,
+    weak_target: Int = -1,
+    weak_search: UInt32 = 0U
 )
 
 // names, section bytes and auxiliary records refer into this retained buffer.

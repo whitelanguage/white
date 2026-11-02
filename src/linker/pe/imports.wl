@@ -153,14 +153,16 @@ func pe_select_imports(objects: Vector(CoffObject), requests: Vector(PeImport)) 
     i = 0;
     while (i < unresolved.errors.length()) {
         let diagnostic = unresolved.errors[i];
-        let slot = coff_name_slot(inputs, ref names, CoffSymbolRef(diagnostic.object, diagnostic.symbol));
+        let reference = CoffSymbolRef(diagnostic.object, diagnostic.symbol);
+        if (diagnostic.other.object >= 0) { reference = diagnostic.other; }
+        let slot = coff_name_slot(inputs, ref names, reference);
         let found = slots.lookup(slot);
         if (found is null) { missing.append(diagnostic); }
         else {
             let id: Int = found;
             used[id] = true;
-            let symbol = objects[diagnostic.object].symbols[diagnostic.symbol];
-            if (coff_name_matches(objects[diagnostic.object], symbol.name, normalized[id].symbol)) { direct[id] = true; }
+            let symbol = objects[reference.object].symbols[reference.symbol];
+            if (coff_name_matches(objects[reference.object], symbol.name, normalized[id].symbol)) { direct[id] = true; }
         }
         i++;
     }

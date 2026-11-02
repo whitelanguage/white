@@ -21,16 +21,17 @@ func pe_zeros(ref bytes: Vector(Byte), size: Int) -> Void {
     while (bytes.length() < size) { bytes.append(Byte(0)); }
 }
 
-func pe_entry(objects: Vector(CoffObject), name: String) -> CoffSymbolRef {
-// only external definitions name a public entry, local symbols can share the spelling
+func pe_entry(objects: Vector(CoffObject), symbols: CoffSymbolResult, name: String) -> CoffSymbolRef {
+// entry aliases use the same binding as calls, local names cannot become an entry
     let i = 0;
     while (i < objects.length()) {
         let object = objects[i];
         let j = 0;
         while (j < object.symbols.length()) {
             let symbol = object.symbols[j];
-            if (symbol.storage == Byte(2) && symbol.section > 0 && coff_name_matches(object, symbol.name, name)) {
-                return CoffSymbolRef(i, j);
+            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && coff_name_matches(object, symbol.name, name)) {
+                let target = symbols.targets[i][j];
+                if (target.object >= 0) { return target; }
             }
             j++;
         }
@@ -160,7 +161,7 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
     }
     let entry_rva = 0U;
     if (options.entry.length() != 0) {
-        let entry = pe_entry(inputs, options.entry);
+        let entry = pe_entry(inputs, symbols, options.entry);
         if (entry.object < 0) {
             return pe_image_error(CoffLinkStatus.UndefinedSymbol, -1, -1, "PE entry symbol '" + options.entry + "' is not defined");
         }
@@ -168,6 +169,9 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
             return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "PE entry must be defined by an input object, not a DLL import");
         }
         let definition = inputs[entry.object].symbols[entry.symbol];
+        if (definition.section <= 0) {
+            return pe_image_error(CoffLinkStatus.InvalidLayout, entry.object, -1, "PE entry must point into initialized executable storage");
+        }
         let input = inputs[entry.object].sections[definition.section - 1];
         let place = layout.placements[entry.object][definition.section - 1];
         if (place.section == 0 || definition.value >= input.size || (input.flags & 0x20000000U) == 0U || input.data.size == 0) {
