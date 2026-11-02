@@ -2,6 +2,9 @@
 import "file"
 import CoffObject from "coff/model.wl"
 import read_coff from "coff/reader.wl"
+import CoffArchive from "coff/archive_model.wl"
+import read_archive from "coff/archive.wl"
+import extract_archives from "coff/extract.wl"
 import PeImport, PeExport, PeOptions, PeImage from "pe/model.wl"
 import write_pe from "pe/writer.wl"
 
@@ -16,12 +19,15 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         }
     }
     let objects: Vector(CoffObject) = [];
+    let archives: Vector(CoffArchive) = [];
+    let archive_paths: Vector(String) = [];
     let generated = read_coff(bytes);
     if (generated.object is null) {
         print("LinkError: Generated COFF object: " + generated.message);
         return false;
     }
-    objects.append(generated.object);
+    let primary: CoffObject = generated.object;
+    objects.append(primary);
 
     for (let i = 0; i < extra_files.length(); i++) {
         let path = extra_files[i];
@@ -41,13 +47,38 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         // file buffers carry a byte length, COFF bytes are never decoded as UTF-8 here
         let data: Vector(Byte) = [];
         for (let b = 0; b < content.length(); b++) { data.append(content[b]); }
-        let decoded = read_coff(data);
-        if (decoded.object is null) {
-            print("LinkError: '" + path + "': " + decoded.message + " at byte " + decoded.offset);
-            return false;
+        if (path.ends_with(".lib") || path.ends_with(".LIB") || path.ends_with(".a") || path.ends_with(".A")) {
+            let decoded = read_archive(data);
+            if (decoded.archive is null) {
+                print("LinkError: '" + path + "': " + decoded.message + " at byte " + decoded.offset);
+                return false;
+            }
+            let archive: CoffArchive = decoded.archive;
+            archives.append(archive);
+            archive_paths.append(path);
+        } else {
+            let decoded = read_coff(data);
+            if (decoded.object is null) {
+                print("LinkError: '" + path + "': " + decoded.message + " at byte " + decoded.offset);
+                return false;
+            }
+            let object: CoffObject = decoded.object;
+            objects.append(object);
         }
-        objects.append(decoded.object);
     }
+    let selected = extract_archives(objects, archives);
+    if (selected.errors.length() != 0) {
+        for (let e = 0; e < selected.errors.length(); e++) {
+            let diagnostic = selected.errors[e];
+            if (selected.library >= 0) {
+                print("LinkError: '" + archive_paths[selected.library] + "' at byte " + diagnostic.offset + ": " + diagnostic.message);
+            } else {
+                print("LinkError: Object " + diagnostic.object + ": " + diagnostic.message);
+            }
+        }
+        return false;
+    }
+    objects = selected.objects;
 
     let entry = "mainCRTStartup";
     if shared { entry = "DllMainCRTStartup"; }

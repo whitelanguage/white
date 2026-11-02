@@ -94,7 +94,7 @@ func read_coff(bytes: Vector(Byte)) -> CoffResult {
 // validate file spans before decoding, partial objects never escape on failure
     let size: Int = bytes.length();
     if (size >= 8 && coff_u32(bytes, 0) == 0x72613C21U && coff_u32(bytes, 4) == 0x0A3E6863U) {
-        return coff_unsupported(0, "COFF archives are not supported yet");
+        return coff_unsupported(0, "Expected a COFF object, found an archive");
     }
     if (size < 20) { return coff_invalid(0, "Truncated COFF header"); }
     if (coff_u16(bytes, 0) == 23117U) { return coff_unsupported(0, "Expected a COFF object, found a PE image"); }

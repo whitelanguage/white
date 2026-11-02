@@ -71,7 +71,7 @@ func print_usage() -> Void {
     print("  --shared               Build a shared library (dll, so, dylib)");
     print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --linker <name>        Select clang (default) or white (Windows x64 machine)");
-    print("                        White accepts COFF objects, DLLs do not produce an import library yet");
+    print("                        White accepts COFF objects and static archives, DLL import libraries remain unsupported");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -461,8 +461,9 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
         for (let extra = 0; extra < cfg.extra_files.length(); extra++) {
             let path = cfg.extra_files[extra];
-            if (!path.ends_with(".obj") && !path.ends_with(".o") && !path.ends_with(".OBJ") && !path.ends_with(".O")) {
-                print("Error: --linker=white only accepts additional COFF object files, unsupported input '" + path + "'.");
+            if (!path.ends_with(".obj") && !path.ends_with(".o") && !path.ends_with(".OBJ") && !path.ends_with(".O") &&
+                !path.ends_with(".lib") && !path.ends_with(".LIB") && !path.ends_with(".a") && !path.ends_with(".A")) {
+                print("Error: --linker=white only accepts additional COFF objects or static archives, unsupported input '" + path + "'.");
                 return 1;
             }
         }
