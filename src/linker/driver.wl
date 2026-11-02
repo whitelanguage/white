@@ -7,7 +7,38 @@ import read_archive from "coff/archive.wl"
 import extract_archives from "coff/extract.wl"
 import PeImport, PeExport, PeOptions, PeImage from "pe/model.wl"
 import write_pe from "pe/writer.wl"
+import write_import_library from "pe/library.wl"
 
+
+func windows_implib_path(output: String) -> String {
+    let len = output.length();
+    if (len >= 4 && output[len - 4] == '.' && (output[len - 3] == 'd' || output[len - 3] == 'D') &&
+        (output[len - 2] == 'l' || output[len - 2] == 'L') && (output[len - 1] == 'l' || output[len - 1] == 'L')) {
+        return output.slice(0, len - 4) + ".lib";
+    }
+    return output + ".lib";
+}
+
+func write_link_output(path: String, bytes: Vector(Byte)) -> Bool {
+// a successful build must include close errors, the file module buffers writes
+    let target = file.create(path)?;
+    catch(err) {
+        print("LinkError: Could not create '" + path + "'.");
+        return false;
+    }
+    target.write_bytes(bytes)?;
+    catch(err) {
+        target.close();
+        print("LinkError: Could not write '" + path + "'.");
+        return false;
+    }
+    target.close_checked()?;
+    catch(err) {
+        print("LinkError: Could not close '" + path + "'.");
+        return false;
+    }
+    return true;
+}
 
 func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vector(PeImport), exports: Vector(PeExport), output: String, shared: Bool, verbose: Bool) -> Bool {
 // decode every input before opening the output, malformed objects must leave an existing image untouched
@@ -107,22 +138,20 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         return false;
     }
     let ready: PeImage = image;
+    let library: Vector(Byte) = [];
+    let library_path = "";
+    if shared {
+        let encoded = write_import_library(image_name, ready.exports);
+        if (encoded.message.length() != 0) {
+            print("LinkError: " + encoded.message);
+            return false;
+        }
+        library = encoded.bytes;
+        library_path = windows_implib_path(output);
+    }
 
-    let target = file.create(output)?;
-    catch(err) {
-        print("LinkError: Could not create '" + output + "'.");
-        return false;
-    }
-    target.write_bytes(ready.bytes)?;
-    catch(err) {
-        target.close();
-        print("LinkError: Could not write '" + output + "'.");
-        return false;
-    }
-    target.close_checked()?;
-    catch(err) {
-        print("LinkError: Could not close '" + output + "'.");
-        return false;
-    }
+    // finish both encodings before touching either destination, I/O failures still fail the build.
+    if (!write_link_output(output, ready.bytes)) { return false; }
+    if (shared && !write_link_output(library_path, library)) { return false; }
     return true;
 }

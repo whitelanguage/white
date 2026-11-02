@@ -1,12 +1,12 @@
 // src/linker/pe/exports.wl
-import PeExport, PeLayout from "model.wl"
+import PeExport, PeExportBinding, PeLayout from "model.wl"
 import * from "../coff/model.wl"
 import * from "../coff/link_model.wl"
 import * from "../coff/symbols.wl"
 import coff_put_word from "../coff/reloc.wl"
 
 
-struct PeExportTable(bytes: Vector(Byte) = [], errors: Vector(CoffLinkError) = [])
+struct PeExportTable(bytes: Vector(Byte) = [], errors: Vector(CoffLinkError) = [], bindings: Vector(PeExportBinding) = [])
 
 func pe_export_error(message: String) -> PeExportTable {
     return PeExportTable(errors=[CoffLinkError(status=CoffLinkStatus.InvalidLayout, object=-1, message=message)]);
@@ -219,6 +219,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
     }
 
     let name_id = 0;
+    let bindings: Vector(PeExportBinding) = [];
     i = 0;
     while (i < order.length()) {
         let request_id = order[i];
@@ -238,6 +239,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         let assigned = item.ordinal;
         if (assigned is null) { return pe_export_error("Missing assigned PE export ordinal"); }
         let ordinal: UInt32 = assigned;
+        bindings.append(PeExportBinding(item.name, item.symbol, ordinal, UInt32(name_id), (section.flags & 0x20000000U) == 0U));
         let address_slot = Int(ordinal - base);
         coff_put_word(bytes, 40 + address_slot * 4, 4, UInt64(place.rva) + UInt64(symbol.value));
         if (item.name.length() != 0) {
@@ -248,5 +250,5 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         }
         i++;
     }
-    return PeExportTable(bytes=bytes);
+    return PeExportTable(bytes=bytes, bindings=bindings);
 }

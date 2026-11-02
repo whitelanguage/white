@@ -220,9 +220,11 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
 
     let export_rva = 0U;
     let export_size = 0U;
+    let export_bindings: Vector(PeExportBinding) = [];
     if (options.exports.length() != 0) {
         let exported = pe_export_table(inputs, layout, options.exports, options.image_name, layout.image_size, import_id);
         if (exported.errors.length() != 0) { return PeImageResult(errors=exported.errors); }
+        export_bindings = exported.bindings;
         let raw_size = pe_align(Long(exported.bytes.length()), 512);
         let image_size = pe_align(Long(layout.image_size) + Long(exported.bytes.length()), 4096);
         if (Long(layout.file_size) + raw_size > 2147483647L || image_size > 2147483647L ||
@@ -284,5 +286,5 @@ func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult 
         i++;
     }
 
-    return PeImageResult(image=PeImage(bytes, layout, entry_rva, fixed));
+    return PeImageResult(image=PeImage(bytes, layout, entry_rva, fixed, export_bindings));
 }

@@ -58,7 +58,7 @@ def check_driver(compiler):
         assert library.factorial(6) == 720
         assert library.multiply_float(2.5, 4.0) == 10.0
         assert library.read_count() == 42
-        assert not dll.with_suffix(".lib").exists()
+        assert dll.with_suffix(".lib").read_bytes().startswith(b"!<arch>\n")
         ctypes.windll.kernel32.FreeLibrary.argtypes = [ctypes.c_void_p]
         assert ctypes.windll.kernel32.FreeLibrary(library._handle)
         checks += 1

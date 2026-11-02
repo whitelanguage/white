@@ -15,7 +15,7 @@ import "compiler/target.wl" as WhitelangTarget
 import "compiler/wir/pipeline.wl" as WhitelangWIR
 import "compiler/machine/pipeline.wl" as WhitelangMachine
 import PeImport, PeExport from "linker/pe/model.wl"
-import link_windows from "linker/driver.wl"
+import link_windows, windows_implib_path from "linker/driver.wl"
 
 
 const VERSION      : String = "devel";
@@ -69,6 +69,7 @@ func print_usage() -> Void {
     print("  --dump-ir              Dump LLVM IR to stdout");
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
+    print("                        Windows DLL builds also write the corresponding .lib");
     print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --linker <name>        Select clang (default) or white (Windows x64 machine)");
     print("                        White accepts COFF objects, static archives and AMD64 short-format DLL import libraries");
@@ -169,14 +170,6 @@ func get_base_name(path: String) -> String {
         return path.slice(0, len - 3);
     }
     return path;
-}
-
-func windows_implib_path(output: String) -> String {
-    let len: Int = output.length();
-    if (len >= 4 && output[len - 4] == '.' && (output[len - 3] == 'd' || output[len - 3] == 'D') && (output[len - 2] == 'l' || output[len - 2] == 'L') && (output[len - 1] == 'l' || output[len - 1] == 'L')) {
-        return output.slice(0, len - 4) + ".lib";
-    }
-    return output + ".lib";
 }
 
 func split_link_flags(value: String) -> Vector(String) {

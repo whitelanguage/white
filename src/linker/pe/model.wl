@@ -13,6 +13,7 @@ struct PeImport(
 )
 
 struct PeExport(name: String = "", symbol: String = "", ordinal: Optional(UInt32) = null)
+struct PeExportBinding(name: String, symbol: String, ordinal: UInt32, hint: UInt32, is_data: Bool)
 
 struct PeOptions(
     entry: String = "mainCRTStartup",
@@ -51,5 +52,5 @@ struct PeLayout(
 
 struct PeLayoutResult(layout: Optional(PeLayout) = null, errors: Vector(CoffLinkError) = [])
 
-struct PeImage(bytes: Vector(Byte), layout: PeLayout, entry_rva: UInt32, fixed_base: Bool)
+struct PeImage(bytes: Vector(Byte), layout: PeLayout, entry_rva: UInt32, fixed_base: Bool, exports: Vector(PeExportBinding) = [])
 struct PeImageResult(image: Optional(PeImage) = null, errors: Vector(CoffLinkError) = [])
