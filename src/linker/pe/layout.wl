@@ -153,6 +153,7 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_section
         while (section_id < object.sections.length()) {
             row.append(CoffPlacement(0U, 0));
             let input = object.sections[section_id];
+            if (input.discarded) { section_id++; continue; }
             if (!coff_range(object.bytes.length(), Long(input.name.offset), Long(input.name.size), 1) ||
                 !coff_range(object.bytes.length(), Long(input.data.offset), Long(input.data.size), 1) ||
                 (input.data.size != 0 && Long(input.data.size) != Long(input.size)) || input.alignment < 1 ||
@@ -163,8 +164,8 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_section
             if (coff_name_matches(object, prefix, ".drectve") && input.size != 0U) {
                 return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COFF linker directives are not implemented yet");
             }
-            if ((input.flags & 4096U) != 0U) {
-                return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COMDAT selection is not implemented yet");
+            if ((input.flags & 4096U) != 0U && !input.selected) {
+                return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COMDAT sections require selection before PE layout");
             }
             if ((input.flags & 2560U) != 0U || coff_name_matches(object, prefix, ".debug")) {
                 section_id++;

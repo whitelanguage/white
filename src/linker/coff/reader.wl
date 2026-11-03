@@ -90,6 +90,66 @@ func coff_reloc_width(kind: UInt32) -> Int {
     return -1;
 }
 
+func coff_read_comdats(ref object: CoffObject) -> CoffResult {
+// section auxiliaries describe ownership, symbol names alone cannot group unwind contributions
+    let found = false;
+    for (let probe = 0; probe < object.sections.length(); probe++) {
+        if ((object.sections[probe].flags & 4096U) != 0U) { found = true; break; }
+    }
+    if (!found) { return CoffResult(); }
+
+    let defs: Vector(Int) = [];
+    for (let sec = 0; sec < object.sections.length(); sec++) { defs.append(-1); }
+    for (let s = 0; s < object.symbols.length(); s++) {
+        let symbol = object.symbols[s];
+        if (symbol.section <= 0) { continue; }
+        let id = symbol.section - 1;
+        let section = object.sections[id];
+        if ((section.flags & 4096U) == 0U) { continue; }
+        if (defs[id] < 0) {
+            if (symbol.storage != Byte(3) || symbol.value != 0U || symbol.type != 0U || symbol.aux.size != 18 ||
+                symbol.name.size != section.name.size) {
+                return coff_invalid(symbol.aux.offset, "COMDAT section requires a section definition auxiliary record");
+            }
+            for (let b = 0; b < symbol.name.size; b++) {
+                if (object.bytes[symbol.name.offset + b] != object.bytes[section.name.offset + b]) {
+                    return coff_invalid(symbol.name.offset, "COMDAT section definition has the wrong name");
+                }
+            }
+            let mode = UInt32(object.bytes[symbol.aux.offset + 14]);
+            if (mode != 1U && mode != 2U && mode != 3U && mode != 5U) {
+                return coff_unsupported(symbol.aux.offset + 14, "Unsupported COMDAT selection mode");
+            }
+            if (coff_u32(object.bytes, symbol.aux.offset) != section.size) {
+                return coff_invalid(symbol.aux.offset, "COMDAT auxiliary length does not match its section");
+            }
+            section.selection = mode;
+            if (mode == 5U) {
+                // do not truncate the extended section number to a valid but unrelated parent.
+                let number = coff_u16(object.bytes, symbol.aux.offset + 12) | (coff_u16(object.bytes, symbol.aux.offset + 16) << 16U);
+                if (number == 0U || Long(number) > Long(object.sections.length()) || Long(number) == Long(id + 1)) {
+                    return coff_invalid(symbol.aux.offset + 12, "Invalid associative COMDAT parent");
+                }
+                section.parent = Int(number) - 1;
+            }
+            defs[id] = s;
+        } else if (section.selection != 5U && section.leader < 0) {
+            if (symbol.storage != Byte(2) && symbol.storage != Byte(3) && symbol.storage != Byte(6)) {
+                return coff_invalid(symbol.name.offset, "Invalid COMDAT leader symbol");
+            }
+            section.leader = s;
+        }
+        object.sections[id] = section;
+    }
+    for (let check = 0; check < object.sections.length(); check++) {
+        let section = object.sections[check];
+        if ((section.flags & 4096U) != 0U && (defs[check] < 0 || (section.selection != 5U && section.leader < 0))) {
+            return coff_invalid(section.name.offset, "COMDAT section has no definition or leader");
+        }
+    }
+    return CoffResult();
+}
+
 func read_coff(bytes: Vector(Byte)) -> CoffResult {
 // validate file spans before decoding, partial objects never escape on failure
     let size: Int = bytes.length();
@@ -277,5 +337,7 @@ func read_coff(bytes: Vector(Byte)) -> CoffResult {
         index++;
     }
 
+    let comdats = coff_read_comdats(ref object);
+    if (comdats.status != CoffError.None) { return comdats; }
     return CoffResult(object=object);
 }

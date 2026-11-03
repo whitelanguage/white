@@ -12,7 +12,12 @@ struct CoffSection(
     flags: UInt32,
     alignment: Int,
     relocs: Vector(CoffReloc),
-    lines: CoffSpan
+    lines: CoffSpan,
+    selection: UInt32 = 0U,
+    leader: Int = -1,
+    parent: Int = -1,
+    selected: Bool = false,
+    discarded: Bool = false
 )
 
 struct CoffSymbol(

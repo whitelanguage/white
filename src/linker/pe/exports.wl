@@ -194,6 +194,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         i = 0;
         while (i < object.symbols.length()) {
             let symbol = object.symbols[i];
+            if (symbol.section > 0 && object.sections[symbol.section - 1].discarded) { i++; continue; }
             if (symbol.storage == Byte(2) && (symbol.section > 0 || symbol.section == -1)) {
                 let slot = coff_name_slot(inputs, ref index, CoffSymbolRef(object_id, i));
                 let entry = index.entries[slot];

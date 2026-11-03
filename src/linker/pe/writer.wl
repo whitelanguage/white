@@ -10,6 +10,7 @@ import * from "../coff/model.wl"
 import * from "../coff/link_model.wl"
 import coff_name_matches from "../coff/reader.wl"
 import coff_resolve_symbols from "../coff/symbols.wl"
+import coff_select_objects from "../coff/comdat.wl"
 import coff_apply_section, coff_put_word from "../coff/reloc.wl"
 
 
@@ -126,12 +127,15 @@ func pe_headers(layout: PeLayout, options: PeOptions, entry: UInt32, reloc_rva: 
     return bytes;
 }
 
-func write_pe(objects: Vector(CoffObject), options: PeOptions) -> PeImageResult {
+func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageResult {
 // the driver remains separate, this stage has no filesystem or toolchain dependencies
     if ((options.entry.length() == 0 && !options.is_dll) || (options.image_base & 65535UL) != 0UL || options.stack_commit == 0UL ||
         options.stack_reserve < options.stack_commit || options.heap_commit == 0UL || options.heap_reserve < options.heap_commit) {
         return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "Invalid PE image options");
     }
+    let selected = coff_select_objects(raw_objects);
+    if (selected.errors.length() != 0) { return PeImageResult(errors=selected.errors); }
+    let objects = selected.objects;
     let inputs: Vector(CoffObject) = [];
     let n = 0;
     while (n < objects.length()) { inputs.append(objects[n]); n++; }

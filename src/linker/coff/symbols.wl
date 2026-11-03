@@ -60,7 +60,9 @@ func coff_register_object_aliases(objects: Vector(CoffObject), id: Int, ref name
     let object = objects[id];
     for (let s = 0; s < object.symbols.length(); s++) {
         let symbol = object.symbols[s];
-        if ((symbol.storage != Byte(2) && symbol.storage != Byte(105)) || symbol.section != 0) { continue; }
+        if (symbol.storage != Byte(2) && symbol.storage != Byte(105)) { continue; }
+        let discarded = symbol.section > 0 && object.sections[symbol.section - 1].discarded;
+        if (symbol.section != 0 && !discarded) { continue; }
         let slot = coff_name_slot(objects, ref names, CoffSymbolRef(id, s));
         if (symbol.storage != Byte(105)) { continue; }
         let target = CoffSymbolRef(id, symbol.weak_target);
@@ -155,7 +157,9 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
         let section_id: Int = 0;
         while (section_id < object.sections.length()) {
             if ((object.sections[section_id].flags & 4096U) != 0U) {
-                result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, section=section_id, message="COMDAT selection is not implemented yet"));
+                if (!object.sections[section_id].selected) {
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, section=section_id, message="COMDAT sections require selection before symbol resolution"));
+                }
             }
             section_id++;
         }
@@ -188,7 +192,8 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
                 result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Defined symbol extends beyond its section"));
             }
 
-            if (coff_address_symbol(symbol) && (symbol.section > 0 || symbol.section == -1)) {
+            let discarded = symbol.section > 0 && object.sections[symbol.section - 1].discarded;
+            if (coff_address_symbol(symbol) && !discarded && (symbol.section > 0 || symbol.section == -1)) {
                 row[symbol_id] = target;
                 if (symbol.storage == Byte(2)) {
                     let slot: Int = coff_name_slot(objects, ref names, target);
@@ -219,7 +224,8 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
         let symbol_id: Int = 0;
         while (symbol_id < object.symbols.length()) {
             let symbol: CoffSymbol = object.symbols[symbol_id];
-            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && symbol.section == 0) {
+            let discarded = symbol.section > 0 && object.sections[symbol.section - 1].discarded;
+            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && (symbol.section == 0 || discarded)) {
                 let slot: Int = coff_name_slot(objects, ref names, CoffSymbolRef(object_id, symbol_id));
                 result.targets[object_id][symbol_id] = names.entries[slot].definition;
             }
@@ -233,6 +239,7 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
         let section_id: Int = 0;
         while (section_id < object.sections.length()) {
             let section: CoffSection = object.sections[section_id];
+            if (section.discarded) { section_id++; continue; }
             let i: Int = 0;
             while (i < section.relocs.length()) {
                 let reloc: CoffReloc = section.relocs[i];
@@ -245,7 +252,11 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
                         let slot = coff_name_slot(objects, ref names, CoffSymbolRef(object_id, reloc.symbol));
                         missing = names.entries[slot].fallback;
                     }
-                    result.errors.append(CoffLinkError(status=CoffLinkStatus.UndefinedSymbol, object=object_id, section=section_id, symbol=reloc.symbol, offset=reloc.offset, other=missing, message="Relocation references an undefined or non-address symbol"));
+                    let message = "Relocation references an undefined or non-address symbol";
+                    if (reference.section > 0 && object.sections[reference.section - 1].discarded && reference.storage != Byte(2)) {
+                        message = "Relocation references a discarded local COMDAT symbol";
+                    }
+                    result.errors.append(CoffLinkError(status=CoffLinkStatus.UndefinedSymbol, object=object_id, section=section_id, symbol=reloc.symbol, offset=reloc.offset, other=missing, message=message));
                     reported[reloc.symbol] = true;
                 }
                 i++;
