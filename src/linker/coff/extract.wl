@@ -2,7 +2,7 @@
 import * from "model.wl"
 import * from "archive_model.wl"
 import CoffSymbolRef, CoffLinkError, CoffLinkStatus from "link_model.wl"
-import CoffNameIndex, coff_name_slot, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases, coff_is_common, coff_define_symbol from "symbols.wl"
+import CoffNameIndex, coff_name_slot, coff_same_name, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases, coff_is_common, coff_define_symbol from "symbols.wl"
 import archive_find from "archive.wl"
 import read_coff from "reader.wl"
 import coff_select_objects, coff_select_object, coff_prepare_selection from "comdat.wl"
@@ -13,6 +13,19 @@ import pe_import_symbol from "../pe/imports.wl"
 
 struct ArchiveSelection(objects: Vector(CoffObject) = [], imports: Vector(PeImport) = [], errors: Vector(CoffLinkError) = [], library: Int = -1)
 struct ArchiveDemand(symbol: CoffSymbolRef, required: Bool = true)
+
+func archive_defines_name(objects: Vector(CoffObject), id: Int, demand: CoffSymbolRef) -> Bool {
+// a replaced COMDAT may have defined this name, that is different from a corrupt archive directory
+    let object = objects[id];
+    for (let s = 0; s < object.symbols.length(); s++) {
+        let symbol = object.symbols[s];
+        if ((symbol.storage == Byte(2) && (symbol.section > 0 || symbol.section == -1 || coff_is_common(symbol))) ||
+            symbol.storage == Byte(105)) {
+            if (coff_same_name(objects, CoffSymbolRef(id, s), demand)) { return true; }
+        }
+    }
+    return false;
+}
 
 func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNameIndex, work: Vector(ArchiveDemand)) -> Void {
 // definitions are registered before the work queue advances, cycles do not reload members
@@ -64,10 +77,10 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
     let import_id = objects.length();
     objects.append(import_names);
     let imports: Vector(PeImport) = [];
-    let loaded: Vector(Vector(Bool)) = [];
+    let loaded: Vector(Vector(Int)) = [];
     for (let lib = 0; lib < archives.length(); lib++) {
-        let flags: Vector(Bool) = [];
-        for (let m = 0; m < archives[lib].members.length(); m++) { flags.append(false); }
+        let flags: Vector(Int) = [];
+        for (let m = 0; m < archives[lib].members.length(); m++) { flags.append(-1); }
         loaded.append(flags);
     }
     let queried: Dict(Int, Bool) = Dict();
@@ -98,11 +111,11 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
             let archive = archives[lib];
             let member_id = archive_find(archive, objects[demand.object], objects[demand.object].symbols[demand.symbol].name);
             if (member_id < 0) { continue; }
-            if (loaded[lib][member_id]) {
+            if (loaded[lib][member_id] >= 0) {
+                if (archive_defines_name(objects, loaded[lib][member_id], demand)) { continue; }
                 return ArchiveSelection(library=lib, errors=[CoffLinkError(status=CoffLinkStatus.InvalidObject, object=lib,
                     message="Archive directory names a symbol which its selected member does not define")]);
             }
-            loaded[lib][member_id] = true;
             let span = archive.members[member_id].data;
             let bytes: Vector(Byte) = [];
             for (let b = 0; b < span.size; b++) { bytes.append(archive.bytes[span.offset + b]); }
@@ -115,6 +128,7 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
                         offset=UInt32(span.offset + decoded_import.offset), message="Selected archive member: " + decoded_import.message)]);
                 }
                 let entry: PeImport = decoded_import.entry;
+                loaded[lib][member_id] = import_id;
                 let first = import_names.symbols.length();
                 if (!entry.is_data || entry.is_const) { pe_import_symbol(ref import_names, entry.symbol, -1, 0U, true); }
                 pe_import_symbol(ref import_names, "__imp_" + entry.symbol, -1, 0U, true);
@@ -137,13 +151,33 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
                 let member: CoffObject = decoded.object;
                 let id = objects.length();
                 objects.append(coff_prepare_selection(member));
-                let selected_errors = coff_select_object(objects, id, ref chosen.leaders);
-                if (selected_errors.length() != 0) { return ArchiveSelection(library=lib, errors=selected_errors); }
-                archive_add_symbols(objects, id, ref names, work);
-                let added_aliases = coff_register_object_aliases(objects, id, ref names);
-                if (added_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=added_aliases); }
+                loaded[lib][member_id] = id;
+                let step = coff_select_object(objects, id, ref chosen.leaders);
+                if (step.errors.length() != 0) { return ArchiveSelection(library=lib, errors=step.errors); }
+                if (step.replaced) {
+                    // this slow path runs only when LARGEST changes a winner. Dropped definitions,
+                    // alias traversal and relocation demands must all refer to the same selection.
+                    // Members already extracted stay loaded, their ordinary sections still count.
+                    names = CoffNameIndex();
+                    work = [];
+                    for (let rebuild = 0; rebuild < objects.length(); rebuild++) {
+                        archive_add_symbols(objects, rebuild, ref names, work);
+                    }
+                    let rebuilt_aliases = coff_register_aliases(objects, ref names);
+                    if (rebuilt_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=rebuilt_aliases); }
+                    queried = Dict();
+                    demanded = Dict();
+                    followed = Dict();
+                    cursor = 0;
+                    slot = coff_name_slot(objects, ref names, demand);
+                } else {
+                    archive_add_symbols(objects, id, ref names, work);
+                    let added_aliases = coff_register_object_aliases(objects, id, ref names);
+                    if (added_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=added_aliases); }
+                }
             }
-            if (names.entries[slot].definition.object < 0 && names.entries[slot].fallback.object < 0) {
+            if (names.entries[slot].definition.object < 0 && names.entries[slot].fallback.object < 0 &&
+                !archive_defines_name(objects, loaded[lib][member_id], demand)) {
                 return ArchiveSelection(library=lib, errors=[CoffLinkError(status=CoffLinkStatus.InvalidObject, object=lib,
                     offset=UInt32(archive.members[member_id].header), message="Archive directory names a symbol which its selected member does not define")]);
             }

@@ -117,7 +117,7 @@ func coff_read_comdats(ref object: CoffObject) -> CoffResult {
                 }
             }
             let mode = UInt32(object.bytes[symbol.aux.offset + 14]);
-            if (mode != 1U && mode != 2U && mode != 3U && mode != 5U) {
+            if (mode < 1U || mode > 6U) {
                 return coff_unsupported(symbol.aux.offset + 14, "Unsupported COMDAT selection mode");
             }
             if (coff_u32(object.bytes, symbol.aux.offset) != section.size) {

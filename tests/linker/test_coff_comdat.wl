@@ -72,6 +72,36 @@ func main() -> Int {
     if (chosen.errors.length() != 1 || chosen.errors[0].status != CoffLinkStatus.InvalidObject) { return 1; }
 
     first = fixture();
+    second = fixture();
+    first.sections[0].selection = 6U;
+    second.sections[0].selection = 6U;
+    second.sections[0].size = 7U;
+    second.sections[0].data.size = 7;
+    chosen = coff_select_objects([first, second]);
+    for (let owner = 0; owner < 3; owner++) {
+        if (!chosen.objects[0].sections[owner].discarded || chosen.objects[1].sections[owner].discarded ||
+            chosen.objects[0].sections[owner].root != 0 || chosen.objects[1].sections[owner].root != 0 ||
+            first.sections[owner].discarded || second.sections[owner].discarded) {
+            print("FAIL: largest root did not revoke its entire associative subtree");
+            return 1;
+        }
+    }
+    resolved = coff_resolve_symbols(chosen.objects);
+    if (resolved.errors.length() != 0 || resolved.targets[0][0].object != 1) { return 1; }
+    repeated = coff_select_objects(chosen.objects);
+    if (repeated.errors.length() != 0 || !repeated.objects[0].sections[2].discarded) { return 1; }
+
+    first = fixture();
+    second = fixture();
+    first.sections[0].selection = 4U;
+    second.sections[0].selection = 4U;
+    chosen = coff_select_objects([first, second]);
+    if (chosen.errors.length() != 0 || !chosen.objects[1].sections[0].discarded) { return 1; }
+    second.bytes[1] = Byte(1);
+    chosen = coff_select_objects([first, second]);
+    if (chosen.errors.length() != 1 || chosen.errors[0].status != CoffLinkStatus.DuplicateSymbol) { return 1; }
+
+    first = fixture();
     let child = first.sections[1];
     for (let depth = 3; depth < 4096; depth++) {
         child.parent = depth - 1;

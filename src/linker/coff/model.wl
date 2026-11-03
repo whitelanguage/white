@@ -16,6 +16,7 @@ struct CoffSection(
     selection: UInt32 = 0U,
     leader: Int = -1,
     parent: Int = -1,
+    root: Int = -1,
     selected: Bool = false,
     discarded: Bool = false
 )

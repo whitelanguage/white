@@ -140,7 +140,24 @@ def check_comdat(compiler, clang=None):
              save("unique2.obj", object_bytes([text(mode=1)]))], False, "Conflicting COMDAT")
         run([one, save("mixed.obj", object_bytes([text(mode=3)]))], False, "Conflicting COMDAT")
         run([one, save("ordinary.obj", object_bytes([text(mode=0)]))], False, "Duplicate external")
-        for mode in (4, 6, 7, 8):
+        exact = save("exact.obj", object_bytes([text(mode=4)]))
+        assert run([exact, exact]) == run([exact])
+        run([exact, save("exact-different.obj", object_bytes([text(1, mode=4)]))], False, "Conflicting COMDAT")
+        run([exact, save("exact-longer.obj", object_bytes([dict(text(mode=4), data=code() + b"\x90")]))],
+            False, "Conflicting COMDAT")
+        run([exact, one], False, "Conflicting COMDAT")
+
+        small = save("small.obj", object_bytes([text(1, mode=6)]))
+        large_section = dict(text(mode=6), data=code() + b"\x90")
+        large = save("large.obj", object_bytes([large_section]))
+        largest_alone = run([large])
+        assert run([small, large]) == largest_alone
+        assert run([large, small]) == largest_alone
+        assert run([large, large]) == largest_alone
+        tie = save("tie.obj", object_bytes([dict(large_section, data=code(1) + b"\x90")]))
+        assert run([large, tie]) == largest_alone
+        run([save("largest-one-file.obj", object_bytes([text(1, mode=6), large_section]))])
+        for mode in (7, 8):
             run([save(f"mode-{mode}.obj", object_bytes([text(mode=mode)]))], False, "selection mode")
 
         a = save("unwind1.obj", object_bytes(unwind()))
@@ -153,6 +170,21 @@ def check_comdat(compiler, clang=None):
         damaged[1]["data"] = b"\xff" * 8
         damaged[2]["relocs"] = [(0, 3, "missing"), (4, 3, "missing"), (8, 3, "missing")]
         run([a, save("discarded-unwind.obj", object_bytes(damaged))])
+
+        # Replacing an earlier root also removes its transitive unwind and data contributions.
+        old_tree = unwind(1)
+        old_tree[0]["mode"] = 6
+        old_tree[1]["data"] = b"\xff" * 8
+        old_tree[2]["relocs"] = [(0, 3, "missing"), (4, 3, "missing"), (8, 3, "missing")]
+        new_tree = unwind()
+        new_tree[0]["mode"] = 6
+        new_tree[0]["data"] += b"\x90"
+        new_tree[2]["data"] = struct.pack("<III", 0, len(new_tree[0]["data"]), 0)
+        new_unwind = save("largest-unwind.obj", object_bytes(new_tree))
+        assert run([save("old-unwind.obj", object_bytes(old_tree)), new_unwind]) == run([new_unwind])
+        old_data = dict(name=".rdata$old", data=b"\0" * 8, flags=0x40400040, mode=5, parent=1,
+                        relocs=[(0, 1, "missing")])
+        run([save("largest-one-file-tree.obj", object_bytes([text(1, mode=6), old_data, large_section]))])
         for label, change, needle in (
                 ("parent-zero", 0, "parent"), ("parent-big", 99, "parent"),
                 ("parent-self", 2, "parent")):
@@ -196,6 +228,58 @@ def check_comdat(compiler, clang=None):
         run([library, one, poison], caller=force)
         provider = save("provider.lib", archive_bytes([("answer.obj", object_bytes([text()]), ["answer"])]))
         run([provider])
+
+        # A forced member replaces a root before its old dependency reaches the queue cursor.
+        old_largest = object_bytes([text(1, mode=6),
+            dict(name=".rdata$old", data=b"\0" * 8, flags=0x40400040, mode=5, parent=1,
+                 relocs=[(0, 1, "missing")])])
+        old_provider = save("old-largest.obj", old_largest)
+        winning_member = object_bytes([large_section, helper])
+        winning_lib = save("largest.lib", archive_bytes([("winner.obj", winning_member, ["helper", "answer"])]))
+        run([old_provider, winning_lib, poison], caller=force)
+        run([winning_lib, old_provider, poison], caller=force)
+
+        # A retained wrapper used to reference storage defined in the revoked root.
+        # It now needs an archive provider, even though the original relocation was not undefined.
+        old_extra = dict(text(1, mode=6), symbols=[dict(name="extra", storage=2)])
+        old_wrapper = dict(helper, relocs=[(1, 4, "extra")])
+        extras = save("extras.lib", archive_bytes([("extra.obj", object_bytes([text(key="extra", mode=0)]), ["extra"])]))
+        replacement = save("replacement.lib", archive_bytes([("winner.obj", object_bytes([large_section,
+            dict(name=".text$force", data=code(), key="force", mode=0)]), ["answer", "force"])]))
+        force_extra = root / "force-extra.wl"
+        force_extra.write_text('extern "c" { func answer() -> Int; func force() -> Int; func helper() -> Int; }\n'
+                               'func main() -> Int { if (helper() != 42 || force() != 42 || answer() != 42) { return 1; }\n'
+                               '    print("PASS: Rebound COMDAT secondary symbol"); return 0; }\n', encoding="ascii")
+        old_with_extra = save("old-extra.obj", object_bytes([old_extra, old_wrapper]))
+        run([old_with_extra, replacement, extras], caller=force_extra)
+        run([old_with_extra, replacement], False, "undefined or non-address", caller=force_extra)
+        old_local = dict(old_extra, symbols=[dict(name="local", storage=3)])
+        local_wrapper = dict(helper, relocs=[(1, 4, "local")])
+        run([save("largest-lost-local.obj", object_bytes([old_local, local_wrapper])), replacement],
+            False, "discarded local", caller=force_extra)
+
+        # An extracted member's discarded definition is not a corrupt directory entry.
+        # A later library may still provide the missing secondary name.
+        old_extra_lib = save("old-extra.lib", archive_bytes([("old.obj", object_bytes([old_extra, old_wrapper]),
+                                                            ["answer", "extra", "helper"])]))
+        run([old_extra_lib, replacement, extras], caller=force_extra)
+        run([old_extra_lib, replacement], False, "undefined or non-address", caller=force_extra)
+
+        # The ordinary wrapper forces a second, larger replacement in the same library.
+        last_section = dict(large_section, data=code() + b"\x90\x90")
+        chain_lib = save("largest-chain.lib", archive_bytes([
+            ("first.obj", object_bytes([dict(large_section, data=code(1) + b"\x90"),
+                dict(helper, relocs=[(1, 4, "next")])]), ["answer", "helper"]),
+            ("next.obj", object_bytes([last_section, dict(helper, key="next")]), ["answer", "next"])]))
+        run([old_provider, chain_lib, poison], caller=force)
+
+        # EXACT_MATCH follows link.exe/LLD payload comparison, symbol table indices and
+        # relocation targets do not participate. Only the retained relocation is resolved.
+        exact_jump = dict(text(mode=4), data=b"\xe9\0\0\0\0", relocs=[(1, 4, "target")])
+        target = dict(text(key="target", mode=0), name=".text$target")
+        exact_a = save("exact-reloc-a.obj", object_bytes([exact_jump, target]))
+        exact_b = save("exact-reloc-b.obj", object_bytes([dict(exact_jump, relocs=[(1, 4, "missing")])]))
+        run([exact_a, exact_b, poison])
 
         # Retained relocations to local discarded storage cannot be guessed by byte offset.
         lost = text(1)
