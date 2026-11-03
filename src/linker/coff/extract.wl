@@ -6,6 +6,7 @@ import CoffNameIndex, coff_name_slot, coff_same_name, coff_resolve_symbols, coff
 import archive_find from "archive.wl"
 import read_coff from "reader.wl"
 import coff_select_objects, coff_select_object, coff_prepare_selection from "comdat.wl"
+import coff_collect_directives, coff_add_directives from "directives.wl"
 import coff_is_import, read_coff_import from "import_object.wl"
 import PeImport from "../pe/model.wl"
 import pe_import_symbol from "../pe/imports.wl"
@@ -56,11 +57,20 @@ func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNa
     }
 }
 
+func archive_add_roots(object: CoffObject, id: Int, work: Vector(ArchiveDemand)) -> Void {
+// the name-only object also holds directive roots, they have no relocation section to walk
+    for (let s = 0; s < object.symbols.length(); s++) {
+        if (object.symbols[s].section == 0) { work.append(ArchiveDemand(CoffSymbolRef(id, s))); }
+    }
+}
+
 func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive)) -> ArchiveSelection {
 // a dependency queue avoids rerunning whole-object symbol resolution after each extraction
     let chosen = coff_select_objects(inputs);
     if (chosen.errors.length() != 0) { return ArchiveSelection(errors=chosen.errors); }
     if (archives.length() == 0) { return ArchiveSelection(objects=chosen.objects); }
+    let directives = coff_collect_directives(chosen.objects);
+    if (directives.errors.length() != 0) { return ArchiveSelection(errors=directives.errors); }
     let checked = coff_resolve_symbols(chosen.objects);
     for (let e = 0; e < checked.errors.length(); e++) {
         if (checked.errors[e].status != CoffLinkStatus.UndefinedSymbol) { return ArchiveSelection(errors=checked.errors); }
@@ -75,7 +85,11 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
     // this name-only object lives in the extraction index, it must never reach relocation or PE layout.
     let import_names = CoffObject();
     let import_id = objects.length();
+    for (let root = 0; root < directives.roots.length(); root++) {
+        pe_import_symbol(ref import_names, directives.roots[root], 0, 0U, true);
+    }
     objects.append(import_names);
+    archive_add_roots(import_names, import_id, work);
     let imports: Vector(PeImport) = [];
     let loaded: Vector(Vector(Int)) = [];
     for (let lib = 0; lib < archives.length(); lib++) {
@@ -150,6 +164,19 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
                 }
                 let member: CoffObject = decoded.object;
                 let id = objects.length();
+                let first_root = directives.roots.length();
+                coff_add_directives(ref directives, member, id);
+                if (directives.errors.length() != 0) {
+                    for (let error_id = 0; error_id < directives.errors.length(); error_id++) {
+                        directives.errors[error_id].offset += UInt32(span.offset);
+                    }
+                    return ArchiveSelection(library=lib, errors=directives.errors);
+                }
+                for (let new_root = first_root; new_root < directives.roots.length(); new_root++) {
+                    let root_symbol = pe_import_symbol(ref import_names, directives.roots[new_root], 0, 0U, true);
+                    work.append(ArchiveDemand(CoffSymbolRef(import_id, root_symbol)));
+                }
+                objects[import_id] = import_names;
                 objects.append(coff_prepare_selection(member));
                 loaded[lib][member_id] = id;
                 let step = coff_select_object(objects, id, ref chosen.leaders);
@@ -163,6 +190,7 @@ func extract_archives(inputs: Vector(CoffObject), archives: Vector(CoffArchive))
                     for (let rebuild = 0; rebuild < objects.length(); rebuild++) {
                         archive_add_symbols(objects, rebuild, ref names, work);
                     }
+                    archive_add_roots(import_names, import_id, work);
                     let rebuilt_aliases = coff_register_aliases(objects, ref names);
                     if (rebuilt_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=rebuilt_aliases); }
                     queried = Dict();

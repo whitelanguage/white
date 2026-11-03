@@ -139,7 +139,7 @@ func pe_special_section(object: CoffObject, prefix: CoffSpan) -> Bool {
         coff_name_matches(object, prefix, ".gljmp") || coff_name_matches(object, prefix, ".00cfg");
 }
 
-func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_sections: Int = 1) -> PeLayoutResult {
+func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_sections: Int = 1, directives_ready: Bool = false) -> PeLayoutResult {
 // assign contributions before patching, raw offsets and RVAs have different alignment
     if (spare_sections < 0 || spare_sections > 96) {
         return pe_layout_error(CoffLinkStatus.InvalidLayout, -1, -1, "Invalid reserved PE section count");
@@ -162,7 +162,11 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_section
             }
             let prefix = pe_prefix(object, input.name);
             if (coff_name_matches(object, prefix, ".drectve") && input.size != 0U) {
-                return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COFF linker directives are not implemented yet");
+                if (!directives_ready || !coff_name_matches(object, input.name, ".drectve")) {
+                    return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COFF linker directives require processing before PE layout");
+                }
+                section_id++;
+                continue;
             }
             if ((input.flags & 4096U) != 0U && !input.selected) {
                 return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "COMDAT sections require selection before PE layout");

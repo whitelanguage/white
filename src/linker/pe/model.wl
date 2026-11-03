@@ -12,7 +12,7 @@ struct PeImport(
     is_const: Bool = false
 )
 
-struct PeExport(name: String = "", symbol: String = "", ordinal: Optional(UInt32) = null)
+struct PeExport(name: String = "", symbol: String = "", ordinal: Optional(UInt32) = null, data: Bool = false)
 struct PeExportBinding(name: String, symbol: String, ordinal: UInt32, hint: UInt32, is_data: Bool)
 
 struct PeOptions(

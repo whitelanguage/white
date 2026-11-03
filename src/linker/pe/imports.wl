@@ -73,9 +73,9 @@ func pe_same_import(left: PeImport, right: PeImport) -> Bool {
     return a == b;
 }
 
-func pe_select_imports(objects: Vector(CoffObject), requests: Vector(PeImport)) -> PeImportSelection {
+func pe_select_imports(objects: Vector(CoffObject), requests: Vector(PeImport), required: Optional(Vector(CoffSymbolRef)) = null) -> PeImportSelection {
 // collect unresolved references first, strong object definitions take precedence over import metadata
-    let unresolved = coff_resolve_symbols(objects);
+    let unresolved = coff_resolve_symbols(objects, required);
     let i = 0;
     while (i < unresolved.errors.length()) {
         if (unresolved.errors[i].status != CoffLinkStatus.UndefinedSymbol) {

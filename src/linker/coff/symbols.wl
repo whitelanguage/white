@@ -174,7 +174,7 @@ func coff_bind_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) ->
     return CoffSymbolResult();
 }
 
-func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
+func coff_resolve_symbols(objects: Vector(CoffObject), required: Optional(Vector(CoffSymbolRef)) = null) -> CoffSymbolResult {
 // build definitions before binding references, input order cannot hide a definition
     let result: CoffSymbolResult = CoffSymbolResult();
     let names: CoffNameIndex = CoffNameIndex();
@@ -291,6 +291,21 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
             section_id++;
         }
         object_id++;
+    }
+    if (required is !null) {
+        let roots: Vector(CoffSymbolRef) = required;
+        for (let root = 0; root < roots.length(); root++) {
+            let reference = roots[root];
+            if (reference.object < 0 || reference.object >= objects.length() || reference.symbol < 0 ||
+                reference.symbol >= objects[reference.object].symbols.length()) {
+                result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=reference.object,
+                    symbol=reference.symbol, message="Invalid required linker symbol"));
+            } else if (result.targets[reference.object][reference.symbol].object < 0) {
+                let slot = coff_name_slot(objects, ref names, reference);
+                result.errors.append(CoffLinkError(status=CoffLinkStatus.UndefinedSymbol, object=reference.object,
+                    symbol=reference.symbol, other=names.entries[slot].fallback, message="Required linker symbol is not defined"));
+            }
+        }
     }
     return result;
 }

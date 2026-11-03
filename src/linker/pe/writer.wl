@@ -12,6 +12,7 @@ import coff_name_matches from "../coff/reader.wl"
 import coff_resolve_symbols from "../coff/symbols.wl"
 import coff_select_objects from "../coff/comdat.wl"
 import coff_allocate_common from "../coff/common.wl"
+import coff_collect_directives, coff_directive_export from "../coff/directives.wl"
 import coff_apply_section, coff_put_word from "../coff/reloc.wl"
 
 
@@ -139,13 +140,45 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let allocated = coff_allocate_common(selected.objects);
     if (allocated.errors.length() != 0) { return PeImageResult(errors=allocated.errors); }
     let objects = allocated.objects;
+    let directives = coff_collect_directives(objects);
+    if (directives.errors.length() != 0) { return PeImageResult(errors=directives.errors); }
+    let explicit_names: Dict(String, Bool) = Dict();
+    let explicit_ordinals: Dict(UInt32, Bool) = Dict();
+    for (let exp = 0; exp < options.exports.length(); exp++) {
+        let item = options.exports[exp];
+        if (item.symbol.length() == 0) { item.symbol = item.name; }
+        if (item.name.length() != 0) {
+            if (explicit_names.contains_key(item.name)) {
+                return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "Duplicate PE export name '" + item.name + "'");
+            }
+            explicit_names.put(item.name, true);
+        }
+        let ordinal = item.ordinal;
+        if (ordinal is !null) {
+            if (explicit_ordinals.contains_key(ordinal)) {
+                return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "Duplicate PE export ordinal");
+            }
+            explicit_ordinals.put(ordinal, true);
+        }
+        if (!coff_directive_export(ref directives, item)) {
+            return pe_image_error(CoffLinkStatus.InvalidLayout, -1, -1, "Conflicting PE export declarations");
+        }
+    }
     let inputs: Vector(CoffObject) = [];
     let n = 0;
     while (n < objects.length()) { inputs.append(objects[n]); n++; }
+    let query = CoffObject();
+    let required: Vector(CoffSymbolRef) = [];
+    let query_id = inputs.length();
+    for (let root = 0; root < directives.roots.length(); root++) {
+        let symbol = pe_import_symbol(ref query, directives.roots[root], 0, 0U, true);
+        required.append(CoffSymbolRef(query_id, symbol));
+    }
+    if (required.length() != 0) { inputs.append(query); }
     let imported = PeImports();
     let import_id = -1;
     if (options.imports.length() != 0) {
-        let selected = pe_select_imports(objects, options.imports);
+        let selected = pe_select_imports(inputs, options.imports, required);
         if (selected.errors.length() != 0) { return PeImageResult(errors=selected.errors); }
         imported = pe_make_imports(selected.entries, selected.direct);
         if (imported.errors.length() != 0) { return PeImageResult(errors=imported.errors); }
@@ -156,11 +189,11 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
         }
     }
 
-    let symbols = coff_resolve_symbols(inputs);
+    let symbols = coff_resolve_symbols(inputs, required);
     if (symbols.errors.length() != 0) { return PeImageResult(errors=symbols.errors); }
     let spare = 1;
-    if (options.exports.length() != 0) { spare++; }
-    let planned = plan_pe(inputs, import_id, spare);
+    if (directives.exports.length() != 0) { spare++; }
+    let planned = plan_pe(inputs, import_id, spare, true);
     if (planned.layout is null) { return PeImageResult(errors=planned.errors); }
     let layout: PeLayout = planned.layout;
     if (Int128(UInt128(options.image_base)) + Int128(layout.image_size) > Int128(UInt128(18446744073709551615UL))) {
@@ -232,8 +265,8 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let export_rva = 0U;
     let export_size = 0U;
     let export_bindings: Vector(PeExportBinding) = [];
-    if (options.exports.length() != 0) {
-        let exported = pe_export_table(inputs, layout, options.exports, options.image_name, layout.image_size, import_id);
+    if (directives.exports.length() != 0) {
+        let exported = pe_export_table(inputs, layout, directives.exports, options.image_name, layout.image_size, import_id);
         if (exported.errors.length() != 0) { return PeImageResult(errors=exported.errors); }
         export_bindings = exported.bindings;
         let raw_size = pe_align(Long(exported.bytes.length()), 512);

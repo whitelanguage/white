@@ -241,6 +241,7 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
         let section = objects[target.object].sections[symbol.section - 1];
         let place = layout.placements[target.object][symbol.section - 1];
         if (place.section == 0 || symbol.value >= section.size) { return pe_export_error("PE export must point into loadable storage"); }
+        if (item.data && (section.flags & 0x20000000U) != 0U) { return pe_export_error("COFF DATA export must point into data storage"); }
 
         let assigned = item.ordinal;
         if (assigned is null) { return pe_export_error("Missing assigned PE export ordinal"); }
