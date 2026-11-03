@@ -11,6 +11,7 @@ import * from "../coff/link_model.wl"
 import coff_name_matches from "../coff/reader.wl"
 import coff_resolve_symbols from "../coff/symbols.wl"
 import coff_select_objects from "../coff/comdat.wl"
+import coff_allocate_common from "../coff/common.wl"
 import coff_apply_section, coff_put_word from "../coff/reloc.wl"
 
 
@@ -135,7 +136,9 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     }
     let selected = coff_select_objects(raw_objects);
     if (selected.errors.length() != 0) { return PeImageResult(errors=selected.errors); }
-    let objects = selected.objects;
+    let allocated = coff_allocate_common(selected.objects);
+    if (allocated.errors.length() != 0) { return PeImageResult(errors=allocated.errors); }
+    let objects = allocated.objects;
     let inputs: Vector(CoffObject) = [];
     let n = 0;
     while (n < objects.length()) { inputs.append(objects[n]); n++; }

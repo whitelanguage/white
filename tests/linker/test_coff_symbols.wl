@@ -74,7 +74,7 @@ func main() -> Int {
     changed.symbols[0].section = 0;
     changed.symbols[0].value = 8U;
     result = coff_resolve_symbols([changed]);
-    if (result.errors.length() != 1 || result.errors[0].status != CoffLinkStatus.Unsupported) { print("FAIL: common symbol"); return 1; }
+    if (result.errors.length() != 0 || result.targets[0][0].object != 0 || result.targets[0][0].symbol != 0) { print("FAIL: common symbol"); return 1; }
     changed.symbols[0].value = 0U;
     changed.symbols[0].storage = Byte(105);
     result = coff_resolve_symbols([changed]);

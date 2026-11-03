@@ -11,6 +11,10 @@ func coff_address_symbol(symbol: CoffSymbol) -> Bool {
     return symbol.storage == Byte(2) || symbol.storage == Byte(3) || symbol.storage == Byte(6) || symbol.storage == Byte(104);
 }
 
+func coff_is_common(symbol: CoffSymbol) -> Bool {
+    return symbol.storage == Byte(2) && symbol.section == 0 && symbol.value != 0U;
+}
+
 func coff_name_hash(bytes: Vector(Byte), name: CoffSpan) -> UInt64 {
 // FNV-1a selects a bucket, full byte comparison still decides symbol identity
     let hash: UInt64 = 14695981039346656037UL;
@@ -52,6 +56,30 @@ func coff_name_slot(objects: Vector(CoffObject), ref index: CoffNameIndex, name:
     index.entries.append(CoffNameEntry(name=name, next=head));
     index.buckets.put(hash, slot);
     return slot;
+}
+
+func coff_define_symbol(objects: Vector(CoffObject), ref names: CoffNameIndex, definition: CoffSymbolRef) -> Bool {
+// common sizes merge while loading, storage is assigned only after archive extraction
+    let slot = coff_name_slot(objects, ref names, definition);
+    let previous = names.entries[slot].definition;
+    if (previous.object < 0) {
+        names.entries[slot].definition = definition;
+        return true;
+    }
+    let old = objects[previous.object].symbols[previous.symbol];
+    let symbol = objects[definition.object].symbols[definition.symbol];
+    if (coff_is_common(symbol)) {
+        if ((coff_is_common(old) && symbol.value > old.value) || old.section == -1) {
+            names.entries[slot].definition = definition;
+        }
+        return true;
+    }
+    if (coff_is_common(old)) {
+        // a real section definition wins, an absolute value does not allocate storage.
+        if (symbol.section > 0) { names.entries[slot].definition = definition; }
+        return true;
+    }
+    return false;
 }
 
 func coff_register_object_aliases(objects: Vector(CoffObject), id: Int, ref names: CoffNameIndex) -> Vector(CoffLinkError) {
@@ -185,24 +213,23 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
                     result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Weak external fallback must be external"));
                 }
             }
-            if (symbol.storage == Byte(2) && symbol.section == 0 && symbol.value != 0U) {
-                result.errors.append(CoffLinkError(status=CoffLinkStatus.Unsupported, object=object_id, symbol=symbol_id, message="Common symbol allocation is not implemented yet"));
+            if (coff_is_common(symbol) && symbol.name.size == 0) {
+                result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Common symbol requires a name"));
             }
             if (coff_address_symbol(symbol) && symbol.section > 0 && symbol.value > object.sections[symbol.section - 1].size) {
                 result.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=object_id, symbol=symbol_id, message="Defined symbol extends beyond its section"));
             }
 
             let discarded = symbol.section > 0 && object.sections[symbol.section - 1].discarded;
-            if (coff_address_symbol(symbol) && !discarded && (symbol.section > 0 || symbol.section == -1)) {
+            if (coff_is_common(symbol)) {
+                coff_define_symbol(objects, ref names, target);
+            } else if (coff_address_symbol(symbol) && !discarded && (symbol.section > 0 || symbol.section == -1)) {
                 row[symbol_id] = target;
                 if (symbol.storage == Byte(2)) {
-                    let slot: Int = coff_name_slot(objects, ref names, target);
-                    let entry: CoffNameEntry = names.entries[slot];
-                    if (entry.definition.object >= 0) {
-                        result.errors.append(CoffLinkError(status=CoffLinkStatus.DuplicateSymbol, object=object_id, symbol=symbol_id, other=entry.definition, message="Duplicate external symbol definition"));
-                    } else {
-                        entry.definition = target;
-                        names.entries[slot] = entry;
+                    if (!coff_define_symbol(objects, ref names, target)) {
+                        let slot = coff_name_slot(objects, ref names, target);
+                        result.errors.append(CoffLinkError(status=CoffLinkStatus.DuplicateSymbol, object=object_id, symbol=symbol_id,
+                            other=names.entries[slot].definition, message="Duplicate external symbol definition"));
                     }
                 }
             }
@@ -225,7 +252,7 @@ func coff_resolve_symbols(objects: Vector(CoffObject)) -> CoffSymbolResult {
         while (symbol_id < object.symbols.length()) {
             let symbol: CoffSymbol = object.symbols[symbol_id];
             let discarded = symbol.section > 0 && object.sections[symbol.section - 1].discarded;
-            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && (symbol.section == 0 || discarded)) {
+            if ((symbol.storage == Byte(2) || symbol.storage == Byte(105)) && (symbol.section == 0 || symbol.section == -1 || discarded)) {
                 let slot: Int = coff_name_slot(objects, ref names, CoffSymbolRef(object_id, symbol_id));
                 result.targets[object_id][symbol_id] = names.entries[slot].definition;
             }

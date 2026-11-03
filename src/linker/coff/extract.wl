@@ -2,7 +2,7 @@
 import * from "model.wl"
 import * from "archive_model.wl"
 import CoffSymbolRef, CoffLinkError, CoffLinkStatus from "link_model.wl"
-import CoffNameIndex, coff_name_slot, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases from "symbols.wl"
+import CoffNameIndex, coff_name_slot, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases, coff_is_common, coff_define_symbol from "symbols.wl"
 import archive_find from "archive.wl"
 import read_coff from "reader.wl"
 import coff_select_objects, coff_select_object, coff_prepare_selection from "comdat.wl"
@@ -20,9 +20,8 @@ func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNa
     for (let s = 0; s < object.symbols.length(); s++) {
         let symbol = object.symbols[s];
         if (symbol.section > 0 && object.sections[symbol.section - 1].discarded) { continue; }
-        if (symbol.storage == Byte(2) && (symbol.section > 0 || symbol.section == -1)) {
-            let slot = coff_name_slot(objects, ref names, CoffSymbolRef(id, s));
-            if (names.entries[slot].definition.object < 0) { names.entries[slot].definition = CoffSymbolRef(id, s); }
+        if (symbol.storage == Byte(2) && (symbol.section > 0 || symbol.section == -1 || coff_is_common(symbol))) {
+            coff_define_symbol(objects, ref names, CoffSymbolRef(id, s));
         }
         if (symbol.storage == Byte(105)) {
             // a newly loaded alias can satisfy an earlier demand which found no archive member.
