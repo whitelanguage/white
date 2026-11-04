@@ -43,7 +43,7 @@ func write_link_output(path: String, bytes: Vector(Byte)) -> Bool {
     return true;
 }
 
-func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vector(PeImport), exports: Vector(PeExport), output: String, shared: Bool, verbose: Bool, library_paths: Vector(String), libraries: Vector(String)) -> Bool {
+func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vector(PeImport), exports: Vector(PeExport), output: String, shared: Bool, verbose: Bool, library_paths: Vector(String), libraries: Vector(String), gc_sections: Bool = false) -> Bool {
 // decode every input before opening the output, malformed objects must leave an existing image untouched
     let objects: Vector(CoffObject) = [];
     let archives: Vector(CoffArchive) = [];
@@ -158,7 +158,7 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         }
     }
     if verbose { print("Linking PE image with White"); }
-    let linked = write_pe(objects, PeOptions(entry=entry, imports=requests, exports=exports, image_name=image_name, is_dll=shared, libraries_ready=true));
+    let linked = write_pe(objects, PeOptions(entry=entry, imports=requests, exports=exports, image_name=image_name, is_dll=shared, libraries_ready=true, gc_sections=gc_sections));
     if (linked.errors.length() != 0) {
         for (let e = 0; e < linked.errors.length(); e++) {
             let diagnostic = linked.errors[e];

@@ -26,7 +26,8 @@ struct PeOptions(
     exports: Vector(PeExport) = [],
     image_name: String = "white.exe",
     is_dll: Bool = false,
-    libraries_ready: Bool = false
+    libraries_ready: Bool = false,
+    gc_sections: Bool = false
 )
 
 struct PeInput(object: Int, section: Int)

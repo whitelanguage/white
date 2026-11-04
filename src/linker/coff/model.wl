@@ -18,7 +18,8 @@ struct CoffSection(
     parent: Int = -1,
     root: Int = -1,
     selected: Bool = false,
-    discarded: Bool = false
+    discarded: Bool = false,
+    collected: Bool = false
 )
 
 struct CoffSymbol(

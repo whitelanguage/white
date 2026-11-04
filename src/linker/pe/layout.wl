@@ -187,6 +187,7 @@ func plan_pe(objects: Vector(CoffObject), import_object: Int = -1, spare_section
             if ((input.flags & 0xC0000000U) == 0U || (input.flags & 0x000E0000U) != 0U) {
                 return pe_layout_error(CoffLinkStatus.Unsupported, object_id, section_id, "Unsupported image section characteristics");
             }
+            if (input.collected) { section_id++; continue; }
 
             let group = 0;
             while (group < layout.sections.length() && !pe_name_equal(object, prefix, layout.sections[group].name)) { group++; }

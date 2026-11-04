@@ -24,6 +24,7 @@ func coff_prepare_selection(object: CoffObject) -> CoffObject {
         let section = object.sections[i];
         section.selected = false;
         section.discarded = false;
+        section.collected = false;
         section.root = -1;
         sections.append(section);
     }

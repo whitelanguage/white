@@ -14,6 +14,7 @@ import coff_select_objects from "../coff/comdat.wl"
 import coff_allocate_common from "../coff/common.wl"
 import coff_collect_directives, coff_directive_export from "../coff/directives.wl"
 import coff_alternate_queries from "../coff/alternates.wl"
+import coff_collect_sections, coff_has_gc_sections from "../coff/gc.wl"
 import coff_apply_section, coff_put_word from "../coff/reloc.wl"
 
 
@@ -141,6 +142,7 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let allocated = coff_allocate_common(selected.objects);
     if (allocated.errors.length() != 0) { return PeImageResult(errors=allocated.errors); }
     let objects = allocated.objects;
+    let collect = options.gc_sections && coff_has_gc_sections(objects);
     let directives = coff_collect_directives(objects);
     if (directives.errors.length() != 0) { return PeImageResult(errors=directives.errors); }
     if (!options.libraries_ready && !directives.no_libraries) {
@@ -179,12 +181,28 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let query = CoffObject();
     let required: Vector(CoffSymbolRef) = [];
     let query_id = inputs.length();
+    if (collect && options.entry.length() != 0) {
+        let entry_symbol = pe_import_symbol(ref query, options.entry, 0, 0U, true);
+        required.append(CoffSymbolRef(query_id, entry_symbol));
+    }
     for (let root = 0; root < directives.roots.length(); root++) {
         let symbol = pe_import_symbol(ref query, directives.roots[root], 0, 0U, true);
         required.append(CoffSymbolRef(query_id, symbol));
     }
     let alternates = coff_alternate_queries(ref query, directives, 0, query_id);
     if (query.symbols.length() != 0) { inputs.append(query); }
+    if collect {
+        let preliminary = coff_resolve_symbols(inputs, required, alternates);
+        for (let bad = 0; bad < preliminary.errors.length(); bad++) {
+            if (preliminary.errors[bad].status != CoffLinkStatus.UndefinedSymbol) {
+                return PeImageResult(errors=[preliminary.errors[bad]]);
+            }
+        }
+        // missing definitions are diagnosed after collection, dead code needs no DLL imports.
+        let collected = coff_collect_sections(inputs, preliminary, required);
+        if (collected.errors.length() != 0) { return PeImageResult(errors=collected.errors); }
+        inputs = collected.objects;
+    }
     let imported = PeImports();
     let import_id = -1;
     if (options.imports.length() != 0) {

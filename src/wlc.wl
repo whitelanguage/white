@@ -719,7 +719,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     if native_link {
         log_stage(cfg, "Backend/Linker");
-        if (!link_windows(machine_bytes, cfg.extra_files, machine_imports, machine_exports, cfg.output_file, cfg.is_shared, cfg.verbose, cfg.library_paths, compiler.extra_libs)) {
+        if (!link_windows(machine_bytes, cfg.extra_files, machine_imports, machine_exports, cfg.output_file, cfg.is_shared, cfg.verbose, cfg.library_paths, compiler.extra_libs, cfg.opt_level == "-Os" || cfg.opt_level == "-Oz")) {
             return 1;
         }
         print("Build success: " + cfg.output_file);

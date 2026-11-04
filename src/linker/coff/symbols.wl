@@ -303,7 +303,7 @@ func coff_resolve_symbols(objects: Vector(CoffObject), required: Optional(Vector
         let section_id: Int = 0;
         while (section_id < object.sections.length()) {
             let section: CoffSection = object.sections[section_id];
-            if (section.discarded) { section_id++; continue; }
+            if (section.discarded || section.collected) { section_id++; continue; }
             let i: Int = 0;
             while (i < section.relocs.length()) {
                 let reloc: CoffReloc = section.relocs[i];
