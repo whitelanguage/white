@@ -8,14 +8,47 @@ import PeExport from "../pe/model.wl"
 
 struct CoffDirectiveToken(text: String, offset: Int)
 struct CoffDirectiveTokens(tokens: Vector(CoffDirectiveToken) = [], message: String = "", offset: Int = 0)
+struct CoffDefaultLib(name: String, key: String, object: Int, section: Int, offset: UInt32)
 struct CoffDirectives(
     roots: Vector(String) = [],
     root_names: Dict(String, Bool) = Dict(),
     exports: Vector(PeExport) = [],
     export_names: Dict(String, Int) = Dict(),
     matches: Dict(String, String) = Dict(),
+    libraries: Vector(CoffDefaultLib) = [],
+    library_names: Dict(String, Bool) = Dict(),
+    excluded: Dict(String, Bool) = Dict(),
+    no_libraries: Bool = false,
+    library_epoch: Int = 0,
     errors: Vector(CoffLinkError) = []
 )
+
+func coff_library_name(name: String) -> String {
+// directives carry filenames, explicit paths remain ordinary driver inputs
+    if (name.length() == 0) { return ""; }
+    let dot = false;
+    for (let i = 0; i < name.length(); i++) {
+        let ch = name[i];
+        if (ch == '/' || ch == '\\' || ch == ':' || ch == Byte(0)) { return ""; }
+        if (ch == '.') { dot = true; }
+    }
+    if (!dot) { return name + ".lib"; }
+    if (name.ends_with(".lib") || name.ends_with(".LIB") || name.ends_with(".a") || name.ends_with(".A")) { return name; }
+    let size = name.length();
+    if (size >= 4 && coff_directive_is(name.slice(size - 4, size), ".lib")) { return name; }
+    return "";
+}
+
+func coff_library_key(name: String) -> String? {
+// COFF library matching folds ASCII on every host, actual file lookup keeps the spelling
+    let text = strings.Builder(name.length());
+    for (let i = 0; i < name.length(); i++) {
+        let byte = Int(name[i]);
+        if (byte >= 65 && byte <= 90) { byte += 32; }
+        text.write_byte(Byte(byte))?;
+    }
+    return text.build()?;
+}
 
 func coff_directive_space(byte: Byte) -> Bool {
     return byte == Byte(0) || byte == Byte(32) || (byte >= Byte(9) && byte <= Byte(13));
@@ -199,7 +232,10 @@ func coff_add_directives(ref state: CoffDirectives, object: CoffObject, id: Int)
             while (colon < token.text.length() && token.text[colon] != ':') { colon++; }
             let message = "";
             let status = CoffLinkStatus.InvalidObject;
-            if (colon == token.text.length() || colon < 2 ||
+            if ((coff_directive_is(token.text, "/nodefaultlib") || coff_directive_is(token.text, "-nodefaultlib"))) {
+                if (!state.no_libraries) { state.library_epoch++; }
+                state.no_libraries = true;
+            } else if (colon == token.text.length() || colon < 2 ||
                 (token.text[0] != '/' && token.text[0] != '-')) {
                 message = "Invalid COFF linker directive '" + token.text + "'";
             } else {
@@ -208,6 +244,27 @@ func coff_add_directives(ref state: CoffDirectives, object: CoffObject, id: Int)
                 if (argument.length() == 0) { message = "Missing COFF directive argument"; }
                 else if (coff_directive_is(option, "include")) { coff_directive_root(ref state, argument); }
                 else if (coff_directive_is(option, "export")) { message = coff_parse_export(ref state, argument); }
+                else if (coff_directive_is(option, "defaultlib") || coff_directive_is(option, "nodefaultlib")) {
+                    let name = coff_library_name(argument);
+                    if (name.length() == 0) { message = "COFF default library must be an archive filename without a path"; }
+                    else {
+                        let key = coff_library_key(name)?;
+                        catch(err) {
+                            state.errors.append(CoffLinkError(status=CoffLinkStatus.InvalidObject, object=id, section=sec,
+                                offset=UInt32(token.offset), message="Could not allocate COFF library name"));
+                            return;
+                        }
+                        if (coff_directive_is(option, "nodefaultlib")) {
+                            if (!state.excluded.contains_key(key)) { state.library_epoch++; }
+                            state.excluded.put(key, true);
+                        }
+                        else if (!state.library_names.contains_key(key)) {
+                            state.library_names.put(key, true);
+                            state.libraries.append(CoffDefaultLib(name, key, id, sec, UInt32(token.offset)));
+                            state.library_epoch++;
+                        }
+                    }
+                }
                 else if (coff_directive_is(option, "failifmismatch")) {
                     let equal = 0;
                     while (equal < argument.length() && argument[equal] != '=') { equal++; }

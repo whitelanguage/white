@@ -64,6 +64,16 @@ func main() -> Int {
 
     let leaf = pe_leaf_object()?;
     catch(err) { return 1; }
+    let defaults = directive_object("/defaultlib:Answer /defaultlib:ANSWER.lib /nodefaultlib:answer /NODEFAULTLIB");
+    let libraries = coff_collect_directives([defaults]);
+    if (libraries.errors.length() != 0 || libraries.libraries.length() != 1 || !libraries.no_libraries ||
+        libraries.libraries[0].name != "Answer.lib" || libraries.libraries[0].key != "answer.lib" ||
+        !libraries.excluded.contains_key("answer.lib")) { print("FAIL: default library normalization"); return 1; }
+    let unprocessed = write_pe([leaf, directive_object("/defaultlib:answer")], PeOptions(entry="entry"));
+    if (unprocessed.image is !null || unprocessed.errors.length() != 1 ||
+        unprocessed.errors[0].status != CoffLinkStatus.Unsupported) { print("FAIL: unresolved discovery accepted by PE writer"); return 1; }
+    let suppressed = write_pe([leaf, defaults], PeOptions(entry="entry"));
+    if (suppressed.image is null) { print("FAIL: excluded default required discovery"); return 1; }
     let exported = directive_object("/export:Public=entry,@7 /export:Public=entry,@7");
     let image = write_pe([leaf, exported], PeOptions(entry="entry"));
     let ready = image.image;

@@ -142,6 +142,14 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let objects = allocated.objects;
     let directives = coff_collect_directives(objects);
     if (directives.errors.length() != 0) { return PeImageResult(errors=directives.errors); }
+    if (!options.libraries_ready && !directives.no_libraries) {
+        for (let lib = 0; lib < directives.libraries.length(); lib++) {
+            if (!directives.excluded.contains_key(directives.libraries[lib].key)) {
+                return pe_image_error(CoffLinkStatus.Unsupported, directives.libraries[lib].object, directives.libraries[lib].section,
+                    "COFF default libraries require driver discovery before PE layout");
+            }
+        }
+    }
     let explicit_names: Dict(String, Bool) = Dict();
     let explicit_ordinals: Dict(UInt32, Bool) = Dict();
     for (let exp = 0; exp < options.exports.length(); exp++) {

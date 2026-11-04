@@ -4,7 +4,9 @@ import CoffObject from "coff/model.wl"
 import read_coff from "coff/reader.wl"
 import CoffArchive from "coff/archive_model.wl"
 import read_archive from "coff/archive.wl"
-import extract_archives from "coff/extract.wl"
+import ArchiveSelection, begin_archive_work, resume_archive_work, extract_archives from "coff/extract.wl"
+import coff_collect_directives from "coff/directives.wl"
+import LinkLibraries, discover_default_libraries, active_link_libraries from "libraries.wl"
 import PeImport, PeExport, PeOptions, PeImage from "pe/model.wl"
 import write_pe from "pe/writer.wl"
 import write_import_library from "pe/library.wl"
@@ -105,7 +107,31 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
             objects.append(object);
         }
     }
-    let selected = extract_archives(objects, archives);
+    let initial = coff_collect_directives(objects);
+    if (initial.errors.length() != 0) {
+        for (let bad = 0; bad < initial.errors.length(); bad++) {
+            print("LinkError: Object " + initial.errors[bad].object + ": " + initial.errors[bad].message);
+        }
+        return false;
+    }
+    let selected = ArchiveSelection();
+    if (archives.length() == 0 && initial.libraries.length() == 0) {
+        selected = extract_archives(objects, archives);
+    } else {
+        let state = begin_archive_work(objects);
+        if (state.errors.length() != 0) { selected = ArchiveSelection(errors=state.errors); }
+        else {
+            let discovery = LinkLibraries(archives=archives, paths=archive_paths, supplied=supplied);
+            for (let explicit = 0; explicit < archives.length(); explicit++) { discovery.default_keys.append(""); }
+            while true {
+                if (!discover_default_libraries(ref discovery, state.directives, library_paths, verbose)) { return false; }
+                let enabled = active_link_libraries(discovery, state.directives);
+                selected = resume_archive_work(ref state, discovery.archives, enabled);
+                if (!selected.pending_libraries || selected.errors.length() != 0) { break; }
+            }
+            archive_paths = discovery.paths;
+        }
+    }
     if (selected.errors.length() != 0) {
         for (let e = 0; e < selected.errors.length(); e++) {
             let diagnostic = selected.errors[e];
@@ -132,7 +158,7 @@ func link_windows(bytes: Vector(Byte), extra_files: Vector(String), imports: Vec
         }
     }
     if verbose { print("Linking PE image with White"); }
-    let linked = write_pe(objects, PeOptions(entry=entry, imports=requests, exports=exports, image_name=image_name, is_dll=shared));
+    let linked = write_pe(objects, PeOptions(entry=entry, imports=requests, exports=exports, image_name=image_name, is_dll=shared, libraries_ready=true));
     if (linked.errors.length() != 0) {
         for (let e = 0; e < linked.errors.length(); e++) {
             let diagnostic = linked.errors[e];

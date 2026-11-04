@@ -6,7 +6,7 @@ import read_coff from "../../src/linker/coff/reader.wl"
 import coff_name_hash from "../../src/linker/coff/symbols.wl"
 import * from "../../src/linker/coff/archive_model.wl"
 import read_archive, archive_find from "../../src/linker/coff/archive.wl"
-import extract_archives from "../../src/linker/coff/extract.wl"
+import extract_archives, begin_archive_work, resume_archive_work from "../../src/linker/coff/extract.wl"
 import * from "../../src/compiler/machine/x86_64/model.wl"
 import coff_object from "../../src/compiler/machine/x86_64/coff.wl"
 
@@ -68,6 +68,18 @@ func main() -> Int {
     selected = extract_archives([caller, selected.objects[1]], [archive]);
     if (selected.errors.length() != 0 || selected.objects.length() != 2) { print("FAIL: already defined symbol extracted again"); return 1; }
     if (extract_archives([], [archive]).objects.length() != 0) { print("FAIL: unused archive retained"); return 1; }
+
+    // Discovery can add a library after the first unresolved demand, retain the existing index.
+    let state = begin_archive_work([caller]);
+    selected = resume_archive_work(ref state, []);
+    if (selected.errors.length() != 0 || selected.objects.length() != 1 || state.unresolved.length() != 1) { return 1; }
+    selected = resume_archive_work(ref state, [archive]);
+    if (selected.errors.length() != 0 || selected.objects.length() != 2 || state.loaded.length() != 1) { return 1; }
+    let loaded_id = state.loaded[0][0];
+    selected = resume_archive_work(ref state, [archive]);
+    if (selected.objects.length() != 2 || state.loaded[0][0] != loaded_id) { print("FAIL: resumed member loaded twice"); return 1; }
+    if (resume_archive_work(ref state, []).errors.length() != 1 ||
+        resume_archive_work(ref state, [archive], []).errors.length() != 1) { print("FAIL: invalid discovery state accepted"); return 1; }
 
     for (let n = 0; n < bytes.length(); n++) {
         if (n == 8) { continue; }

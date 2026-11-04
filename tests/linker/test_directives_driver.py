@@ -120,7 +120,7 @@ def check_directives(compiler, clang=None):
             ("entry.obj", entry, ["entry"]), ("answer.obj", provider, ["answer"]),
             ("unused.obj", object_bytes([text(key="unused", mode=0), directive('/defaultlib:missing')]), ["unused"])]))
         run([save("start.obj", object_bytes([directive('/include:entry')])), nested])
-        run([save("load-bad.obj", object_bytes([directive('/include:unused')])), nested], False, "Unsupported COFF")
+        run([save("load-bad.obj", object_bytes([directive('/include:unused')])), nested], False, "Could not find library")
         # A larger COMDAT restarts the demand queue, directive-only roots must survive it.
         small = object_bytes([text(key="entry", mode=6), directive('/include:load_larger')])
         # The directory's second name is a real ordinary definition in the selected member.
@@ -172,7 +172,7 @@ def check_directives(compiler, clang=None):
             (b'/include:', 'Missing'), (b'/include:"answer', 'Unterminated quote'),
             (b'/include:"an\0swer"', 'control byte'), (b'/include:an\x01swer', 'control byte'),
             (b'/include:\x80', 'BOM'), (b'\xef\xbb\xbf/include:\xff', 'UTF-8'),
-            (b'@response.txt', 'Invalid COFF'), (b'/defaultlib:crt.lib', 'Unsupported'),
+            (b'@response.txt', 'Invalid COFF'), (b'/defaultlib:crt.lib', 'Could not find library'),
             (b'/alternatename:one=two', 'Unsupported'), (b'/merge:.data=.text', 'Unsupported')):
             run([save("bad-token.obj", object_bytes([directive(data)]))], False, needle)
         run([save("padding.obj", object_bytes([directive(b' \t\r\n\0\0')]))])
