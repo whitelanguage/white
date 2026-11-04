@@ -9,12 +9,15 @@ import PeExport from "../pe/model.wl"
 struct CoffDirectiveToken(text: String, offset: Int)
 struct CoffDirectiveTokens(tokens: Vector(CoffDirectiveToken) = [], message: String = "", offset: Int = 0)
 struct CoffDefaultLib(name: String, key: String, object: Int, section: Int, offset: UInt32)
+struct CoffAlternate(source: String, target: String)
 struct CoffDirectives(
     roots: Vector(String) = [],
     root_names: Dict(String, Bool) = Dict(),
     exports: Vector(PeExport) = [],
     export_names: Dict(String, Int) = Dict(),
     matches: Dict(String, String) = Dict(),
+    alternates: Vector(CoffAlternate) = [],
+    alternate_names: Dict(String, String) = Dict(),
     libraries: Vector(CoffDefaultLib) = [],
     library_names: Dict(String, Bool) = Dict(),
     excluded: Dict(String, Bool) = Dict(),
@@ -244,6 +247,21 @@ func coff_add_directives(ref state: CoffDirectives, object: CoffObject, id: Int)
                 if (argument.length() == 0) { message = "Missing COFF directive argument"; }
                 else if (coff_directive_is(option, "include")) { coff_directive_root(ref state, argument); }
                 else if (coff_directive_is(option, "export")) { message = coff_parse_export(ref state, argument); }
+                else if (coff_directive_is(option, "alternatename")) {
+                    let equal = 0;
+                    while (equal < argument.length() && argument[equal] != '=') { equal++; }
+                    if (equal == 0 || equal + 1 >= argument.length()) { message = "Invalid COFF alternate name"; }
+                    else {
+                        let source = argument.slice(0, equal);
+                        let target = argument.slice(equal + 1, argument.length());
+                        let previous = state.alternate_names.lookup(source);
+                        if (previous is !null && previous != target) { message = "Conflicting COFF alternate names for '" + source + "'"; }
+                        else if (previous is null) {
+                            state.alternate_names.put(source, target);
+                            state.alternates.append(CoffAlternate(source, target));
+                        }
+                    }
+                }
                 else if (coff_directive_is(option, "defaultlib") || coff_directive_is(option, "nodefaultlib")) {
                     let name = coff_library_name(argument);
                     if (name.length() == 0) { message = "COFF default library must be an archive filename without a path"; }

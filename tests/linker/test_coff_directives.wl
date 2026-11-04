@@ -3,6 +3,7 @@ import * from "../../src/linker/coff/model.wl"
 import * from "../../src/linker/coff/link_model.wl"
 import * from "../../src/linker/coff/directives.wl"
 import coff_resolve_symbols from "../../src/linker/coff/symbols.wl"
+import coff_alternate_queries from "../../src/linker/coff/alternates.wl"
 import pe_import_symbol from "../../src/linker/pe/imports.wl"
 import * from "../../src/linker/pe/model.wl"
 import write_pe from "../../src/linker/pe/writer.wl"
@@ -64,6 +65,20 @@ func main() -> Int {
 
     let leaf = pe_leaf_object()?;
     catch(err) { return 1; }
+    let alternate = directive_object("/alternatename:alias=entry /alternatename:alias=entry /export:Public=alias");
+    let alternate_state = coff_collect_directives([alternate]);
+    if (alternate_state.errors.length() != 0 || alternate_state.alternates.length() != 1 ||
+        alternate_state.roots.length() != 1) { print("FAIL: alternate deduplication or unintended root"); return 1; }
+    let alias_query = CoffObject();
+    let aliases = coff_alternate_queries(ref alias_query, alternate_state, 0, 1);
+    resolution = coff_resolve_symbols([leaf, alias_query], [aliases[0].source], aliases);
+    if (resolution.errors.length() != 0 || resolution.targets[1][aliases[0].source.symbol].object != 0) { return 1; }
+    resolution = coff_resolve_symbols([leaf], null, [CoffAlias(CoffSymbolRef(0, 999), CoffSymbolRef(0, 0))]);
+    if (resolution.errors.length() != 1 || resolution.errors[0].status != CoffLinkStatus.InvalidObject) { return 1; }
+    let alias_image = write_pe([leaf, alternate], PeOptions(entry="alias"));
+    if (alias_image.image is null) { print("FAIL: alternate entry or export"); return 1; }
+    alias_image = write_pe([leaf, alternate], PeOptions(entry="alias"));
+    if (alias_image.image is null || alternate.sections[0].discarded) { print("FAIL: alternate input reuse"); return 1; }
     let defaults = directive_object("/defaultlib:Answer /defaultlib:ANSWER.lib /nodefaultlib:answer /NODEFAULTLIB");
     let libraries = coff_collect_directives([defaults]);
     if (libraries.errors.length() != 0 || libraries.libraries.length() != 1 || !libraries.no_libraries ||

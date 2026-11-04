@@ -4,7 +4,7 @@ import * from "link_model.wl"
 import coff_range from "reader.wl"
 
 
-struct CoffNameEntry(name: CoffSymbolRef, definition: CoffSymbolRef = CoffSymbolRef(), next: Int = -1, fallback: CoffSymbolRef = CoffSymbolRef())
+struct CoffNameEntry(name: CoffSymbolRef, definition: CoffSymbolRef = CoffSymbolRef(), next: Int = -1, fallback: CoffSymbolRef = CoffSymbolRef(), alternate: Bool = false)
 struct CoffNameIndex(buckets: Dict(UInt64, Int) = Dict(), entries: Vector(CoffNameEntry) = [])
 
 func coff_address_symbol(symbol: CoffSymbol) -> Bool {
@@ -97,14 +97,47 @@ func coff_register_object_aliases(objects: Vector(CoffObject), id: Int, ref name
         coff_name_slot(objects, ref names, target);
         if (names.entries[slot].definition.object >= 0) { continue; }
         let previous = names.entries[slot].fallback;
-        if (previous.object >= 0 && !coff_same_name(objects, previous, target)) {
+        if (previous.object >= 0 && !names.entries[slot].alternate && !coff_same_name(objects, previous, target)) {
             errors.append(CoffLinkError(status=CoffLinkStatus.DuplicateSymbol, object=id, symbol=s, other=previous,
                 message="Conflicting weak external fallbacks"));
         } else {
             names.entries[slot].fallback = target;
+            names.entries[slot].alternate = false;
         }
     }
     return errors;
+}
+
+func coff_register_alternates(objects: Vector(CoffObject), aliases: Vector(CoffAlias), ref names: CoffNameIndex) -> Vector(CoffLinkError) {
+// object weak externals already have a fallback, directive aliases only fill the remaining names
+    for (let i = 0; i < aliases.length(); i++) {
+        let alias = aliases[i];
+        if (alias.source.object < 0 || alias.source.object >= objects.length() || alias.target.object < 0 ||
+            alias.target.object >= objects.length() || alias.source.symbol < 0 || alias.target.symbol < 0 ||
+            alias.source.symbol >= objects[alias.source.object].symbols.length() ||
+            alias.target.symbol >= objects[alias.target.object].symbols.length()) {
+            return [CoffLinkError(status=CoffLinkStatus.InvalidObject, object=alias.source.object,
+                symbol=alias.source.symbol, message="Invalid alternate name symbol reference")];
+        }
+        let source = objects[alias.source.object].symbols[alias.source.symbol];
+        let target = objects[alias.target.object].symbols[alias.target.symbol];
+        if ((source.storage != Byte(2) && source.storage != Byte(105)) ||
+            (target.storage != Byte(2) && target.storage != Byte(105))) {
+            return [CoffLinkError(status=CoffLinkStatus.InvalidObject, object=alias.source.object,
+                symbol=alias.source.symbol, message="Alternate names require external symbols")];
+        }
+        let slot = coff_name_slot(objects, ref names, alias.source);
+        coff_name_slot(objects, ref names, alias.target);
+        let previous = names.entries[slot].fallback;
+        if (names.entries[slot].definition.object >= 0 || (previous.object >= 0 && !names.entries[slot].alternate)) { continue; }
+        if (previous.object >= 0 && !coff_same_name(objects, previous, alias.target)) {
+            return [CoffLinkError(status=CoffLinkStatus.DuplicateSymbol, object=alias.source.object,
+                symbol=alias.source.symbol, message="Conflicting COFF alternate names")];
+        }
+        names.entries[slot].fallback = alias.target;
+        names.entries[slot].alternate = true;
+    }
+    return [];
 }
 
 func coff_register_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) -> Vector(CoffLinkError) {
@@ -150,7 +183,7 @@ func coff_bind_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) ->
             }
             if (state[current] == Byte(1)) {
                 return CoffSymbolResult(errors=[CoffLinkError(status=CoffLinkStatus.InvalidObject,
-                    object=entry.name.object, symbol=entry.name.symbol, message="Weak external alias cycle")]);
+                    object=entry.name.object, symbol=entry.name.symbol, message="COFF alias cycle")]);
             }
             state[current] = Byte(1);
             path.append(current);
@@ -174,7 +207,7 @@ func coff_bind_aliases(objects: Vector(CoffObject), ref names: CoffNameIndex) ->
     return CoffSymbolResult();
 }
 
-func coff_resolve_symbols(objects: Vector(CoffObject), required: Optional(Vector(CoffSymbolRef)) = null) -> CoffSymbolResult {
+func coff_resolve_symbols(objects: Vector(CoffObject), required: Optional(Vector(CoffSymbolRef)) = null, alternates: Optional(Vector(CoffAlias)) = null) -> CoffSymbolResult {
 // build definitions before binding references, input order cannot hide a definition
     let result: CoffSymbolResult = CoffSymbolResult();
     let names: CoffNameIndex = CoffNameIndex();
@@ -242,6 +275,10 @@ func coff_resolve_symbols(objects: Vector(CoffObject), required: Optional(Vector
 
     let aliases = coff_register_aliases(objects, ref names);
     if (aliases.length() != 0) { return CoffSymbolResult(errors=aliases); }
+    if (alternates is !null) {
+        let added = coff_register_alternates(objects, alternates, ref names);
+        if (added.length() != 0) { return CoffSymbolResult(errors=added); }
+    }
     let bound = coff_bind_aliases(objects, ref names);
     if (bound.errors.length() != 0) { return bound; }
 

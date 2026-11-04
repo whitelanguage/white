@@ -13,6 +13,7 @@ import coff_resolve_symbols from "../coff/symbols.wl"
 import coff_select_objects from "../coff/comdat.wl"
 import coff_allocate_common from "../coff/common.wl"
 import coff_collect_directives, coff_directive_export from "../coff/directives.wl"
+import coff_alternate_queries from "../coff/alternates.wl"
 import coff_apply_section, coff_put_word from "../coff/reloc.wl"
 
 
@@ -182,11 +183,12 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
         let symbol = pe_import_symbol(ref query, directives.roots[root], 0, 0U, true);
         required.append(CoffSymbolRef(query_id, symbol));
     }
-    if (required.length() != 0) { inputs.append(query); }
+    let alternates = coff_alternate_queries(ref query, directives, 0, query_id);
+    if (query.symbols.length() != 0) { inputs.append(query); }
     let imported = PeImports();
     let import_id = -1;
     if (options.imports.length() != 0) {
-        let selected = pe_select_imports(inputs, options.imports, required);
+        let selected = pe_select_imports(inputs, options.imports, required, alternates);
         if (selected.errors.length() != 0) { return PeImageResult(errors=selected.errors); }
         imported = pe_make_imports(selected.entries, selected.direct);
         if (imported.errors.length() != 0) { return PeImageResult(errors=imported.errors); }
@@ -197,7 +199,7 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
         }
     }
 
-    let symbols = coff_resolve_symbols(inputs, required);
+    let symbols = coff_resolve_symbols(inputs, required, alternates);
     if (symbols.errors.length() != 0) { return PeImageResult(errors=symbols.errors); }
     let spare = 1;
     if (directives.exports.length() != 0) { spare++; }
@@ -274,7 +276,7 @@ func write_pe(raw_objects: Vector(CoffObject), options: PeOptions) -> PeImageRes
     let export_size = 0U;
     let export_bindings: Vector(PeExportBinding) = [];
     if (directives.exports.length() != 0) {
-        let exported = pe_export_table(inputs, layout, directives.exports, options.image_name, layout.image_size, import_id);
+        let exported = pe_export_table(inputs, layout, directives.exports, options.image_name, layout.image_size, import_id, alternates);
         if (exported.errors.length() != 0) { return PeImageResult(errors=exported.errors); }
         export_bindings = exported.bindings;
         let raw_size = pe_align(Long(exported.bytes.length()), 512);

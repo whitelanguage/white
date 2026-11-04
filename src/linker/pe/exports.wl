@@ -91,7 +91,7 @@ func pe_export_string(ref bytes: Vector(Byte), text: String) -> Int {
     return offset;
 }
 
-func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Vector(PeExport), image_name: String, rva: UInt32, import_object: Int = -1) -> PeExportTable {
+func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Vector(PeExport), image_name: String, rva: UInt32, import_object: Int = -1, alternates: Optional(Vector(CoffAlias)) = null) -> PeExportTable {
 // final placements already exist, exported addresses need RVAs rather than base relocations
     if (requests.length() == 0) { return PeExportTable(); }
     if (!pe_export_text(image_name, true) || image_name.length() > 255) {
@@ -207,6 +207,10 @@ func pe_export_table(objects: Vector(CoffObject), layout: PeLayout, requests: Ve
     }
     let aliases = coff_register_aliases(inputs, ref index);
     if (aliases.length() != 0) { return PeExportTable(errors=aliases); }
+    if (alternates is !null) {
+        let added = coff_register_alternates(inputs, alternates, ref index);
+        if (added.length() != 0) { return PeExportTable(errors=added); }
+    }
     let bound = coff_bind_aliases(inputs, ref index);
     if (bound.errors.length() != 0) { return PeExportTable(errors=bound.errors); }
 

@@ -1,12 +1,13 @@
 // src/linker/coff/extract.wl
 import * from "model.wl"
 import * from "archive_model.wl"
-import CoffSymbolRef, CoffLinkError, CoffLinkStatus from "link_model.wl"
-import CoffNameIndex, coff_name_slot, coff_same_name, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases, coff_is_common, coff_define_symbol from "symbols.wl"
+import CoffSymbolRef, CoffAlias, CoffLinkError, CoffLinkStatus from "link_model.wl"
+import CoffNameIndex, coff_name_slot, coff_same_name, coff_resolve_symbols, coff_register_aliases, coff_register_object_aliases, coff_register_alternates, coff_is_common, coff_define_symbol from "symbols.wl"
 import archive_find from "archive.wl"
 import read_coff from "reader.wl"
 import coff_select_objects, coff_select_object, coff_prepare_selection from "comdat.wl"
 import CoffDirectives, coff_collect_directives, coff_add_directives from "directives.wl"
+import coff_alternate_queries from "alternates.wl"
 import coff_is_import, read_coff_import from "import_object.wl"
 import PeImport from "../pe/model.wl"
 import pe_import_symbol from "../pe/imports.wl"
@@ -29,6 +30,9 @@ struct ArchiveWork(
     demanded: Dict(Int, Bool) = Dict(),
     followed: Dict(Int, Bool) = Dict(),
     unresolved: Vector(CoffSymbolRef) = [],
+    roots: Vector(CoffSymbolRef) = [],
+    alternates: Vector(CoffAlias) = [],
+    alternate_work: Vector(CoffSymbolRef) = [],
     cursor: Int = 0,
     errors: Vector(CoffLinkError) = []
 )
@@ -75,11 +79,9 @@ func archive_add_symbols(objects: Vector(CoffObject), id: Int, ref names: CoffNa
     }
 }
 
-func archive_add_roots(object: CoffObject, id: Int, work: Vector(ArchiveDemand)) -> Void {
+func archive_add_roots(roots: Vector(CoffSymbolRef), work: Vector(ArchiveDemand)) -> Void {
 // the name-only object also holds directive roots, they have no relocation section to walk
-    for (let s = 0; s < object.symbols.length(); s++) {
-        if (object.symbols[s].section == 0) { work.append(ArchiveDemand(CoffSymbolRef(id, s))); }
-    }
+    for (let s = 0; s < roots.length(); s++) { work.append(ArchiveDemand(roots[s])); }
 }
 
 func begin_archive_work(inputs: Vector(CoffObject)) -> ArchiveWork {
@@ -102,13 +104,18 @@ func begin_archive_work(inputs: Vector(CoffObject)) -> ArchiveWork {
     // this name-only object lives in the extraction index, it must never reach relocation or PE layout.
     let import_names = CoffObject();
     let import_id = objects.length();
+    let roots: Vector(CoffSymbolRef) = [];
     for (let root = 0; root < directives.roots.length(); root++) {
-        pe_import_symbol(ref import_names, directives.roots[root], 0, 0U, true);
+        let symbol = pe_import_symbol(ref import_names, directives.roots[root], 0, 0U, true);
+        roots.append(CoffSymbolRef(import_id, symbol));
     }
+    let alternates = coff_alternate_queries(ref import_names, directives, 0, import_id);
     objects.append(import_names);
-    archive_add_roots(import_names, import_id, work);
+    archive_add_roots(roots, work);
+    let added = coff_register_alternates(objects, alternates, ref names);
+    if (added.length() != 0) { return ArchiveWork(errors=added); }
     return ArchiveWork(objects=objects, names=names, leaders=chosen.leaders, directives=directives,
-        work=work, import_names=import_names, import_id=import_id);
+        work=work, import_names=import_names, import_id=import_id, roots=roots, alternates=alternates);
 }
 
 func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), enabled: Optional(Vector(Bool)) = null) -> ArchiveSelection {
@@ -138,7 +145,21 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
         state.unresolved = [];
     }
     let epoch = state.directives.library_epoch;
-    while (state.cursor < state.work.length()) {
+    while true {
+        if (state.cursor == state.work.length()) {
+            // finish ordinary demands before extracting fallback providers. Their directives
+            // may discover more libraries, where the original name still gets first choice.
+            for (let pending = 0; pending < state.alternate_work.length(); pending++) {
+                let name = coff_name_slot(state.objects, ref state.names, state.alternate_work[pending]);
+                let entry = state.names.entries[name];
+                if (entry.definition.object < 0 && entry.fallback.object >= 0 && !state.followed.contains_key(name)) {
+                    state.followed.put(name, true);
+                    state.work.append(ArchiveDemand(entry.fallback));
+                }
+            }
+            state.alternate_work = [];
+            if (state.cursor == state.work.length()) { break; }
+        }
         let request = state.work[state.cursor];
         let demand = request.symbol;
         state.cursor++;
@@ -147,7 +168,7 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
         state.demanded.put(slot, true);
         if (state.names.entries[slot].definition.object >= 0) { continue; }
         let fallback = state.names.entries[slot].fallback;
-        if (fallback.object >= 0) {
+        if (fallback.object >= 0 && !state.names.entries[slot].alternate) {
             // NOLIBRARY and ALIAS do not pull a same-named provider from a library.
             if (!state.followed.contains_key(slot)) {
                 state.followed.put(slot, true);
@@ -158,7 +179,10 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
         let previous = state.queried.lookup(slot);
         let search_from = 0;
         if (previous is !null) {
-            if (previous >= archives.length()) { continue; }
+            if (previous >= archives.length()) {
+                if (state.names.entries[slot].alternate) { state.alternate_work.append(demand); }
+                continue;
+            }
             search_from = previous;
         }
         state.queried.put(slot, archives.length());
@@ -211,6 +235,7 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
                 let member: CoffObject = decoded.object;
                 let id = state.objects.length();
                 let first_root = state.directives.roots.length();
+                let first_alias = state.directives.alternates.length();
                 coff_add_directives(ref state.directives, member, id);
                 if (state.directives.errors.length() != 0) {
                     for (let error_id = 0; error_id < state.directives.errors.length(); error_id++) {
@@ -220,8 +245,12 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
                 }
                 for (let new_root = first_root; new_root < state.directives.roots.length(); new_root++) {
                     let root_symbol = pe_import_symbol(ref state.import_names, state.directives.roots[new_root], 0, 0U, true);
-                    state.work.append(ArchiveDemand(CoffSymbolRef(state.import_id, root_symbol)));
+                    let root = CoffSymbolRef(state.import_id, root_symbol);
+                    state.roots.append(root);
+                    state.work.append(ArchiveDemand(root));
                 }
+                let new_aliases = coff_alternate_queries(ref state.import_names, state.directives, first_alias, state.import_id);
+                for (let a = 0; a < new_aliases.length(); a++) { state.alternates.append(new_aliases[a]); }
                 state.objects[state.import_id] = state.import_names;
                 state.objects.append(coff_prepare_selection(member));
                 state.loaded[lib][member_id] = id;
@@ -236,19 +265,34 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
                     for (let rebuild = 0; rebuild < state.objects.length(); rebuild++) {
                         archive_add_symbols(state.objects, rebuild, ref state.names, state.work);
                     }
-                    archive_add_roots(state.import_names, state.import_id, state.work);
+                    archive_add_roots(state.roots, state.work);
                     let rebuilt_aliases = coff_register_aliases(state.objects, ref state.names);
                     if (rebuilt_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=rebuilt_aliases); }
+                    let rebuilt_alternates = coff_register_alternates(state.objects, state.alternates, ref state.names);
+                    if (rebuilt_alternates.length() != 0) { return ArchiveSelection(library=lib, errors=rebuilt_alternates); }
                     state.queried = Dict();
                     state.unresolved = [];
                     state.demanded = Dict();
                     state.followed = Dict();
+                    state.alternate_work = [];
                     state.cursor = 0;
                     slot = coff_name_slot(state.objects, ref state.names, demand);
                 } else {
                     archive_add_symbols(state.objects, id, ref state.names, state.work);
                     let added_aliases = coff_register_object_aliases(state.objects, id, ref state.names);
                     if (added_aliases.length() != 0) { return ArchiveSelection(library=lib, errors=added_aliases); }
+                    // a newly loaded weak record may replace a directive fallback already followed.
+                    for (let weak = 0; weak < member.symbols.length(); weak++) {
+                        if (member.symbols[weak].storage == Byte(105)) {
+                            let name = coff_name_slot(state.objects, ref state.names, CoffSymbolRef(id, weak));
+                            state.followed.remove(name);
+                        }
+                    }
+                    let added_alternates = coff_register_alternates(state.objects, new_aliases, ref state.names);
+                    if (added_alternates.length() != 0) { return ArchiveSelection(library=lib, errors=added_alternates); }
+                    for (let a = 0; a < new_aliases.length(); a++) {
+                        state.work.append(ArchiveDemand(new_aliases[a].source, false));
+                    }
                 }
             }
             if (state.names.entries[slot].definition.object < 0 && state.names.entries[slot].fallback.object < 0 &&
@@ -258,7 +302,11 @@ func resume_archive_work(ref state: ArchiveWork, archives: Vector(CoffArchive), 
             }
             break;
         }
-        if (state.names.entries[slot].definition.object < 0 && state.names.entries[slot].fallback.object < 0) {
+        if (state.names.entries[slot].definition.object < 0 && state.names.entries[slot].alternate) {
+            state.alternate_work.append(demand);
+        }
+        if (state.names.entries[slot].definition.object < 0 &&
+            (state.names.entries[slot].fallback.object < 0 || state.names.entries[slot].alternate)) {
             state.unresolved.append(demand);
         }
         if (epoch != state.directives.library_epoch) { return ArchiveSelection(pending_libraries=true); }

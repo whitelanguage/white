@@ -1,6 +1,7 @@
 // src/linker/coff/link_model.wl
 
 struct CoffSymbolRef(object: Int = -1, symbol: Int = -1)
+struct CoffAlias(source: CoffSymbolRef, target: CoffSymbolRef)
 
 enum CoffLinkStatus {
     InvalidObject,

@@ -173,7 +173,7 @@ def check_directives(compiler, clang=None):
             (b'/include:"an\0swer"', 'control byte'), (b'/include:an\x01swer', 'control byte'),
             (b'/include:\x80', 'BOM'), (b'\xef\xbb\xbf/include:\xff', 'UTF-8'),
             (b'@response.txt', 'Invalid COFF'), (b'/defaultlib:crt.lib', 'Could not find library'),
-            (b'/alternatename:one=two', 'Unsupported'), (b'/merge:.data=.text', 'Unsupported')):
+            (b'/alternatename:one=', 'Invalid COFF alternate'), (b'/merge:.data=.text', 'Unsupported')):
             run([save("bad-token.obj", object_bytes([directive(data)]))], False, needle)
         run([save("padding.obj", object_bytes([directive(b' \t\r\n\0\0')]))])
         run([save("empty.obj", object_bytes([directive(b'')]))])
