@@ -2302,7 +2302,12 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
             return void_result();
         }
 
-        c.expected_type = c.current_ret_type;
+        let expected: Int = return_value_type(ref c, c.current_ret_type);
+        if (is_numeric_literal_expression(ref c, node.value) &&
+            !validate_explicit_literal_cast(ref c, node.value, expected, node.pos)) {
+            return void_result();
+        }
+        c.expected_type = expected;
         let res: CompileResult = compile_node(ref c, node.value);
         c.expected_type = 0;
 
@@ -2310,14 +2315,28 @@ func compile_return(ref c: Compiler, node: ReturnNode) -> CompileResult {
             return void_result();
         }
 
+        let array = c.array_info_map.lookup(get_repr_type(ref c, res.type));
+        let value_kind = node_tag(node.value);
+        if (array is !null && array.size >= 0 &&
+            (value_kind == NODE_VECTOR_LIT || value_kind == NODE_VAR_ACCESS ||
+             value_kind == NODE_FIELD_ACCESS || value_kind == NODE_INDEX_ACCESS || value_kind == NODE_DEREF)) {
+            // these expressions keep fixed arrays in slots, return copies the aggregate before cleanup.
+            let layout = get_llvm_type_str(ref c, res.type);
+            let loaded = next_reg(ref c);
+            write_ir(ref c, c.indent + loaded + " = load " + layout + ", " + layout + "* " + res.reg + "\n");
+            res.reg = loaded;
+        }
+
         let is_ret_fallible: Bool = is_fallible_type(ref c, c.current_ret_type);
-        let inner_ret_type: Int = c.current_ret_type;
-        if is_ret_fallible { inner_ret_type = get_inner_fallible_type(ref c, c.current_ret_type); }
+        let inner_ret_type: Int = return_value_type(ref c, c.current_ret_type);
 
         if is_ret_fallible {
             res = emit_implicit_cast(ref c, res, inner_ret_type, node.pos);
         } else {
             res = emit_implicit_cast(ref c, res, c.current_ret_type, node.pos);
+        }
+        if (res.type == TYPE_POISON || !has_result(res)) {
+            return void_result();
         }
 
         let ret_val_reg: String = res.reg;

@@ -4616,11 +4616,12 @@ func infer_type_args(ref c: Compiler, template: GenericTemplate, pattern: NodeID
             let meta_actual_bindings: Dict(String, SymbolInfo) = actual_bindings;
 
             let generic_name: String = named.name_tok.value;
-            if (c.current_package_prefix != "" && (c.generic_structs.lookup(c.current_package_prefix + generic_name) is !null)) {
-                generic_name = c.current_package_prefix + generic_name;
+            // the pattern belongs to the template, argument expressions still use the caller's names.
+            if (template.prefix != "" && (c.generic_structs.lookup(template.prefix + generic_name) is !null)) {
+                generic_name = template.prefix + generic_name;
             }
 
-            let alias: Optional(String) = c.current_file_type_aliases.lookup(generic_name);
+            let alias: Optional(String) = template.types.lookup(generic_name);
             if (alias is !null) { generic_name = alias; }
 
             let nested_template: Optional(GenericTemplate) = c.generic_structs.lookup(generic_name);

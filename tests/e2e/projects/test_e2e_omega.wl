@@ -11,9 +11,9 @@ struct Payload(id: Long, tag: String)
 class Node {
     let val: Int;
     let data: Payload;
-    let next: Node;
+    let next: Optional(Node);
 
-    init(val: Int, data: Payload, next: Node) {
+    init(val: Int, data: Payload, next: Optional(Node)) {
         self.val = val;
         self.data = data;
         self.next = next;
@@ -36,7 +36,9 @@ func main() -> Int {
     let fn_ptr: Function(Int, Int) -> Int = compute_sum;
     let calc_res: Int = fn_ptr(50, 50);
 
-    if (process_id > 0 && calc_res == 100 && v_test.length() == 3 && head.next.val == 2) {
+    let next = head.next;
+    if (next is null) { return 1; }
+    if (process_id > 0 && calc_res == 100 && v_test.length() == 3 && next.val == 2) {
         print("PASS: End-to-end language features");
     } else {
         print("FAIL: End-to-end language feature result");

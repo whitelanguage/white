@@ -6,9 +6,9 @@
 class Node {
     let id: Int;
     let data: Int;
-    let next: Node;
+    let next: Optional(Node);
 
-    init(id: Int, data: Int, next: Node) {
+    init(id: Int, data: Int, next: Optional(Node)) {
         self.id = id;
         self.data = data;
         self.next = next;
@@ -22,8 +22,9 @@ func build_chain(count: Int) -> Node {
     let curr: Node = head;
     let i: Int = 1;
     while (i < count) {
-        curr.next = Node(i, i * 10, null);
-        curr = curr.next;
+        let next = Node(i, i * 10, null);
+        curr.next = next;
+        curr = next;
         i++;
     }
     return head;
@@ -32,7 +33,11 @@ func build_chain(count: Int) -> Node {
 func main() -> Int {
     // linked list stress
     let list: Node = build_chain(10);
-    let tail_val: Int = list.next.next.data; // 20
+    let second = list.next;
+    if (second is null) { return 1; }
+    let third = second.next;
+    if (third is null) { return 1; }
+    let tail_val: Int = third.data; // 20
 
     // nested struct offsets
     let r: Rect = Rect(Point(10, 20), 100, 200);

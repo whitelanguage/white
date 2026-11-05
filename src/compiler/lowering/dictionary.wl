@@ -3,40 +3,11 @@ import Dict from "dict"
 import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
+import is_dict_key_type from "../validation.wl"
 
-
-func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
-    if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) {
-        return true;
-    }
-    if (is_primitive_type(type_id)) {
-        return type_id != TYPE_ANY_ERROR;
-    }
-    if (is_pointer_type(ref c, type_id)) { return true; }
-
-    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
-    if ((info is !null)) {
-        if (info.is_enum || info.is_interface) { return true; }
-        if (info.is_class) {
-            return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$");
-        }
-        return false;
-    }
-    if ((c.func_ret_map.lookup(type_id) is !null) || (c.method_ret_map.lookup(type_id) is !null)) {
-        return true;
-    }
-    return false;
-}
 
 func is_dynamic_dict(info: StructInfo) -> Bool {
     return has_struct(info) && (info.name == "dict.Dict" || info.name == "Dict");
-}
-
-func is_typed_dict(ref c: Compiler, info: Optional(StructInfo)) -> Bool {
-    if (info is null) { return false; }
-
-    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
-    return (template is !null) && (template.name == "Dict" || template.name.ends_with(".Dict"));
 }
 
 func is_generic_class(ref c: Compiler, info: StructInfo) -> Bool {

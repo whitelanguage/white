@@ -4,7 +4,234 @@ import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
+import parse_const_uint128, parse_decimal_float_literal from "constants.wl"
+import get_target_pointer_bits from "target.wl"
 
+
+func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
+    if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) {
+        return true;
+    }
+    if (is_primitive_type(type_id)) {
+        return type_id != TYPE_ANY_ERROR;
+    }
+    if (is_pointer_type(ref c, type_id)) { return true; }
+
+    let info: Optional(StructInfo) = c.struct_id_map.lookup(type_id);
+    if ((info is !null)) {
+        if (info.is_enum || info.is_interface) { return true; }
+        if (info.is_class) {
+            return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$");
+        }
+        return false;
+    }
+    if ((c.func_ret_map.lookup(type_id) is !null) || (c.method_ret_map.lookup(type_id) is !null)) {
+        return true;
+    }
+    return false;
+}
+
+func is_typed_dict(ref c: Compiler, info: Optional(StructInfo)) -> Bool {
+    if (info is null) { return false; }
+
+    let template: Optional(GenericTemplate) = c.generic_instance_templates.lookup("" + info.type_id);
+    return (template is !null) && (template.name == "Dict" || template.name.ends_with(".Dict"));
+}
+
+func signed_negative_limit(type_id: Int) -> UInt128 {
+    if (type_id == TYPE_INT8) {
+        return UInt128(128);
+    }
+    if (type_id == TYPE_INT16) {
+        return UInt128(32768);
+    }
+    if (type_id == TYPE_INT) {
+        return UInt128(2147483648UL);
+    }
+    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(2147483648UL);
+    }
+    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return UInt128(9223372036854775808UL); }
+    if (type_id == TYPE_INT128) {
+        return 170141183460469231731687303715884105728ULL;
+    }
+    return UInt128(0);
+}
+
+func positive_integer_limit(type_id: Int) -> UInt128 {
+    if (type_id == TYPE_INT8) { return UInt128(127); }
+    if (type_id == TYPE_INT16) {
+        return UInt128(32767);
+    }
+    if (type_id == TYPE_INT) {
+        return UInt128(2147483647);
+    }
+    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(2147483647);
+    }
+    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) {
+        return UInt128(9223372036854775807L);
+    }
+    if (type_id == TYPE_INT128) {
+        return 170141183460469231731687303715884105727ULL;
+    }
+    if (type_id == TYPE_BYTE) { return UInt128(255); }
+    if (type_id == TYPE_UINT16) {
+        return UInt128(65535);
+    }
+    if (type_id == TYPE_UINT32) {
+        return UInt128(4294967295UL);
+    }
+    if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(4294967295UL);
+    }
+    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) {
+        return UInt128(18446744073709551615UL);
+    }
+    if (type_id == TYPE_UINT128) {
+        return 340282366920938463463374607431768211455ULL;
+    }
+    return UInt128(0);
+}
+
+func float_integer_limit(type_id: Int) -> Float {
+    let bits: Int = get_type_bitwidth(type_id);
+    if (is_signed_integer(type_id)) { bits -= 1; }
+    let limit: Float = 1.0;
+    let i: Int = 0;
+    while (i < bits) {
+        limit *= 2.0;
+        i += 1;
+    }
+    return limit;
+}
+
+func is_numeric_literal_expression(ref c: Compiler, node: NodeID) -> Bool {
+    if (!has_node(node)) { return false; }
+    let base: Int = node_tag(node);
+    if (base == NODE_INT || base == NODE_FLOAT ||
+        base == NODE_CHAR || base == NODE_BOOL) {
+        return true;
+    }
+    if (base == NODE_UNARYOP) {
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
+        if (unary.op_tok.type == TOK_PLUS || unary.op_tok.type == TOK_SUB) {
+            return is_numeric_literal_expression(ref c, unary.node);
+        }
+    }
+    return false;
+}
+
+func validate_explicit_literal_cast(ref c: Compiler, node: NodeID, target_type: Int, pos: Position) -> Bool {
+    target_type = get_repr_type(ref c, target_type);
+    if (!has_node(node)) { return true; }
+    let base: Int = node_tag(node);
+    let magnitude: UInt128 = UInt128(0);
+    let negative: Bool = false;
+    let literal_text: String = "";
+    let is_float_literal: Bool = false;
+    let float_value: Float = 0.0;
+
+    if (base == NODE_INT) {
+        let integer: IntNode = get_int_node(ref c.arena, node);
+        literal_text = integer.tok.value;
+        magnitude = parse_const_uint128(integer.tok.value, integer.pos);
+    } else if (base == NODE_FLOAT) {
+        let float_node: FloatNode = get_float_node(ref c.arena, node);
+        literal_text = float_node.tok.value;
+        float_value = parse_decimal_float_literal(float_node.tok.value);
+        is_float_literal = true;
+    } else if (base == NODE_CHAR) {
+        let char_node: CharNode = get_char_node(ref c.arena, node);
+        literal_text = "'" + char_node.tok.value + "'";
+        magnitude = UInt128(string_to_int(char_node.tok.value, char_node.pos));
+    } else if (base == NODE_BOOL) {
+        return true;
+    } else if (base == NODE_UNARYOP) {
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
+        if (unary.op_tok.type == TOK_PLUS) {
+            return validate_explicit_literal_cast(ref c, unary.node, target_type, pos);
+        }
+        let inner_base: Int = node_tag(unary.node);
+        if (unary.op_tok.type != TOK_SUB) { return true; }
+        if (inner_base == NODE_INT) {
+            let integer: IntNode = get_int_node(ref c.arena, unary.node);
+            literal_text = "-" + integer.tok.value;
+            magnitude = parse_const_uint128(integer.tok.value, integer.pos);
+            negative = magnitude != UInt128(0);
+        } else if (inner_base == NODE_FLOAT) {
+            let float_node: FloatNode = get_float_node(ref c.arena, unary.node);
+            literal_text = "-" + float_node.tok.value;
+            float_value = 0.0 - parse_decimal_float_literal(float_node.tok.value);
+            is_float_literal = true;
+        } else {
+            return true;
+        }
+    } else {
+        return true;
+    }
+
+    let target_name: String = get_type_name(ref c, target_type);
+    if is_float_literal {
+        if (!is_integer_type(target_type) && target_type != TYPE_BOOL) { return true; }
+        let valid: Bool = true;
+        if (target_type == TYPE_BOOL) {
+            valid = float_value == 0.0 || float_value == 1.0;
+        } else if (target_type == TYPE_CHAR) {
+            valid = float_value >= 0.0 && float_value < 1114112.0 &&
+                    (float_value < 55296.0 || float_value >= 57344.0);
+        } else {
+            let limit: Float = float_integer_limit(target_type);
+            if (is_unsigned_integer(target_type)) {
+                valid = float_value >= 0.0 && float_value < limit;
+            } else {
+                valid = float_value >= 0.0 - limit && float_value < limit;
+            }
+        }
+        if (!valid) {
+            throw_overflow_error(pos, "Constant " + literal_text + " overflows " + target_name);
+            return false;
+        }
+        return true;
+    }
+
+    if (target_type == TYPE_BOOL) {
+        if (negative || magnitude > UInt128(1)) {
+            throw_type_error(pos, "Cannot convert constant " + literal_text + " to Bool; expected 0 or 1");
+            return false;
+        }
+        return true;
+    }
+    if (target_type == TYPE_CHAR) {
+        if (negative || magnitude > UInt128(1114111) ||
+            (magnitude >= UInt128(55296) && magnitude <= UInt128(57343))) {
+            throw_overflow_error(pos, "Constant " + literal_text + " is not a valid Unicode scalar value");
+            return false;
+        }
+        return true;
+    }
+    if (!is_integer_type(target_type)) { return true; }
+
+    if (!negative) {
+        let max_value: UInt128 = positive_integer_limit(target_type);
+        if (max_value != UInt128(0) && magnitude > max_value) {
+            throw_overflow_error(pos, "Constant " + literal_text + " overflows " + target_name);
+            return false;
+        }
+        return true;
+    }
+
+    if (is_unsigned_integer(target_type)) {
+        throw_overflow_error(pos, "Constant " + literal_text + " overflows " + target_name);
+        return false;
+    }
+    let limit: UInt128 = signed_negative_limit(target_type);
+    if (limit != UInt128(0) && magnitude > limit) {
+        throw_overflow_error(pos, "Constant " + literal_text + " overflows " + target_name);
+        return false;
+    }
+    return true;
+}
 
 func c_vararg_type(ref c: Compiler, type_id: Int, pos: Position) -> Int {
 // C's anonymous arguments undergo default promotions, the named prefix does not.
@@ -62,13 +289,18 @@ func check_postfix_operand(ref c: Compiler, type_id: Int, pos: Position) -> Bool
     return true;
 }
 
+func return_value_type(ref c: Compiler, return_type: Int) -> Int {
+// literals and constructors need T as their context before the T? carrier is built
+    if (is_fallible_type(ref c, return_type)) {
+        return get_inner_fallible_type(ref c, return_type);
+    }
+    return return_type;
+}
+
 func check_null_return(ref c: Compiler, value_type: Int, return_type: Int, pos: Position) -> Bool {
 // a fallible return still needs a valid success value, null never stands for an error
     if (value_type == TYPE_POISON) { return false; }
-    let target = return_type;
-    if (is_fallible_type(ref c, target)) {
-        target = get_inner_fallible_type(ref c, target);
-    }
+    let target = return_value_type(ref c, return_type);
 
     if (value_type == TYPE_NULLPTR && !is_pointer_type(ref c, target)) {
         throw_type_error(pos, "'nullptr' can only be returned for explicit pointer types.");

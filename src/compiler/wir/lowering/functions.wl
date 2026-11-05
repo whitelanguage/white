@@ -22,11 +22,10 @@ import find_interface_implementation from "../../analysis.wl"
 import has_index_refs, check_body_refs from "../../references.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long, check_layout_type from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
-import check_null_return, check_unary_operand, check_postfix_operand from "../../validation.wl"
+import return_value_type, check_null_return, check_unary_operand, check_postfix_operand from "../../validation.wl"
 import c_vararg_type from "../../validation.wl"
 import check_struct_init, struct_arg_supplied from "../../initialization.wl"
-import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
-import validate_explicit_literal_cast from "../../lowering/casts.wl"
+import is_typed_dict, is_dict_key_type, validate_explicit_literal_cast from "../../validation.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
@@ -391,6 +390,16 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
 
         let constructor_type: Int = wir_generic_constructor_type(ref state, ref source, call);
         if (constructor_type != 0) { return constructor_type; }
+
+        if (node_tag(call.callee) == NODE_VAR_ACCESS && wir_has_local_binding(ref state, get_var_access_node(ref source.arena, call.callee).name_tok.value)) {
+            let callable_type = wir_lvalue_type(ref state, ref source, call.callee);
+            let signature = source.func_ret_map.lookup(callable_type);
+            if (signature is null) { signature = source.method_ret_map.lookup(callable_type); }
+            if (signature is !null) {
+                if (call.preserve_fallible || !is_fallible_type(ref source, signature.type)) { return signature.type; }
+                return get_inner_fallible_type(ref source, signature.type);
+            }
+        }
 
         // a call can also name a struct or class constructor. Asking for an
         // lvalue below would diagnose the type name as an unknown value before
@@ -2170,7 +2179,11 @@ func wir_lower_closure_function(
     wir_bind_closure_self(ref state, ref types, ref program, node.name_tok.value, source_type, function.parameters[0]);
     wir_bind_closure_captures(ref state, ref program, environment, captures);
     wir_bind_closure_parameters(ref state, ref types, ref source, ref program, node, function, parameter_types);
+    let errors_before: Int = GLOBAL_ERROR_COUNT;
     wir_lower_block(ref state, ref types, ref source, ref program, node.body);
+    if (GLOBAL_ERROR_COUNT != errors_before) {
+        return function_id;
+    }
     wir_finish_closure_function(ref state, ref types, ref source, ref program, node.name_tok.value, result_type);
     return function_id;
 }
@@ -2413,7 +2426,7 @@ func wir_cast_expr(
         let compatible: Bool = is_void_ptr(ref source, value.source_type) ||
                                is_void_ptr(ref source, target_type);
         if (implicit && !compatible) {
-            state.errors.append("implicit pointer conversion from " + get_type_name(ref source, value.source_type) + " to " + get_type_name(ref source, target_type) + " reached WIR lowering");
+            throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
             return wir_no_expr();
         }
         let casted: WirValueID = wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location());
@@ -2430,7 +2443,7 @@ func wir_cast_expr(
     }
     if (source_kind == WirTypeKind.BoolType && target_integer) {
         if implicit {
-            throw_type_error(no_position(), "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got Bool");
+            throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got Bool");
             return wir_no_expr();
         }
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
@@ -2446,7 +2459,7 @@ func wir_cast_expr(
         return wir_no_expr();
     }
     if (implicit && !wir_implicit_numeric_cast(value.source_type, target_type)) {
-        state.errors.append("implicit conversion from " + get_type_name(ref source, value.source_type) + " to " + get_type_name(ref source, target_type) + " reached WIR lowering");
+        throw_type_error(pos, "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got " + get_type_name(ref source, value.source_type) + ".");
         return wir_no_expr();
     }
     return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
@@ -5909,7 +5922,24 @@ func wir_lower_expected_expr(ref state: WirFunctionLowering, ref types: WirTypeM
         return value;
     }
     if (wir_is_numeric_literal(ref source, node) && wir_source_numeric(get_repr_type(ref source, value.source_type)) && wir_source_numeric(get_repr_type(ref source, expected_type))) {
-        return wir_cast_expr(ref state, ref types, ref source, ref program, value, expected_type, false, no_position());
+        let literal: NodeID = node;
+        let pos: Position = no_position();
+        while (node_tag(literal) == NODE_UNARYOP) {
+            let unary: UnaryOpNode = get_unary_node(ref source.arena, literal);
+            pos = unary.pos;
+            if (unary.op_tok.type != TOK_PLUS) { break; }
+            literal = unary.node;
+        }
+        if (node_tag(literal) == NODE_INT) {
+            pos = get_int_node(ref source.arena, literal).pos;
+        } else if (node_tag(literal) == NODE_FLOAT) {
+            pos = get_float_node(ref source.arena, literal).pos;
+        }
+        // contextual casts still need the range check, a narrow return must not truncate a literal.
+        if (!validate_explicit_literal_cast(ref source, literal, expected_type, pos)) {
+            return wir_no_expr();
+        }
+        return wir_cast_expr(ref state, ref types, ref source, ref program, value, expected_type, false, pos);
     }
     return value;
 }
@@ -8138,10 +8168,10 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
             return;
         }
         if (is_fallible_type(ref source, state.return_type)) {
-            let inner_type: Int = get_inner_fallible_type(ref source, state.return_type);
+            let inner_type: Int = return_value_type(ref source, state.return_type);
             let value: WirExpr = wir_no_expr();
             if (has_node(statement.value)) {
-                value = wir_lower_expr(ref state, ref types, ref source, ref program, statement.value);
+                value = wir_lower_expected_expr(ref state, ref types, ref source, ref program, statement.value, inner_type);
                 if (value.value == NO_WIR_VALUE) { return; }
                 if (!check_null_return(ref source, value.source_type, state.return_type, statement.pos)) { return; }
             }
@@ -8159,7 +8189,7 @@ func wir_lower_raw_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, r
                     throw_type_error(statement.pos, "Non-void function must return a value.");
                     return;
                 }
-                value = wir_cast_expr(ref state, ref types, ref source, ref program, value, inner_type, true, no_position());
+                value = wir_cast_expr(ref state, ref types, ref source, ref program, value, inner_type, true, statement.pos);
                 if (value.value == NO_WIR_VALUE) { return; }
                 wir_move_or_retain(ref state, ref types, ref source, ref program, value);
                 result = WirExpr(value=wir_success_result(ref state, ref types, ref source, ref program, value), source_type=state.return_type);
