@@ -347,11 +347,6 @@ On Windows, an x86 executable or DLL needs the x86 `kernel32` and `shell32`
 import libraries. If Clang does not find the Windows SDK automatically, pass its
 `um/x86` directory with `-L`.
 
-The Linux target harness is in `ci/test-linux-targets.ps1`. It creates a native
-compiler for x86-64, x86, ARMv7, or AArch64, bootstraps it twice in Docker, and
-compares the two generated IR files before running the language tests. See
-`ci/docker/README.md` for the short and full commands.
-
 ## Rebuilding the compiler
 
 Bootstrapping requires an existing `wlc`, normally the compiler from the latest
